@@ -31,8 +31,7 @@ final class AdvancedPreferencesViewController: NSViewController {
     private func rebuild() {
         view.subviews.forEach { $0.removeFromSuperview() }
 
-        let page = SettingsUI.page([
-            SettingsUI.heading(AdvancedStrings.title),
+        let page = SettingsUI.page(title: "Advanced", sections: [
             SettingsUI.note(AdvancedStrings.explanation),
             SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: [
                 locationRow(

@@ -239,8 +239,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.fullRow(shellRow())
         ])
 
-        let page = SettingsUI.page([
-            SettingsUI.heading("General"),
+        let page = SettingsUI.page(title: "General", sections: [
             SettingsUI.section("Sessions", sessions),
             SettingsUI.section("Opening Message", openingMessageCard()),
             SettingsUI.section("Attachments", attachmentDetectionCard()),

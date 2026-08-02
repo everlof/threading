@@ -216,7 +216,10 @@ enum SettingsPages {
             hostPage: .tools,
             title: L10n.string("Tools"),
             symbol: "wrench.and.screwdriver",
-            searchTerms: terms("MCP", "browser", "agents", "permissions", "enabled")
+            searchTerms: terms(
+                "MCP", "browser", "agents", "permissions", "enabled",
+                "website access", "origin", "revoke"
+            )
         ) { ToolsPreferencesViewController() },
         Page(
             id: keyboardID,
@@ -255,7 +258,9 @@ enum SettingsPages {
             id: advancedID,
             hostPage: nil,
             title: L10n.string("Advanced"),
-            symbol: "wrench.and.screwdriver",
+            // Not `wrench.and.screwdriver`: Tools already wears it, and two sidebar rows in
+            // one icon read as one destination twice.
+            symbol: "gearshape.2",
             searchTerms: terms(
                 "reset", "start over", "fresh", "erase", "corrupt", "preferences file",
                 "application support", "where", "location", "reveal", "backup", "restart"

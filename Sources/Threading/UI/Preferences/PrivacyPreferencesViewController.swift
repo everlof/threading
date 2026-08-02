@@ -178,8 +178,7 @@ final class PrivacyPreferencesViewController: NSViewController {
     // MARK: - Construction
 
     private func buildPage() {
-        let page = SettingsUI.page([
-            SettingsUI.heading("Privacy"),
+        let page = SettingsUI.page(title: "Privacy", sections: [
             SettingsUI.note(
                 "Threading runs without the App Sandbox — a terminal that cannot open a pseudo-"
                     + "terminal or launch your shell is not a terminal. These are the grants it "

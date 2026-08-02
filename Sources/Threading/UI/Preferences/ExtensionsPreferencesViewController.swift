@@ -2,6 +2,12 @@ import AppKit
 import ThreadingExtensionKit
 
 /// Installed extension packages, their desired enablement, and their supervised runtime state.
+///
+/// Each package is a **collapsed card**: name, short runtime state and the enable switch on the
+/// header, the manifest detail (type, provenance, contributions, services, capabilities,
+/// companions) and the action row unfolding on demand. Fully unfolded, every extension was up
+/// to ten rows — a page with four installed read as a wall in which the one decision per
+/// extension, the switch, was somewhere in the middle.
 final class ExtensionsPreferencesViewController: NSViewController {
     private enum Action {
         case toggle
@@ -30,6 +36,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private var controlActions: [ObjectIdentifier: ControlAction] = [:]
     private var identityMenus: [ObjectIdentifier: IdentityFamily] = [:]
     private var isImporting = false
+
+    /// The packages whose manifest detail the user has unfolded, by identifier. A view state,
+    /// kept for the session only.
+    private var expandedExtensions: Set<String> = []
 
     init(
         manager: ExtensionManager? = nil,
@@ -81,21 +91,11 @@ final class ExtensionsPreferencesViewController: NSViewController {
         importButton.setAccessibilityIdentifier("settings.extensions.import")
 
         var sections: [NSView] = [
-            SettingsUI.heading("Extensions"),
             SettingsUI.note(
-                "Extensions are copied into Threading before they can run. Importing leaves one "
-                    + "disabled; enabling it starts a supervised process with the capabilities "
-                    + "declared in its manifest."
-            ),
-            SettingsUI.section(
-                "Install",
-                SettingsCard(rows: [
-                    SettingsUI.row(
-                        title: "Extension package",
-                        subtitle: "Choose a .threadingextension package or an unpacked development directory.",
-                        control: importButton
-                    )
-                ])
+                "Extensions are copied into Threading before they can run. Import a "
+                    + ".threadingextension package or an unpacked development directory; "
+                    + "importing leaves one disabled, and enabling it starts a supervised "
+                    + "process with the capabilities declared in its manifest."
             )
         ]
 
@@ -134,7 +134,13 @@ final class ExtensionsPreferencesViewController: NSViewController {
             sections.append(contentsOf: installed.map(extensionSection))
         }
 
-        let page = SettingsUI.page(sections, hostPage: .extensions)
+        let page = SettingsUI.page(
+            title: "Extensions",
+            summary: installedSummary(installed.count),
+            actions: [importButton],
+            sections: sections,
+            hostPage: .extensions
+        )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
@@ -255,6 +261,27 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
     }
 
+    private func installedSummary(_ count: Int) -> String {
+        switch count {
+        case 0: L10n.string("No extensions installed")
+        case 1: L10n.string("1 extension installed")
+        default: L10n.format("%lld extensions installed", Int64(count))
+        }
+    }
+
+    /// The one word the header states about a package's runtime, coloured the way the full
+    /// status row colours its sentence; the sentence itself stays in the unfolded detail.
+    private func shortStatus(_ status: InstalledExtensionStatus) -> (label: String, color: NSColor) {
+        switch status {
+        case .running: (L10n.string("Running"), Design.Status.positive)
+        case .failed: (L10n.string("Failed"), Design.Status.negative)
+        case .invalid: (L10n.string("Invalid"), Design.Status.negative)
+        case .starting: (L10n.string("Starting"), Design.Status.warning)
+        case .updating: (L10n.string("Updating"), Design.Status.warning)
+        case .disabled: (L10n.string("Disabled"), Design.Text.secondary)
+        }
+    }
+
     private func extensionSection(_ item: InstalledExtensionSnapshot) -> NSView {
         let toggle = SettingsUI.toggle(
             isOn: item.isEnabled,
@@ -267,6 +294,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
             return true
         }()
         toggle.setAccessibilityIdentifier("settings.extensions.enabled.\(item.identifier)")
+        toggle.setAccessibilityLabel(item.name)
         remember(toggle, action: .toggle, identifier: item.identifier)
 
         let version = item.version.map {
@@ -275,11 +303,6 @@ final class ExtensionsPreferencesViewController: NSViewController {
             ?? item.identifier
 
         var rows: [NSView] = [
-            SettingsUI.row(
-                title: "Enabled",
-                subtitle: version,
-                control: toggle
-            ),
             SettingsUI.row(
                 title: "Type",
                 subtitle: localizedName(item.profile)
@@ -384,7 +407,28 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
         rows.append(SettingsUI.fullRow(actionRow(for: item)))
 
-        return SettingsUI.section(item.name, SettingsCard(rows: rows))
+        let identifier = item.identifier
+        let status = shortStatus(item.status)
+        return SettingsUI.disclosureCard(
+            title: item.name,
+            subtitle: version,
+            summary: status.label,
+            summaryColor: status.color,
+            control: toggle,
+            isExpanded: expandedExtensions.contains(identifier),
+            localizes: false,
+            accessibilityIdentifier: "settings.extensions.card.\(identifier)",
+            onToggle: { [weak self] nowExpanded in
+                guard let self else { return }
+                if nowExpanded {
+                    self.expandedExtensions.insert(identifier)
+                } else {
+                    self.expandedExtensions.remove(identifier)
+                }
+                self.render()
+            },
+            detailRows: rows
+        )
     }
 
     private func localizedName(_ profile: ExtensionProfile) -> String {

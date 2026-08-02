@@ -248,8 +248,7 @@ final class MotionPreferencesViewController: NSViewController {
             SettingsUI.fullRow(namePreviewRow())
         ])
 
-        let page = SettingsUI.page([
-            SettingsUI.heading("Motion"),
+        let page = SettingsUI.page(title: "Motion", sections: [
             SettingsUI.section("Working", indicatorCard),
             SettingsUI.section("Chat names", transitionCard)
         ], hostPage: .motion)

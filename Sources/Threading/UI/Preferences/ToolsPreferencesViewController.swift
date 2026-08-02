@@ -6,13 +6,19 @@ import AppKit
 /// The switch is per group rather than per tool on purpose — several tools only make sense as a
 /// set (clicking a page you never opened, activating a tab you never listed) — and each group
 /// lists the tools it carries so the page doubles as documentation of what an agent can reach.
+///
+/// Each group is a **collapsed card**: the decision (the switch) and the group's size sit on
+/// the header, the per-tool documentation unfolds on demand. Fully unfolded, ten groups listed
+/// seventy-odd tool rows and the browser group alone was a screen and a half — the page read
+/// as a wall, and Website Access at its foot was effectively unreachable.
 @MainActor
 final class ToolsPreferencesViewController: NSViewController {
 
     // MARK: - Properties
 
-    /// The tool rows of each group, kept so toggling the group can dim them together.
-    private var toolRowsByGroup: [String: [NSView]] = [:]
+    /// The groups whose tool documentation the user has unfolded, by group id. A view state,
+    /// not a preference — the same session-only fold Storage keeps for its checkouts.
+    private var expandedGroups: Set<String> = []
     private let appEvents = AppEventObservations()
     private var pageView: NSView?
     private let groupOverride: [MCPToolGroup]?
@@ -53,10 +59,8 @@ final class ToolsPreferencesViewController: NSViewController {
     private func render() {
         guard isViewLoaded else { return }
         pageView?.removeFromSuperview()
-        toolRowsByGroup.removeAll()
 
         var sections: [NSView] = [
-            SettingsUI.heading("Tools"),
             SettingsUI.note(
                 "Threading exposes these tools to the Claude and Codex sessions it launches, so an "
                 + "agent can reach the app it is running inside. Turn a group off to hide its "
@@ -69,7 +73,17 @@ final class ToolsPreferencesViewController: NSViewController {
         }
         sections.append(websiteAccessSection())
 
-        let page = SettingsUI.page(sections, hostPage: .tools)
+        let enabled = displayedGroups.filter { MCPToolCatalog.isEnabled($0) }.count
+        let page = SettingsUI.page(
+            title: "Tools",
+            summary: L10n.format(
+                "%lld of %lld tool groups enabled",
+                Int64(enabled),
+                Int64(displayedGroups.count)
+            ),
+            sections: sections,
+            hostPage: .tools
+        )
         pageView = page
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -81,6 +95,8 @@ final class ToolsPreferencesViewController: NSViewController {
         ])
     }
 
+    /// One group, folded: the switch and the group's size on the header, the per-tool
+    /// documentation as detail rows only while unfolded.
     private func groupSection(_ group: MCPToolGroup, index: Int) -> NSView {
         let enabled = MCPToolCatalog.isEnabled(group)
         let available = MCPToolCatalog.isAvailable(group)
@@ -91,22 +107,47 @@ final class ToolsPreferencesViewController: NSViewController {
         toggle.tag = index
         toggle.target = self
         toggle.action = #selector(groupToggled(_:))
+        toggle.setAccessibilityLabel(group.title)
 
-        var rows: [NSView] = [
-            SettingsUI.row(title: "Enabled", subtitle: group.summary, control: toggle)
-        ]
-
-        var toolViews: [NSView] = []
-        for tool in group.tools {
-            let content = toolRow(tool)
-            toolViews.append(content)
-            rows.append(SettingsUI.fullRow(content))
+        let expanded = expandedGroups.contains(group.id)
+        var detailRows: [NSView] = []
+        if expanded {
+            detailRows = group.tools.map { tool in
+                let content = toolRow(tool)
+                // The tools stay listed when the group is off — the page is documentation
+                // too — but read as inactive.
+                content.alphaValue = enabled && available
+                    ? 1
+                    : ToolsPreferencesDefaults.disabledAlpha
+                return SettingsUI.fullRow(content)
+            }
         }
 
-        toolRowsByGroup[group.id] = toolViews
-        applyEnabled(enabled && available, to: toolViews)
+        let groupID = group.id
+        return SettingsUI.disclosureCard(
+            title: group.title,
+            subtitle: group.summary,
+            summary: toolCount(group.tools.count),
+            control: toggle,
+            isExpanded: expanded,
+            accessibilityIdentifier: "settings.tools.group.\(groupID)",
+            onToggle: { [weak self] nowExpanded in
+                guard let self else { return }
+                if nowExpanded {
+                    self.expandedGroups.insert(groupID)
+                } else {
+                    self.expandedGroups.remove(groupID)
+                }
+                self.render()
+            },
+            detailRows: detailRows
+        )
+    }
 
-        return SettingsUI.section(group.title, SettingsCard(rows: rows))
+    private func toolCount(_ count: Int) -> String {
+        count == 1
+            ? L10n.string("1 tool")
+            : L10n.format("%lld tools", Int64(count))
     }
 
     /// One tool: its glyph, its name and one-line description, and the raw tool name an agent
@@ -195,9 +236,10 @@ final class ToolsPreferencesViewController: NSViewController {
 
     @objc private func groupToggled(_ sender: ThemedToggle) {
         let group = displayedGroups[sender.tag]
-        let enabled = sender.state == .on
-        AppSettings.shared.setToolGroup(group.id, enabled: enabled)
-        applyEnabled(enabled, to: toolRowsByGroup[group.id] ?? [])
+        AppSettings.shared.setToolGroup(group.id, enabled: sender.state == .on)
+        // Rebuilt rather than dimmed in place: the header's count line and the page summary
+        // both state enablement, and a wholesale rebuild is the page's one update path.
+        render()
     }
 
     @objc private func revokeWebsiteAccess(_ sender: ThemedButton) {
@@ -223,13 +265,6 @@ final class ToolsPreferencesViewController: NSViewController {
         }
     }
 
-    /// Dims a group's tool rows when it is off — the tools are still listed, since the page is
-    /// documentation too, but read as inactive.
-    private func applyEnabled(_ enabled: Bool, to views: [NSView]) {
-        for view in views {
-            view.alphaValue = enabled ? 1 : ToolsPreferencesDefaults.disabledAlpha
-        }
-    }
 }
 
 // MARK: - Tools Preferences Defaults

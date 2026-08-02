@@ -18,6 +18,10 @@ final class KeyboardPreferencesViewController: NSViewController {
     /// page is both simpler and more correct than patching the row that changed.
     private var recorders: [String: ShortcutRecorderView] = [:]
 
+    /// The command groups whose shortcut rows are unfolded, by group name. A view state,
+    /// kept for the session only.
+    private var expandedGroups: Set<String> = []
+
     /// The Return-key choice. Held across rebuilds rather than rebuilt with the rest of the
     /// page: it is the one control here that is not a chord recorder, and re-adding the same
     /// pop-up keeps its open menu and selection from being torn out underneath a click.
@@ -47,14 +51,32 @@ final class KeyboardPreferencesViewController: NSViewController {
         recorders.removeAll()
 
         var sections: [NSView] = [
-            SettingsUI.heading(Strings.heading),
             SettingsUI.note(Strings.note),
             SettingsUI.section(Strings.composerSection, SettingsCard(rows: [makeReturnKeyRow()]))
         ]
 
+        // Each command group folds to one row with its count: the page is a reference, and
+        // forty-odd recorder rows in five always-open sections made it the longest page in
+        // Settings. The Return-key choice above and the reset below stay visible — those are
+        // decisions, and only inventories fold.
         for (group, commands) in registry.grouped() {
-            let rows = commands.map(makeRow)
-            sections.append(SettingsUI.section(group.rawValue, SettingsCard(rows: rows)))
+            let key = group.rawValue
+            let expanded = expandedGroups.contains(key)
+            sections.append(SettingsUI.disclosureCard(
+                title: group.rawValue,
+                summary: shortcutCount(commands.count),
+                isExpanded: expanded,
+                onToggle: { [weak self] nowExpanded in
+                    guard let self else { return }
+                    if nowExpanded {
+                        self.expandedGroups.insert(key)
+                    } else {
+                        self.expandedGroups.remove(key)
+                    }
+                    self.rebuild()
+                },
+                detailRows: expanded ? commands.map(makeRow) : []
+            ))
         }
 
         sections.append(SettingsUI.section(nil, SettingsCard(rows: [
@@ -65,7 +87,7 @@ final class KeyboardPreferencesViewController: NSViewController {
             )
         ])))
 
-        let page = SettingsUI.page(sections, hostPage: .keyboard)
+        let page = SettingsUI.page(title: "Keyboard", sections: sections, hostPage: .keyboard)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
 
@@ -75,6 +97,12 @@ final class KeyboardPreferencesViewController: NSViewController {
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    private func shortcutCount(_ count: Int) -> String {
+        count == 1
+            ? L10n.string("1 shortcut")
+            : L10n.format("%lld shortcuts", Int64(count))
     }
 
     private func makeRow(_ command: AppCommand) -> NSView {

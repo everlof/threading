@@ -38,11 +38,15 @@ final class StoragePreferencesViewController: NSViewController {
     /// Findings by checkout, largest first, read from the cache the service keeps.
     private var groups: [CheckoutGroup] = []
 
-    /// Checkouts whose sub-gigabyte rows the user has unfolded, by path. A checkout of a
-    /// codebase collects dozens of tiny `__pycache__` directories, which buried the two that
-    /// mattered under a page of noise — so anything under a gigabyte folds into one row until
-    /// asked for. Kept for the session only; the fold is a view state, not a preference.
+    /// Checkouts whose cards the user has unfolded, by path. Collapsed, a checkout is one row —
+    /// name, path and size — which is the table the page's numbers actually want to be read as;
+    /// the artifact rows are detail. Kept for the session only; a view state, not a preference.
     private var expandedCheckouts: Set<String> = []
+
+    /// Within an unfolded checkout, whose sub-gigabyte tail is open. A checkout of a codebase
+    /// collects dozens of tiny `__pycache__` directories, which buried the two that mattered
+    /// under a page of noise — so anything under a gigabyte folds into one row until asked for.
+    private var expandedTails: Set<String> = []
     private let appEvents = AppEventObservations()
 
     private var isScanning: Bool { ArtifactScanService.shared.isScanning }
@@ -137,9 +141,7 @@ final class StoragePreferencesViewController: NSViewController {
         view.subviews.forEach { $0.removeFromSuperview() }
 
         var sections: [NSView] = [
-            SettingsUI.heading(StorageStrings.title),
-            SettingsUI.note(StorageStrings.explanation),
-            summarySection()
+            SettingsUI.note(StorageStrings.explanation)
         ]
 
         for (index, group) in groups.enumerated() {
@@ -152,7 +154,24 @@ final class StoragePreferencesViewController: NSViewController {
 
         sections.append(SettingsUI.note(StorageStrings.safety))
 
-        let page = SettingsUI.page(sections, hostPage: .storage)
+        var actions: [NSView] = [
+            SettingsUI.button(StorageStrings.rescan, target: self, action: #selector(rescanClicked))
+        ]
+        if totalBytes > 0 {
+            actions.append(SettingsUI.button(
+                StorageStrings.removeEverything,
+                target: self,
+                action: #selector(removeEverythingClicked)
+            ))
+        }
+
+        let page = SettingsUI.page(
+            title: "Storage",
+            summary: headerSummary(),
+            actions: actions,
+            sections: sections,
+            hostPage: .storage
+        )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
@@ -163,57 +182,15 @@ final class StoragePreferencesViewController: NSViewController {
         ])
     }
 
-    /// The total, sized like the page's own heading — it is the number the page exists to
-    /// report, and the one thing worth reading from across the room.
-    private func summarySection() -> NSView {
-        let total = NSTextField(labelWithString: Self.size.string(fromByteCount: totalBytes))
-        total.applyFont(.heading)
-        total.textColor = totalBytes > 0 ? Design.Text.label : Design.Text.secondary
-
-        let caption = NSTextField(labelWithString: summaryCaption())
-        caption.applyFont(.subheading)
-        caption.textColor = Design.Text.secondary
-
-        let labels = NSStackView(views: [total, caption])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-
-        let actions = NSStackView(views: [
-            SettingsUI.button(StorageStrings.rescan, target: self, action: #selector(rescanClicked))
-        ])
-        actions.orientation = .horizontal
-        actions.spacing = Design.Spacing.small
-
-        if totalBytes > 0 {
-            let removeAll = SettingsUI.button(
-                StorageStrings.removeEverything,
-                target: self,
-                action: #selector(removeEverythingClicked)
-            )
-            actions.addArrangedSubview(removeAll)
-        }
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.medium
-        row.addArrangedSubview(labels)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(actions)
-
-        return SettingsUI.section(nil, SettingsCard(rows: [SettingsUI.fullRow(row)]))
-    }
-
-    /// What the number underneath the total means, which is not the same sentence twice.
+    /// The header's one line: the total — the number the page exists to report, kept on screen
+    /// however far the list scrolls — then when it was true, then the room left.
     ///
     /// A cached reading has to say **when** it was true, or it quietly claims to be live. The
     /// page shows numbers measured up to an hour ago and would otherwise look identical whether
-    /// the disk was read a second or a day before.
-    private func summaryCaption() -> String {
+    /// the disk was read a second or a day before. And what the total is worth depends entirely
+    /// on the room left: 87 GB reclaimable means something different beside 14 GB free than
+    /// beside 800 GB.
+    private func headerSummary() -> String {
         if isScanning {
             return StorageStrings.scanning
         }
@@ -221,36 +198,39 @@ final class StoragePreferencesViewController: NSViewController {
         let count = allArtifacts.count
         guard count > 0 else { return StorageStrings.nothingFound }
 
+        var parts = [
+            StorageStrings.total(
+                Self.size.string(fromByteCount: totalBytes),
+                directories: count
+            )
+        ]
+
         let projectIDs = ProjectStore.shared.projects.map(\.id)
-        guard let measured = ArtifactScanService.shared.oldestScan(among: projectIDs) else {
-            return StorageStrings.reclaimable(count: count)
+        if let measured = ArtifactScanService.shared.oldestScan(among: projectIDs) {
+            parts.append(StorageStrings.measured(
+                Self.relativeDate.localizedString(for: measured, relativeTo: Date())
+            ))
         }
 
-        var caption = StorageStrings.reclaimable(count: count)
-            + " · "
-            + StorageStrings.measured(
-                Self.relativeDate.localizedString(for: measured, relativeTo: Date())
-            )
-
-        // What the total is worth depends entirely on the room left: 87 GB reclaimable means
-        // something different beside 14 GB free than beside 800 GB.
         if let disk = DiskSpace.homeReading() {
-            caption += " · " + StorageStrings.free(
+            parts.append(StorageStrings.free(
                 Self.size.string(fromByteCount: disk.available),
                 pressured: disk.isUnderPressure
-            )
+            ))
         }
 
-        return caption
+        return parts.joined(separator: " · ")
     }
 
-    /// One checkout: its big artifacts as their own rows, everything under a gigabyte folded
-    /// into one, closed by a row that removes the lot.
+    /// One checkout, folded to the row the page's numbers want to be read as: project and
+    /// checkout name, the full path beneath, the size trailing, Remove All beside it. Unfolded,
+    /// the big artifacts get their own rows and everything under a gigabyte folds again into
+    /// one tail row.
     ///
-    /// The heading carries the project *and* the checkout, because the checkout is the answer to
-    /// "which of these is it"; the full path sits beneath it, because a worktree name alone does
-    /// not say where on disk it lives, and that is what someone about to delete gigabytes wants
-    /// to confirm.
+    /// The title carries the project *and* the checkout, because the checkout is the answer to
+    /// "which of these is it"; the path sits beneath it, because a worktree name alone does not
+    /// say where on disk it lives, and that is what someone about to delete gigabytes wants to
+    /// confirm.
     private func checkoutSection(_ group: CheckoutGroup, groupIndex: Int) -> NSView {
         // Enumerated over the *original* order, so a row's tag still indexes `group.artifacts`
         // however the rows are then partitioned for display.
@@ -258,109 +238,76 @@ final class StoragePreferencesViewController: NSViewController {
         let large = indexed.filter { $0.element.byteCount >= StorageDefaults.collapseThreshold }
         let small = indexed.filter { $0.element.byteCount < StorageDefaults.collapseThreshold }
 
-        var rows: [NSView] = large.map { index, artifact in
-            row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
-        }
-
-        if !small.isEmpty {
-            let expanded = expandedCheckouts.contains(group.path)
-            if expanded {
-                rows += small.map { index, artifact in
-                    row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
-                }
+        let expanded = expandedCheckouts.contains(group.path)
+        var rows: [NSView] = []
+        if expanded {
+            rows = large.map { index, artifact in
+                row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
             }
-            rows.append(foldRow(for: small.map(\.element), in: group, expanded: expanded))
+
+            if !small.isEmpty {
+                let tailOpen = expandedTails.contains(group.path)
+                if tailOpen {
+                    rows += small.map { index, artifact in
+                        row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
+                    }
+                }
+                rows.append(foldRow(for: small.map(\.element), in: group, expanded: tailOpen))
+            }
         }
 
-        if group.artifacts.count > 1 {
-            let button = SettingsUI.button(
-                StorageStrings.removeAll,
-                target: self,
-                action: #selector(removeCheckoutClicked(_:))
-            )
-            button.tag = tag(group: groupIndex, artifact: StorageDefaults.wholeGroupTag)
-            rows.append(SettingsUI.row(
-                title: StorageStrings.everythingHere,
-                subtitle: StorageStrings.rebuiltOnDemand,
-                control: button
-            ))
-        }
+        let removeAll = SettingsUI.button(
+            StorageStrings.removeAll,
+            target: self,
+            action: #selector(removeCheckoutClicked(_:))
+        )
+        removeAll.tag = tag(group: groupIndex, artifact: StorageDefaults.wholeGroupTag)
 
-        let title = "\(group.project.name) · \(group.label)"
-            + " · \(Self.size.string(fromByteCount: group.byteCount))"
-        return pathSection(title: title, path: group.path, card: SettingsCard(rows: rows))
-    }
-
-    /// A section whose heading is followed by the checkout's full path — abbreviated at the home
-    /// directory, truncated in the middle so both ends survive a long worktree path.
-    private func pathSection(title: String, path: String, card: NSView) -> NSView {
-        let pathLabel = NSTextField(labelWithString: abbreviate(path))
-        pathLabel.applyFont(.subheading)
-        pathLabel.textColor = Design.Text.tertiary
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let stack = NSStackView(views: [SettingsUI.caption(title), pathLabel, card])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.tight
-
-        for pinned in [pathLabel, card] {
-            pinned.translatesAutoresizingMaskIntoConstraints = false
-            pinned.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-            pinned.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        }
-
-        return stack
+        let path = group.path
+        return SettingsUI.disclosureCard(
+            title: "\(group.project.name) · \(group.label)",
+            subtitle: abbreviate(path),
+            summary: Self.size.string(fromByteCount: group.byteCount),
+            control: removeAll,
+            isExpanded: expanded,
+            localizes: false,
+            onToggle: { [weak self] nowExpanded in
+                guard let self else { return }
+                if nowExpanded {
+                    self.expandedCheckouts.insert(path)
+                } else {
+                    self.expandedCheckouts.remove(path)
+                }
+                self.rebuild()
+            },
+            detailRows: rows
+        )
     }
 
     /// The row that stands in for everything under a gigabyte, and unfolds it on a click.
-    ///
-    /// It reads like a data row so the size column stays aligned — a count and a total where a
-    /// name and a size would be — with a chevron in place of a Remove button, since the whole
-    /// row is the control.
     private func foldRow(
         for artifacts: [ReclaimableArtifact],
         in group: CheckoutGroup,
         expanded: Bool
     ) -> NSView {
         let total = artifacts.reduce(0) { $0 + $1.byteCount }
-
-        let size = NSTextField(labelWithString: Self.size.string(fromByteCount: total))
-        size.applyFont(.numericBody)
-        size.textColor = Design.Text.secondary
-        size.alignment = .right
-
-        let chevron = NSImageView()
-        chevron.image = NSImage(
-            systemSymbolName: expanded ? "chevron.up" : "chevron.down",
-            accessibilityDescription: nil
-        )
-        chevron.contentTintColor = Design.Text.tertiary
-        chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron)
-
-        let trailing = NSStackView(views: [size, chevron])
-        trailing.orientation = .horizontal
-        trailing.spacing = Design.Spacing.medium
-
-        let content = SettingsUI.row(
-            title: expanded
-                ? StorageStrings.showFewer
-                : StorageStrings.smallerDirectories(artifacts.count),
-            subtitle: expanded ? nil : StorageStrings.underAGigabyte,
-            control: trailing
-        )
-
         let path = group.path
-        return ClickableRow(content: content) { [weak self] in
-            guard let self else { return }
-            if self.expandedCheckouts.contains(path) {
-                self.expandedCheckouts.remove(path)
-            } else {
-                self.expandedCheckouts.insert(path)
+        return SettingsUI.disclosureRow(
+            title: StorageStrings.smallerDirectories(artifacts.count),
+            subtitle: StorageStrings.underAGigabyte,
+            summary: Self.size.string(fromByteCount: total),
+            isExpanded: expanded,
+            localizes: false,
+            onToggle: { [weak self] nowOpen in
+                guard let self else { return }
+                if nowOpen {
+                    self.expandedTails.insert(path)
+                } else {
+                    self.expandedTails.remove(path)
+                }
+                self.rebuild()
             }
-            self.rebuild()
-        }
+        )
     }
 
     /// Replaces the home directory with `~`, so a path is read for its shape rather than its
@@ -507,7 +454,6 @@ final class StoragePreferencesViewController: NSViewController {
         }
     }
 }
-
 // MARK: - Storage Defaults
 
 private enum StorageDefaults {
@@ -554,19 +500,15 @@ private enum StorageStrings {
     static var remove: String { L10n.string("Remove") }
     static var cancel: String { L10n.string("Cancel") }
     static var removeEverything: String { L10n.string("Remove All…") }
-    static var everythingHere: String { L10n.string("Everything above") }
-    static var rebuiltOnDemand: String {
-        L10n.string("Removed together, rebuilt when each project next builds")
-    }
 
-    static func reclaimable(count: Int) -> String {
+    /// The header's opening clause: the size and the count, one fact.
+    static func total(_ size: String, directories count: Int) -> String {
         count == 1
-            ? L10n.string("1 directory can be removed")
-            : L10n.format("%lld directories can be removed", Int64(count))
+            ? L10n.format("%@ reclaimable in 1 directory", size)
+            : L10n.format("%@ reclaimable in %lld directories", size, Int64(count))
     }
 
     static var removeAll: String { L10n.string("Remove All…") }
-    static var showFewer: String { L10n.string("Show fewer") }
     static var underAGigabyte: String {
         L10n.string("Under 1 GB — click to show each")
     }
@@ -635,45 +577,5 @@ private enum StorageStrings {
                 + "output will interrupt that build.",
             projects
         )
-    }
-}
-
-// MARK: - Clickable Row
-
-/// Wraps a row so a click anywhere on it fires a callback — for the fold row, whose whole
-/// surface is the control rather than a button at its edge.
-private final class ClickableRow: NSView {
-
-    private let handler: () -> Void
-
-    init(content: NSView, handler: @escaping () -> Void) {
-        self.handler = handler
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-        NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: topAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor)
-        ])
-
-        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(clicked)))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    /// A pointing hand, so the row reads as clickable before it is clicked.
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    @objc private func clicked() {
-        handler()
     }
 }

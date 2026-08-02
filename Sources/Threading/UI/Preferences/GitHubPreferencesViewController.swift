@@ -108,8 +108,7 @@ final class GitHubPreferencesViewController: NSViewController {
         var ghField: NSTextField?
         var gitField: NSTextField?
 
-        let page = SettingsUI.page([
-            SettingsUI.heading("GitHub"),
+        let page = SettingsUI.page(title: "GitHub", sections: [
             SettingsUI.note(
                 "Extensions can ask Threading to read from GitHub — check runs today. Threading "
                     + "performs those reads itself with the best credential below; extensions "

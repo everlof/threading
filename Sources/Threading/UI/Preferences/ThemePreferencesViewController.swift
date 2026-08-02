@@ -198,8 +198,7 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Setup
 
     private func setupUI() {
-        let page = SettingsUI.page([
-            SettingsUI.heading("Themes"),
+        let page = SettingsUI.page(title: "Themes", sections: [
             SettingsUI.section("App", appThemeSection()),
             SettingsUI.section("Fonts", fontSection()),
             SettingsUI.section("Terminal", themeListSection()),

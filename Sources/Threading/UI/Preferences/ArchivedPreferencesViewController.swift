@@ -16,6 +16,9 @@ final class ArchivedPreferencesViewController: NSViewController {
     private var rows: [(project: Project, session: AgentSession)] = []
     private let appEvents = AppEventObservations()
 
+    /// Whether the fold past the recent slice is open. A view state, kept for the session.
+    private var showsOlder = false
+
     private static let relativeDate: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -50,20 +53,43 @@ final class ArchivedPreferencesViewController: NSViewController {
         view.subviews.forEach { $0.removeFromSuperview() }
 
         var sections: [NSView] = [
-            SettingsUI.heading("Archived"),
             SettingsUI.note(ArchivedPreferencesStrings.explanation)
         ]
 
         if rows.isEmpty {
             sections.append(SettingsUI.note(ArchivedPreferencesStrings.empty))
         } else {
-            let rowViews = rows.enumerated().map { index, entry in
+            // The list arrives most-recent-first, and the recent slice is what restoring is
+            // for; an archive that has grown for months folds behind one row instead of
+            // stretching the page by its whole history.
+            let all = rows.enumerated().map { index, entry in
                 makeRow(entry: entry, index: index)
+            }
+            var rowViews = Array(all.prefix(ArchivedDefaults.recentLimit))
+            let older = all.count - rowViews.count
+            if older > 0 {
+                if showsOlder {
+                    rowViews += all.suffix(older)
+                }
+                rowViews.append(SettingsUI.disclosureRow(
+                    title: ArchivedPreferencesStrings.older(older),
+                    isExpanded: showsOlder,
+                    localizes: false,
+                    onToggle: { [weak self] nowOpen in
+                        self?.showsOlder = nowOpen
+                        self?.reload()
+                    }
+                ))
             }
             sections.append(SettingsUI.section(nil, SettingsCard(rows: rowViews)))
         }
 
-        let page = SettingsUI.page(sections, hostPage: .archived)
+        let page = SettingsUI.page(
+            title: "Archived",
+            summary: ArchivedPreferencesStrings.count(rows.count),
+            sections: sections,
+            hostPage: .archived
+        )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
@@ -181,4 +207,24 @@ private enum ArchivedPreferencesStrings {
     static var empty: String {
         L10n.string("No archived conversations.")
     }
+
+    static func count(_ count: Int) -> String {
+        count == 1
+            ? L10n.string("1 archived conversation")
+            : L10n.format("%lld archived conversations", Int64(count))
+    }
+
+    static func older(_ count: Int) -> String {
+        count == 1
+            ? L10n.string("1 older conversation")
+            : L10n.format("%lld older conversations", Int64(count))
+    }
+}
+
+// MARK: - Archived Defaults
+
+private enum ArchivedDefaults {
+    /// How many conversations show before the rest fold — restoring reaches for something
+    /// recent, and a long archive should cost one row, not the page's whole height.
+    static let recentLimit = 10
 }

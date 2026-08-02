@@ -140,8 +140,7 @@ final class ProfilePreferencesViewController: NSViewController {
             SettingsUI.fullRow(previewContent())
         ])
 
-        let page = SettingsUI.page([
-            SettingsUI.heading("Profiles"),
+        let page = SettingsUI.page(title: "Profiles", sections: [
             SettingsUI.section("Text", text),
             SettingsUI.section("Cursor", cursor),
             SettingsUI.section("Colour", colour),

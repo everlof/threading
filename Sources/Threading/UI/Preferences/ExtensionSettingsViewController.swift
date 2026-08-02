@@ -16,8 +16,13 @@ final class ExtensionSettingsViewController: NSViewController {
     }
 
     override func loadView() {
+        // The extension's strings arrive already localized by its own resolver, so the header
+        // must not pass them through the app's catalogue — see the localization-domain split
+        // in design-system.md.
         view = SettingsUI.page(
-            registeredPage.page.sections.map {
+            title: registeredPage.page.title,
+            summary: registeredPage.extensionName,
+            sections: registeredPage.page.sections.map {
                 ExtensionSettingsRenderer.section(
                     extensionIdentifier: registeredPage.extensionIdentifier,
                     extensionName: registeredPage.extensionName,
@@ -26,7 +31,8 @@ final class ExtensionSettingsViewController: NSViewController {
                     fields: $0.fields,
                     prefixesTitleWithExtension: false
                 )
-            }
+            },
+            localizes: false
         )
     }
 }

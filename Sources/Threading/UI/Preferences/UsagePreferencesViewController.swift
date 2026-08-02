@@ -57,7 +57,6 @@ final class UsagePreferencesViewController: NSViewController {
         let report = TranscriptUsageService.shared.report
 
         var sections: [NSView] = [
-            SettingsUI.heading(UsageStrings.title),
             SettingsUI.note(UsageStrings.explanation),
             summarySection(report)
         ]
@@ -76,7 +75,7 @@ final class UsagePreferencesViewController: NSViewController {
 
         sections.append(SettingsUI.note(UsageStrings.footnote))
 
-        let page = SettingsUI.page(sections, hostPage: .usage)
+        let page = SettingsUI.page(title: "Usage", sections: sections, hostPage: .usage)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
