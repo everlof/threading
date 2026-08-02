@@ -62,7 +62,18 @@ final class SidebarRowRenderTests: XCTestCase {
             title: "Refactor the sidebar trailing slot and its hover controls"
         )
 
-        XCTAssertEqual(written, 10, "Every story should render in both appearances")
+        // Hovered on the *selected* row — the state where the row's ground is the theme's accent
+        // rather than the sidebar's surface, and the one the `⋯` and archive were once drawn
+        // wrong in: they kept the chrome's label over a block of colour it was never measured
+        // against. What to look for is that the pair reads as the title beside it does.
+        written += try write(
+            story: "06-hovered-and-selected",
+            activity: .idle,
+            hovered: true,
+            selected: true
+        )
+
+        XCTAssertEqual(written, 12, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -256,6 +267,214 @@ final class SidebarRowRenderTests: XCTestCase {
         )
     }
 
+    // MARK: - Selected Ground
+
+    /// A selected row's trailing controls have to ink against the fill the *row* painted, not
+    /// against the chrome's ground they were built for.
+    ///
+    /// Reported against Botanical, whose accent is a deep herbarium green: the selected row's
+    /// title inverted to near-white and the `⋯` and archive beside it kept the chrome's dark
+    /// green secondary label — two glyphs sunk into the fill, in the one row the eye is already
+    /// on. Nothing about the buttons was Botanical-specific, so the sweep is every stock theme
+    /// and every row kind the sidebar can select: the three rows state the rule separately, and
+    /// two of three would be the drift the component vocabulary exists to prevent.
+    ///
+    /// Asserted as *which of two inks* the glyphs were drawn in rather than as a contrast floor,
+    /// because contrast does not separate them: under Bauhaus the chrome's dark label reads on
+    /// the selection better than the ink measured against it does (3.8 against 2.8), and under
+    /// Art Deco it reads at 1.1. Any threshold that passed Bauhaus would pass Botanical's 2.6 as
+    /// well, and Botanical's 2.6 is the bug. The rule is not "clears a number", it is "measured
+    /// against the ground it is on".
+    ///
+    /// Nearest-of-two rather than an exact colour, because the two composites being told apart
+    /// are far apart while the *rendering* of either is only close: CoreGraphics flattens the
+    /// glyph's transparency layer in its own working space, which lands a few points off a
+    /// component-wise mix of the same two colours. A classification is immune to that, where a
+    /// tolerance would be a number tuned until it passed.
+    ///
+    /// Read from pixels rather than from the buttons' tint, because the tint is set twice —
+    /// `ThemedIconButton` resolves the glyph again inside `draw(_:)`, so a fix that reached only
+    /// `applyInk` would satisfy the property and still paint the old colour.
+    func testASelectedRowsTrailingControlsReadAgainstItsSelectionFill() throws {
+        let themes = AppThemeLibrary.stock
+        XCTAssertFalse(themes.isEmpty, "Fixture premise: there are stock themes to sweep")
+
+        for theme in themes {
+            try withTheme(theme) {
+                for row in Self.selectableRows {
+                    let fill = Design.Surface.selectionFill
+                    let drawn = try strongestTrailingControlInk(
+                        of: row.build(),
+                        identified: row.controls,
+                        over: fill
+                    )
+
+                    // The two answers the button could have given: the ink the fill asks for, and
+                    // the chrome's own, which is what it drew before the row started saying what
+                    // it had painted. A theme whose accent happens to sit where its chrome ink
+                    // already reads leaves the two nearly equal, and passes either way —
+                    // correctly, since under that theme there is nothing to get wrong.
+                    let selected = distance(
+                        drawn, Design.Ink.selection.secondary.composited(over: fill)
+                    )
+                    let chrome = distance(
+                        drawn, Design.Ink.chrome.secondary.composited(over: fill)
+                    )
+
+                    XCTAssertLessThanOrEqual(
+                        selected,
+                        chrome,
+                        "\(theme.name): a selected \(row.name)'s actions should ink from its fill"
+                    )
+                }
+            }
+        }
+    }
+
+    /// One row kind a sidebar selection can land on, hovered so its trailing controls are what is
+    /// in the slot, named by the identifier the row hangs them under.
+    private struct SelectableRow {
+        let name: String
+        let controls: String
+        let build: () -> NSTableCellView
+    }
+
+    private static let selectableRows = [
+        SelectableRow(
+            name: "session row",
+            controls: "sidebar.session.hover-controls",
+            build: { hoveredSessionRow(AgentSession(kind: .claude, title: "Fix the hover state")) }
+        ),
+        SelectableRow(
+            name: "project row",
+            controls: "sidebar.project.actions",
+            build: {
+                hoveredProjectRow {
+                    $0.configure(
+                        with: Project(
+                            name: "Threading",
+                            folderURL: URL(fileURLWithPath: "/tmp/Threading")
+                        ),
+                        collapsedSessionCount: 0
+                    )
+                }
+            }
+        ),
+        SelectableRow(
+            name: "terminal row",
+            controls: "sidebar.terminal.actions",
+            build: { hoveredTerminalRow() }
+        )
+    ]
+
+    /// How far the rendered ground may sit from the colour the fixture handed it — the same few
+    /// points of working-space conversion the ink comparison above is written around, summed over
+    /// three channels. It is a premise check, not the measurement.
+    private static let groundTolerance: CGFloat = 0.1
+
+    /// How far apart two colours are, summed over the channels — the same reading
+    /// `SidebarRowHighlightTests` takes, and enough to say which of two inks a pixel is.
+    private func distance(_ first: NSColor, _ second: NSColor) -> CGFloat {
+        guard let first = first.usingColorSpace(.sRGB),
+              let second = second.usingColorSpace(.sRGB) else { return .greatestFiniteMagnitude }
+
+        return abs(first.redComponent - second.redComponent)
+            + abs(first.greenComponent - second.greenComponent)
+            + abs(first.blueComponent - second.blueComponent)
+    }
+
+    /// The most fully inked pixel the hover controls put on the fill they are drawn over.
+    ///
+    /// The *most*, because a glyph is mostly its own antialiased edge: only a stroke's solid
+    /// centre carries the colour that was chosen, and a half-covered pixel carries half of it.
+    /// Scanned across the controls' whole column so the probe need not know where inside a `⋯`
+    /// the dots fall.
+    private func strongestTrailingControlInk(
+        of row: NSTableCellView,
+        identified identifier: String,
+        over fill: NSColor
+    ) throws -> NSColor {
+        // The other half of what selection means to the row: the caller paints the fill, and this
+        // is the background style AppKit hands the cell to say that fill is emphasized.
+        row.backgroundStyle = .emphasized
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height))
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor),
+            row.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+        // The fill the sidebar's row view paints under a selected row, laid down here so the
+        // glyphs composite over it the way they do on screen. Read back from the render below
+        // rather than assumed: a ground that failed to land would make every comparison a
+        // comparison against transparency, which nothing can be wrong about.
+        host.wantsLayer = true
+        host.layer?.backgroundColor = fill.cgColor
+
+        let controls = try XCTUnwrap(
+            row.descendant(identified: identifier),
+            "The row should hold \(identifier)"
+        )
+        let column = controls.convert(controls.bounds, to: host)
+
+        let rep = try XCTUnwrap(
+            host.bitmapImageRepForCachingDisplay(in: host.bounds),
+            "Failed to build a bitmap for the row"
+        )
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        // The controls' column, at every height: the buttons are the only thing drawn there once
+        // the status indicator has crossfaded out, so this needs no flipped-coordinate arithmetic
+        // to find the glyphs.
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let first = max(0, Int(column.minX * scale))
+        let last = min(rep.pixelsWide - 1, Int(column.maxX * scale))
+        XCTAssertLessThan(first, last, "The hover controls should occupy a column of pixels")
+
+        // The ground as *rendered*, read from a corner the row draws nothing in, so the search
+        // below measures against the pixels the glyphs actually sit on rather than against the
+        // colour the fixture asked for.
+        let ground = try XCTUnwrap(rep.colorAt(x: 0, y: 0), "No pixel at the fixture's corner")
+        XCTAssertLessThan(
+            distance(ground, fill),
+            Self.groundTolerance,
+            "Fixture premise: the corner should hold the selection fill the row was given"
+        )
+
+        var strongest = ground
+        var moved: CGFloat = 0
+        for x in first...last {
+            for y in 0..<rep.pixelsHigh {
+                guard let pixel = rep.colorAt(x: x, y: y) else { continue }
+                let inked = distance(pixel, ground)
+                if inked > moved {
+                    moved = inked
+                    strongest = pixel
+                }
+            }
+        }
+
+        XCTAssertGreaterThan(moved, 0, "The hover controls should have drawn something")
+        return strongest
+    }
+
+    /// `apply` is what the app itself calls, and it moves both halves the row reads: the library,
+    /// which decides whether the row draws its own selection at all, and the palette the fill and
+    /// the ink over it both come from.
+    private func withTheme(_ theme: AppTheme, _ body: () throws -> Void) rethrows {
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+
+        AppThemeLibrary.apply(theme)
+        try body()
+    }
+
+    // MARK: - Lookup
+
     /// Reads the trailing control's *ink* edge: its frame pulled in by the padding it reports.
     private func assertOpticalEdge(
         ofControlsIn identifier: String,
@@ -302,6 +521,18 @@ final class SidebarRowRenderTests: XCTestCase {
         return row
     }
 
+    private static func hoveredTerminalRow() -> ProjectTerminalRowView {
+        let row = ProjectTerminalRowView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.configure(
+            with: ProjectTerminal(currentDirectory: "/tmp/Threading", title: "zsh"),
+            running: true,
+            projectRoot: nil
+        )
+        if let entered = enterEvent() { row.mouseEntered(with: entered) }
+        return row
+    }
+
     private static func hoveredSessionRow(_ session: AgentSession) -> SessionRowView {
         let row = SessionRowView(customizationLookup: { _ in .empty })
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -336,6 +567,7 @@ final class SidebarRowRenderTests: XCTestCase {
         story: String,
         activity: SessionActivity,
         hovered: Bool,
+        selected: Bool = false,
         title: String = "Fix the hover state"
     ) throws -> Int {
         let directory = Render.directory
@@ -371,12 +603,18 @@ final class SidebarRowRenderTests: XCTestCase {
                     row.mouseEntered(with: entered)
                     row.configure(with: session, activity: activity)
                 }
+                // The selection is two things and the row owns only one of them: the ground is
+                // the sidebar's row view's to paint, and `backgroundStyle` is what the cell is
+                // told about it.
+                if selected { row.backgroundStyle = .emphasized }
 
                 AppThemeRefresh.repaint(host)
                 host.layoutSubtreeIfNeeded()
 
                 host.wantsLayer = true
-                host.layer?.backgroundColor = Design.Surface.background.cgColor
+                host.layer?.backgroundColor = selected
+                    ? Design.Surface.selectionFill.cgColor
+                    : Design.Surface.background.cgColor
 
                 guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                     return

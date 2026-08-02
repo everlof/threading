@@ -77,6 +77,9 @@ final class ProjectTerminalRowView: NSTableCellView {
             onAction?(terminalID, actionButton)
         }
         actionButton.translatesAutoresizingMaskIntoConstraints = false
+        // Named the way the session and project rows name theirs, so the inspector — and a test
+        // sweeping all three — reads this row by the same convention.
+        actionButton.setAccessibilityIdentifier("sidebar.terminal.actions")
 
         addSubview(iconView)
         addSubview(titleLabel)
@@ -156,5 +159,10 @@ final class ProjectTerminalRowView: NSTableCellView {
         iconView.contentTintColor = backgroundStyle == .emphasized
             ? Design.Text.selected
             : (isRunning ? Design.Text.label : Design.Text.secondary)
+
+        // The `⋯` is a drawn control rather than a tinted image, so it is told which ground it is
+        // on rather than handed a colour — see `BackdropThemedControl.hostGround`, and the
+        // session row beside this one, which states the same thing.
+        actionButton.hostGround = backgroundStyle == .emphasized ? .selection : nil
     }
 }

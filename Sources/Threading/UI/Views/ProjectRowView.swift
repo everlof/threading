@@ -731,6 +731,15 @@ final class ProjectRowView: NSTableCellView {
     private func applyTextColors() {
         nameLabel.refreshTextColor()
 
+        // The `+` and the `⋯` are drawn controls rather than tinted images, so they are told
+        // which ground they are on rather than handed a colour — see
+        // `BackdropThemedControl.hostGround`. Only the emphasized fill is named: the
+        // unemphasized one is the accent held far back over the sidebar's surface, where the
+        // chrome's ink is still the ink that reads.
+        let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
+        createButton.hostGround = ground
+        hoverButton.hostGround = ground
+
         if backgroundStyle == .emphasized {
             countLabel.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha

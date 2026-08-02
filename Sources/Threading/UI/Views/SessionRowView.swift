@@ -871,6 +871,14 @@ final class SessionRowView: NSTableCellView {
     /// filled shape alone.
     private func applyTextColors() {
         titleLabel.refreshTextColor()
+
+        // The row's own buttons sit on whatever the row is filled with, and selection changes
+        // that out from under them — see `BackdropThemedControl.hostGround`. Only the emphasized
+        // fill is named: the unemphasized one is the accent held far back over the sidebar's
+        // surface, where the chrome's ink is still the ink that reads.
+        let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
+        actionButton.hostGround = ground
+        archiveButton.hostGround = ground
     }
 }
 

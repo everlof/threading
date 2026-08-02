@@ -19,7 +19,7 @@ protocol BackdropOverlayContent where Self: NSView {}
 /// state, the close button, the pressed fill and the accessibility role, none of which a shared
 /// constant reaches.
 @MainActor
-enum InkSource {
+enum InkSource: Equatable {
 
     /// The chrome's ground, whose roles the app theme states.
     case chrome
@@ -27,10 +27,23 @@ enum InkSource {
     /// The window backdrop, whose colour the theme does not own.
     case backdrop
 
+    /// The fill of an emphasized selection — a ground a *component* paints rather than one of
+    /// the window's two, and the only one a control can move onto without moving at all.
+    ///
+    /// A sidebar row's `⋯` and archive are on the chrome's ground right up to the moment the row
+    /// is selected, when the theme lays a block of accent under them and the chrome's secondary
+    /// label is suddenly measured against a ground that is no longer there. Under Botanical that
+    /// is a dark green glyph on a dark green fill, in the one row the eye is already on.
+    ///
+    /// Never a control's `inkSource`, which is what it was built for and does not change; this is
+    /// what a host names through `BackdropThemedControl.hostGround`.
+    case selection
+
     var ink: Design.Ink {
         switch self {
         case .chrome: Design.Ink.chrome
         case .backdrop: WindowBackdrop.ink
+        case .selection: Design.Ink.selection
         }
     }
 
@@ -41,6 +54,7 @@ enum InkSource {
         switch self {
         case .chrome: Design.Surface.ground
         case .backdrop: WindowBackdrop.color
+        case .selection: Design.Surface.selectionFill
         }
     }
 }
@@ -174,7 +188,25 @@ class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
     /// from different roles.
     let inkSource: InkSource
 
-    final var ink: Design.Ink { inkSource.ink }
+    /// A ground this control's **host** paints over its source, when there is one.
+    ///
+    /// `inkSource` says which ground the control was built for, and that does not change. What
+    /// can change is what its host lays down in between: a sidebar row fills with the theme's
+    /// accent once it is selected, and the controls inside it are over a colour the chrome's
+    /// roles were never measured against without having moved at all.
+    ///
+    /// Only the host knows what it painted, so the host is what says so — by *naming* the ground
+    /// rather than handing over an ink, so a live theme switch is answered again at the next draw
+    /// instead of keeping the ink the selection happened to start under. Cleared, the control
+    /// goes back to reading its source.
+    var hostGround: InkSource? {
+        didSet {
+            guard hostGround != oldValue else { return }
+            inkDidChange()
+        }
+    }
+
+    final var ink: Design.Ink { (hostGround ?? inkSource).ink }
 
     init(frame frameRect: NSRect, inkSource: InkSource) {
         self.inkSource = inkSource

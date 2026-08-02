@@ -145,6 +145,31 @@ The hover fill is part of the role too: a toolbar button lifts to `surface` beca
 the bare backdrop, an inline one to `surfaceHover` because it sits on a fill that is *already*
 `surface` — a distinction previously set by hand at the one call site that had noticed.
 
+**A control's ground can move without the control moving.** `inkSource` says which ground a
+component was built for, and that does not change; what it cannot say is what the component's
+*host* paints in between. A sidebar row fills with the theme's accent when it is selected, and its
+`⋯` and archive are suddenly over a colour the chrome's roles were never measured against — under
+Botanical a dark green glyph on a dark green fill, in the one row the eye is already on, beside a
+title that had already inverted. The host is the only thing that knows what it painted, so the
+host is what says so: `BackdropThemedControl.hostGround` **names** the ground (`InkSource.selection`
+→ `Design.Ink.selection`, measured against `Design.Surface.selectionFill`, which is the theme's
+accent or AppKit's own fill under System) rather than handing over an ink, so a live theme switch
+is answered again at the next draw instead of keeping the ink the selection began under. Only the
+*emphasized* fill is named: the unemphasized one is the accent held far back over the sidebar's
+surface, where the chrome's ink still reads. All three selectable sidebar rows state it, and
+`SidebarRowRenderTests` sweeps every stock theme × every row kind — by asking which of the two
+candidate inks the rendered glyph *is*, since contrast cannot separate them (under Bauhaus the
+wrong ink reads better than the right one).
+
+**A translucent glyph tint composites over the ground, not into the artwork.**
+`TemplateImageDrawing` filled the symbol `.sourceAtop` inside its transparency layer, which is
+right for an opaque tint and wrong for every other one: a template's own artwork is black, so atop
+blended the tint *into that black* and a tint below full opacity could never reach the colour it
+asked for — white at 70% came out an opaque 70% grey whatever it stood on. Every ink tier below
+`label` is an alpha, so that was every secondary glyph in the window quietly drawn dark. `.sourceIn`
+keeps the silhouette and replaces its colour, alpha included, leaving the layer to composite it
+over the ground the ink was measured against.
+
 **A menu opens on the press; an action fires on the release.** Which of the two a button does is
 `ThemedIconButton.presentsMenu`, and the split is not a preference — press-drag-release onto an
 item is the platform's menu gesture (`ChipView` and `ThemedPopUp` already present theirs on the

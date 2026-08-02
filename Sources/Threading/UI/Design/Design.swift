@@ -560,6 +560,17 @@ enum Design {
         /// A selected row inside app-owned chrome.
         static var selection: NSColor { AppThemePalette.color(.selection) }
 
+        /// What an **emphasized** selection is actually filled with — the ground anything drawn
+        /// *inside* a selected row has to read against.
+        ///
+        /// Not `selection` above, which is the theme's role for a selected row at rest:
+        /// `SidebarHoverRowView` paints the accent while the list has focus, and under **System**
+        /// hands the fill back to AppKit entirely. Stated once here so a control sitting in the
+        /// row need know neither fact. See `Design.Ink.selection`.
+        static var selectionFill: NSColor {
+            AppThemePalette.current.isSystem ? .selectedContentBackgroundColor : accent
+        }
+
         /// The ground behind the run of a string a search matched.
         ///
         /// Derived from the accent rather than authored per theme: a match is the one thing on
@@ -754,6 +765,20 @@ enum Design {
             self.border = border
             self.rule = rule
         }
+
+        /// The **emphasized selection's fill**, as an `Ink` — what a control nested inside a
+        /// selected row draws from.
+        ///
+        /// A sidebar row's `⋯` and archive take the chrome's ink, which is right up to the moment
+        /// the row is selected: the theme then lays a block of accent under them, and the chrome's
+        /// secondary label is measured against a ground that is no longer there. Under Botanical
+        /// that is a dark green glyph on a dark green fill — the buttons read as holes in the row
+        /// the title beside them has already inverted out of.
+        ///
+        /// Mirrors `Design.Text.selected`, and for its reason: under **System** the fill is
+        /// AppKit's own, so the ink is measured against AppKit's; a styled theme paints its own
+        /// accent, so the ink is measured against that.
+        static var selection: Ink { Text.on(Design.Surface.selectionFill) }
 
         /// The chrome's own ground, as an `Ink`.
         ///

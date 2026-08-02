@@ -18,7 +18,15 @@ enum TemplateImageDrawing {
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         image.draw(in: rect)
         tint.set()
-        rect.fill(using: .sourceAtop)
+        // `.sourceIn`, not `.sourceAtop`: the template's own artwork is **black**, and atop keeps
+        // whatever the tint's alpha does not cover — so a tint below full opacity was blended
+        // into that black instead of over the ground, and could never reach the colour it asked
+        // for. Every ink tier below `label` is an alpha (`Design.Ink` is "the base at an
+        // opacity"), so this was every secondary glyph in the window quietly drawn dark: white at
+        // 70% came out an opaque 70% grey whatever it stood on. `.sourceIn` keeps the silhouette
+        // and replaces its colour, alpha included, leaving the transparency layer to composite it
+        // over the ground the way the ink was measured against. An opaque tint is unaffected.
+        rect.fill(using: .sourceIn)
         context.endTransparencyLayer()
         context.restoreGState()
     }
