@@ -43,6 +43,10 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
         let scoped = try XCTUnwrap(usage.modelWindows.first)
         XCTAssertEqual(usage.modelWindows.count, 1)
         XCTAssertEqual(scoped.label, "Weekly · Fable")
+        // The scope is carried rather than deduced from the id, which is what lets the window be
+        // named by its length in a compact reading — `7d Fable` — instead of by its model alone.
+        XCTAssertEqual(scoped.scopeName, "Fable")
+        XCTAssertEqual(scoped.compactName, "7d Fable")
         XCTAssertEqual(scoped.fraction ?? 0, 0.89, accuracy: 0.0001)
         XCTAssertEqual(scoped.windowDuration, UsageDefaults.sevenDaySeconds)
         XCTAssertNotNil(scoped.resetsAt)

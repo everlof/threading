@@ -206,7 +206,24 @@ account's pressure, which is what compares two logins. The **binding** window is
 work in front of you: the fullest of the account's own windows *and* the scoped windows metering
 the model that session runs. A weekly window at 56% beside a Fable window at 89% is comfortable
 as an account and nearly spent as a session, and the toolbar belongs to the session — so the pill
-gauges the binding window and names it in its text (`5h 7% · 7d 56% · Fable 89%`).
+gauges the binding window and names it in its text (`5h 7% · 7d 56% · 7d Fable 89%`).
+
+### One name per window
+
+A window is named by its **length**, and a scoped one adds the **model** it meters: compact
+`5h`, `7d`, `7d Fable` (`Window.compactName`); spacious `5-hour`, `Weekly`, `Weekly · Fable`
+(`Window.label`). Same structure, two registers — short in a menu line or the pill, long in a bar.
+
+The scoped window used to print as its model alone, so one window answered to three names on one
+screen: the composer's bar said `Weekly · Fable`, the account menu said `Fable`, and the model
+row said `7d`. Worse than inconsistent — `5h 7% · 7d 56% · Fable 89%` sits a model's name in a
+list of durations, and nothing in the line says what period that last number covers.
+
+`id` was not available to fix it: it identifies the limit, it is what `ModelName.scope(_:meters:)`
+matches a session against, and it is the key `UsageHistoryStore` files samples under. So the scope
+is carried separately (`Window.scopeName`) and the length recovered from `windowDuration` — a
+provider that reports a scoped limit without a window length keeps the bare model name, which is
+then genuinely all that is known.
 
 Which scoped windows apply is decided by name (`ModelName.scope(_:meters:)`), because the two
 vocabularies never line up: a limit is named after the family it meters (`Fable`), a session
@@ -222,8 +239,8 @@ rather than looked up, because the pill follows a session and the session is wha
 
 The account menu is read against the model that *would* run if that login were picked, resolved
 per account (the configured default is an account's own setting). Its line is
-`Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h` — plan, every window, and when the tight
-one comes back. The reset names its window rather than trailing the list bare: the binding window
+`Max · 5h 7% · 7d 56% · 7d Fable 89% · 7d Fable resets in 15h` — plan, every window, and when the
+tight one comes back. The reset names its window rather than trailing the list bare: the binding window
 is not always the last one written, and an unattributed countdown is read as belonging to
 whichever is.
 
@@ -240,14 +257,27 @@ Everywhere else the reading stays narrow (`.metering`, the default): a session a
 model, and the mobile mirror of one, are subject to that model's windows and to no others.
 
 The **model** menu carries the other half, since it is the only surface where a scoped limit is
-actionable — a spent Fable window is escaped by picking something else. Each row states its own
-scoped window and nothing more (`AccountUsageMenu.modelSummary`): `7d 89% · resets in 1h 1m`,
-named by the window's *length* rather than by the model, which the row's title already says —
-`UsageDefaults.windowID(forDuration:)` recovers `7d` from it, since a scoped window is named
-after its model and its length is the only thing left that identifies the window. Rows the plan
-meters no differently stay bare: their pressure is the account's, which every row would repeat
-and none would distinguish. It reads the cache without asking for a refresh — the composer has
-already prefetched, and a model list is not a new reason to spend a round trip per row.
+actionable — a spent Fable window is escaped by picking something else. Each row states every
+window a session on it would be measured against (`AccountUsageMenu.modelSummary`, `.metering`):
+`5h 10% · 7d 22% · 7d Fable 89% · 7d Fable resets in 15h`. Both menus draw the same ring, gauging
+the same binding window, because two rings a click apart that meant different things would be
+worse than no ring.
+
+**Rows the plan meters no differently repeat the account's windows rather than staying bare.**
+Printing only the scoped ones was the first design and it was defensible — the account windows
+are identical on every such row and distinguish nothing — but three models listed with a number
+beside exactly one of them does not read as "two models with nothing of their own to say", it
+reads as two failed lookups. Repetition is the cheaper mistake. The row that leaves the choice
+to the CLI decorates too, metered by the account's configured default, or by nothing at all when
+the account names none — in which case the account's own windows are the whole honest answer.
+
+The model menu reads the cache without asking for a refresh per row; the conversation header's
+copy of it asks once for the whole menu, since unlike the composer it has no prefetch on appear.
+
+**Both model menus decorate — the composer's and the running session's.** The conversation
+header's chip listed models with no readings at all for as long as it existed, which is the one
+place the numbers are most actionable: switching model mid-conversation is exactly the move a
+spent window calls for, and the pill only ever spoke for the model already running.
 
 A window whose `resets_at` has passed keeps its identity but not its percentage — the stale
 value describes the *previous* window, so it renders as `—`, never as pressure. The pill

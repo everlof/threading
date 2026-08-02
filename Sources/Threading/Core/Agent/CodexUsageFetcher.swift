@@ -100,12 +100,16 @@ enum CodexUsageFetcher {
             guard let name = limit.limitName,
                   let window = normalize(limit.rateLimit?.primaryWindow) else { return nil }
 
+            // `window` carries the length's own identity, so the scoped window is named the same
+            // way the account's are — long form in a bar, short form in a line — with the model
+            // added rather than substituted for the length.
             return AccountUsage.Window(
                 id: name,
-                label: name,
+                label: "\(window.label)\(UsageDefaults.segmentSeparator)\(name)",
                 fraction: window.fraction,
                 resetsAt: window.resetsAt,
-                windowDuration: window.windowDuration
+                windowDuration: window.windowDuration,
+                scopeName: name
             )
         }
 

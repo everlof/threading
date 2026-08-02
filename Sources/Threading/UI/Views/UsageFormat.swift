@@ -142,7 +142,7 @@ extension UsageFormat {
             return nil
         case let .exhausting(at, early):
             let earlyBy = remaining(until: Date().addingTimeInterval(early), from: Date())
-            return "\(window.id) spent by \(clock.string(from: at)) · \(earlyBy) early"
+            return "\(window.compactName) spent by \(clock.string(from: at)) · \(earlyBy) early"
         }
     }
 

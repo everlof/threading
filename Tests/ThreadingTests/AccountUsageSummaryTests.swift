@@ -65,13 +65,41 @@ final class AccountUsageSummaryTests: XCTestCase {
             window(id: "5h", fraction: 0.10, resetsIn: 3600),
             window(id: "7d", fraction: 0.22, resetsIn: 86_400)
         ])
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 86_400)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 86_400)]
 
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "claude-fable-5[1m]")?.id, "Fable")
         XCTAssertEqual(
             usage.compactSummary(at: now, metering: "claude-fable-5[1m]"),
-            "5h 10% · 7d 22% · Fable 89%"
+            "5h 10% · 7d 22% · 7d Fable 89%"
         )
+    }
+
+    /// One vocabulary for every written-out window: a length, and the model it meters when it
+    /// meters one. A scoped window printing as its model alone put a name in a list of durations,
+    /// and left `Fable 89%` with nothing to say which period it covered.
+    func testAScopedWindowIsNamedByLengthAndModel() {
+        XCTAssertEqual(
+            scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 86_400).compactName,
+            "7d Fable"
+        )
+        XCTAssertEqual(
+            scopedWindow(
+                model: "Fable",
+                fraction: 0.89,
+                resetsIn: 86_400,
+                duration: UsageDefaults.fiveHourSeconds
+            ).compactName,
+            "5h Fable"
+        )
+        XCTAssertEqual(window(id: "7d", fraction: 0.22, resetsIn: 86_400).compactName, "7d")
+    }
+
+    /// A provider that reports a scoped limit without saying how long its window is leaves the
+    /// model's name as the only thing that identifies it — which is what gets printed, rather
+    /// than a length invented to fill the slot.
+    func testAScopedWindowOfUnknownLengthKeepsItsModelName() {
+        let unsized = scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 86_400, duration: nil)
+        XCTAssertEqual(unsized.compactName, "Fable")
     }
 
     /// Another model's limit is not this session's problem, and naming no model at all is not a
@@ -81,7 +109,7 @@ final class AccountUsageSummaryTests: XCTestCase {
             window(id: "5h", fraction: 0.10, resetsIn: 3600),
             window(id: "7d", fraction: 0.22, resetsIn: 86_400)
         ])
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 86_400)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 86_400)]
 
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "claude-opus-4-8")?.id, "7d")
         XCTAssertEqual(usage.bindingWindow(at: now, metering: nil)?.id, "7d")
@@ -92,10 +120,10 @@ final class AccountUsageSummaryTests: XCTestCase {
     /// window before it, and gauging the ring from it would show pressure that has gone.
     func testExpiredModelWindowDoesNotBind() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.22, resetsIn: 86_400)])
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: -60)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: -60)]
 
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "fable")?.id, "7d")
-        XCTAssertEqual(usage.compactSummary(at: now, metering: "fable"), "7d 22% · Fable —")
+        XCTAssertEqual(usage.compactSummary(at: now, metering: "fable"), "7d 22% · 7d Fable —")
     }
 
     // MARK: - Account Menu
@@ -114,11 +142,11 @@ final class AccountUsageSummaryTests: XCTestCase {
             observedAt: now,
             source: .localCache
         )
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 54_000)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
         XCTAssertEqual(
             AccountUsageMenu.summary(for: usage, metering: "claude-fable-5[1m]", at: now),
-            "Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h"
+            "Max · 5h 7% · 7d 56% · 7d Fable 89% · 7d Fable resets in 15h"
         )
     }
 
@@ -136,12 +164,12 @@ final class AccountUsageSummaryTests: XCTestCase {
             observedAt: now,
             source: .localCache
         )
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 54_000)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
         // Metering Opus: Fable is named, but 7d is still what binds — and what the ring gauges.
         XCTAssertEqual(
             AccountUsageMenu.summary(for: usage, metering: "opus[1m]", at: now),
-            "Max · 5h 11% · 7d 62% · Fable 89% · 7d resets in 15h"
+            "Max · 5h 11% · 7d 62% · 7d Fable 89% · 7d resets in 15h"
         )
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "opus[1m]")?.id, "7d")
     }
@@ -150,60 +178,74 @@ final class AccountUsageSummaryTests: XCTestCase {
     /// mirrored reading stays narrow, because there another model's limit is not its problem.
     func testARunningSessionsReadingStaysNarrow() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 54_000)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
         XCTAssertEqual(usage.compactSummary(at: now, metering: "opus[1m]"), "7d 62%")
         XCTAssertEqual(
             usage.compactSummary(at: now, metering: "opus[1m]", scoped: .all),
-            "7d 62% · Fable 89%"
+            "7d 62% · 7d Fable 89%"
         )
     }
 
     // MARK: - Model Menu
 
-    /// The row where the choice is made states its own window, named by length — the model's own
-    /// name is the row's title, and printing it again says nothing.
+    /// The row where the choice is made states everything a session on it would be measured
+    /// against — the account's windows and the model's own — and when the binding one comes back.
     @MainActor
-    func testModelRowStatesItsOwnWindowByLength() {
+    func testModelRowStatesEveryWindowThatWouldMeasureIt() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
-        usage.modelWindows = [
-            window(id: "Fable", fraction: 0.89, resetsIn: 54_000, duration: UsageDefaults.sevenDaySeconds)
-        ]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
         XCTAssertEqual(
             AccountUsageMenu.modelSummary(for: usage, running: "claude-fable-5[1m]", at: now),
-            "7d 89% · resets in 15h"
+            "7d 62% · 7d Fable 89% · 7d Fable resets in 15h"
         )
     }
 
-    /// Silent on a model the plan meters no differently: its pressure is the account's, which
-    /// every row would then repeat and none would distinguish.
+    /// A model the plan meters no differently still carries its reading. The account's windows
+    /// are the same on every such row and distinguish nothing — but a blank row does not read as
+    /// "nothing of its own to say", it reads as a failed lookup beside the one row that worked.
     @MainActor
-    func testModelRowSaysNothingWithoutAScopedWindow() {
+    func testModelRowWithoutAScopedWindowFallsBackToTheAccountsOwn() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
-        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 54_000)]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
-        XCTAssertNil(AccountUsageMenu.modelSummary(for: usage, running: "claude-opus-4-8", at: now))
-        XCTAssertNil(AccountUsageMenu.modelSummary(for: usage, running: "", at: now))
+        XCTAssertEqual(
+            AccountUsageMenu.modelSummary(for: usage, running: "claude-opus-4-8", at: now),
+            "7d 62% · 7d resets in 15h"
+        )
+        // The row that leaves the choice to the CLI, on an account naming no default: nothing is
+        // known about the model, so the account's own windows are the whole honest answer.
+        XCTAssertEqual(
+            AccountUsageMenu.modelSummary(for: usage, running: nil, at: now),
+            "7d 62% · 7d resets in 15h"
+        )
     }
 
-    /// An expired scoped window loses its number here too, and takes the countdown with it —
+    /// The one silence left: an account with no windows at all says nothing, rather than showing
+    /// a row furnished with an empty line.
+    @MainActor
+    func testModelRowSaysNothingWhenTheAccountHasNoWindows() {
+        XCTAssertNil(
+            AccountUsageMenu.modelSummary(for: makeUsage(windows: []), running: "opus", at: now)
+        )
+    }
+
+    /// An expired scoped window loses its number here too, and stops binding the countdown —
     /// a reset that has already happened is not a wait.
     @MainActor
     func testExpiredModelRowKeepsItsWindowAndDropsTheNumber() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
-        usage.modelWindows = [
-            window(id: "Fable", fraction: 0.89, resetsIn: -60, duration: UsageDefaults.sevenDaySeconds)
-        ]
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: -60)]
 
         XCTAssertEqual(
             AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now),
-            "7d —"
+            "7d 62% · 7d Fable — · 7d resets in 15h"
         )
     }
 
-    /// A scoped window is named after its model, so its *length* is the only thing left that
-    /// says which window it is.
+    /// A scoped window is identified by its model, so its *length* is recovered from the window
+    /// it is measured in.
     func testWindowIDIsRecoveredFromItsLength() {
         XCTAssertEqual(UsageDefaults.windowID(forDuration: UsageDefaults.fiveHourSeconds), "5h")
         XCTAssertEqual(UsageDefaults.windowID(forDuration: UsageDefaults.sevenDaySeconds), "7d")
@@ -247,6 +289,24 @@ final class AccountUsageSummaryTests: XCTestCase {
             fraction: fraction,
             resetsAt: now.addingTimeInterval(resetsIn),
             windowDuration: duration
+        )
+    }
+
+    /// A model-scoped window as a provider builds one: identified by its model, and knowing the
+    /// length it is measured in — which is what lets it be *named* like the account's own.
+    private func scopedWindow(
+        model: String,
+        fraction: Double?,
+        resetsIn: TimeInterval,
+        duration: TimeInterval? = UsageDefaults.sevenDaySeconds
+    ) -> AccountUsage.Window {
+        AccountUsage.Window(
+            id: model,
+            label: "\(UsageDefaults.weeklyLabel)\(UsageDefaults.segmentSeparator)\(model)",
+            fraction: fraction,
+            resetsAt: now.addingTimeInterval(resetsIn),
+            windowDuration: duration,
+            scopeName: model
         )
     }
 

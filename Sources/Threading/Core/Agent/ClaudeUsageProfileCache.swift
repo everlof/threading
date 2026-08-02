@@ -173,14 +173,16 @@ enum ClaudeUsageProfileCache {
 
             let base = baseWindow(forGroup: limit.group)
 
-            // The id is the model's own name, because that is what a compact reading says out
-            // loud — `5h 7% · 7d 56% · Fable 89%` — beside window ids that are lengths.
+            // The id is the model's own name — it is what identifies the limit, what a session
+            // is matched against, and what its history is filed under. What it is *called* on
+            // screen comes from `label` and `compactName`, both of which lead with the length.
             return AccountUsage.Window(
                 id: name,
                 label: "\(base.label)\(UsageDefaults.segmentSeparator)\(name)",
                 fraction: min(max(percent / 100, 0), 1),
                 resetsAt: limit.resetsAt.flatMap(UsageHTTP.parseISO8601),
-                windowDuration: base.duration
+                windowDuration: base.duration,
+                scopeName: name
             )
         }
     }

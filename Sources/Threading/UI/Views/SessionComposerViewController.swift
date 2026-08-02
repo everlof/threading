@@ -708,14 +708,15 @@ final class SessionComposerViewController: NSViewController {
         } ?? ComposerDefaults.defaultModelTitle
 
         // Where a scoped limit is finally actionable: a spent Fable window is escaped by
-        // picking another model, and this is the menu that does it. Each row states its own
-        // window rather than the account's, which every row would otherwise repeat.
+        // picking another model, and this is the menu that does it. Every row states what a
+        // session on it would be measured against, this one included — on an account that names
+        // no default there is no model to meter by, and the account's own windows are the answer.
         var defaultItem = ThemedMenuItem(
             title: defaultTitle,
             representedValue: nil,
             isSelected: selectedModel == nil
         )
-        if let account, let configured {
+        if let account {
             AccountUsageMenu.decorate(&defaultItem, forModel: configured, on: account)
         }
 

@@ -899,8 +899,16 @@ week is a poor place to start a long task — so the composer shows it twice ove
 
 - **In the account chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
   accounts are compared before one is picked.
+- **In the model chip's menu**, every model carries what a session on it would be measured
+  against — the account's windows, plus that model's own where the plan meters one separately.
+  This is the menu where a spent limit is escaped, since switching model is the way out of it.
+  The same menu on a **running session's header** carries the same readings.
 - **Under the chips**, the chosen account's windows are drawn in full: a bar per window, its
   percentage, and its reset countdown.
+
+A window is named by its length, and one that meters a single model adds that model: `5h`, `7d`,
+`7d Fable` in a line; `5-hour`, `Weekly`, `Weekly · Fable` on a bar. So the same window is
+recognisable wherever it is quoted.
 
 Each bar carries a **time mark** — a thin line at the point the clock has reached in that
 window. Fill short of the mark means you are spending slower than the window refills; fill

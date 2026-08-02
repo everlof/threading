@@ -76,71 +76,92 @@ enum AccountUsageMenu {
         if let windows = usage.compactSummary(at: now, metering: model, scoped: .all) {
             parts.append(windows)
         }
-        if let binding = usage.bindingWindow(at: now, metering: model),
-           let resetsAt = binding.resetsAt {
-            parts.append("\(binding.id) \(UsageFormat.resets(until: resetsAt, from: now))")
+        if let reset = resetLine(for: usage, metering: model, at: now) {
+            parts.append(reset)
         }
 
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: UsageDefaults.segmentSeparator)
     }
 
+    /// `7d Fable resets in 15h` — when the window that binds a session on `model` comes back.
+    ///
+    /// Attributed to its window rather than trailing the list bare: the binding window is not
+    /// always the last one written, and an unattributed countdown is read as belonging to
+    /// whichever is.
+    private static func resetLine(
+        for usage: AccountUsage,
+        metering model: String?,
+        at now: Date
+    ) -> String? {
+        guard let binding = usage.bindingWindow(at: now, metering: model),
+              let resetsAt = binding.resetsAt
+        else { return nil }
+
+        return "\(binding.compactName) \(UsageFormat.resets(until: resetsAt, from: now))"
+    }
+
     // MARK: - Model Rows
 
-    /// Puts the window metering `model` on a *model* row, in the menu where the model is chosen.
+    /// Puts what a session on `model` would be measured against on a *model* row, in the menu
+    /// where the model is chosen.
     ///
     /// The other half of the same decision. The account menu says which logins have a
     /// separately metered model under pressure; this says which model that is, at the moment
     /// that choice is made — and it is the only surface where the answer is actionable, since
     /// switching model is the cheap way out of a spent scoped window.
     ///
-    /// Silent on models the plan does not meter separately: their pressure is the account's,
-    /// which every row would then repeat identically and none would distinguish.
+    /// Every row carries its reading, including the models the plan meters no differently.
+    /// Stating only the scoped ones was defensible — the account windows are identical on every
+    /// row and distinguish nothing — but it read as *missing*: three models listed and one with
+    /// a number beside it looks like two failed lookups, not like two models with nothing of
+    /// their own to say. Repetition is cheaper than a row that appears to have no data.
+    ///
+    /// `model` is nil for the row that leaves the choice to the CLI on an account that names no
+    /// default: nothing is known about which model will run, so the account's own windows are
+    /// the whole honest answer.
     ///
     /// No refresh from here, unlike the account rows. The composer prefetches when it appears
     /// and the account menu asks again on every open, so this list is already warm — and a
     /// model list is not a new reason to spend a network round trip per row.
     static func decorate(
         _ item: inout ThemedMenuItem,
-        forModel model: String,
+        forModel model: String?,
         on account: AgentAccount
     ) {
+        let now = Date()
         guard let usage = AccountUsageService.shared.usage(for: account),
-              let summary = modelSummary(for: usage, running: model, at: Date())
+              let summary = modelSummary(for: usage, running: model, at: now)
         else { return }
 
-        if let window = usage.tightestScopedWindow(metering: model), let fraction = window.fraction {
-            item.image = UsageRingImage.make(
-                fraction: fraction,
-                tint: UsageSeverity.from(fraction: fraction).glyphColor
-            )
-        }
+        // The same ring the account rows draw, gauging the same thing: the window a session
+        // started here runs out of first. Rings that meant different things on two menus a click
+        // apart would be worse than no ring at all. One `now` for both, so a row cannot state a
+        // window the ring has already decided is expired.
+        item.image = UsageRingImage.make(for: usage, at: now, metering: model)
         item.subtitle = summary
     }
 
-    /// `7d 89% · resets in 1h 1m` — the scoped windows metering `model`, and when the tight one
-    /// comes back. Nil when the plan meters this model no differently from anything else.
+    /// `5h 10% · 7d 22% · 7d Fable 89% · 7d Fable resets in 15h` — every window a session on
+    /// `model` is measured against, and when the binding one comes back.
     ///
-    /// Each window is named by its *length* rather than by the model, which the row it sits
-    /// under already says; and the countdown needs no attribution here for the same reason.
+    /// Nil only when the account has no windows at all, which is the same silence every other
+    /// usage surface keeps when there is nothing to report.
+    ///
+    /// Narrow where the account menu is broad: this row *is* a model, so the scoped windows of
+    /// other models are not its business — that is `ScopedWindows.metering`, and the reason the
+    /// two menus do not share one line.
     static func modelSummary(
         for usage: AccountUsage,
-        running model: String,
+        running model: String?,
         at now: Date = Date()
     ) -> String? {
-        let scoped = usage.scopedWindows(metering: model)
-        guard !scoped.isEmpty else { return nil }
+        guard let windows = usage.compactSummary(at: now, metering: model) else { return nil }
 
-        var parts = scoped.map { window in
-            let name = UsageDefaults.windowID(forDuration: window.windowDuration) ?? window.id
-            return "\(name) \(AccountUsage.value(of: window, at: now))"
+        var parts = [windows]
+        if let reset = resetLine(for: usage, metering: model, at: now) {
+            parts.append(reset)
         }
-
-        if let tightest = usage.tightestScopedWindow(at: now, metering: model),
-           let resetsAt = tightest.resetsAt {
-            parts.append(UsageFormat.resets(until: resetsAt, from: now))
-        }
-
         return parts.joined(separator: UsageDefaults.segmentSeparator)
     }
 

@@ -1525,13 +1525,25 @@ final class ConversationViewController: NSViewController {
             "\(ModelName.display(for: $0))\(ConversationControlDefaults.accountDefaultSuffix)"
         } ?? ConversationControlDefaults.defaultModel
 
-        var items: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: defaultTitle,
-                representedValue: nil,
-                isSelected: session.model == nil
-            ))
-        ]
+        // The same readings the composer's model menu carries. Switching model mid-conversation
+        // is exactly the move a spent window calls for, and this menu used to be the one place
+        // that made it without saying what any of the choices cost — the numbers were on the
+        // toolbar pill for the model already running, and nowhere for the ones on offer.
+        //
+        // One refresh for the whole menu, not one per row: the service throttles either way, but
+        // a list is not a reason to ask the network once per item.
+        if let account { AccountUsageService.shared.refresh(account) }
+
+        var defaultItem = ThemedMenuItem(
+            title: defaultTitle,
+            representedValue: nil,
+            isSelected: session.model == nil
+        )
+        if let account {
+            AccountUsageMenu.decorate(&defaultItem, forModel: configured, on: account)
+        }
+
+        var items: [ThemedMenuEntry] = [.item(defaultItem)]
 
         var options = AgentModels.options(for: session.kind, account: account)
         if let selected = session.model,
@@ -1548,11 +1560,15 @@ final class ConversationViewController: NSViewController {
         }
 
         items += options.map { option in
-            .item(ThemedMenuItem(
+            var item = ThemedMenuItem(
                 title: option.displayName,
                 representedValue: option.identifier,
                 isSelected: option.identifier == session.model
-            ))
+            )
+            if let account {
+                AccountUsageMenu.decorate(&item, forModel: option.identifier, on: account)
+            }
+            return .item(item)
         }
         return items
     }

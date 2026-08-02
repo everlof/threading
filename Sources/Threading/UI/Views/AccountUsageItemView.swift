@@ -255,7 +255,7 @@ final class AccountUsageItemView: BackdropOverlay {
             }
 
             append(
-                "\(window.id) ",
+                "\(window.compactName) ",
                 font: Design.Typography.caption(),
                 color: ink.tertiary
             )

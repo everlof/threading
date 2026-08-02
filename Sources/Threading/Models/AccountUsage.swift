@@ -25,9 +25,53 @@ struct AccountUsage: Equatable {
         /// window's *time* we are — the pace line the spent fraction is read against.
         let windowDuration: TimeInterval?
 
+        /// The model this window meters, when it meters one rather than the account as a whole.
+        ///
+        /// Carried beside `id` rather than deduced from it, because `id` cannot be spared: a
+        /// scoped window is identified by its model's name, which is what `ModelName.scope`
+        /// matches a session against and what `UsageHistoryStore` files its samples under. So
+        /// the identity stays the model, and this says what the identity means.
+        let scopeName: String?
+
+        init(
+            id: String,
+            label: String,
+            fraction: Double?,
+            resetsAt: Date?,
+            windowDuration: TimeInterval?,
+            scopeName: String? = nil
+        ) {
+            self.id = id
+            self.label = label
+            self.fraction = fraction
+            self.resetsAt = resetsAt
+            self.windowDuration = windowDuration
+            self.scopeName = scopeName
+        }
+
         /// Percent for display, or nil when the fraction is unknown.
         var percent: Int? {
             fraction.map { Int(($0 * 100).rounded()) }
+        }
+
+        /// What a compact reading calls this window: its length, plus the model it meters when
+        /// it meters one — `5h`, `7d`, `7d Fable`.
+        ///
+        /// One vocabulary, so the same window reads as the same window everywhere it is named.
+        /// A scoped window used to print as its model alone, which put `5h 7% · 7d 56% · Fable
+        /// 89%` on screen — a model's name in a list of window lengths, leaving no way to tell
+        /// what period that last number covered, and no way to connect it to the `Weekly ·
+        /// Fable` bar stating the same figure two inches below.
+        ///
+        /// The spacious form (`label`) says the same thing in longer words — `Weekly · Fable` —
+        /// so a bar and a menu line name one window two lengths of the same way, rather than two
+        /// different ways.
+        var compactName: String {
+            guard let scopeName, !scopeName.isEmpty else { return id }
+            guard let length = UsageDefaults.windowID(forDuration: windowDuration) else {
+                return scopeName
+            }
+            return "\(length)\(UsageDefaults.scopeSeparator)\(scopeName)"
         }
 
         /// Whether the reset moment has passed, making `fraction` a leftover from the
@@ -142,15 +186,6 @@ struct AccountUsage: Equatable {
         Self.fullest(of: windows(metering: model), at: now)
     }
 
-    /// The fullest window metering `model`, with the account's own left out — what a row that
-    /// *is* that model states about itself.
-    ///
-    /// `bindingWindow` is the wrong reading there: a model list compares its own rows, and the
-    /// account weekly they all share would print the same number on every one of them.
-    func tightestScopedWindow(at now: Date = Date(), metering model: String?) -> Window? {
-        Self.fullest(of: scopedWindows(metering: model), at: now)
-    }
-
     private static func fullest(of windows: [Window], at now: Date) -> Window? {
         windows
             .filter { !$0.isExpired(at: now) && $0.fraction != nil }
@@ -165,10 +200,13 @@ struct AccountUsage: Equatable {
     /// An expired window keeps its name and loses its number, for the same reason
     /// `peakWindow` skips it: the percentage describes the window before it.
     ///
-    /// Naming a model adds the windows that meter it — `5h 7% · 7d 56% · Fable 89%` — so a
+    /// Naming a model adds the windows that meter it — `5h 7% · 7d 56% · 7d Fable 89%` — so a
     /// surface that knows what the session will run on says the number that binds it. A surface
     /// where the model is not decided yet asks for `.all` instead, and gets the same line with
     /// every scoped window on it.
+    ///
+    /// Each window is named by `compactName`, so a scoped one states its length beside its model
+    /// rather than standing in the list as a bare model name.
     func compactSummary(
         at now: Date = Date(),
         metering model: String? = nil,
@@ -178,7 +216,7 @@ struct AccountUsage: Equatable {
         guard !windows.isEmpty else { return nil }
 
         return windows
-            .map { "\($0.id) \(Self.value(of: $0, at: now))" }
+            .map { "\($0.compactName) \(Self.value(of: $0, at: now))" }
             .joined(separator: UsageDefaults.segmentSeparator)
     }
 
@@ -219,6 +257,10 @@ enum UsageDefaults {
 
     /// Between one window and the next in a written-out reading.
     static let segmentSeparator = " · "
+
+    /// Between a scoped window's length and the model it meters — `7d Fable`. A space rather
+    /// than `segmentSeparator`, which would make one window look like two in a joined list.
+    static let scopeSeparator = " "
 
     /// Stands in for a window whose number would be a leftover from the previous one.
     static let unknownValue = "—"
@@ -270,9 +312,9 @@ enum UsageDefaults {
 
     /// The identifier for a window of this length — the inverse of `duration(forWindowID:)`.
     ///
-    /// A model-scoped window is named after its *model*, which is the right label beside the
-    /// account's own windows and the wrong one under a row that is already that model. Its
-    /// length is the only thing left that says which window it is, so `7d` is recovered from it.
+    /// A model-scoped window is identified by its *model* rather than by its length, so
+    /// `compactName` recovers the length from here to name it the way every other window is
+    /// named.
     static func windowID(forDuration duration: TimeInterval?) -> String? {
         guard let duration, duration > 0 else { return nil }
 
