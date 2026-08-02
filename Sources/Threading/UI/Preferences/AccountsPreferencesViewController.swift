@@ -55,8 +55,7 @@ final class AccountsPreferencesViewController: NSViewController {
 
         let card = SettingsCard(rows: rows)
 
-        let page = SettingsUI.page([
-            SettingsUI.heading("Accounts"),
+        let page = SettingsUI.page(title: "Accounts", sections: [
             SettingsUI.section("Agent Accounts", card),
             SettingsUI.note(AccountsPreferencesStrings.explanation)
         ], hostPage: .accounts)

@@ -1,6 +1,267 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld archived conversations": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld arkiverade konversationer" } } }
+    },
+    "%lld older conversations": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld äldre konversationer" } } }
+    },
+    "%lld shortcuts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld kortkommandon" } } }
+    },
+    "1 archived conversation": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 arkiverad konversation" } } }
+    },
+    "1 older conversation": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 äldre konversation" } } }
+    },
+    "1 shortcut": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 kortkommando" } } }
+    },
+    "Status Card": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Statuskort" } } }
+    },
+    "A full-width collapsible header with hover, focus, keyboard, and accessibility states.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En utfällbar rubrik över hela bredden med lägen för hovring, fokus, tangentbord och hjälpmedel." } } }
+    },
+    "A full-width keyboard and VoiceOver control": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En kontroll över hela bredden för tangentbord och VoiceOver" } } }
+    },
+    "Advanced details": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avancerade detaljer" } } }
+    },
+    "Collapsed advanced details.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fällde ihop avancerade detaljer." } } }
+    },
+    "Expanded advanced details.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fällde ut avancerade detaljer." } } }
+    },
+    "Expanded content remains owned by the surrounding settings card.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det utfällda innehållet ägs fortfarande av det omgivande inställningskortet." } } }
+    },
+    "%lld extensions installed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld tillägg installerade" } } }
+    },
+    "%lld of %lld tool groups enabled": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld av %lld verktygsgrupper aktiverade" } } }
+    },
+    "%lld tools": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld verktyg" } } }
+    },
+    "%@ reclaimable in %lld directories": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kan frigöras i %lld mappar" } } }
+    },
+    "%@ reclaimable in 1 directory": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kan frigöras i 1 mapp" } } }
+    },
+    "1 extension installed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 tillägg installerat" } } }
+    },
+    "1 tool": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 verktyg" } } }
+    },
+    "Extensions are copied into Threading before they can run. Import a .threadingextension package or an unpacked development directory; importing leaves one disabled, and enabling it starts a supervised process with the capabilities declared in its manifest.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillägg kopieras till Threading innan de kan köras. Importera ett .threadingextension-paket eller en uppackad utvecklingsmapp; ett importerat tillägg lämnas inaktiverat, och när det aktiveras startas en övervakad process med funktionerna som anges i manifestet." } } }
+    },
+    "Invalid": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ogiltig" } } }
+    },
+    "ThemedDisclosureRow": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedDisclosureRow" } } }
+    },
+    "Updating": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterar" } } }
+    },
+    "origin": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ursprung" } } }
+    },
+    "revoke": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "återkalla" } } }
+    },
+    "website access": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "webbplatsåtkomst" } } }
+    },
+    "%@ is controlling this chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ styr den här chatten" } } }
+    },
+    "Away — control returns to the owner shortly": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte här — kontrollen återgår snart till ägaren" } } }
+    },
+    "HTTPS port 8443 already has a Tailscale Serve handler. Remove it, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HTTPS-port 8443 har redan en Tailscale Serve-hanterare. Ta bort den och försök igen." } } }
+    },
+    "Reclaim": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ta tillbaka" } } }
+    },
+    "Tailscale HTTPS port 8443 is already configured. Remove that Serve handler, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscales HTTPS-port 8443 är redan konfigurerad. Ta bort Serve-hanteraren och försök igen." } } }
+    },
+    "Your input was not sent.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Din inmatning skickades inte." } } }
+    },
+    "Would like input control": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vill ha inmatningskontroll" } } }
+    },
+    "%@ controlling": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ styr" } } }
+    },
+    "%@ is controlling this chat. Your draft stays here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ styr den här chatten. Ditt utkast finns kvar." } } }
+    },
+    "%@ is controlling · everyone else can watch and keep a draft.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ styr · alla andra kan titta och behålla ett utkast." } } }
+    },
+    "Another participant": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En annan deltagare" } } }
+    },
+    "Away — can take control when they return": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte här — kan ta kontroll när personen återvänder" } } }
+    },
+    "Collaborative": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete" } } }
+    },
+    "Controller": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Styrning" } } }
+    },
+    "Collaborative lets everyone with reply access send. Focused starts with the Mac owner in control. You can switch a live chat at any time.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete låter alla med svarsåtkomst skicka. Fokuserat börjar med Mac-ägaren i kontroll. Du kan växla en aktiv chatt när som helst." } } }
+    },
+    "Everyone with reply access can send. Terminal lines are still submitted atomically.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alla med svarsåtkomst kan skicka. Terminalrader skickas fortfarande atomärt." } } }
+    },
+    "Everyone with reply access can send.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alla med svarsåtkomst kan skicka." } } }
+    },
+    "Focused": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fokuserat" } } }
+    },
+    "Focused on owner": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fokuserat på ägaren" } } }
+    },
+    "Input control": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inmatningskontroll" } } }
+    },
+    "New shared chats": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nya delade chattar" } } }
+    },
+    "Online": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Online" } } }
+    },
+    "One of your own paired devices. Manage paired devices in Remote Access settings.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En av dina egna parkopplade enheter. Hantera parkopplade enheter i inställningarna för Fjärråtkomst." } } }
+    },
+    "Others can watch and keep drafts.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Andra kan titta och behålla utkast." } } }
+    },
+    "Owner": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ägare" } } }
+    },
+    "Paired devices can connect through Relay. Tailscale pairing: %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkopplade enheter kan ansluta via reläet. Tailscale-parkoppling: %@" } } }
+    },
+    "Relay fallback ready": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Reläreserven är redo" } } }
+    },
+    "Allow Threading to publish this private service, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt Threading att publicera den här privata tjänsten och försök sedan igen." } } }
+    },
+    "Checked when Remote Access turns on.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrolleras när Fjärråtkomst slås på." } } }
+    },
+    "Checking your tailnet status…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar status för ditt tailnet…" } } }
+    },
+    "Enable Tailscale HTTPS for this tailnet, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale HTTPS för detta tailnet och försök sedan igen." } } }
+    },
+    "In Private + Sharing, let your paired devices use Relay when Tailscale cannot be reached. Off fails closed on the private path.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I Privat + delning kan parkopplade enheter använda reläet när Tailscale inte kan nås. Av innebär att den privata vägen stängs vid fel." } } }
+    },
+    "Install Tailscale on this Mac to use private access.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera Tailscale på denna Mac för att använda privat åtkomst." } } }
+    },
+    "Install Tailscale on this Mac, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Keep Sharing Relay Ready": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll delningsreläet redo" } } }
+    },
+    "Looking for Tailscale…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Letar efter Tailscale…" } } }
+    },
+    "Owner Relay Fallback": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Reläreserv för ägare" } } }
+    },
+    "Private + Sharing": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat + delning" } } }
+    },
+    "Private HTTPS endpoint": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat HTTPS-slutpunkt" } } }
+    },
+    "Private pairing is ready. The public relay starts when you share.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är klar. Det offentliga reläet startar när du delar." } } }
+    },
+    "Publishing Threading privately…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Publicerar Threading privat…" } } }
+    },
+    "Ready at %@.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo på %@." } } }
+    },
+    "Relay supports ordinary share links. Tailscale keeps access inside your private tailnet. Private + Sharing uses Tailscale for pairing and starts the public relay only when it is needed.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Relä stöder vanliga delningslänkar. Tailscale håller åtkomsten inom ditt privata tailnet. Privat + delning använder Tailscale för parkoppling och startar det offentliga reläet endast när det behövs." } } }
+    },
+    "Remote Access is not ready.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fjärråtkomst är inte redo." } } }
+    },
+    "Sign in to Tailscale on this Mac, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Logga in i Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Signed in and running": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inloggad och igång" } } }
+    },
+    "Start the public relay immediately instead of waiting until you create a public share link.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Starta det offentliga reläet direkt i stället för att vänta tills du skapar en offentlig delningslänk." } } }
+    },
+    "Tailscale Readiness": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale-status" } } }
+    },
+    "Tailscale Serve could not publish Threading on this tailnet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale Serve kunde inte publicera Threading på detta tailnet." } } }
+    },
+    "Tailscale Serve could not publish Threading. Retry the connection.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale Serve kunde inte publicera Threading. Försök ansluta igen." } } }
+    },
+    "Tailscale did not allow Threading to publish this private service.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale tillät inte Threading att publicera denna privata tjänst." } } }
+    },
+    "Tailscale installed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale installerat" } } }
+    },
+    "Tailscale is installed.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale är installerat." } } }
+    },
+    "The sharing connection timed out. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delningsanslutningen tog för lång tid. Försök igen." } } }
+    },
+    "This Mac is connected to your tailnet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Denna Mac är ansluten till ditt tailnet." } } }
+    },
+    "Threading could not read Tailscale’s status.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte läsa Tailscales status." } } }
+    },
+    "Too many share links are being prepared. Try again shortly.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "För många delningslänkar förbereds. Försök igen om en stund." } } }
+    },
+    "Turn on Tailscale on this Mac, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slå på Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Waiting for Tailscale.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar på Tailscale." } } }
+    },
+    "Waiting for the installation check.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar på installationskontrollen." } } }
+    },
     "A reset moves file state into “Threading Resets” rather than deleting it. Reset Everything also revokes paired-owner credentials; Reset Settings keeps them. Agent logins and anything the Claude or Codex CLIs keep stay where they are.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "En återställning flyttar filstatus till ”Threading Resets” i stället för att radera den. Återställ allt återkallar även autentiseringsuppgifter för parkopplade ägarenheter; Återställ inställningar behåller dem. Agentinloggningar och allt som Claude- eller Codex-CLI:erna sparar ligger kvar." } }
@@ -219,6 +480,21 @@
     "Open popover": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Öppna poppfönster" } }
+      }
+    },
+    "Open completions": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna kompletteringar" } }
+      }
+    },
+    "PromptCompletionPresenter": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "PromptCompletionPresenter" } }
+      }
+    },
+    "Non-key command and skill suggestions that keep the composer focused while keyboard selection moves.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Kommandoförslag och färdighetsförslag som inte tar fokus från skrivfältet när tangentbordsmarkeringen flyttas." } }
       }
     },
     "ThemedFileIconView": {
@@ -14078,6 +14354,16 @@
         }
       }
     },
+    "Share…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela…"
+          }
+        }
+      }
+    },
     "Share “%@”": {
       "extractionState": "stale",
       "localizations": {
@@ -21946,6 +22232,146 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rensa flagga"
+          }
+        }
+      }
+    },
+    "Compact failed: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Komprimeringen misslyckades: %@"
+          }
+        }
+      }
+    },
+    "Compact the conversation context": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Komprimera konversationens kontext"
+          }
+        }
+      }
+    },
+    "Context compacted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontexten komprimerades."
+          }
+        }
+      }
+    },
+    "Disabled in Codex settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inaktiverad i Codex-inställningarna"
+          }
+        }
+      }
+    },
+    "Review uncommitted changes, or follow custom review instructions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granska ej incheckade ändringar eller följ egna granskningsinstruktioner"
+          }
+        }
+      }
+    },
+    "Browse skills available in this conversation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bläddra bland färdigheter som är tillgängliga i den här konversationen"
+          }
+        }
+      }
+    },
+    "Show native session status": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa status för den inbyggda sessionen"
+          }
+        }
+      }
+    },
+    "Native Chat status · %@ · %@ · %@ · %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status för inbyggd chatt · %@ · %@ · %@ · %@"
+          }
+        }
+      }
+    },
+    "Context not reported yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontext har inte rapporterats än"
+          }
+        }
+      }
+    },
+    "Available in Codex Terminal; not available in native Chat yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillgängligt i Codex-terminalen men ännu inte i inbyggd chatt"
+          }
+        }
+      }
+    },
+    "Available in Claude Terminal; not safe in native Chat yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillgängligt i Claude-terminalen men ännu inte säkert i inbyggd chatt"
+          }
+        }
+      }
+    },
+    "This command is not available in native Chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det här kommandot är inte tillgängligt i inbyggd chatt"
+          }
+        }
+      }
+    },
+    "Command": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommando"
+          }
+        }
+      }
+    },
+    "Skill": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Färdighet"
           }
         }
       }
