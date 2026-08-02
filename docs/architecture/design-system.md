@@ -173,6 +173,18 @@ resolves what its dismissing click landed on, and when that is a `ThemedMenuOpen
 menu is open, whose click stays a toggle-close — it hands the press over, drag and release
 included, so the menu moves between siblings the way menu-bar titles have always traded one click.
 
+**A menu opened by a secondary click hangs from the pointer, not from the view that was
+clicked.** `ThemedMenuPresenter` was written for dropdowns, where the anchor is the button and
+the panel lines up under its leading edge with a small standoff. A context menu presented the
+same way opens in one fixed place however large the thing clicked is, and however far from that
+place the click landed — the composer's attachment thumbnail showed it, the panel jumping to the
+thumbnail's corner rather than answering the click. `ThemedMenuAnchor` names the two idioms:
+`.control` is the dropdown and stays the default, `.pointer` puts a corner on the click and drops
+the standoff, because the gap exists to clear a button's edge and a pointer has none. Which one
+applies is the *gesture's* knowledge, so it travels with the report — `ThemedTabItemView` hands
+its strip an anchor rather than a bare "a menu was asked for", and the accessibility
+show-menu route, which has no pointer behind it, asks for `.control`.
+
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
 rather than as a patch stuck on it — right for a control on an empty stretch of chrome, wrong for
@@ -603,10 +615,16 @@ VoiceOver and to UI scripting alike. That was found by a settings page reporting
 buttons on a page that visibly had one.
 
 Two things are contained rather than replaced, and both are platform workflows whose behavior is
-the value: the **native application/right-click menus** and the **system colour panel behind
-`ThemeSwatchView`**. App-owned dropdowns already use `ThemedMenuPresenter`; the remaining menus
-retain Services, responder roles, type-to-select, keyboard navigation, and conventional secondary
-click behavior. Callers still depend on a named boundary rather than constructing their chrome.
+the value: the **application menu bar** (Services, responder-chain command routing, system key
+equivalents — `AppDelegate` is the one file the source checker excepts for `NSMenu`) and the
+**system colour panel behind `ThemeSwatchView`**. Every menu *inside* the window — dropdowns,
+right-click menus, the terminal's own — is `ThemedMenuPresenter`: one presenter carries
+type-to-select, arrow-key navigation into and out of submenus, press-drag-release tracking,
+hover-safe submenu travel, and pointer anchoring, so the app never mixes two menu languages in
+one window. Nested menus ride on `ThemedMenuItem.submenu`; a parent row draws the chevron,
+opens beside its panel on hover or right-arrow, and keeps the menu-path highlight while the
+pointer is anywhere in the chain. Callers still depend on a named boundary rather than
+constructing their chrome.
 
 Nine bugs are worth keeping, because each is a trap the next drawn control will walk into:
 

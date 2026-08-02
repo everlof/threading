@@ -28,6 +28,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     private var localGridBeforeRemoteControl: (cols: Int, rows: Int)?
     private var deferredLocalGrid: (cols: Int, rows: Int)?
 
+    /// Holds the terminal's context menu while it is up; released from its own dismissal.
+    private var contextMenuSession: AnyObject?
+
     // MARK: - Activity Hooks
 
     /// Called with the size of each chunk of output the process produces.
@@ -251,25 +254,47 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         layer?.contentsScale = scale
     }
 
+    /// The terminal's own context menu is app-owned like every other in the window. Nothing
+    /// native is given up: this is a fixed Copy/Paste/Rename, not a field editor's Services
+    /// and spelling menu — those never lived on a terminal grid.
     private func setupContextMenu() {
-        let contextMenu = NSMenu()
-        contextMenu.addItem(
-            withTitle: L10n.string("Copy"),
-            action: #selector(copy(_:)),
-            keyEquivalent: ""
+        // SwiftTerm assigns no `menu`, but the property is cleared anyway so a future default
+        // could not put a second, stock menu behind the themed one.
+        menu = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        contextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(
+                        title: L10n.string("Copy"),
+                        onChoose: { [weak self] in
+                            guard let self else { return }
+                            self.copy(self)
+                        }
+                    )),
+                    .item(ThemedMenuItem(
+                        title: L10n.string("Paste"),
+                        onChoose: { [weak self] in
+                            guard let self else { return }
+                            self.paste(self)
+                        }
+                    )),
+                    .separator,
+                    .item(ThemedMenuItem(
+                        title: L10n.string("Rename Session…"),
+                        onChoose: { [weak self] in self?.renameSession(nil) }
+                    ))
+                ],
+                minimumWidth: SidebarDefaults.menuWidth
+            ),
+            from: self,
+            anchor: .pointer(event.locationInWindow),
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.contextMenuSession = nil }
         )
-        contextMenu.addItem(
-            withTitle: L10n.string("Paste"),
-            action: #selector(paste(_:)),
-            keyEquivalent: ""
-        )
-        contextMenu.addItem(NSMenuItem.separator())
-        contextMenu.addItem(
-            withTitle: L10n.string("Rename Session…"),
-            action: #selector(renameSession(_:)),
-            keyEquivalent: ""
-        )
-        menu = contextMenu
     }
 
     // MARK: - Mouse Handling

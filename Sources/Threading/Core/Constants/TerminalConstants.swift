@@ -322,6 +322,10 @@ enum DisplayPaneDefaults {
     /// it — and the user can still drag it wider.
     static let widestOpening: CGFloat = 620
 
+    /// The footer's content dropdown floor, matching the Git Review overflow so the two panes'
+    /// menus read as one control.
+    static let contentMenuWidth: CGFloat = 190
+
     /// The panel's hard floor: its own chrome and nothing more.
     ///
     /// `NSSplitViewItem.minimumThickness` is a **required** constraint, and a window laid out
@@ -437,6 +441,9 @@ enum SidebarDefaults {
     static let shutOvershoot: CGFloat = 60
 
     static let rowHeight: CGFloat = 28
+    /// Every sidebar dropdown's floor, so the short menus read as the same control as the
+    /// long ones.
+    static let menuWidth: CGFloat = 190
     /// Project rows are a single line — the branch shows in a hover popover, not beneath the
     /// name — so one compact height covers them all.
     static let projectCompactRowHeight: CGFloat = 30

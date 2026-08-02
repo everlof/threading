@@ -130,6 +130,105 @@ final class AppThemeRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+    /// The dropdown with a submenu open beside it — the panel pair is a composition no single
+    /// panel's render can vouch for: the overlap, the aligned first row, the parent row's
+    /// menu-path highlight, and the chevron column all only exist between the two.
+    func testRendersASubmenuBesideItsParent() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "Rename Session…")),
+            .item(ThemedMenuItem(title: "Theme", submenu: [
+                .item(ThemedMenuItem(title: "Inherit (Adaptive)", isSelected: true)),
+                .separator,
+                .item(ThemedMenuItem(title: "Solarized Dark")),
+                .item(ThemedMenuItem(title: "Neon Meltdown"))
+            ])),
+            .item(ThemedMenuItem(title: "Session Options", submenu: [
+                .item(ThemedMenuItem(title: "Interface"))
+            ])),
+            .separator,
+            .item(ThemedMenuItem(title: "Delete Session"))
+        ]
+
+        var written = 0
+        for (mode, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                data = submenuImage(entries: entries, appearance: appearance)
+            }
+            let url = directory.appendingPathComponent("menu-submenu-\(mode).png")
+            try XCTUnwrap(data, "Failed to render submenu \(mode)").write(to: url)
+            written += 1
+        }
+        print("Rendered \(written) submenu pairs to \(directory.path)")
+        XCTAssertEqual(written, 2)
+    }
+
+    private func submenuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 320))
+        root.appearance = appearance
+        let source = NSView(frame: NSRect(x: 24, y: 270, width: 180, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView = root
+        defer { window.close() }
+
+        let token = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: source.bounds.width),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        )
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        // Down to "Theme", right-arrow opens its panel with the first row lit.
+        if let overlay = window.firstResponder as? NSView,
+           let down = key(125),
+           let right = key(124) {
+            overlay.keyDown(with: down)
+            overlay.keyDown(with: right)
+        }
+
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return nil }
+        root.wantsLayer = true
+        root.layer?.backgroundColor = AppThemePalette.current.resolved(.ground).cgColor
+        root.cacheDisplay(in: root.bounds, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private func key(_ keyCode: UInt16) -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: keyCode
+        )
+    }
+
     private func menuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
         root.appearance = appearance

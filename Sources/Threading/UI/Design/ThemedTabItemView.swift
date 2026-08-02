@@ -63,7 +63,11 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// than handled: what can be done with a tab is its strip's knowledge, not the tab's.
     /// Answers whether a menu actually opened, so the accessibility route can say so honestly
     /// — a handler that presents nothing is a "show menu" that did not happen.
-    var onContextMenu: (() -> Bool)?
+    ///
+    /// The anchor travels with the report, because where the menu belongs is the *gesture's*
+    /// knowledge and only the tab has it: a click puts it on the pointer, and a request with no
+    /// pointer behind it puts it on the tab.
+    var onContextMenu: ((ThemedMenuAnchor) -> Bool)?
 
     /// The press turned into a drag along the strip. The tab reports the raw phases and the
     /// strip owns the geometry of reordering — the tab cannot know its neighbours.
@@ -449,7 +453,7 @@ final class ThemedTabItemView: BackdropThemedControl {
             super.rightMouseDown(with: event)
             return
         }
-        _ = onContextMenu()
+        _ = onContextMenu(.pointer(event.locationInWindow))
     }
 
     /// The standard tab gesture: a middle-button click closes without selecting first.
@@ -526,6 +530,6 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// The same menu the secondary click opens, so everything a pointer can do to a tab —
     /// reorder it, move it — is reachable without one.
     override func accessibilityPerformShowMenu() -> Bool {
-        onContextMenu?() ?? false
+        onContextMenu?(.control) ?? false
     }
 }

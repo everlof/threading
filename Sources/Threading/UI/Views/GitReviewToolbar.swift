@@ -17,72 +17,82 @@ extension GitReviewViewController {
     // MARK: - Menu
 
     @objc func showOverflowMenu(_ sender: NSView) {
-        let menu = NSMenu()
-        // Items here say whether they apply; left to auto-enable, AppKit would answer that
-        // question from the responder chain instead and re-enable the one disabled item.
-        menu.autoenablesItems = false
-
-        menu.addItem(
-            withTitle: L10n.string("Refresh"),
-            action: #selector(refreshFromMenu),
-            keyEquivalent: ""
+        overflowMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: overflowMenuEntries(),
+                minimumWidth: GitReviewUIDefaults.overflowMenuWidth
+            ),
+            from: sender,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.overflowMenuSession = nil }
         )
+    }
+
+    /// The dropdown's rows, built fresh per open. Internal so a test can hold the titles and
+    /// the one disabled item to the pane's actual state — a presented menu is unreachable
+    /// from a script.
+    func overflowMenuEntries() -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Refresh"),
+                onChoose: { [weak self] in self?.refreshFromMenu() }
+            ))
+        ]
 
         // Everything below speaks about a diff, so it appears only when one is on screen — the
         // history list has no lines to wrap, collapse or copy.
-        if showsDiff {
-            addCollapseItem(to: menu)
-            addRenderingItems(to: menu)
-            addCopyItem(to: menu)
-        }
-
-        for item in menu.items { item.target = self }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY), in: sender)
+        guard showsDiff else { return entries }
+        entries.append(contentsOf: collapseEntries())
+        entries.append(contentsOf: renderingEntries())
+        entries.append(contentsOf: copyEntries())
+        return entries
     }
 
     /// Offered only when something can actually open, so a diff of binaries alone does not carry
     /// a control that would do nothing.
-    private func addCollapseItem(to menu: NSMenu) {
+    private func collapseEntries() -> [ThemedMenuEntry] {
         let expandable = renderedFiles.filter(GitReviewFileRow.isExpandable)
-        guard !expandable.isEmpty else { return }
+        guard !expandable.isEmpty else { return [] }
 
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: expandable.contains(where: isFileExpanded)
-                ? L10n.string("Collapse all diffs")
-                : L10n.string("Expand all diffs"),
-            action: #selector(toggleAllExpansion),
-            keyEquivalent: ""
-        )
+        return [
+            .separator,
+            .item(ThemedMenuItem(
+                title: expandable.contains(where: isFileExpanded)
+                    ? L10n.string("Collapse all diffs")
+                    : L10n.string("Expand all diffs"),
+                onChoose: { [weak self] in self?.toggleAllExpansion() }
+            ))
+        ]
     }
 
-    private func addRenderingItems(to menu: NSMenu) {
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: wrapsDiffLines
-                ? L10n.string("Disable word wrap")
-                : L10n.string("Enable word wrap"),
-            action: #selector(toggleWordWrap),
-            keyEquivalent: ""
-        )
-
-        let whitespace = menu.addItem(
-            withTitle: L10n.string("Hide whitespace"),
-            action: #selector(toggleWhitespace),
-            keyEquivalent: ""
-        )
-        whitespace.state = ignoresWhitespace ? .on : .off
+    private func renderingEntries() -> [ThemedMenuEntry] {
+        [
+            .separator,
+            .item(ThemedMenuItem(
+                title: wrapsDiffLines
+                    ? L10n.string("Disable word wrap")
+                    : L10n.string("Enable word wrap"),
+                onChoose: { [weak self] in self?.toggleWordWrap() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Hide whitespace"),
+                isSelected: ignoresWhitespace,
+                onChoose: { [weak self] in self?.toggleWhitespace() }
+            ))
+        ]
     }
 
-    private func addCopyItem(to menu: NSMenu) {
-        menu.addItem(.separator())
-        let copy = menu.addItem(
-            withTitle: L10n.string("Copy git apply command"),
-            action: #selector(copyGitApplyCommand),
-            keyEquivalent: ""
-        )
-        // The history list is the one surface with no single patch to speak for.
-        copy.isEnabled = currentDiffRequest != nil
+    private func copyEntries() -> [ThemedMenuEntry] {
+        [
+            .separator,
+            .item(ThemedMenuItem(
+                title: L10n.string("Copy git apply command"),
+                // The history list is the one surface with no single patch to speak for.
+                isEnabled: currentDiffRequest != nil,
+                onChoose: { [weak self] in self?.copyGitApplyCommand() }
+            ))
+        ]
     }
 
     // MARK: - State

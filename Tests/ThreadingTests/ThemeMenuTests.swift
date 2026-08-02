@@ -11,9 +11,19 @@ import XCTest
 @MainActor
 final class ThemeMenuTests: XCTestCase {
 
-    private func themeSubmenu(of item: NSMenuItem) throws -> NSMenu {
+    private func themeSubmenu(of entry: ThemedMenuEntry) throws -> [ThemedMenuEntry] {
+        guard case .item(let item) = entry else {
+            throw ThemeMenuTestError.expectedItem
+        }
         XCTAssertEqual(item.title, "Theme")
         return try XCTUnwrap(item.submenu, "the Theme item has no submenu")
+    }
+
+    private func items(in entries: [ThemedMenuEntry]) -> [ThemedMenuItem] {
+        entries.compactMap { entry in
+            guard case .item(let item) = entry else { return nil }
+            return item
+        }
     }
 
     // MARK: - Shape
@@ -21,9 +31,9 @@ final class ThemeMenuTests: XCTestCase {
     func testSessionMenuOffersInheritThenEveryTheme() throws {
         let sidebar = ProjectSidebarViewController()
         let sessionID = SessionID()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: sessionID))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: sessionID))
 
-        let titles = submenu.items.map(\.title)
+        let titles = items(in: submenu).map(\.title)
         let names = ThemeManager.shared.allThemes.map(\.name)
 
         // Inherit, separator, one item per theme, separator, the door to Settings.
@@ -41,28 +51,28 @@ final class ThemeMenuTests: XCTestCase {
     /// result cannot be seen before picking it.
     func testInheritNamesTheThemeItWouldFallBackTo() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeProjectThemeItem(for: ProjectID()))
+        let submenu = try themeSubmenu(of: sidebar.projectThemeEntry(for: ProjectID()))
 
-        let inherit = try XCTUnwrap(submenu.items.first)
+        let inherit = try XCTUnwrap(items(in: submenu).first)
         XCTAssertTrue(inherit.title.contains(ThemeAssignments.defaultTheme.name))
     }
 
     /// A session with nothing assigned is inheriting, so that is what carries the check.
     func testUnassignedSessionChecksInherit() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: SessionID()))
 
-        let checked = submenu.items.filter { $0.state == .on }
+        let checked = items(in: submenu).filter(\.isSelected)
         XCTAssertEqual(checked.count, 1, "exactly one item should be checked")
         XCTAssertTrue(checked.first?.title.hasPrefix("Inherit") == true)
     }
 
     func testEveryThemeItemCarriesItsSwatch() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: SessionID()))
 
-        for item in submenu.items where item.representedObject is ThemeMenuChoice {
-            guard (item.representedObject as? ThemeMenuChoice)?.themeID != nil else { continue }
+        for item in items(in: submenu) where item.representedValue is ThemeMenuChoice {
+            guard (item.representedValue as? ThemeMenuChoice)?.themeID != nil else { continue }
             XCTAssertNotNil(item.image, "\(item.title) has no swatch")
         }
     }
@@ -77,18 +87,18 @@ final class ThemeMenuTests: XCTestCase {
         let terminalID = TerminalID()
         let projectID = ProjectID()
 
-        let sessionMenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: sessionID))
-        let terminalMenu = try themeSubmenu(of: sidebar.makeTerminalThemeItem(for: terminalID))
-        let projectMenu = try themeSubmenu(of: sidebar.makeProjectThemeItem(for: projectID))
+        let sessionMenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: sessionID))
+        let terminalMenu = try themeSubmenu(of: sidebar.terminalThemeEntry(for: terminalID))
+        let projectMenu = try themeSubmenu(of: sidebar.projectThemeEntry(for: projectID))
 
         let sessionChoice = try XCTUnwrap(
-            sessionMenu.items.compactMap { $0.representedObject as? ThemeMenuChoice }.first
+            items(in: sessionMenu).compactMap { $0.representedValue as? ThemeMenuChoice }.first
         )
         let projectChoice = try XCTUnwrap(
-            projectMenu.items.compactMap { $0.representedObject as? ThemeMenuChoice }.first
+            items(in: projectMenu).compactMap { $0.representedValue as? ThemeMenuChoice }.first
         )
         let terminalChoice = try XCTUnwrap(
-            terminalMenu.items.compactMap { $0.representedObject as? ThemeMenuChoice }.first
+            items(in: terminalMenu).compactMap { $0.representedValue as? ThemeMenuChoice }.first
         )
 
         guard case .session(let id) = sessionChoice.target else {
@@ -110,58 +120,65 @@ final class ThemeMenuTests: XCTestCase {
     /// "inherit" apart from a theme called something.
     func testInheritCarriesNoThemeName() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: SessionID()))
 
-        let inherit = try XCTUnwrap(submenu.items.first?.representedObject as? ThemeMenuChoice)
+        let inherit = try XCTUnwrap(
+            items(in: submenu).first?.representedValue as? ThemeMenuChoice
+        )
         XCTAssertNil(inherit.themeID)
     }
 
-    /// End to end through AppKit's own dispatch: picking an item reaches the assignment layer.
+    /// End to end through the themed menu action: picking an item reaches the assignment layer.
     /// The session identifier is one no store knows, so the write itself is a no-op — what is
     /// under test is that the item, its target and its selector are connected at all.
     ///
-    /// Dispatch goes through the item's *own* target rather than through the sidebar, which is
-    /// what AppKit does when the menu fires. The handler lives on `ThemeMenuBuilder`, since the
-    /// submenu is built from four places and the items need one stable target between them —
-    /// asserting the sidebar handles it pins the owner rather than the connection, and this
-    /// test failed for exactly that reason once the builder was extracted.
+    /// The action is carried by the row itself rather than routed through whichever sidebar row
+    /// was last clicked, which is the themed-menu equivalent of AppKit's item target.
     func testChoosingAThemeFiresTheAssignmentEvent() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: SessionID()))
 
         let themeItem = try XCTUnwrap(
-            submenu.items.first { ($0.representedObject as? ThemeMenuChoice)?.themeID != nil },
+            items(in: submenu).first {
+                ($0.representedValue as? ThemeMenuChoice)?.themeID != nil
+            },
             "no theme item in the menu"
         )
-        let action = try XCTUnwrap(themeItem.action)
-        let target = try XCTUnwrap(themeItem.target as? NSObject, "the item carries no target")
-        XCTAssertTrue(target.responds(to: action), "the target does not implement \(action)")
+        let action = try XCTUnwrap(themeItem.onChoose)
 
         let fired = expectation(description: "ThemeAssignmentsDidChange")
         let observations = AppEventObservations()
         observations.observe(ThemeAssignmentsDidChange.self) { _ in fired.fulfill() }
 
-        _ = target.perform(action, with: themeItem)
+        action()
 
         wait(for: [fired], timeout: 1)
     }
 
-    /// `NSMenuItem.target` is a *weak* reference, so a builder owned by nothing leaves every
-    /// item in the submenu pointing at nil and the menu silently does nothing when clicked.
-    /// The sidebar therefore has to hold its builder, which is invisible at the call site —
-    /// `sidebarThemeBuilder()` returning a fresh instance would read identically and be dead.
-    func testTheSidebarKeepsTheBuilderItsItemsTargetAlive() throws {
+    /// A choice remains bound to the scope it was built for even after another menu is built.
+    func testAChoiceSurvivesAnotherMenuBuildWithoutChangingTarget() throws {
         let sidebar = ProjectSidebarViewController()
-        let item = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
-            .items
-            .first { ($0.representedObject as? ThemeMenuChoice)?.themeID != nil }
+        let store = ProjectStore.shared
+        let project = store.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("theme-menu-\(UUID().uuidString)", isDirectory: true)
+        )
+        defer { store.removeProject(id: project.id) }
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let sessionID = session.id
+        let item = items(in: try themeSubmenu(of: sidebar.sessionThemeEntry(for: sessionID)))
+            .first { ($0.representedValue as? ThemeMenuChoice)?.themeID != nil }
         let themeItem = try XCTUnwrap(item, "no theme item in the menu")
+        let choice = try XCTUnwrap(themeItem.representedValue as? ThemeMenuChoice)
+        let action = try XCTUnwrap(themeItem.onChoose)
 
-        // Anything transient would already be gone by the time the menu is shown.
-        autoreleasepool { _ = sidebar.makeProjectThemeItem(for: ProjectID()) }
+        autoreleasepool { _ = sidebar.projectThemeEntry(for: ProjectID()) }
+        action()
 
-        XCTAssertNotNil(themeItem.target, "the items' target was not retained by the sidebar")
-        XCTAssertTrue(themeItem.target as? ThemeMenuBuilder === sidebar.themeMenuBuilder,
-                      "the items point at a builder the sidebar does not own")
+        XCTAssertEqual(ThemeAssignments.themeID(forSession: sessionID), choice.themeID)
     }
+}
+
+private enum ThemeMenuTestError: Error {
+    case expectedItem
 }

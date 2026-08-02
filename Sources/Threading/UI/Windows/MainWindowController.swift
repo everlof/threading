@@ -122,8 +122,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Holds the "Open in" dropdown while it is up; released from its own dismissal.
     var openInMenuSession: AnyObject?
 
-    /// The toolbar context button's menu, rebuilt each open so all session state is live.
-    let sessionContextMenu = NSMenu()
+    /// Holds the toolbar context button's menu while it is up, rebuilt each open so all
+    /// session state is live; released from its own dismissal.
+    var sessionContextMenuSession: AnyObject?
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
@@ -1616,16 +1617,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
-    /// Populates the pane-header menu through the row's action builder. The two entrances
-    /// therefore share not just their labels but their targets, enablement, and extensions.
-    @discardableResult
-    func populateVisibleSessionActions(_ menu: NSMenu) -> Bool {
+    /// The pane-header menu, built through the row's action builder. The two entrances
+    /// therefore share not just their labels but their handlers, enablement, and extensions.
+    /// Nil when no session is on screen — Settings, say — so the caller can offer its own.
+    func visibleSessionActionEntries() -> [ThemedMenuEntry]? {
         guard let sessionID = currentSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return false }
+              let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
 
         sidebarViewController.actionSessionID = sessionID
-        sidebarViewController.populateSessionActions(menu, for: session)
-        return true
+        return sidebarViewController.sessionActionEntries(for: session)
     }
 
     /// The dedicated header button always points to the surface not currently on screen.

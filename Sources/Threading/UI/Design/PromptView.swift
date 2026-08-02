@@ -725,15 +725,16 @@ private final class PromptAttachmentThumbnail: ThemedControl {
 
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        _ = presentContextMenu()
+        _ = presentContextMenu(at: .pointer(event.locationInWindow))
     }
 
     override func accessibilityPerformPress() -> Bool {
         performPrimaryAction()
     }
 
+    /// No pointer asked for this one, so it hangs from the thumbnail itself.
     override func accessibilityPerformShowMenu() -> Bool {
-        presentContextMenu()
+        presentContextMenu(at: .control)
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .image }
@@ -764,7 +765,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         return true
     }
 
-    private func presentContextMenu() -> Bool {
+    private func presentContextMenu(at anchor: ThemedMenuAnchor) -> Bool {
         guard menuSession == nil else { return true }
 
         let entries: [ThemedMenuEntry] = [
@@ -784,6 +785,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         menuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: 190),
             from: self,
+            anchor: anchor,
             selectedEntryIndex: nil,
             onChoose: { _, item in item.onChoose?() },
             onDismiss: { [weak self] in self?.menuSession = nil }

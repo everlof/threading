@@ -43,23 +43,21 @@ final class RowExtensionCommandMenuTests: XCTestCase {
 
         let sidebar = ProjectSidebarViewController()
         let session = AgentSession(kind: .claude, title: "Fixture")
-        let menu = NSMenu()
-        sidebar.populateSessionActions(menu, for: session)
+        let entries = sidebar.sessionActionEntries(for: session)
 
-        let extensionsItem = try XCTUnwrap(menu.items.last)
+        let extensionsItem = try XCTUnwrap(entries.last?.item)
         XCTAssertEqual(extensionsItem.title, "Extensions")
-        let group = try XCTUnwrap(extensionsItem.submenu?.items.first)
+        let group = try XCTUnwrap(extensionsItem.submenu?.first?.item)
         XCTAssertEqual(group.title, "Row Menu")
         XCTAssertEqual(
-            group.submenu?.items.map(\.title),
+            group.submenu?.compactMap { $0.item?.title },
             ["Inspect Session"],
             "a menu-bar-only command stays out of the row"
         )
 
-        let command = try XCTUnwrap(group.submenu?.items.first)
-        XCTAssertEqual(command.keyEquivalent, "", "row menus never display key equivalents")
+        let command = try XCTUnwrap(group.submenu?.first?.item)
         let reference = try XCTUnwrap(
-            command.representedObject
+            command.representedValue
                 as? ProjectSidebarViewController.RowExtensionCommandReference
         )
         XCTAssertEqual(reference.commandID, "extension.com.example.rowmenu.inspect")
@@ -73,11 +71,10 @@ final class RowExtensionCommandMenuTests: XCTestCase {
     func testNoEnabledCommandsMeansNoGroupAtAll() {
         let sidebar = ProjectSidebarViewController()
         let session = AgentSession(kind: .claude, title: "Fixture")
-        let menu = NSMenu()
-        sidebar.populateSessionActions(menu, for: session)
+        let entries = sidebar.sessionActionEntries(for: session)
 
         XCTAssertEqual(
-            menu.items.last?.title,
+            entries.last?.item?.title,
             "Delete Session",
             "an empty Extensions group would be noise on every row"
         )
@@ -105,18 +102,16 @@ final class RowExtensionCommandMenuTests: XCTestCase {
         )
 
         let sidebar = ProjectSidebarViewController()
-        let menu = NSMenu()
-        sidebar.appendExtensionCommandItems(
-            to: menu,
+        let entries = sidebar.extensionCommandEntries(
             placement: .projectRow,
             context: ExtensionCommandContext(projectID: "p-1"),
             commands: registry.extensionCommands
         )
 
-        let extensionsItem = try XCTUnwrap(menu.items.last)
-        let group = try XCTUnwrap(extensionsItem.submenu?.items.first)
+        let extensionsItem = try XCTUnwrap(entries.last?.item)
+        let group = try XCTUnwrap(extensionsItem.submenu?.first?.item)
         XCTAssertEqual(
-            group.submenu?.items.map(\.title),
+            group.submenu?.compactMap { $0.item?.title },
             ["Audit Project"],
             "a project row never names a session, so a session command has nothing to say"
         )

@@ -344,17 +344,20 @@ final class ClaudeRemoteControlTests: XCTestCase {
 
         let submenu = try remoteControlSubmenu(for: AgentSession(kind: .claude, title: "Chat"))
 
-        XCTAssertEqual(submenu.items.map(\.title), ["Use Default (On)", "Always On", "Always Off"])
+        XCTAssertEqual(
+            submenu.compactMap(\.item).map(\.title),
+            ["Use Default (On)", "Always On", "Always Off"]
+        )
     }
 
     func testTheInheritItemFollowsTheAppDefault() throws {
         AppSettings.shared.claudeRemoteControl = .followClaude
         var submenu = try remoteControlSubmenu(for: AgentSession(kind: .claude, title: "Chat"))
-        XCTAssertEqual(submenu.items.first?.title, "Use Claude's Setting")
+        XCTAssertEqual(submenu.compactMap(\.item).first?.title, "Use Claude's Setting")
 
         AppSettings.shared.claudeRemoteControl = .disabled
         submenu = try remoteControlSubmenu(for: AgentSession(kind: .claude, title: "Chat"))
-        XCTAssertEqual(submenu.items.first?.title, "Use Default (Off)")
+        XCTAssertEqual(submenu.compactMap(\.item).first?.title, "Use Default (Off)")
     }
 
     /// The tick has to sit on the session's *own* state, including when that state is "no
@@ -376,19 +379,18 @@ final class ClaudeRemoteControlTests: XCTestCase {
     }
 
     func testCodexSessionsAreNotOfferedTheItem() throws {
-        let menu = NSMenu()
-        ProjectSidebarViewController().populateSessionActions(
-            menu,
+        let entries = ProjectSidebarViewController().sessionActionEntries(
             for: AgentSession(kind: .codex, title: "Codex")
         )
 
         // The item lives in the Session Options fold, so that is where its absence means
         // anything — a top-level check would pass whatever the fold held.
         let options = try XCTUnwrap(
-            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+            entries.compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
                 .submenu
         )
-        XCTAssertNil(options.items.first { $0.title == "Claude Remote Control" })
+        XCTAssertNil(options.compactMap(\.item).first { $0.title == "Claude Remote Control" })
     }
 
     // MARK: - Settings Page
@@ -426,17 +428,17 @@ final class ClaudeRemoteControlTests: XCTestCase {
         (AppSettings.shared.claudeRemoteControl.inheritedMenuTitle, "Always On", "Always Off")
     }
 
-    private func remoteControlSubmenu(for session: AgentSession) throws -> NSMenu {
-        let menu = NSMenu()
-        ProjectSidebarViewController().populateSessionActions(menu, for: session)
+    private func remoteControlSubmenu(for session: AgentSession) throws -> [ThemedMenuEntry] {
+        let entries = ProjectSidebarViewController().sessionActionEntries(for: session)
 
         let options = try XCTUnwrap(
-            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+            entries.compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
                 .submenu,
             "the session menu has no Session Options fold"
         )
         let item = try XCTUnwrap(
-            options.items.first { $0.title == "Claude Remote Control" },
+            options.compactMap(\.item).first { $0.title == "Claude Remote Control" },
             "Session Options has no Claude Remote Control item"
         )
         return try XCTUnwrap(item.submenu, "the item has no submenu")
@@ -444,8 +446,8 @@ final class ClaudeRemoteControlTests: XCTestCase {
 
     private func tickedTitles(for session: AgentSession) throws -> [String] {
         try remoteControlSubmenu(for: session)
-            .items
-            .filter { $0.state == .on }
+            .compactMap(\.item)
+            .filter(\.isSelected)
             .map(\.title)
     }
 

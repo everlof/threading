@@ -95,8 +95,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// presses". Measured: a view removed between a synthesised down and up receives one
     /// `mouseDown` and no `mouseUp`, and so does its replacement.
     ///
-    /// `NSMenu.popUp` is modal, so the button reads as held for exactly as long as its menu is up
-    /// and the still-held mouse tracks the menu rather than this button.
+    /// The presenter's dropdown owns the pointer while it is up — the held press's drag and
+    /// release are forwarded to the open menu — so the button reads as held for exactly as
+    /// long as its menu is, the way a menu-bar title does.
     var presentsMenu = false
 
     var isSelected = false {

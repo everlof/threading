@@ -14,77 +14,61 @@ extension DisplayPaneController {
   /// Built per click rather than once at setup: an image and a document have almost nothing
   /// in common to act on, and a menu of mostly-disabled items is worse than a short one.
   ///
-  /// Internal rather than private so it can be asserted on: a popped menu is modal and
-  /// unreachable from a script, and the items whose presence is conditional on the file still
-  /// existing are exactly the kind of thing that rot silently.
-  func makeContentMenu() -> NSMenu {
-    let menu = NSMenu()
-    menu.autoenablesItems = false
-
+  /// Internal rather than private so it can be asserted on: a presented menu is unreachable
+  /// from a script, and the items whose presence is conditional on the file still existing
+  /// are exactly the kind of thing that rot silently.
+  func makeContentEntries() -> [ThemedMenuEntry] {
     switch currentContent?.body {
     case .image(_, let url):
+      var entries: [ThemedMenuEntry] = []
       if QuickLookPresenter.canPreview(url) {
-        menu.addItem(
-          withTitle: L10n.string("Inspect"),
-          action: #selector(inspectImage),
-          keyEquivalent: ""
-        )
-        menu.addItem(.separator())
+        entries.append(item(L10n.string("Inspect")) { [weak self] in self?.inspectImage() })
+        entries.append(.separator)
       }
-      menu.addItem(
-        withTitle: L10n.string("Copy Image"), action: #selector(copyImage), keyEquivalent: "")
-      menu.addItem(
-        withTitle: L10n.string("Copy File Name"), action: #selector(copyFileName), keyEquivalent: ""
-      )
-      menu.addItem(
-        withTitle: L10n.string("Copy File Path"), action: #selector(copyFilePath), keyEquivalent: ""
-      )
-      menu.addItem(.separator())
-      menu.addItem(
-        withTitle: L10n.string("Reveal in Finder"), action: #selector(revealInFinder),
-        keyEquivalent: "")
-      menu.addItem(
-        withTitle: L10n.string("Open in Default App"), action: #selector(openInDefaultApp),
-        keyEquivalent: "")
+      entries.append(item(L10n.string("Copy Image")) { [weak self] in self?.copyImage() })
+      entries.append(item(L10n.string("Copy File Name")) { [weak self] in self?.copyFileName() })
+      entries.append(item(L10n.string("Copy File Path")) { [weak self] in self?.copyFilePath() })
+      entries.append(.separator)
+      entries.append(item(L10n.string("Reveal in Finder")) { [weak self] in self?.revealInFinder() })
+      entries.append(item(L10n.string("Open in Default App")) { [weak self] in self?.openInDefaultApp() })
       if QuickLookPresenter.canPreview(url) {
-        menu.addItem(.separator())
-        menu.addItem(
-          withTitle: L10n.string("Open in System Quick Look"),
-          action: #selector(quickLookImage),
-          keyEquivalent: ""
-        )
+        entries.append(.separator)
+        entries.append(item(L10n.string("Open in System Quick Look")) { [weak self] in
+          self?.quickLookImage()
+        })
       }
+      return entries
 
     case .html:
-      menu.addItem(
-        withTitle: L10n.string("Copy HTML"), action: #selector(copyHTML), keyEquivalent: "")
-      menu.addItem(.separator())
-      menu.addItem(
-        withTitle: L10n.string("Open in Browser"), action: #selector(openHTMLInBrowser),
-        keyEquivalent: "")
-      menu.addItem(
-        withTitle: L10n.string("Reload"), action: #selector(reloadHTML), keyEquivalent: "")
+      return [
+        item(L10n.string("Copy HTML")) { [weak self] in self?.copyHTML() },
+        .separator,
+        item(L10n.string("Open in Browser")) { [weak self] in self?.openHTMLInBrowser() },
+        item(L10n.string("Reload")) { [weak self] in self?.reloadHTML() }
+      ]
 
-    case .semanticScene:
-      break
-
-    case nil:
-      break
+    case .semanticScene, nil:
+      return []
     }
+  }
 
-    for item in menu.items {
-      item.target = self
-    }
-
-    return menu
+  private func item(_ title: String, action: @escaping () -> Void) -> ThemedMenuEntry {
+    .item(ThemedMenuItem(title: title, onChoose: action))
   }
 
   @objc func contentMenuButtonClicked(_ sender: ThemedButton) {
-    guard currentContent != nil else { return }
+    let entries = makeContentEntries()
+    guard entries.contains(where: \.isItem) else { return }
 
-    // Popped above the button, which sits at the bottom edge of the pane: a menu dropped
-    // below it would open off the window.
-    makeContentMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: sender)
+    // The button sits at the bottom edge of the pane; the presenter measures the room and
+    // opens the panel above it on its own.
+    contentMenuSession = ThemedMenuPresenter.present(
+      ThemedMenuPresentation(entries: entries, minimumWidth: DisplayPaneDefaults.contentMenuWidth),
+      from: sender,
+      selectedEntryIndex: nil,
+      onChoose: { _, item in item.onChoose?() },
+      onDismiss: { [weak self] in self?.contentMenuSession = nil }
+    )
   }
 
   // MARK: Image Actions

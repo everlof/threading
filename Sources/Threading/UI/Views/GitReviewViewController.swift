@@ -225,6 +225,9 @@ final class GitReviewViewController: NSViewController {
     /// it, so it never outlives the thing it is about.
     var notice: (text: String, isError: Bool)?
 
+    /// Holds the header's `···` dropdown while it is up; released from its own dismissal.
+    var overflowMenuSession: AnyObject?
+
     // MARK: - Initialization
 
     init(sessionID: SessionID, folderPath: String, mode: GitReviewMode) {
@@ -737,4 +740,8 @@ enum GitReviewUIDefaults {
     /// Delimits the patch in the copied `git apply` heredoc. Distinctive enough that a diff
     /// containing the word cannot close it early.
     static let patchHeredocDelimiter = "THREADING_PATCH_EOF"
+
+    /// The `···` dropdown's floor, so a diff-less menu (one Refresh row) still reads as the
+    /// same control as the full one.
+    static let overflowMenuWidth: CGFloat = 190
 }

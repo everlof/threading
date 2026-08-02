@@ -102,6 +102,15 @@ enum RowControls {
 /// so the two-line duplication here is what lets both keep their real superclass.
 class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
 
+    /// A secondary click (or an accessibility "show menu") landed on a row — `-1` for the
+    /// empty stretch below the last one. Reported rather than handled, with the anchor the
+    /// gesture carries: what a row's menu holds is the host's knowledge, not the outline's.
+    /// Answers whether a menu actually opened, so the accessibility route can say so honestly.
+    ///
+    /// This replaces `menu(for:)`/`.menu`: the host presents an app-owned dropdown instead of
+    /// an `NSMenu`, so the outline's part shrinks to resolving the row under the gesture.
+    var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
@@ -110,6 +119,23 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let onContextMenu else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        _ = onContextMenu(row(at: point), .pointer(event.locationInWindow))
+    }
+
+    /// The pointerless route to the same menu, anchored to the selected row itself.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let onContextMenu, selectedRow >= 0 else {
+            return super.accessibilityPerformShowMenu()
+        }
+        return onContextMenu(selectedRow, .control)
     }
 
     /// Disclosure triangles are controls AppKit inserts into outline rows after the data source

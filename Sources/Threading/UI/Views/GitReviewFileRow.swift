@@ -89,6 +89,8 @@ final class GitReviewFileRow: NSView {
     }()
     private var bodyBuilt = false
     private var isExpanded = false
+    /// Holds the row's context menu while it is up; released from its own dismissal.
+    private var contextMenuSession: AnyObject?
 
     private var canExpand: Bool {
         Self.isExpandable(file)
@@ -264,33 +266,46 @@ final class GitReviewFileRow: NSView {
     /// the row's own job — opening and closing the diff — so the way out lives on the gesture
     /// that costs the row nothing.
     ///
-    /// Nil where there is nothing to point at: a file this comparison deletes has no working
-    /// copy left, and offering to open it would fail after the menu had already promised.
-    override func menu(for event: NSEvent) -> NSMenu? {
-        guard let openInTarget,
-              FileManager.default.fileExists(atPath: openInTarget.url.path) else { return nil }
-
-        let menu = NSMenu()
-        if let openIn = OpenInMenu.item(
-            for: openInTarget,
-            action: #selector(openInAppClicked),
-            owner: self
-        ) {
-            menu.addItem(openIn)
+    /// Nothing where there is nothing to point at: a file this comparison deletes has no
+    /// working copy left, and offering to open it would fail after the menu had promised.
+    override func rightMouseDown(with event: NSEvent) {
+        if !presentContextMenu(at: .pointer(event.locationInWindow)) {
+            super.rightMouseDown(with: event)
         }
-        menu.addItem(
-            withTitle: L10n.string("Reveal in Finder"),
-            action: #selector(revealInFinderClicked),
-            keyEquivalent: ""
+    }
+
+    /// The pointerless route to the same menu, hanging from the row itself.
+    override func accessibilityPerformShowMenu() -> Bool {
+        presentContextMenu(at: .control)
+    }
+
+    private func presentContextMenu(at anchor: ThemedMenuAnchor) -> Bool {
+        guard let openInTarget,
+              FileManager.default.fileExists(atPath: openInTarget.url.path) else { return false }
+
+        var entries: [ThemedMenuEntry] = []
+        if let openIn = OpenInMenu.submenuEntry(for: openInTarget) {
+            entries.append(openIn)
+        }
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Reveal in Finder"),
+            onChoose: { [weak self] in self?.revealInFinderClicked() }
+        )))
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Path"),
+            onChoose: { [weak self] in self?.copyPathClicked() }
+        )))
+
+        contextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: OpenInMenuDefaults.menuWidth),
+            from: self,
+            anchor: anchor,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.contextMenuSession = nil }
         )
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.string("Copy Path"),
-            action: #selector(copyPathClicked),
-            keyEquivalent: ""
-        )
-        menu.items.forEach { $0.target = $0.target ?? self }
-        return menu
+        return contextMenuSession != nil
     }
 
     private var firstChangedLine: Int? { Self.firstChangedLine(in: file) }
@@ -318,11 +333,6 @@ final class GitReviewFileRow: NSView {
             }
         }
         return nil
-    }
-
-    @objc private func openInAppClicked(_ sender: NSMenuItem) {
-        guard let app = OpenInMenu.app(in: sender), let openInTarget else { return }
-        ExternalAppLauncher.shared.open(openInTarget, in: app)
     }
 
     @objc private func revealInFinderClicked() {

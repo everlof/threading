@@ -48,6 +48,8 @@ final class DisplayPaneController: NSViewController {
     }
   )
   private var newTabMenuSession: AnyObject?
+  /// Holds the footer's content dropdown while it is up; released from its own dismissal.
+  var contentMenuSession: AnyObject?
   private var regularTabBarTrailingConstraint: NSLayoutConstraint?
   private var globalTabBarTrailingConstraint: NSLayoutConstraint?
   private lazy var tabBar: DisplayTabBar = {

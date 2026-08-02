@@ -478,7 +478,7 @@ final class DisplayPaneLayoutTests: XCTestCase {
         let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let titles = paneShowing(content).makeContentMenu().items.map(\.title)
+        let titles = paneShowing(content).makeContentEntries().compactMap { $0.item?.title }
 
         XCTAssertEqual(
             titles.first,
@@ -494,7 +494,7 @@ final class DisplayPaneLayoutTests: XCTestCase {
         let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
         try FileManager.default.removeItem(at: url)
 
-        let titles = paneShowing(content).makeContentMenu().items.map(\.title)
+        let titles = paneShowing(content).makeContentEntries().compactMap { $0.item?.title }
 
         XCTAssertFalse(titles.contains(L10n.string("Inspect")))
         XCTAssertFalse(titles.contains(L10n.string("Open in System Quick Look")))

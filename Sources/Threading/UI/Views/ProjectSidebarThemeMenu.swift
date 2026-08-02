@@ -4,10 +4,10 @@ import AppKit
 
 /// What one item in the Theme submenu would do: which record it themes, and with what.
 ///
-/// Carried on the item itself rather than read from the controller when it fires, because the
-/// submenu is built from several places — a session's `⋯`, a session's right-click, a
-/// project's menu, the toolbar's context button — and ambient "whichever row was last
-/// clicked" state is exactly what gets stale between them.
+/// Carried in the row's own closure rather than read from the controller when it fires,
+/// because the submenu is built from several places — a session's `⋯`, a session's
+/// right-click, a project's menu, the toolbar's context button — and ambient "whichever row
+/// was last clicked" state is exactly what gets stale between them.
 struct ThemeMenuChoice {
 
     enum Target {
@@ -27,18 +27,18 @@ struct ThemeMenuChoice {
 /// Builds the Theme submenu, offered wherever a theme is chosen at the thing it applies to:
 /// the sidebar rows' menus, and the pane header's Context button.
 ///
-/// A class rather than free functions because the items need a stable target for their
-/// actions; each presenter keeps one and tells it how "Edit Themes…" reaches Settings.
+/// A class rather than free functions because "Edit Themes…" needs a way to Settings that the
+/// presenter owns; each presenter keeps one and tells it how that door opens.
 @MainActor
-final class ThemeMenuBuilder: NSObject {
+final class ThemeMenuBuilder {
 
     /// Opens the Themes settings page, in whatever way the presenter reaches Settings.
     var onEditThemes: (() -> Void)?
 
     /// A session's theme: its own choice, or inheriting whatever its project and the default
     /// resolve to.
-    func sessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
-        makeThemeItem(
+    func sessionThemeEntry(for sessionID: SessionID) -> ThemedMenuEntry {
+        makeThemeEntry(
             target: .session(sessionID),
             assigned: ThemeAssignments.themeID(forSession: sessionID),
             inherited: ThemeAssignments.inheritedName(forSession: sessionID)
@@ -46,16 +46,16 @@ final class ThemeMenuBuilder: NSObject {
     }
 
     /// A project's theme, which every session inside it follows unless it names its own.
-    func projectThemeItem(for projectID: ProjectID) -> NSMenuItem {
-        makeThemeItem(
+    func projectThemeEntry(for projectID: ProjectID) -> ThemedMenuEntry {
+        makeThemeEntry(
             target: .project(projectID),
             assigned: ThemeAssignments.themeID(forProject: projectID),
             inherited: ThemeAssignments.inheritedName(forProject: projectID)
         )
     }
 
-    func terminalThemeItem(for terminalID: TerminalID) -> NSMenuItem {
-        makeThemeItem(
+    func terminalThemeEntry(for terminalID: TerminalID) -> ThemedMenuEntry {
+        makeThemeEntry(
             target: .terminal(terminalID),
             assigned: ThemeAssignments.themeID(forTerminal: terminalID),
             inherited: ThemeAssignments.inheritedName(forTerminal: terminalID)
@@ -69,76 +69,66 @@ final class ThemeMenuBuilder: NSObject {
     ///
     /// "Inherit" names what it inherits, because it is otherwise the one choice in the list
     /// whose result the user cannot see.
-    private func makeThemeItem(
+    private func makeThemeEntry(
         target: ThemeMenuChoice.Target,
         assigned: TerminalThemeID?,
         inherited: String
-    ) -> NSMenuItem {
-        let submenu = NSMenu()
-
-        submenu.addItem(themeChoiceItem(
-            title: L10n.format("Inherit (%@)", inherited),
-            choice: ThemeMenuChoice(target: target, themeID: nil),
-            isChecked: assigned == nil
-        ))
-        submenu.addItem(.separator())
+    ) -> ThemedMenuEntry {
+        var rows: [ThemedMenuEntry] = [
+            themeChoiceEntry(
+                title: L10n.format("Inherit (%@)", inherited),
+                choice: ThemeMenuChoice(target: target, themeID: nil),
+                isChecked: assigned == nil
+            ),
+            .separator
+        ]
 
         // Above the list and separated from it, because it is not one of the palettes — it is
         // the answer "whatever the app theme says", which changes when the app theme does.
-        let followsApp = themeChoiceItem(
+        rows.append(themeChoiceEntry(
             title: TerminalThemeNames.followsAppTheme,
             choice: ThemeMenuChoice(target: target, themeID: .followsAppTheme),
-            isChecked: assigned == .followsAppTheme
-        )
-        followsApp.image = ThemeSwatchImage.menuSwatch(for: AppThemeLibrary.current.terminalPalette)
-        submenu.addItem(followsApp)
-        submenu.addItem(.separator())
+            isChecked: assigned == .followsAppTheme,
+            image: ThemeSwatchImage.menuSwatch(for: AppThemeLibrary.current.terminalPalette)
+        ))
+        rows.append(.separator)
 
         for theme in ThemeManager.shared.allThemes {
-            let item = themeChoiceItem(
+            rows.append(themeChoiceEntry(
                 title: theme.name,
                 choice: ThemeMenuChoice(target: target, themeID: theme.id),
-                isChecked: theme.id == assigned
-            )
-            item.image = ThemeSwatchImage.menuSwatch(for: theme)
-            submenu.addItem(item)
+                isChecked: theme.id == assigned,
+                image: ThemeSwatchImage.menuSwatch(for: theme)
+            ))
         }
 
-        submenu.addItem(.separator())
-        let edit = NSMenuItem(
+        rows.append(.separator)
+        rows.append(.item(ThemedMenuItem(
             title: L10n.string("Edit Themes…"),
-            action: #selector(editThemesClicked),
-            keyEquivalent: ""
-        )
-        edit.target = self
-        submenu.addItem(edit)
+            onChoose: { [weak self] in self?.onEditThemes?() }
+        )))
 
-        let item = NSMenuItem(
-            title: L10n.string("Theme"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        item.submenu = submenu
-        return item
+        return .item(ThemedMenuItem(title: L10n.string("Theme"), submenu: rows))
     }
 
-    private func themeChoiceItem(
+    private func themeChoiceEntry(
         title: String,
         choice: ThemeMenuChoice,
-        isChecked: Bool
-    ) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: #selector(themeChoiceClicked(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = choice
-        item.state = isChecked ? .on : .off
-        return item
+        isChecked: Bool,
+        image: NSImage? = nil
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: title,
+            image: image,
+            representedValue: choice,
+            isSelected: isChecked,
+            onChoose: { Self.apply(choice) }
+        ))
     }
 
     // MARK: - Handlers
 
-    @objc private func themeChoiceClicked(_ sender: NSMenuItem) {
-        guard let choice = sender.representedObject as? ThemeMenuChoice else { return }
-
+    private static func apply(_ choice: ThemeMenuChoice) {
         switch choice.target {
         case .session(let sessionID):
             ThemeAssignments.setTheme(id: choice.themeID, forSession: sessionID)
@@ -147,10 +137,6 @@ final class ThemeMenuBuilder: NSObject {
         case .project(let projectID):
             ThemeAssignments.setTheme(id: choice.themeID, forProject: projectID)
         }
-    }
-
-    @objc private func editThemesClicked() {
-        onEditThemes?()
     }
 }
 
@@ -161,16 +147,16 @@ final class ThemeMenuBuilder: NSObject {
 /// icon. The app-wide default stays in Settings, which is the scope with no row to hang from.
 extension ProjectSidebarViewController {
 
-    func makeSessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
-        sidebarThemeBuilder().sessionThemeItem(for: sessionID)
+    func sessionThemeEntry(for sessionID: SessionID) -> ThemedMenuEntry {
+        sidebarThemeBuilder().sessionThemeEntry(for: sessionID)
     }
 
-    func makeProjectThemeItem(for projectID: ProjectID) -> NSMenuItem {
-        sidebarThemeBuilder().projectThemeItem(for: projectID)
+    func projectThemeEntry(for projectID: ProjectID) -> ThemedMenuEntry {
+        sidebarThemeBuilder().projectThemeEntry(for: projectID)
     }
 
-    func makeTerminalThemeItem(for terminalID: TerminalID) -> NSMenuItem {
-        sidebarThemeBuilder().terminalThemeItem(for: terminalID)
+    func terminalThemeEntry(for terminalID: TerminalID) -> ThemedMenuEntry {
+        sidebarThemeBuilder().terminalThemeEntry(for: terminalID)
     }
 
     private func sidebarThemeBuilder() -> ThemeMenuBuilder {

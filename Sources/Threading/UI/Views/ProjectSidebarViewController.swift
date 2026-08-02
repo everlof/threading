@@ -18,7 +18,9 @@ final class ProjectSidebarViewController: NSViewController {
         outline.indentationPerLevel = SidebarDefaults.indentationPerLevel
         outline.dataSource = self
         outline.delegate = self
-        outline.menu = makeContextMenu()
+        outline.onContextMenu = { [weak self] row, anchor in
+            self?.presentRowContextMenu(row: row, anchor: anchor) ?? false
+        }
         outline.registerForDraggedTypes([.fileURL])
         let column = NSTableColumn(identifier: SidebarIdentifiers.mainColumn)
         column.resizingMask = .autoresizingMask
@@ -173,6 +175,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// Pins the row a hover-button menu targets, since a button click does not set the
     /// outline view's `clickedRow`. Non-nil only while such a menu is up.
     private var overrideContextRow: Int?
+
+    /// Whichever sidebar dropdown or context menu is up — one at a time, released from its
+    /// own dismissal.
+    private var activeMenuSession: AnyObject?
 
     /// Branch groups the user collapsed, keyed `projectID:branch`, kept for this run only.
     /// Branch groups are transient — they come and go as sessions move — so persisting
@@ -1090,30 +1096,20 @@ private extension ProjectSidebarViewController {
 
     /// The `+` button offers both ways in: a folder that exists, or one made on the spot.
     private func presentAddProjectMenu() {
-        let menu = NSMenu()
-
-        let scratch = NSMenuItem(
-            title: L10n.string("Start from Scratch…"),
-            action: #selector(startFromScratchClicked),
-            keyEquivalent: ""
-        )
-        scratch.target = self
-        scratch.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-        menu.addItem(scratch)
-
-        let existing = NSMenuItem(
-            title: L10n.string("Use an Existing Folder…"),
-            action: #selector(useExistingFolderClicked),
-            keyEquivalent: ""
-        )
-        existing.target = self
-        existing.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        menu.addItem(existing)
-
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: addButton.bounds.maxY + Design.Spacing.tight),
-            in: addButton
+        presentSidebarMenu(
+            [
+                .item(ThemedMenuItem(
+                    title: L10n.string("Start from Scratch…"),
+                    image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil),
+                    onChoose: { [weak self] in self?.startFromScratchClicked() }
+                )),
+                .item(ThemedMenuItem(
+                    title: L10n.string("Use an Existing Folder…"),
+                    image: NSImage(systemSymbolName: "folder", accessibilityDescription: nil),
+                    onChoose: { [weak self] in self?.useExistingFolderClicked() }
+                ))
+            ],
+            from: addButton
         )
     }
 
@@ -1240,20 +1236,6 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebar(self, didSelectSettingsPage: SettingsPages.storageID)
     }
 
-    /// Opens the clicked project's checkout in the app the item names.
-    ///
-    /// The project is read back from the row rather than captured when the menu was built, for
-    /// the same reason every other handler here does: the menu that opened is the one for the
-    /// row under the pointer, and `presentProjectMenu` pins that row for exactly as long as the
-    /// menu is up.
-    @objc private func openProjectInAppClicked(_ sender: NSMenuItem) {
-        guard let app = OpenInMenu.app(in: sender),
-              let projectID = contextProjectID(),
-              let project = projectStore.project(withID: projectID) else { return }
-
-        ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
-    }
-
     @objc private func revealInFinderClicked() {
         guard let row = contextRow(),
               let node = outlineView.item(atRow: row) as? ProjectNode,
@@ -1338,22 +1320,31 @@ private extension ProjectSidebarViewController {
     /// The `+` button: the project's new-session choices, split out from its `⋯` menu.
     /// The `⋯` button: everything a project offers but starting a session.
     private func showProjectActions(for projectID: ProjectID, from anchor: NSView) {
-        presentProjectMenu(for: projectID, from: anchor) { self.addProjectManagementItems(to: $0) }
+        guard let row = projectRow(for: projectID) else { return }
+        presentSidebarMenu(projectMenuEntries(row: row), from: anchor)
     }
 
     private func showProjectCreationMenu(for projectID: ProjectID, from anchor: NSView) {
-        presentProjectMenu(for: projectID, from: anchor) { menu in
-            menu.addItem(
-                withTitle: L10n.string("New Chat…"),
-                action: #selector(self.newProjectChatClicked),
-                keyEquivalent: ""
-            )
-            menu.addItem(
-                withTitle: L10n.string("New Terminal"),
-                action: #selector(self.newProjectTerminalClicked),
-                keyEquivalent: ""
-            )
-        }
+        guard let row = projectRow(for: projectID) else { return }
+        presentSidebarMenu(
+            [
+                .item(ThemedMenuItem(
+                    title: L10n.string("New Chat…"),
+                    onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
+                )),
+                .item(ThemedMenuItem(
+                    title: L10n.string("New Terminal"),
+                    onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
+                ))
+            ],
+            from: anchor
+        )
+    }
+
+    private func projectRow(for projectID: ProjectID) -> Int? {
+        guard let node = projectNodesByID[projectID] else { return nil }
+        let row = outlineView.row(forItem: node)
+        return row >= 0 ? row : nil
     }
 
     @objc private func newProjectChatClicked() {
@@ -1367,41 +1358,12 @@ private extension ProjectSidebarViewController {
         select(terminalID: terminal.id)
     }
 
-    /// Pops a project's menu beneath the button that opened it, pinning the row so the
-    /// handlers act on the right project rather than on whatever was last clicked.
-    private func presentProjectMenu(
-        for projectID: ProjectID,
-        from anchor: NSView,
-        build: (NSMenu) -> Void
-    ) {
-        guard let node = projectNodesByID[projectID] else { return }
-        let row = outlineView.row(forItem: node)
-        guard row >= 0 else { return }
-
-        let menu = NSMenu()
-        build(menu)
-        for item in menu.items { item.target = self }
-
-        // A button click leaves `clickedRow` at whatever was last clicked, so the row this
-        // menu targets is pinned while it is open. `popUp` is modal and the handlers read
-        // `contextRow()` before it returns, so the pin is cleared immediately afterwards.
-        overrideContextRow = row
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY), in: anchor)
-        overrideContextRow = nil
-    }
-
     private func showTerminalActions(for terminalID: TerminalID, from anchor: NSView) {
         guard let node = terminalNodesByID[terminalID] else { return }
         let row = outlineView.row(forItem: node)
         guard row >= 0 else { return }
 
-        let menu = NSMenu()
-        addTerminalMenuItems(to: menu, terminalID: terminalID)
-        for item in menu.items { item.target = self }
-
-        overrideContextRow = row
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY), in: anchor)
-        overrideContextRow = nil
+        presentSidebarMenu(terminalMenuEntries(for: terminalID, row: row), from: anchor)
     }
 
     // MARK: - Branch Grouping Options
@@ -1409,76 +1371,53 @@ private extension ProjectSidebarViewController {
     /// The menu behind a branch heading's hover gear: the grouping rules — the settings
     /// that govern the row it hangs from — and the door to the rest of Settings.
     private func showBranchGroupingOptions(from anchor: NSView) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(makeBranchGroupingItem())
-        menu.addItem(makeLoneBranchHeadingsItem())
-        menu.addItem(.separator())
-
-        let settings = NSMenuItem(
-            title: L10n.string("All Settings…"),
-            action: #selector(settingsClicked),
-            keyEquivalent: ""
-        )
-        settings.target = self
-        menu.addItem(settings)
-
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: anchor.bounds.maxY),
-            in: anchor
+        presentSidebarMenu(
+            [
+                branchGroupingEntry(),
+                loneBranchHeadingsEntry(),
+                .separator,
+                .item(ThemedMenuItem(
+                    title: L10n.string("All Settings…"),
+                    onChoose: { [weak self] in self?.settingsClicked() }
+                ))
+            ],
+            from: anchor
         )
     }
 
     /// The menu behind the header's arrangement control: how the list groups, then how it
     /// orders. Rebuilt on every open so the checks always say what is currently true.
     private func showArrangementOptions() {
-        let menu = makeArrangementMenu()
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: arrangeButton.bounds.maxY),
-            in: arrangeButton
-        )
+        presentSidebarMenu(arrangementMenuEntries(), from: arrangeButton)
     }
 
-    /// The grouping toggle as a menu item, its check showing the current state.
-    private func makeBranchGroupingItem() -> NSMenuItem {
-        let item = NSMenuItem(
+    /// The grouping toggle, its check showing the current state.
+    private func branchGroupingEntry() -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
             title: L10n.string("Group Sessions by Branch"),
-            action: #selector(toggleBranchGroupingClicked),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.state = AppSettings.shared.groupsSessionsByBranch ? .on : .off
-        return item
+            isSelected: AppSettings.shared.groupsSessionsByBranch,
+            onChoose: { [weak self] in self?.toggleBranchGroupingClicked() }
+        ))
     }
 
     /// The lone-branch refinement, disabled while grouping is off — it refines the grouping
-    /// rule, so without grouping there is nothing for it to say. Its menus set
-    /// `autoenablesItems = false` for exactly this line.
-    private func makeLoneBranchHeadingsItem() -> NSMenuItem {
-        let item = NSMenuItem(
+    /// rule, so without grouping there is nothing for it to say.
+    private func loneBranchHeadingsEntry() -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
             title: L10n.string("Headings for Lone Branches"),
-            action: #selector(toggleLoneBranchHeadingsClicked),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.state = AppSettings.shared.groupsLoneBranches ? .on : .off
-        item.isEnabled = AppSettings.shared.groupsSessionsByBranch
-        return item
+            isSelected: AppSettings.shared.groupsLoneBranches,
+            isEnabled: AppSettings.shared.groupsSessionsByBranch,
+            onChoose: { [weak self] in self?.toggleLoneBranchHeadingsClicked() }
+        ))
     }
 
-    /// One order as a checkable menu item; the chosen one carries the check.
-    private func makeOrderItem(_ order: SidebarSessionOrder) -> NSMenuItem {
-        let item = NSMenuItem(
+    /// One order as a checkable row; the chosen one carries the check.
+    private func orderEntry(_ order: SidebarSessionOrder) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
             title: order.menuTitle,
-            action: #selector(sessionOrderChosen(_:)),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.representedObject = order.rawValue
-        item.state = AppSettings.shared.sidebarSessionOrder == order ? .on : .off
-        return item
+            isSelected: AppSettings.shared.sidebarSessionOrder == order,
+            onChoose: { [weak self] in self?.sessionOrderChosen(order) }
+        ))
     }
 
     @objc private func toggleBranchGroupingClicked() {
@@ -1492,19 +1431,9 @@ private extension ProjectSidebarViewController {
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
-    @objc private func sessionOrderChosen(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let order = SidebarSessionOrder(rawValue: raw) else { return }
+    private func sessionOrderChosen(_ order: SidebarSessionOrder) {
         AppSettings.shared.sidebarSessionOrder = order
         NotificationCenter.default.post(ProjectsDidChange())
-    }
-
-    // MARK: - Context Menu
-
-    private func makeContextMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.delegate = self
-        return menu
     }
 }
 
@@ -1787,122 +1716,111 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 }
 
-// MARK: - NSMenuDelegate
+// MARK: - Row Context Menus
 
-extension ProjectSidebarViewController: NSMenuDelegate {
+extension ProjectSidebarViewController {
 
-    /// Builds the context menu for whichever row was clicked.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
+    /// Presents the context menu for whichever row a secondary click (or an accessibility
+    /// "show menu") landed on. The anchor came with the gesture: a click carries its pointer,
+    /// a pointerless request hangs from the row.
+    func presentRowContextMenu(row: Int, anchor: ThemedMenuAnchor) -> Bool {
+        guard row >= 0, let item = outlineView.item(atRow: row) else { return false }
 
-        guard let row = contextRow() else { return }
-        let item = outlineView.item(atRow: row)
-
+        let entries: [ThemedMenuEntry]
         if item is ProjectNode {
-            addProjectMenuItems(to: menu)
+            entries = projectMenuEntries(row: row)
         } else if item is BranchGroupNode {
             // The heading offers the display options that created it, and nothing else — it
-            // is a grouping, not a place. Grouping is necessarily on here, so the lone-branch
-            // item is always live despite this menu autoenabling.
-            menu.addItem(makeBranchGroupingItem())
-            menu.addItem(makeLoneBranchHeadingsItem())
+            // is a grouping, not a place.
+            entries = [branchGroupingEntry(), loneBranchHeadingsEntry()]
         } else if let node = item as? SessionNode,
                   let session = projectStore.session(withID: node.sessionID) {
             // The right-click menu offers exactly what the row's `⋯` button does, built from
             // the one place both share. `actionSessionID` is what every handler reads, set as
-            // the menu opens.
+            // the menu is built.
             actionSessionID = node.sessionID
-            populateSessionActions(menu, for: session)
+            entries = sessionActionEntries(for: session)
         } else if let node = item as? TerminalNode {
-            addTerminalMenuItems(to: menu, terminalID: node.terminalID)
+            entries = terminalMenuEntries(for: node.terminalID, row: row)
+        } else {
+            return false
         }
 
-        for menuItem in menu.items {
-            menuItem.target = self
-        }
+        let source = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            ?? outlineView
+        return presentSidebarMenu(entries, from: source, anchor: anchor)
     }
 
-    /// The project row's full menu, used by its right-click and by its `⋯` button alike:
-    /// starting a session is not in it, because that is what selecting the row does.
-    private func addProjectMenuItems(to menu: NSMenu) {
-        addProjectManagementItems(to: menu)
+    func terminalMenuEntries(for terminalID: TerminalID, row: Int) -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(
+                title: L10n.string("Rename Terminal…"),
+                onChoose: pinnedAction(row) { $0.renameClicked() }
+            )),
+            terminalThemeEntry(for: terminalID),
+            .separator,
+            .item(ThemedMenuItem(
+                title: L10n.string("Close Terminal"),
+                onChoose: pinnedAction(row) { $0.closeTerminalClicked() }
+            ))
+        ]
     }
 
-    private func addTerminalMenuItems(to menu: NSMenu, terminalID: TerminalID) {
-        menu.addItem(
-            withTitle: L10n.string("Rename Terminal…"),
-            action: #selector(renameClicked),
-            keyEquivalent: ""
-        )
-        menu.addItem(makeTerminalThemeItem(for: terminalID))
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.string("Close Terminal"),
-            action: #selector(closeTerminalClicked),
-            keyEquivalent: ""
-        )
-    }
+    /// Everything a project offers — its right-click and its `⋯` button alike. Sessions are
+    /// started by selecting the project, which opens its composer.
+    func projectMenuEntries(row: Int) -> [ThemedMenuEntry] {
+        let projectID = (outlineView.item(atRow: row) as? ProjectNode)?.projectID
 
-    /// Everything a project offers. Sessions are started by selecting the project, which
-    /// opens its composer.
-    private func addProjectManagementItems(to menu: NSMenu) {
-        menu.addItem(
-            withTitle: L10n.string("Rename Project…"),
-            action: #selector(renameClicked),
-            keyEquivalent: ""
-        )
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Rename Project…"),
+                onChoose: pinnedAction(row) { $0.renameClicked() }
+            ))
+        ]
         // The way out to an editor sits above the Finder reveal, because it is the one people
         // reach for: a checkout is opened in the app they work in far more often than it is
         // looked at in a file manager. Finder is in that submenu too, and stays here in its own
         // right — it is one press either way, and the one press is what the item is for.
-        if let projectID = contextProjectID(),
+        if let projectID,
            let project = projectStore.project(withID: projectID),
-           let openIn = OpenInMenu.item(
-               for: .folder(project.folderURL),
-               action: #selector(openProjectInAppClicked),
-               owner: self
-           ) {
-            menu.addItem(openIn)
+           let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
+            entries.append(openIn)
         }
-        menu.addItem(
-            withTitle: L10n.string("Reveal in Finder"),
-            action: #selector(revealInFinderClicked),
-            keyEquivalent: ""
-        )
-        menu.addItem(makeProjectIconItem())
-        if let projectID = contextProjectID() {
-            menu.addItem(makeProjectThemeItem(for: projectID))
-            menu.addItem(makeProjectMuteItem(for: projectID))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Reveal in Finder"),
+            onChoose: pinnedAction(row) { $0.revealInFinderClicked() }
+        )))
+        entries.append(projectIconEntry(row: row))
+        if let projectID {
+            entries.append(projectThemeEntry(for: projectID))
+            entries.append(projectMuteEntry(for: projectID, row: row))
         }
-        menu.addItem(
-            withTitle: L10n.string("Reclaim Disk Space…"),
-            action: #selector(reclaimDiskSpaceClicked),
-            keyEquivalent: ""
-        )
-        menu.addItem(.separator())
-        menu.addItem(makeBranchGroupingItem())
-        // Only while grouping is on: this menu autoenables, so a refinement with nothing to
-        // refine would read as live here. The arrangement control and the View menu carry
-        // the disabled-but-visible form.
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Reclaim Disk Space…"),
+            onChoose: pinnedAction(row) { $0.reclaimDiskSpaceClicked() }
+        )))
+        entries.append(.separator)
+        entries.append(branchGroupingEntry())
+        // Only while grouping is on: a refinement with nothing to refine would read as live
+        // here. The arrangement control and the View menu carry the disabled-but-visible form.
         if AppSettings.shared.groupsSessionsByBranch {
-            menu.addItem(makeLoneBranchHeadingsItem())
+            entries.append(loneBranchHeadingsEntry())
         }
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.string("Remove Project"),
-            action: #selector(removeClicked),
-            keyEquivalent: ""
-        )
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Remove Project"),
+            onChoose: pinnedAction(row) { $0.removeClicked() }
+        )))
 
-        if let projectID = contextProjectID() {
-            appendExtensionCommandItems(
-                to: menu,
+        if let projectID {
+            entries.append(contentsOf: extensionCommandEntries(
                 placement: .projectRow,
                 context: ExtensionCommandContext(
                     projectID: projectID.uuidString.lowercased()
                 )
-            )
+            ))
         }
+        return entries
     }
 
     /// The icon submenu: choose one, take a site's favicon, re-run the free discovery,
@@ -1910,73 +1828,59 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// login exists, and is menu-only on purpose — each run costs the user's own usage, so
     /// each is an explicit click, never a background default. A run in flight shows as a
     /// disabled "Researching…", and the last run's full output stays openable from here.
-    private func makeProjectIconItem() -> NSMenuItem {
-        let project = contextProjectID().flatMap { projectStore.project(withID: $0) }
+    private func projectIconEntry(row: Int) -> ThemedMenuEntry {
+        let project = (outlineView.item(atRow: row) as? ProjectNode)
+            .flatMap { projectStore.project(withID: $0.projectID) }
 
-        let submenu = NSMenu()
-        submenu.addItem(
-            withTitle: L10n.string("Choose Icon…"),
-            action: #selector(chooseProjectIconClicked),
-            keyEquivalent: ""
-        )
-        submenu.addItem(
-            withTitle: L10n.string("Use Website Favicon…"),
-            action: #selector(useWebsiteFaviconClicked),
-            keyEquivalent: ""
-        )
-        submenu.addItem(
-            withTitle: L10n.string("Find Icon Automatically"),
-            action: #selector(findProjectIconClicked),
-            keyEquivalent: ""
-        )
+        var submenu: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Choose Icon…"),
+                onChoose: pinnedAction(row) { $0.chooseProjectIconClicked() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Use Website Favicon…"),
+                onChoose: pinnedAction(row) { $0.useWebsiteFaviconClicked() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Find Icon Automatically"),
+                onChoose: pinnedAction(row) { $0.findProjectIconClicked() }
+            ))
+        ]
 
         let isResearching = project.map {
             ProjectIconResearch.runningProjectIDs.contains($0.id)
         } ?? false
 
         if isResearching {
-            // Action-less, so the menu's auto-enabling leaves it disabled.
-            submenu.addItem(
-                withTitle: L10n.string("Researching…"),
-                action: nil,
-                keyEquivalent: ""
-            )
+            submenu.append(.item(ThemedMenuItem(
+                title: L10n.string("Researching…"),
+                isEnabled: false
+            )))
         } else if !AgentAccountDiscovery.accounts(for: .codex).isEmpty {
-            submenu.addItem(
-                withTitle: L10n.string("Research Icon with Codex"),
-                action: #selector(researchProjectIconClicked),
-                keyEquivalent: ""
-            )
+            submenu.append(.item(ThemedMenuItem(
+                title: L10n.string("Research Icon with Codex"),
+                onChoose: pinnedAction(row) { $0.researchProjectIconClicked() }
+            )))
         }
 
         if let project, FileManager.default.fileExists(
             atPath: ProjectIconResearch.recordURL(for: project.id).path
         ) {
-            submenu.addItem(
-                withTitle: L10n.string("Open Last Research Log"),
-                action: #selector(openResearchLogClicked),
-                keyEquivalent: ""
-            )
+            submenu.append(.item(ThemedMenuItem(
+                title: L10n.string("Open Last Research Log"),
+                onChoose: pinnedAction(row) { $0.openResearchLogClicked() }
+            )))
         }
 
         if project?.icon != nil {
-            submenu.addItem(.separator())
-            submenu.addItem(
-                withTitle: L10n.string("Remove Icon"),
-                action: #selector(removeProjectIconClicked),
-                keyEquivalent: ""
-            )
+            submenu.append(.separator)
+            submenu.append(.item(ThemedMenuItem(
+                title: L10n.string("Remove Icon"),
+                onChoose: pinnedAction(row) { $0.removeProjectIconClicked() }
+            )))
         }
 
-        for item in submenu.items { item.target = self }
-
-        let iconItem = NSMenuItem(
-            title: L10n.string("Project Icon"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        iconItem.submenu = submenu
-        return iconItem
+        return .item(ThemedMenuItem(title: L10n.string("Project Icon"), submenu: submenu))
     }
 
     /// Silences a whole checkout, or lets it speak again.
@@ -1985,15 +1889,14 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// actually said — muting its sessions one at a time would have to be repeated for every
     /// session started afterwards, which is the case that makes the setting worth having at
     /// all. Sessions follow unless they answered for themselves.
-    private func makeProjectMuteItem(for projectID: ProjectID) -> NSMenuItem {
+    private func projectMuteEntry(for projectID: ProjectID, row: Int) -> ThemedMenuEntry {
         let muted = projectStore.project(withID: projectID)?.notificationsMuted ?? false
-        return NSMenuItem(
+        return .item(ThemedMenuItem(
             title: muted
                 ? L10n.string("Unmute Notifications")
                 : L10n.string("Mute Notifications"),
-            action: #selector(toggleProjectMuteClicked),
-            keyEquivalent: ""
-        )
+            onChoose: pinnedAction(row) { $0.toggleProjectMuteClicked() }
+        ))
     }
 
     @objc private func toggleProjectMuteClicked() {
@@ -2212,19 +2115,61 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
 
 extension ProjectSidebarViewController {
 
-    /// Built separately from shown, so a test can assert the items without popping a menu
-    /// that would block the run loop — internal for exactly that caller, the same seam the
-    /// theme menu builders offer. Lives outside the private extension because a private
-    /// extension's members are fileprivate no matter what they intend.
-    func makeArrangementMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(makeBranchGroupingItem())
-        menu.addItem(makeLoneBranchHeadingsItem())
-        menu.addItem(.separator())
+    /// Built separately from shown, so a test can assert the entries without presenting —
+    /// internal for exactly that caller, the same seam the theme menu builders offer. Lives
+    /// outside the private extension because a private extension's members are fileprivate
+    /// no matter what they intend.
+    func arrangementMenuEntries() -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = [
+            branchGroupingEntry(),
+            loneBranchHeadingsEntry(),
+            .separator
+        ]
         for order in SidebarSessionOrder.allCases {
-            menu.addItem(makeOrderItem(order))
+            entries.append(orderEntry(order))
         }
-        return menu
+        return entries
+    }
+}
+
+// MARK: - Themed Menu Presentation
+
+extension ProjectSidebarViewController {
+
+    /// Presents one sidebar menu at a time, keeping the token until the menu lets go.
+    /// The shared door for every sidebar entrance — row context menus, hover buttons, the
+    /// header controls — so they cannot drift in width, anchoring, or retention.
+    @discardableResult
+    func presentSidebarMenu(
+        _ entries: [ThemedMenuEntry],
+        from source: NSView,
+        anchor: ThemedMenuAnchor = .control
+    ) -> Bool {
+        guard entries.contains(where: \.isItem) else { return false }
+        activeMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: SidebarDefaults.menuWidth),
+            from: source,
+            anchor: anchor,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.activeMenuSession = nil }
+        )
+        return activeMenuSession != nil
+    }
+
+    /// Wraps a menu action so it runs with `row` pinned as the context row — the
+    /// closure-world equivalent of the pin the old modal `popUp` held for its whole life.
+    /// Every ambient `contextRow()` reader then answers for the row the menu was actually
+    /// opened on, not for whatever was last clicked by the time the action fired.
+    func pinnedAction(
+        _ row: Int,
+        _ body: @escaping (ProjectSidebarViewController) -> Void
+    ) -> () -> Void {
+        { [weak self] in
+            guard let self else { return }
+            self.overrideContextRow = row
+            body(self)
+            self.overrideContextRow = nil
+        }
     }
 }

@@ -99,7 +99,9 @@ final class FileTreeViewController: NSViewController {
         outline.delegate = self
         outline.target = self
         outline.doubleAction = #selector(rowDoubleClicked)
-        outline.menu = makeContextMenu()
+        outline.onContextMenu = { [weak self] row, anchor in
+            self?.presentContextMenu(forRow: row, anchor: anchor) ?? false
+        }
 
         let column = NSTableColumn(identifier: FileTreeDefaults.columnIdentifier)
         column.resizingMask = .autoresizingMask
@@ -115,6 +117,8 @@ final class FileTreeViewController: NSViewController {
         return scroll
     }()
     private var hasLoaded = false
+    /// Holds the row context menu while it is up; released from its own dismissal.
+    private var contextMenuSession: AnyObject?
 
     // MARK: - Initialization
 
@@ -238,80 +242,52 @@ final class FileTreeViewController: NSViewController {
         }
     }
 
-    /// The row menu, rebuilt on every open.
+    /// The row menu, built per click for the row under the pointer.
     ///
-    /// It used to be built once with the outline view, which was right while every item meant
-    /// the same thing for every row. "Open in" does not: its list is the apps installed *now*,
-    /// and which of them may be offered depends on whether the clicked row is a file or a
-    /// folder — a terminal takes a directory and would *run* a file. So the menu is a delegate's
-    /// answer per click rather than a fixture.
-    private func makeContextMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.delegate = self
-        return menu
-    }
-
-    private func populateContextMenu(_ menu: NSMenu) {
-        menu.addItem(
-            withTitle: L10n.string("Open"),
-            action: #selector(openClicked),
-            keyEquivalent: ""
-        )
-        if let node = clickedNode,
-           let openIn = OpenInMenu.item(
-               for: node.openInTarget,
-               action: #selector(openInAppClicked),
-               owner: self
-           ) {
-            menu.addItem(openIn)
+    /// It used to be a fixture built once with the outline view, which was right while every
+    /// item meant the same thing for every row. "Open in" does not: its list is the apps
+    /// installed *now*, and which of them may be offered depends on whether the clicked row is
+    /// a file or a folder — a terminal takes a directory and would *run* a file. The node is
+    /// captured into each row's closure, so the menu cannot act on a row clicked after it
+    /// opened.
+    private func presentContextMenu(forRow row: Int, anchor: ThemedMenuAnchor) -> Bool {
+        guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else {
+            return false
         }
-        menu.addItem(
-            withTitle: L10n.string("Reveal in Finder"),
-            action: #selector(revealClicked),
-            keyEquivalent: ""
+
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Open"),
+                onChoose: { NSWorkspace.shared.open(node.url) }
+            ))
+        ]
+        if let openIn = OpenInMenu.submenuEntry(for: node.openInTarget) {
+            entries.append(openIn)
+        }
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Reveal in Finder"),
+            onChoose: { NSWorkspace.shared.activateFileViewerSelecting([node.url]) }
+        )))
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Path"),
+            onChoose: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(node.url.path, forType: .string)
+            }
+        )))
+
+        let source = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            ?? outlineView
+        contextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: OpenInMenuDefaults.menuWidth),
+            from: source,
+            anchor: anchor,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.contextMenuSession = nil }
         )
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.string("Copy Path"),
-            action: #selector(copyPathClicked),
-            keyEquivalent: ""
-        )
-        // The submenu's items carry their own target; this claims the top-level ones, exactly
-        // as the fixed menu did.
-        menu.items.forEach { $0.target = $0.target ?? self }
-    }
-
-    @objc private func openClicked() {
-        guard let node = clickedNode else { return }
-        NSWorkspace.shared.open(node.url)
-    }
-
-    /// Opens the clicked row in the app the item names — a file at no particular line, since a
-    /// tree knows nothing about what is inside the file it lists.
-    @objc private func openInAppClicked(_ sender: NSMenuItem) {
-        guard let app = OpenInMenu.app(in: sender), let node = clickedNode else { return }
-        ExternalAppLauncher.shared.open(node.openInTarget, in: app)
-    }
-
-    @objc private func revealClicked() {
-        guard let node = clickedNode else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([node.url])
-    }
-
-    @objc private func copyPathClicked() {
-        guard let node = clickedNode else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(node.url.path, forType: .string)
-    }
-}
-
-// MARK: - Menu Delegate
-
-extension FileTreeViewController: NSMenuDelegate {
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        populateContextMenu(menu)
+        return contextMenuSession != nil
     }
 }
 

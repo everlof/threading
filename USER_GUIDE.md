@@ -310,10 +310,28 @@ ink while the rest dim, and the highlight lands on the first match, so a long ac
 theme list is a few letters and Return. Escape backs out one layer at a time: the first
 press clears a half-typed filter, only the second closes the menu.
 
+The same menu serves **every right-click in the window** — sidebar rows, the file tree, Git
+Review's files, the terminal, the composer's attachments — so filtering, drag-to-choose and
+the keyboard work identically everywhere, and the menu opens at the pointer rather than at
+some corner of what was clicked. Rows with more behind them carry a chevron: they open beside
+the menu on hover or **→**, **←** steps back out with the parent still highlighted, and a
+choice anywhere in the chain answers the whole menu. Only the menu bar at the top of the
+screen remains the system's own.
+
 The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
 "Default" — read from whatever the selected account is configured to use. Its menu marks that
 one *(account default)*, so choosing it explicitly and leaving it alone are the same thing. It
 only says "Default model" when the account states no model at all.
+
+For **OpenCode**, provider login and model selection stay in its own TUI. Run `/connect`, choose
+**OpenRouter**, and enter the key there; use `/models` to choose any OpenRouter model, including
+xAI/Grok. Threading neither reads nor stores the OpenRouter key. OpenCode's account, model,
+permission, and Chat-surface chips are hidden because those choices are not equivalent to the
+Claude/Codex host controls.
+
+For the standalone **Grok** runtime, the first TUI launch opens xAI's browser login. Model
+selection remains in Grok's live/custom catalog (`/model`), while Threading can set the opening
+permission posture because Grok exposes the same six modes. Threading does not read Grok's login.
 
 The branch chip lists places, not branch names: this checkout (the default, always first),
 any other checkout of the same repository you have added, and **New Worktree…** at the

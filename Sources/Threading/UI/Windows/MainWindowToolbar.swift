@@ -296,8 +296,6 @@ extension MainWindowController: NSToolbarDelegate {
         }
         sessionContextToolbarButton = button
 
-        sessionContextMenu.delegate = self
-
         return button
     }
 
@@ -365,34 +363,25 @@ extension MainWindowController: NSToolbarDelegate {
     }
 
     private func showSessionContextMenu(from button: ThemedIconButton) {
-        menuNeedsUpdate(sessionContextMenu)
-        sessionContextMenu.popUp(
-            positioning: nil,
-            at: NSPoint(x: button.bounds.minX, y: button.bounds.minY),
-            in: button
-        )
-    }
-}
-
-// MARK: - NSMenuDelegate
-
-extension MainWindowController: NSMenuDelegate {
-
-    public func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu === sessionContextMenu else { return }
-        menu.removeAllItems()
-
-        guard !populateVisibleSessionActions(menu) else { return }
-
         // Settings has no session row to mirror, but the context button remains its door to
         // theme editing instead of opening an empty menu.
-        let item = NSMenuItem(
-            title: L10n.string("Themes…"),
-            action: #selector(themeSettingsClicked),
-            keyEquivalent: ""
+        let entries = visibleSessionActionEntries() ?? [
+            .item(ThemedMenuItem(
+                title: L10n.string("Themes…"),
+                onChoose: { [weak self] in self?.themeSettingsClicked() }
+            ))
+        ]
+
+        sessionContextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: entries,
+                minimumWidth: SidebarDefaults.menuWidth
+            ),
+            from: button,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.sessionContextMenuSession = nil }
         )
-        item.target = self
-        menu.addItem(item)
     }
 
     @objc private func themeSettingsClicked() {

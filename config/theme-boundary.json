@@ -13,6 +13,8 @@
     "NSForm": "a component from UI/Design",
     "NSLevelIndicator": "a component from UI/Design",
     "NSMatrix": "a component from UI/Design",
+    "NSMenu": "ThemedMenuPresenter (the menu bar in AppDelegate is the one exception)",
+    "NSMenuItem": "ThemedMenuItem (the menu bar in AppDelegate is the one exception)",
     "NSOutlineView": "ThemedOutlineView",
     "NSPopover": "ThemedPopover",
     "NSPathControl": "a component from UI/Design",
@@ -136,6 +138,18 @@
     "Sources/Threading/UI/Alerts"
   ],
   "exceptions": [
+    {
+      "path": "Sources/Threading/App/AppDelegate.swift",
+      "kind": "construct",
+      "symbol": "NSMenu",
+      "reason": "The menu bar is the one place the platform's menu objects are the contract; every in-window menu is ThemedMenuPresenter."
+    },
+    {
+      "path": "Sources/Threading/App/AppDelegate.swift",
+      "kind": "construct",
+      "symbol": "NSMenuItem",
+      "reason": "The menu bar is the one place the platform's menu objects are the contract; every in-window menu is ThemedMenuPresenter."
+    },
     {
       "path": "Sources/Threading/UI/Design/ThemedScrollView.swift",
       "kind": "inherit",

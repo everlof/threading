@@ -740,6 +740,256 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(above.minX, bounds.minX + ThemedMenuLayout.screenInset)
     }
 
+    /// A menu opened by a secondary click lands on the pointer, not on its view.
+    ///
+    /// The presenter was written for dropdowns, where the anchor is the button and the panel
+    /// lines up under its edge. A context menu presented the same way opens in one fixed place
+    /// however large the thing clicked is — the composer's attachment thumbnail showed it — and
+    /// a menu that ignores where the click landed does not read as answering the click.
+    func testThemedMenuOpensOnThePointerForASecondaryClick() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        // High enough that both menus have room to open downward, so the two anchors are
+        // compared on the same side of their anchor rather than on opposite ones.
+        let source = NSView(frame: NSRect(x: 20, y: 150, width: 240, height: 100))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        let presentation = ThemedMenuPresentation(
+            entries: [
+                .item(ThemedMenuItem(title: "Inspect")),
+                .item(ThemedMenuItem(title: "Reveal in Finder")),
+                .item(ThemedMenuItem(title: "Remove Attachment"))
+            ],
+            minimumWidth: 190
+        )
+
+        // Deliberately away from every edge of the source, so anchoring to the view and
+        // anchoring to the click cannot agree by accident.
+        let click = NSPoint(x: 180, y: 200)
+        let pointerToken = try XCTUnwrap(ThemedMenuPresenter.present(
+            presentation,
+            from: source,
+            anchor: .pointer(click),
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        let atPointer = try menuFrame(in: root)
+        ThemedMenuPresenter.dismiss(pointerToken)
+
+        // The panel's corner *is* the click: it hangs below the point, with no dropdown standoff.
+        XCTAssertEqual(atPointer.minX, click.x, accuracy: 0.5)
+        XCTAssertEqual(atPointer.maxY, click.y, accuracy: 0.5)
+
+        let controlToken = try XCTUnwrap(ThemedMenuPresenter.present(
+            presentation,
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        let atControl = try menuFrame(in: root)
+        ThemedMenuPresenter.dismiss(controlToken)
+
+        // A dropdown is unchanged: still the source's leading edge, still standing off it.
+        XCTAssertEqual(atControl.minX, source.frame.minX, accuracy: 0.5)
+        XCTAssertEqual(atControl.maxY, source.frame.minY - ThemedMenuLayout.gap, accuracy: 0.5)
+    }
+
+    /// The open dropdown's panel, in `root`'s coordinates.
+    private func menuFrame(in root: NSView) throws -> NSRect {
+        let menu = try XCTUnwrap(
+            descendants(in: root).first { $0.accessibilityRole() == .menu },
+            "no dropdown was presented"
+        )
+        return root.convert(menu.bounds, from: menu)
+    }
+
+    // MARK: - Submenus
+
+    /// A parent row opens beside its panel; the keyboard walks in and out of it the way the
+    /// platform's menus do — right arrow in with the first row lit, left arrow back out with
+    /// the parent keeping the highlight — and a choice anywhere in the chain answers the
+    /// whole menu.
+    func testThemedMenuSubmenuOpensChoosesAndClosesFromTheKeyboard() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 320))
+        let source = NSView(frame: NSRect(x: 24, y: 240, width: 160, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        var chosen: String?
+        var dismissed = false
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "Plain", onChoose: { chosen = "Plain" })),
+                    .item(ThemedMenuItem(title: "Options", submenu: [
+                        .item(ThemedMenuItem(title: "First", onChoose: { chosen = "First" })),
+                        .item(ThemedMenuItem(title: "Second", onChoose: { chosen = "Second" }))
+                    ]))
+                ],
+                minimumWidth: 160
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { dismissed = true }
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        let overlay = try XCTUnwrap(window.firstResponder as? NSView)
+
+        func menus() -> [NSView] {
+            descendants(in: root).filter { $0.accessibilityRole() == .menu }
+        }
+        XCTAssertEqual(menus().count, 1)
+
+        // Down to "Options", right to open. The submenu joins the tree, its panel sits to
+        // the right of the root's, and its first row takes the highlight.
+        overlay.keyDown(with: try keyEvent("", keyCode: 125))
+        overlay.keyDown(with: try keyEvent("", keyCode: 124))
+        XCTAssertEqual(menus().count, 2, "right arrow should have opened the submenu")
+
+        let panels = menus().map { root.convert($0.bounds, from: $0) }
+        XCTAssertGreaterThan(
+            panels[1].minX,
+            panels[0].minX,
+            "the submenu should open beside its parent, not over it"
+        )
+
+        let rows = descendants(in: menus()[1])
+            .filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.compactMap { $0.accessibilityTitle() }, ["First", "Second"])
+
+        // Left closes just the submenu; the root panel stays.
+        overlay.keyDown(with: try keyEvent("", keyCode: 123))
+        XCTAssertEqual(menus().count, 1, "left arrow should have closed only the submenu")
+        XCTAssertFalse(dismissed, "closing a submenu must not answer the menu")
+
+        // Back in, and Return on "Second" answers the whole menu.
+        overlay.keyDown(with: try keyEvent("", keyCode: 124))
+        overlay.keyDown(with: try keyEvent("", keyCode: 125))
+        overlay.keyDown(with: try keyEvent("", keyCode: 36))
+        XCTAssertEqual(chosen, "Second")
+        XCTAssertTrue(dismissed, "a submenu choice should close the whole menu")
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
+    }
+
+    /// Pressing a parent row (a click, or an accessibility press) opens its submenu rather
+    /// than answering the menu — a parent has nothing to answer with.
+    func testPressingAParentRowOpensItsSubmenuInsteadOfChoosing() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 320))
+        let source = NSView(frame: NSRect(x: 24, y: 240, width: 160, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        var dismissed = false
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "Options", submenu: [
+                        .item(ThemedMenuItem(title: "Inner"))
+                    ]))
+                ],
+                minimumWidth: 160
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: { dismissed = true }
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let parent = try XCTUnwrap(
+            descendants(in: root).first {
+                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Options"
+            }
+        )
+        XCTAssertTrue(parent.accessibilityPerformPress())
+
+        let menus = descendants(in: root).filter { $0.accessibilityRole() == .menu }
+        XCTAssertEqual(menus.count, 2, "the press should have opened the submenu")
+        XCTAssertFalse(dismissed, "opening a submenu is not an answer")
+
+        // The open chain hangs off the parent item for accessibility, the way the platform
+        // models an item's menu.
+        XCTAssertEqual(parent.accessibilityChildren()?.count, 1)
+    }
+
+    /// The submenu panel's geometry: beside the parent panel with its first row level with
+    /// the parent row, and mirrored to the left when the right edge has no room.
+    func testThemedMenuSubmenuFrameOpensBesideAndFlipsWhenCramped() {
+        let bounds = NSRect(x: 0, y: 0, width: 600, height: 400)
+        let parentPanel = NSRect(x: 40, y: 100, width: 200, height: 200)
+        let rowFrame = NSRect(x: 48, y: 240, width: 184, height: 28)
+        let size = NSSize(width: 180, height: 120)
+        let inset: CGFloat = 6
+
+        let beside = ThemedMenuLayout.submenuFrame(
+            parentPanel: parentPanel,
+            rowFrame: rowFrame,
+            desiredSize: size,
+            in: bounds,
+            flipped: false,
+            firstRowInset: inset
+        )
+        XCTAssertEqual(
+            beside.minX,
+            parentPanel.maxX - ThemedMenuLayout.submenuOverlap,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            beside.maxY,
+            rowFrame.maxY + inset,
+            accuracy: 0.5,
+            "the submenu's first row should sit level with the row that opened it"
+        )
+
+        let crampedPanel = NSRect(x: 380, y: 100, width: 200, height: 200)
+        let crampedRow = NSRect(x: 388, y: 240, width: 184, height: 28)
+        let mirrored = ThemedMenuLayout.submenuFrame(
+            parentPanel: crampedPanel,
+            rowFrame: crampedRow,
+            desiredSize: size,
+            in: bounds,
+            flipped: false,
+            firstRowInset: inset
+        )
+        XCTAssertEqual(
+            mirrored.maxX,
+            crampedPanel.minX + ThemedMenuLayout.submenuOverlap,
+            accuracy: 0.5,
+            "with no room on the right the panel should mirror to the left"
+        )
+    }
+
     // MARK: - Menu Motion
 
     /// The dropdown arrives with a fade-and-grow rather than snapping in. The animation rides

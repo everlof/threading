@@ -14,6 +14,11 @@ struct ThemedMenuItem {
     var isSelected: Bool
     var isEnabled: Bool
     var onChoose: (() -> Void)?
+    /// Entries this item opens beside itself. A row carrying these draws a chevron and opens on
+    /// hover, on ⌘-less right-arrow, and on press; choosing anywhere in the chain closes the
+    /// whole menu. An item is a parent *or* an action — when both are set the action wins the
+    /// press and only the arrow and hover reach the submenu, which reads as a defect, so don't.
+    var submenu: [ThemedMenuEntry]?
 
     init(
         title: String,
@@ -23,7 +28,8 @@ struct ThemedMenuItem {
         representedValue: Any? = nil,
         isSelected: Bool = false,
         isEnabled: Bool = true,
-        onChoose: (() -> Void)? = nil
+        onChoose: (() -> Void)? = nil,
+        submenu: [ThemedMenuEntry]? = nil
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -33,6 +39,7 @@ struct ThemedMenuItem {
         self.isSelected = isSelected
         self.isEnabled = isEnabled
         self.onChoose = onChoose
+        self.submenu = submenu
     }
 }
 
@@ -83,6 +90,20 @@ struct ThemedMenuPresentation {
 
 // MARK: - Presentation
 
+/// Where an open menu hangs from.
+///
+/// A dropdown belongs to the control that opened it and lines up under that control's edge. A
+/// menu opened by a secondary click belongs to the *pointer*: anchoring one to its whole view
+/// instead puts it in the same place wherever inside the view the click landed, which reads as
+/// the menu ignoring the click that asked for it.
+enum ThemedMenuAnchor {
+    /// Under — or over, where there is no room — the control that opened it, aligned to its
+    /// leading edge.
+    case control
+    /// One corner on a point given in window coordinates: the secondary-click idiom.
+    case pointer(NSPoint)
+}
+
 /// Presents a completely app-owned dropdown above the window's content.
 ///
 /// An overlay rather than `NSMenu`, `NSPopover`, or a borderless panel is deliberate:
@@ -101,6 +122,7 @@ enum ThemedMenuPresenter {
     static func present(
         _ presentation: ThemedMenuPresentation,
         from source: NSView,
+        anchor: ThemedMenuAnchor = .control,
         selectedEntryIndex: Int?,
         onChoose: @escaping (Int, ThemedMenuItem) -> Void,
         onDismiss: @escaping () -> Void
@@ -113,6 +135,7 @@ enum ThemedMenuPresenter {
         return ThemedMenuSession(
             presentation: presentation,
             source: source,
+            anchor: anchor,
             root: root,
             window: window,
             selectedEntryIndex: selectedEntryIndex,
@@ -179,11 +202,15 @@ private enum ThemedMenuDragTarget {
     case outside
 }
 
-private extension ThemedMenuEntry {
-    var isItem: Bool {
-        if case .item = self { return true }
-        return false
+extension ThemedMenuEntry {
+    /// The item this entry carries — nil for a separator. How call sites and tests read a
+    /// built menu, since entries are values rather than a mutable menu object.
+    var item: ThemedMenuItem? {
+        if case .item(let item) = self { return item }
+        return nil
     }
+
+    var isItem: Bool { item != nil }
 }
 
 // MARK: - Geometry
@@ -198,7 +225,8 @@ enum ThemedMenuLayout {
         anchor: NSRect,
         desiredSize: NSSize,
         in bounds: NSRect,
-        flipped: Bool
+        flipped: Bool,
+        gap: CGFloat = ThemedMenuLayout.gap
     ) -> NSRect {
         let width = min(desiredSize.width, max(0, bounds.width - screenInset * 2))
         let x = min(
@@ -229,6 +257,52 @@ enum ThemedMenuLayout {
         }
         return NSRect(x: x, y: y, width: width, height: height)
     }
+
+    /// How far a submenu tucks under its parent panel's edge. Panels that merely touched read
+    /// as two unrelated windows; the platform's own submenus overlap for the same reason.
+    static let submenuOverlap: CGFloat = gap
+
+    /// Where a submenu panel lands: beside its parent panel, its first row level with the row
+    /// that opened it. To the right until there is no room, then mirrored to the left; clamped
+    /// vertically the way the root panel is.
+    ///
+    /// `firstRowInset` is the panel's own padding above its first row
+    /// (`ThemedMenuMetrics.outerInset`), passed in so this stays plain geometry a test can call.
+    static func submenuFrame(
+        parentPanel: NSRect,
+        rowFrame: NSRect,
+        desiredSize: NSSize,
+        in bounds: NSRect,
+        flipped: Bool,
+        firstRowInset: CGFloat
+    ) -> NSRect {
+        let width = min(desiredSize.width, maximumWidth, max(0, bounds.width - screenInset * 2))
+        var x = parentPanel.maxX - submenuOverlap
+        if x + width > bounds.maxX - screenInset {
+            x = parentPanel.minX - width + submenuOverlap
+        }
+        x = min(max(x, bounds.minX + screenInset), bounds.maxX - screenInset - width)
+
+        let height = min(
+            desiredSize.height,
+            maximumHeight,
+            max(0, bounds.height - screenInset * 2)
+        )
+        let y: CGFloat
+        if flipped {
+            y = min(
+                max(rowFrame.minY - firstRowInset, bounds.minY + screenInset),
+                bounds.maxY - screenInset - height
+            )
+        } else {
+            let top = min(
+                max(rowFrame.maxY + firstRowInset, bounds.minY + screenInset + height),
+                bounds.maxY - screenInset
+            )
+            y = top - height
+        }
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
 }
 
 // MARK: - Session
@@ -246,6 +320,7 @@ private final class ThemedMenuSession: NSObject {
     init(
         presentation: ThemedMenuPresentation,
         source: NSView,
+        anchor: ThemedMenuAnchor,
         root: NSView,
         window: NSWindow,
         selectedEntryIndex: Int?,
@@ -262,12 +337,25 @@ private final class ThemedMenuSession: NSObject {
             minimum: presentation.minimumWidth
         )
         let menuHeight = ThemedMenuMetrics.height(for: presentation.entries)
-        let anchor = source.convert(source.bounds, to: root)
+        let anchorRect: NSRect
+        let gap: CGFloat
+        switch anchor {
+        case .control:
+            anchorRect = source.convert(source.bounds, to: root)
+            gap = ThemedMenuLayout.gap
+        case .pointer(let windowPoint):
+            anchorRect = NSRect(origin: root.convert(windowPoint, from: nil), size: .zero)
+            // No standoff: the gap exists so a dropdown clears the button it belongs to, and
+            // the pointer has no edge to clear. Held off it, the panel would read as opening
+            // near the click rather than at it.
+            gap = 0
+        }
         let menuFrame = ThemedMenuLayout.frame(
-            anchor: anchor,
+            anchor: anchorRect,
             desiredSize: NSSize(width: menuWidth, height: menuHeight),
             in: root.bounds,
-            flipped: root.isFlipped
+            flipped: root.isFlipped,
+            gap: gap
         )
         overlay = ThemedMenuOverlayView(
             frame: root.bounds,
@@ -392,33 +480,68 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// drag and release — follows it there.
     private weak var handoffTarget: NSView?
 
-    private let menuSurface: ThemedMenuSurfaceView
-    /// A plain chassis under the surface carrying the elevation shadow. Separate on purpose:
-    /// the surface's own layer belongs to `applySurface`, whose theme glow clears and rewrites
-    /// layer shadow state on every repaint — a shadow set there would not survive the first
-    /// theme refresh. It is also what the appear animation scales, so the shadow arrives with
-    /// the panel instead of sitting full-strength under a panel still growing.
-    private let menuHost = NSView()
-    private var highlightedIndex: Int?
+    /// One open panel: the root dropdown at depth zero, or a submenu hanging off `parentRow`
+    /// in the column before it. The chain is a stack — a column closes with everything deeper
+    /// than it — and the deepest column is the one the keyboard speaks to.
+    private struct MenuColumn {
+        /// A plain chassis under the surface carrying the elevation shadow. Separate on
+        /// purpose: the surface's own layer belongs to `applySurface`, whose theme glow clears
+        /// and rewrites layer shadow state on every repaint — a shadow set there would not
+        /// survive the first theme refresh. It is also what the appear animation scales, so
+        /// the shadow arrives with the panel instead of sitting full-strength under a panel
+        /// still growing.
+        let host: NSView
+        let surface: ThemedMenuSurfaceView
+        /// The row in the previous column this panel hangs off; nil only at the root.
+        weak var parentRow: ThemedMenuRowView?
+        var highlightedIndex: Int?
+    }
+
+    private var columns: [MenuColumn] = []
     private var isTearingDown = false
+
+    /// The row whose choice is closing the menu, kept for the confirmation blink — an index
+    /// alone cannot say *which panel's* row it names once submenus exist.
+    private weak var chosenRow: ThemedMenuRowView?
+
+    // Hover-driven submenu pacing. Timed rather than immediate, because a pointer sweeping
+    // down a column crosses every parent row on the way past; the delays are stated and
+    // justified on `ThemedMenuMotion`.
+    private var submenuOpenTimer: Timer?
+    private var submenuCloseTimer: Timer?
+    private var travelTimer: Timer?
+    /// Where the pointer last was, in overlay coordinates — fed by `mouseMoved`, read by the
+    /// safe-travel corridor and the close-grace check.
+    private var lastPointerPoint: NSPoint?
+    /// A pointer highlight held back while the pointer travels toward an open submenu,
+    /// applied the moment the travel visibly stops being travel.
+    private var pendingTravelHighlight: (column: Int, entry: Int)?
+    /// Where the corridor starts: the pointer's position when it left the open parent row.
+    private var travelApex: NSPoint?
+    private var travelDeadline: TimeInterval = 0
+    private var pointerTrackingArea: NSTrackingArea?
 
     /// What has been typed since the menu opened. Letters filter: matching rows keep their
     /// ink, the rest dim, and the highlight lands on the first match — the menu keeps its
-    /// shape rather than reflowing under the pointer on every keystroke.
+    /// shape rather than reflowing under the pointer on every keystroke. The filter belongs
+    /// to the deepest open panel, and opening or closing one resets it.
     private var filterQuery = "" {
         didSet {
-            guard filterQuery != oldValue, !isTearingDown else { return }
-            menuSurface.applyFilter(filterQuery)
+            guard filterQuery != oldValue, !isTearingDown,
+                  let column = columns.last else { return }
+            column.surface.applyFilter(filterQuery)
             let indices = activeIndices
-            if let highlightedIndex, indices.contains(highlightedIndex) { return }
-            setHighlight(indices.first)
+            if let highlighted = column.highlightedIndex, indices.contains(highlighted) {
+                return
+            }
+            setHighlight(columnIndex: columns.count - 1, entryIndex: indices.first)
         }
     }
 
-    /// The rows arrow keys and Return may land on — every enabled row, narrowed to the
-    /// matches while a filter is active.
+    /// The rows arrow keys and Return may land on — the deepest panel's enabled rows,
+    /// narrowed to the matches while a filter is active.
     private var activeIndices: [Int] {
-        menuSurface.selectableIndices(matching: filterQuery)
+        columns.last?.surface.selectableIndices(matching: filterQuery) ?? []
     }
 
     init(
@@ -427,34 +550,75 @@ private final class ThemedMenuOverlayView: ThemedControl {
         entries: [ThemedMenuEntry],
         selectedEntryIndex: Int?
     ) {
-        menuSurface = ThemedMenuSurfaceView(
-            frame: NSRect(origin: .zero, size: menuFrame.size),
-            entries: entries,
-            selectedEntryIndex: selectedEntryIndex
-        )
         super.init(frame: frame)
 
         setAccessibilityElement(false)
-        menuHost.frame = menuFrame
-        menuHost.wantsLayer = true
-        menuHost.layer?.masksToBounds = false
+        addColumn(
+            entries: entries,
+            frame: menuFrame,
+            parentRow: nil,
+            selectedEntryIndex: selectedEntryIndex
+        )
+
+        let root = columns[0].surface
+        let initial = root.selectableIndices.contains(selectedEntryIndex ?? -1)
+            ? selectedEntryIndex
+            : root.selectableIndices.first
+        setHighlight(columnIndex: 0, entryIndex: initial)
+    }
+
+    /// Builds one panel — chassis, shadow, surface — and stacks it. The closures capture the
+    /// column's index, which is stable for the surface's lifetime: columns close strictly from
+    /// the deep end, so a surviving surface never changes position.
+    @discardableResult
+    private func addColumn(
+        entries: [ThemedMenuEntry],
+        frame: NSRect,
+        parentRow: ThemedMenuRowView?,
+        selectedEntryIndex: Int?
+    ) -> Int {
+        let surface = ThemedMenuSurfaceView(
+            frame: NSRect(origin: .zero, size: frame.size),
+            entries: entries,
+            selectedEntryIndex: selectedEntryIndex
+        )
+        let host = NSView()
+        host.frame = frame
+        host.wantsLayer = true
+        host.layer?.masksToBounds = false
         // A fixed neutral on purpose — the same exception the icon backplates carry. A shadow
         // exists to separate the panel from whatever the theme drew behind it, and every
         // themed colour follows that ground.
-        menuHost.applyLayerShadow(NSColor.black)
-        menuHost.layer?.shadowOpacity = ThemedMenuMotion.shadowOpacity
-        menuHost.layer?.shadowRadius = ThemedMenuMotion.shadowRadius
-        menuHost.layer?.shadowOffset = .zero
-        addSubview(menuHost)
-        menuSurface.autoresizingMask = [.width, .height]
-        menuHost.addSubview(menuSurface)
-        menuSurface.onChoose = { [weak self] index, item in self?.onChoose?(index, item) }
-        menuSurface.onHighlight = { [weak self] index in self?.setHighlight(index) }
+        host.applyLayerShadow(NSColor.black)
+        host.layer?.shadowOpacity = ThemedMenuMotion.shadowOpacity
+        host.layer?.shadowRadius = ThemedMenuMotion.shadowRadius
+        host.layer?.shadowOffset = .zero
+        addSubview(host)
+        surface.autoresizingMask = [.width, .height]
+        host.addSubview(surface)
+        // The surface resolved its layer fill before joining a window; re-resolve under the
+        // window it actually landed in — the same correction the session makes for the root.
+        AppThemeRefresh.repaint(host)
 
-        let initial = menuSurface.selectableIndices.contains(selectedEntryIndex ?? -1)
-            ? selectedEntryIndex
-            : menuSurface.selectableIndices.first
-        setHighlight(initial)
+        let index = columns.count
+        surface.onChoose = { [weak self] entryIndex, item in
+            self?.rowChosen(columnIndex: index, entryIndex: entryIndex, item: item)
+        }
+        surface.onHighlight = { [weak self] entryIndex in
+            self?.pointerHighlighted(columnIndex: index, entryIndex: entryIndex)
+        }
+        // A submenu is anchored to where its parent row was at open; a parent that scrolls
+        // under it would leave the panel beside the wrong row, so scrolling closes deeper.
+        surface.onScrolled = { [weak self] in
+            self?.closeColumns(from: index + 1)
+        }
+        columns.append(MenuColumn(
+            host: host,
+            surface: surface,
+            parentRow: parentRow,
+            highlightedIndex: nil
+        ))
+        return index
     }
 
     @available(*, unavailable)
@@ -468,6 +632,28 @@ private final class ThemedMenuOverlayView: ThemedControl {
     override func accessibilityPerformPress() -> Bool {
         onDismiss?()
         return true
+    }
+
+    /// The overlay watches raw pointer motion as well as the rows' own hover, because the
+    /// safe-travel corridor is a claim about *movement* — where the pointer is heading — and
+    /// a row's enter/exit can only say where it is.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTrackingArea {
+            removeTrackingArea(pointerTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        pointerTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        lastPointerPoint = convert(event.locationInWindow, from: nil)
+        resolveTravel()
     }
 
     /// A closing menu takes no more events. Hit testing alone does not cover tracking areas,
@@ -531,15 +717,21 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// The dropdown materialises: a quick fade with a subtle grow from centre. Decorative
     /// only — the model values are already final, so nothing here can be left half-arrived.
     func animateIn() {
+        guard let host = columns.first?.host else { return }
+        Self.animateAppear(host)
+    }
+
+    /// One arrival for every panel, so a submenu materialises exactly as its root did.
+    private static func animateAppear(_ host: NSView) {
         let duration = Design.Motion.appear
-        guard duration > 0, let layer = menuHost.layer else { return }
+        guard duration > 0, let layer = host.layer else { return }
 
         // Composed about the layer's visual centre whatever its anchor point, so the maths
         // holds under AppKit's own layer geometry rather than assuming it.
         let anchor = layer.anchorPoint
         let centre = CGPoint(
-            x: (0.5 - anchor.x) * menuHost.bounds.width,
-            y: (0.5 - anchor.y) * menuHost.bounds.height
+            x: (0.5 - anchor.x) * host.bounds.width,
+            y: (0.5 - anchor.y) * host.bounds.height
         )
         var from = CATransform3DIdentity
         from = CATransform3DTranslate(from, centre.x, centre.y, 0)
@@ -564,7 +756,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
     func tearDown(exit: ThemedMenuExit) {
         guard !isTearingDown else { return }
         isTearingDown = true
-        menuSurface.setAccessibilityRole(nil)
+        cancelSubmenuTimers()
+        for column in columns {
+            column.surface.setAccessibilityRole(nil)
+        }
 
         let duration = Design.Motion.vanish
         let fadeOut: @MainActor @Sendable () -> Void = {
@@ -587,7 +782,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
             fadeOut()
         case .confirm(let index):
             let beat = Design.Motion.confirmBeat
-            guard beat > 0, let row = menuSurface.row(at: index) else {
+            // The chosen row wherever it lives; the root index is the fallback for a menu
+            // that answered without the overlay seeing which row did it.
+            let row = chosenRow ?? columns.first?.surface.row(at: index)
+            guard beat > 0, let row else {
                 fadeOut()
                 return
             }
@@ -599,10 +797,20 @@ private final class ThemedMenuOverlayView: ThemedControl {
         }
     }
 
+    private func cancelSubmenuTimers() {
+        submenuOpenTimer?.invalidate()
+        submenuCloseTimer?.invalidate()
+        travelTimer?.invalidate()
+    }
+
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53:
             escape()
+        case 123:
+            closeDeepestFromKeyboard()
+        case 124:
+            openSubmenuFromKeyboard()
         case 125:
             moveHighlight(by: 1)
         case 126:
@@ -663,32 +871,47 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
     func dragHighlight(atWindowPoint point: NSPoint) {
         guard !isTearingDown else { return }
-        if let row = menuSurface.row(underWindowPoint: point), row.item.isEnabled {
-            setHighlight(row.entryIndex)
+        for (index, column) in columns.enumerated().reversed() {
+            if let row = column.surface.row(underWindowPoint: point), row.item.isEnabled {
+                pointerHighlighted(columnIndex: index, entryIndex: row.entryIndex)
+                return
+            }
         }
     }
 
     func dragTarget(atWindowPoint point: NSPoint) -> ThemedMenuDragTarget {
         guard !isTearingDown else { return .outside }
-        if let row = menuSurface.row(underWindowPoint: point), row.item.isEnabled {
-            return .row(row.entryIndex, row.item)
+        for (index, column) in columns.enumerated().reversed() {
+            if let row = column.surface.row(underWindowPoint: point), row.item.isEnabled {
+                // Releasing on a parent row opens what it holds — the press stays a browse,
+                // exactly as it does on the platform's own menus.
+                if row.item.submenu != nil, row.item.onChoose == nil {
+                    openSubmenu(columnIndex: index, entryIndex: row.entryIndex, highlightFirst: false)
+                    return .surface
+                }
+                chosenRow = row
+                return .row(row.entryIndex, row.item)
+            }
+            let inSurface = column.surface.bounds.contains(
+                column.surface.convert(point, from: nil)
+            )
+            if inSurface { return .surface }
         }
-        let inSurface = menuSurface.bounds.contains(menuSurface.convert(point, from: nil))
-        return inSurface ? .surface : .outside
+        return .outside
     }
 
     override func performPrimaryAction() -> Bool {
         chooseHighlighted()
     }
 
-    private func setHighlight(_ index: Int?) {
+    private func setHighlight(columnIndex: Int, entryIndex: Int?) {
         // Tracking areas keep firing while the closed menu fades — hit testing does not
         // silence them — and a highlight moving on a menu that has already answered reads
         // as the menu still being open.
-        guard !isTearingDown else { return }
-        highlightedIndex = index
-        menuSurface.highlight(index)
-        if let row = menuSurface.row(at: index) {
+        guard !isTearingDown, columns.indices.contains(columnIndex) else { return }
+        columns[columnIndex].highlightedIndex = entryIndex
+        columns[columnIndex].surface.highlight(entryIndex)
+        if let row = columns[columnIndex].surface.row(at: entryIndex) {
             NSAccessibility.post(element: row, notification: .focusedUIElementChanged)
         }
     }
@@ -696,22 +919,311 @@ private final class ThemedMenuOverlayView: ThemedControl {
     private func moveHighlight(by delta: Int) {
         let indices = activeIndices
         guard !indices.isEmpty else { return }
-        guard let highlightedIndex,
-              let position = indices.firstIndex(of: highlightedIndex)
+        let columnIndex = columns.count - 1
+        guard let highlighted = columns[columnIndex].highlightedIndex,
+              let position = indices.firstIndex(of: highlighted)
         else {
-            setHighlight(delta > 0 ? indices.first : indices.last)
+            setHighlight(
+                columnIndex: columnIndex,
+                entryIndex: delta > 0 ? indices.first : indices.last
+            )
             return
         }
         let next = min(max(position + delta, 0), indices.count - 1)
-        setHighlight(indices[next])
+        setHighlight(columnIndex: columnIndex, entryIndex: indices[next])
     }
 
     @discardableResult
     private func chooseHighlighted() -> Bool {
-        guard let highlightedIndex,
-              let row = menuSurface.row(at: highlightedIndex)
+        let columnIndex = columns.count - 1
+        guard columnIndex >= 0,
+              let highlighted = columns[columnIndex].highlightedIndex,
+              let row = columns[columnIndex].surface.row(at: highlighted)
         else { return false }
+        if row.item.isEnabled, row.item.submenu != nil, row.item.onChoose == nil {
+            openSubmenu(columnIndex: columnIndex, entryIndex: highlighted, highlightFirst: true)
+            return true
+        }
         return row.performPrimaryAction()
+    }
+
+    // MARK: - Submenus
+
+    /// A row was activated — release, click, Return through the row, or accessibility press.
+    /// A parent row's activation is "open"; everything else is the menu's answer.
+    private func rowChosen(columnIndex: Int, entryIndex: Int, item: ThemedMenuItem) {
+        guard !isTearingDown else { return }
+        if item.submenu != nil, item.onChoose == nil {
+            openSubmenu(columnIndex: columnIndex, entryIndex: entryIndex, highlightFirst: true)
+            return
+        }
+        if columns.indices.contains(columnIndex) {
+            chosenRow = columns[columnIndex].surface.row(at: entryIndex)
+        }
+        onChoose?(entryIndex, item)
+    }
+
+    /// Opens `entryIndex`'s submenu beside its panel, closing anything deeper first.
+    private func openSubmenu(columnIndex: Int, entryIndex: Int, highlightFirst: Bool) {
+        guard !isTearingDown,
+              columns.indices.contains(columnIndex),
+              let row = columns[columnIndex].surface.row(at: entryIndex),
+              row.item.isEnabled,
+              let entries = row.item.submenu,
+              entries.contains(where: \.isItem)
+        else { return }
+
+        if columnIndex + 1 < columns.count {
+            if columns[columnIndex + 1].parentRow === row {
+                if highlightFirst {
+                    setHighlight(
+                        columnIndex: columnIndex + 1,
+                        entryIndex: columns[columnIndex + 1].surface.selectableIndices.first
+                    )
+                }
+                return
+            }
+            closeColumns(from: columnIndex + 1, exit: .instant)
+        }
+
+        if !filterQuery.isEmpty { filterQuery = "" }
+        submenuOpenTimer?.invalidate()
+
+        let size = NSSize(
+            width: ThemedMenuMetrics.width(for: entries, minimum: 0),
+            height: ThemedMenuMetrics.height(for: entries)
+        )
+        let frame = ThemedMenuLayout.submenuFrame(
+            parentPanel: columns[columnIndex].host.frame,
+            rowFrame: row.convert(row.bounds, to: self),
+            desiredSize: size,
+            in: bounds,
+            flipped: isFlipped,
+            firstRowInset: ThemedMenuMetrics.outerInset
+        )
+        let index = addColumn(
+            entries: entries,
+            frame: frame,
+            parentRow: row,
+            selectedEntryIndex: nil
+        )
+        row.submenuDidOpen(columns[index].surface)
+        Self.animateAppear(columns[index].host)
+        if highlightFirst {
+            setHighlight(
+                columnIndex: index,
+                entryIndex: columns[index].surface.selectableIndices.first
+            )
+        }
+    }
+
+    /// Closes column `index` and everything deeper. `exit` names only the pixels' leave —
+    /// the model is out of `columns` synchronously either way.
+    private func closeColumns(from index: Int, exit: ThemedMenuExit = .fade) {
+        guard index >= 1, index < columns.count else { return }
+        cancelSubmenuTimers()
+        pendingTravelHighlight = nil
+        travelApex = nil
+
+        let closing = Array(columns[index...])
+        columns.removeSubrange(index...)
+        if !filterQuery.isEmpty { filterQuery = "" }
+
+        for column in closing {
+            column.parentRow?.submenuDidClose()
+            column.surface.setAccessibilityRole(nil)
+            let host = column.host
+            let duration = Design.Motion.vanish
+            if case .instant = exit {
+                host.removeFromSuperview()
+            } else if duration <= 0 {
+                host.removeFromSuperview()
+            } else {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = Design.Motion.vanish
+                    host.animator().alphaValue = 0
+                }, completionHandler: {
+                    Task { @MainActor in host.removeFromSuperview() }
+                })
+            }
+        }
+    }
+
+    /// Right arrow: the highlighted parent row opens, with its first row lit — keyboard
+    /// travel always says where it landed.
+    private func openSubmenuFromKeyboard() {
+        let columnIndex = columns.count - 1
+        guard columnIndex >= 0,
+              let highlighted = columns[columnIndex].highlightedIndex
+        else { return }
+        openSubmenu(columnIndex: columnIndex, entryIndex: highlighted, highlightFirst: true)
+    }
+
+    /// Left arrow: one level back, the parent row keeping the highlight — the platform's
+    /// submenu contract, and deliberately not what Escape does (Escape lets the whole menu go).
+    private func closeDeepestFromKeyboard() {
+        guard columns.count > 1 else { return }
+        let parentRow = columns[columns.count - 1].parentRow
+        closeColumns(from: columns.count - 1)
+        if let parentRow {
+            setHighlight(columnIndex: columns.count - 1, entryIndex: parentRow.entryIndex)
+        }
+    }
+
+    // MARK: - Pointer Choreography
+
+    /// A row lit under the pointer. Everything time-based about submenus funnels through
+    /// here: opening after a rest, granting an open panel its grace, and holding a highlight
+    /// back while the pointer is visibly on its way into the panel it already opened.
+    private func pointerHighlighted(columnIndex: Int, entryIndex: Int) {
+        guard !isTearingDown, columns.indices.contains(columnIndex) else { return }
+        // Every landing restates its own claim: whichever close was pending, the pointer has
+        // just said something newer.
+        submenuCloseTimer?.invalidate()
+
+        let childRowIndex = columnIndex + 1 < columns.count
+            ? columns[columnIndex + 1].parentRow?.entryIndex
+            : nil
+
+        if let childRowIndex, entryIndex != childRowIndex {
+            if isPointerTravelling(toward: columnIndex + 1) {
+                // A deliberate diagonal into the open panel: the rows it crosses on the way
+                // do not steal it. The timer is the stall deadline — a pointer parked in the
+                // corridor produces no further moves to re-answer on.
+                pendingTravelHighlight = (columnIndex, entryIndex)
+                travelApex = travelApex ?? lastPointerPoint
+                travelDeadline = CACurrentMediaTime() + ThemedMenuMotion.safeTravelStall
+                travelTimer?.invalidate()
+                travelTimer = Timer.scheduledTimer(
+                    withTimeInterval: ThemedMenuMotion.safeTravelStall,
+                    repeats: false
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.resolveTravel() }
+                }
+                return
+            }
+            scheduleClose(from: columnIndex + 1)
+        }
+
+        applyPointerHighlight(columnIndex: columnIndex, entryIndex: entryIndex)
+    }
+
+    private func applyPointerHighlight(columnIndex: Int, entryIndex: Int) {
+        pendingTravelHighlight = nil
+        travelApex = nil
+        setHighlight(columnIndex: columnIndex, entryIndex: entryIndex)
+        scheduleOpenIfParent(columnIndex: columnIndex, entryIndex: entryIndex)
+    }
+
+    /// Arms the hover-open for a parent row, unless its panel is already the open one.
+    private func scheduleOpenIfParent(columnIndex: Int, entryIndex: Int) {
+        submenuOpenTimer?.invalidate()
+        guard columns.indices.contains(columnIndex),
+              let row = columns[columnIndex].surface.row(at: entryIndex),
+              row.item.isEnabled,
+              row.item.submenu?.contains(where: \.isItem) == true
+        else { return }
+        if columnIndex + 1 < columns.count, columns[columnIndex + 1].parentRow === row {
+            return
+        }
+        submenuOpenTimer = Timer.scheduledTimer(
+            withTimeInterval: ThemedMenuMotion.submenuOpenDelay,
+            repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isTearingDown,
+                      self.columns.indices.contains(columnIndex),
+                      self.columns[columnIndex].highlightedIndex == entryIndex
+                else { return }
+                self.openSubmenu(
+                    columnIndex: columnIndex,
+                    entryIndex: entryIndex,
+                    highlightFirst: false
+                )
+            }
+        }
+    }
+
+    /// Grants an open chain its grace before closing — the recovery window for an overshoot.
+    private func scheduleClose(from index: Int) {
+        submenuCloseTimer?.invalidate()
+        guard index < columns.count else { return }
+        submenuCloseTimer = Timer.scheduledTimer(
+            withTimeInterval: ThemedMenuMotion.submenuCloseGrace,
+            repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closeIfStillAway(from: index) }
+        }
+    }
+
+    /// The grace ran out — unless the pointer made it into the chain, or back onto the row
+    /// that opened it, while the timer ran.
+    private func closeIfStillAway(from index: Int) {
+        guard !isTearingDown, index < columns.count else { return }
+        if let point = lastPointerPoint {
+            if columns[index...].contains(where: { $0.host.frame.contains(point) }) { return }
+            if let parentRow = columns[index].parentRow,
+               parentRow.bounds.contains(parentRow.convert(point, from: self)) { return }
+        }
+        closeColumns(from: index)
+    }
+
+    /// Re-answers a held-back highlight as the pointer keeps moving: arriving in the panel
+    /// drops it, leaving the corridor (or stalling in it) lands it.
+    private func resolveTravel() {
+        guard !isTearingDown, let pending = pendingTravelHighlight else { return }
+        guard pending.column + 1 < columns.count else {
+            pendingTravelHighlight = nil
+            travelApex = nil
+            return
+        }
+        if let point = lastPointerPoint,
+           columns[(pending.column + 1)...].contains(where: { $0.host.frame.contains(point) }) {
+            // Arrived: the panel keeps its place and the crossed rows keep nothing.
+            pendingTravelHighlight = nil
+            travelApex = nil
+            return
+        }
+        if isPointerTravelling(toward: pending.column + 1) { return }
+        pendingTravelHighlight = nil
+        travelApex = nil
+        scheduleClose(from: pending.column + 1)
+        applyPointerHighlight(columnIndex: pending.column, entryIndex: pending.entry)
+    }
+
+    /// Whether the pointer is inside the corridor from where it left the open row to the
+    /// open panel's near edge — the platform menus' safe triangle.
+    private func isPointerTravelling(toward childIndex: Int) -> Bool {
+        guard columns.indices.contains(childIndex), let point = lastPointerPoint else {
+            return false
+        }
+        let childFrame = columns[childIndex].host.frame
+        // Panels overlap by design, so a row under the seam can fire hover while the pointer
+        // is visually on the child panel: that is arrival, not a landing on the row.
+        if childFrame.contains(point) { return true }
+        if travelApex != nil, CACurrentMediaTime() >= travelDeadline { return false }
+        let apex = travelApex ?? point
+        return Self.point(point, inTriangleFrom: apex, toEdgeOf: childFrame)
+    }
+
+    /// Point-in-triangle from `apex` to the vertical edge of `frame` facing it.
+    private static func point(
+        _ point: NSPoint,
+        inTriangleFrom apex: NSPoint,
+        toEdgeOf frame: NSRect
+    ) -> Bool {
+        let edgeX = apex.x <= frame.midX ? frame.minX : frame.maxX
+        let b = NSPoint(x: edgeX, y: frame.minY)
+        let c = NSPoint(x: edgeX, y: frame.maxY)
+        func sign(_ p1: NSPoint, _ p2: NSPoint, _ p3: NSPoint) -> CGFloat {
+            (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+        }
+        let d1 = sign(point, apex, b)
+        let d2 = sign(point, b, c)
+        let d3 = sign(point, c, apex)
+        let hasNegative = d1 < 0 || d2 < 0 || d3 < 0
+        let hasPositive = d1 > 0 || d2 > 0 || d3 > 0
+        return !(hasNegative && hasPositive)
     }
 }
 
@@ -767,12 +1279,26 @@ enum ThemedMenuMetrics {
     static let previewSize: CGFloat = 20
     static let previewSlot: CGFloat = previewSize + Design.Spacing.tight
 
+    /// The chevron marking a row that opens a submenu, and the column it sits in — trailing,
+    /// where the platform's own submenu arrow lives.
+    static let submenuChevronSize: CGFloat = 8
+    static let submenuChevronSlot: CGFloat = submenuChevronSize + Design.Spacing.small
+
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
     static func hasImageColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
             return item.image != nil
+        }
+    }
+
+    /// Reserved on the image column's terms: only when some row actually opens a submenu, so a
+    /// menu of plain actions keeps its trailing edge tight against the longest title.
+    static func hasSubmenuColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+        entries.contains { entry in
+            guard case .item(let item) = entry else { return false }
+            return item.submenu != nil
         }
     }
 
@@ -824,8 +1350,9 @@ enum ThemedMenuMetrics {
 
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
+        let chevronColumn = hasSubmenuColumn(entries) ? submenuChevronSlot : 0
         let content = outerInset * 2 + contentInset * 2
-            + leadingSlot + imageColumn + previewColumn + text
+            + leadingSlot + imageColumn + previewColumn + text + chevronColumn
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
 }
@@ -837,12 +1364,27 @@ enum ThemedMenuMotion {
     static let appearAnimationKey = "threading.menu.appear"
     static let shadowOpacity: Float = 0.28
     static let shadowRadius: CGFloat = 16
+
+    /// How long the pointer rests on a parent row before its submenu opens. Short enough to
+    /// feel attached to the hover, long enough that sweeping down a menu does not fan panels
+    /// out of every parent row on the way past.
+    static let submenuOpenDelay: TimeInterval = 0.16
+    /// How long an open submenu survives the pointer leaving its row for a sibling. This is
+    /// the recovery window for an overshoot; the safe-travel corridor below covers the
+    /// deliberate diagonal.
+    static let submenuCloseGrace: TimeInterval = 0.28
+    /// How long a pointer may sit still inside the safe-travel corridor before the row it is
+    /// actually on wins. Without a deadline, parking the pointer between panels would pin the
+    /// menu to a highlight it has visibly left.
+    static let safeTravelStall: TimeInterval = 0.35
 }
 
 private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
     var onHighlight: ((Int) -> Void)?
+    /// The panel scrolled under its rows — what tells an open submenu its anchor moved.
+    var onScrolled: (() -> Void)?
 
     let selectableIndices: [Int]
 
@@ -863,6 +1405,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         var selectable: [Int] = []
         let hasImageColumn = ThemedMenuMetrics.hasImageColumn(entries)
         let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
+        let hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
 
         for (index, entry) in entries.enumerated() {
             switch entry {
@@ -874,7 +1417,8 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     item: item,
                     isSelected: item.isSelected || index == selectedEntryIndex,
                     hasImageColumn: hasImageColumn,
-                    hasPreviewColumn: hasPreviewColumn
+                    hasPreviewColumn: hasPreviewColumn,
+                    hasSubmenuColumn: hasSubmenuColumn
                 )
                 madeRows[index] = row
                 views.append(row)
@@ -912,6 +1456,20 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
             row.onHighlight = { [weak self] index in self?.onHighlight?(index) }
         }
         setAccessibilityRole(.menu)
+
+        // Scrolling moves every row under any submenu anchored to one of them; the overlay
+        // listens and closes what no longer lines up.
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(contentScrolled),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+    }
+
+    @objc private func contentScrolled() {
+        onScrolled?()
     }
 
     @available(*, unavailable)
@@ -1068,10 +1626,16 @@ private final class ThemedMenuRowView: ThemedControl {
     private let selected: Bool
     private let hasImageColumn: Bool
     private let hasPreviewColumn: Bool
+    private let hasSubmenuColumn: Bool
     private var pressed = false { didSet { needsDisplay = true } }
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
     private var isDisabledHover = false { didSet { needsDisplay = true } }
+
+    /// The open panel this row fathered, while it is open. It keeps the row drawing the
+    /// menu-path highlight — the parent stays lit wherever the pointer is in its chain, as
+    /// the platform's own menus stay lit — and it is what accessibility descends into.
+    private(set) weak var openSubmenuSurface: NSView?
 
     /// A preview in the title's slot is the row's name, so the row draws no text of its own.
     private var drawsTitle: Bool { item.preview?.placement != .title }
@@ -1081,19 +1645,35 @@ private final class ThemedMenuRowView: ThemedControl {
         item: ThemedMenuItem,
         isSelected: Bool,
         hasImageColumn: Bool,
-        hasPreviewColumn: Bool
+        hasPreviewColumn: Bool,
+        hasSubmenuColumn: Bool
     ) {
         self.entryIndex = entryIndex
         self.item = item
         selected = isSelected
         self.hasImageColumn = hasImageColumn
         self.hasPreviewColumn = hasPreviewColumn
+        self.hasSubmenuColumn = hasSubmenuColumn
         preferredHeight = item.subtitle?.isEmpty == false
             ? ThemedMenuMetrics.subtitleRowHeight
             : ThemedMenuMetrics.rowHeight
         super.init(frame: .zero)
         toolTip = item.subtitle
         installPreview()
+    }
+
+    // MARK: - Submenu
+
+    func submenuDidOpen(_ surface: NSView) {
+        openSubmenuSurface = surface
+        surface.setAccessibilityParent(self)
+        needsDisplay = true
+    }
+
+    func submenuDidClose() {
+        guard openSubmenuSurface != nil else { return }
+        openSubmenuSurface = nil
+        needsDisplay = true
     }
 
     // MARK: - Preview
@@ -1233,10 +1813,19 @@ private final class ThemedMenuRowView: ThemedControl {
     override func isAccessibilityEnabled() -> Bool { item.isEnabled }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 
-    /// A menu item is a leaf whatever it is drawn from. A hosted preview is how this row shows
-    /// its own title and status, not a second thing inside it to navigate to, and `item.title`
-    /// already says in words what the preview says in movement.
-    override func accessibilityChildren() -> [Any]? { [] }
+    /// "Show menu" is honest only on a row that has one; pressing a parent row opens it, so
+    /// the two actions meet in the same place.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard item.submenu != nil else { return false }
+        return performPrimaryAction()
+    }
+
+    /// A menu item is a leaf whatever it is drawn from — a hosted preview is how this row
+    /// shows its own title, not a second thing to navigate to — with one exception: the
+    /// submenu it has opened is its child, exactly as the platform models an item's menu.
+    override func accessibilityChildren() -> [Any]? {
+        openSubmenuSurface.map { [$0] } ?? []
+    }
 
     // MARK: - Drawing
 
@@ -1256,7 +1845,9 @@ private final class ThemedMenuRowView: ThemedControl {
         // is what keeps a filled row off the one stacked against it.
         let fillRect = bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.fillInset)
 
-        if isKeyboardHighlighted || pressed {
+        // The open-submenu fill is the menu path: the parent stays lit while the pointer is
+        // anywhere in the chain it opened, which is what keeps a three-panel menu readable.
+        if isKeyboardHighlighted || pressed || openSubmenuSurface != nil {
             ThemedSurface.draw(
                 fillRect,
                 fill: Design.Surface.controlHover,
@@ -1308,6 +1899,19 @@ private final class ThemedMenuRowView: ThemedControl {
             draw(image, in: imageRect, tint: label)
         }
 
+        if item.submenu != nil {
+            drawChevron(
+                in: NSRect(
+                    x: bounds.maxX - ThemedMenuMetrics.contentInset
+                        - ThemedMenuMetrics.submenuChevronSize,
+                    y: bounds.midY - ThemedMenuMetrics.submenuChevronSize / 2,
+                    width: ThemedMenuMetrics.submenuChevronSize,
+                    height: ThemedMenuMetrics.submenuChevronSize
+                ),
+                color: label
+            )
+        }
+
         guard drawsTitle else { return }
 
         let x = ThemedMenuMetrics.titleInset(
@@ -1320,7 +1924,11 @@ private final class ThemedMenuRowView: ThemedControl {
         let titleY = hasSubtitle
             ? bounds.midY + Design.Spacing.hairline
             : bounds.midY - titleHeight / 2
-        let textWidth = max(0, bounds.maxX - ThemedMenuMetrics.contentInset - x)
+        let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
+        let textWidth = max(
+            0,
+            bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn - x
+        )
         (item.title as NSString).draw(
             in: NSRect(x: x, y: titleY, width: textWidth, height: titleHeight),
             withAttributes: [.font: titleFont, .foregroundColor: label]
@@ -1350,6 +1958,20 @@ private final class ThemedMenuRowView: ThemedControl {
         path.move(to: NSPoint(x: rect.minX, y: rect.midY))
         path.line(to: NSPoint(x: rect.minX + rect.width * 0.38, y: rect.minY))
         path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        color.setStroke()
+        path.stroke()
+    }
+
+    /// The submenu chevron: `›`, drawn with the checkmark's own stroke so the two glyph
+    /// columns read as one hand. Symmetric about the row's midline, so flip cannot skew it.
+    private func drawChevron(in rect: NSRect, color: NSColor) {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.minY))
+        path.line(to: NSPoint(x: rect.maxX - rect.width * 0.2, y: rect.midY))
+        path.line(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.maxY))
         path.lineWidth = 1.5
         path.lineCapStyle = .round
         path.lineJoinStyle = .round

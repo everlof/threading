@@ -175,34 +175,36 @@ final class OpenInTests: XCTestCase {
 
     // MARK: - The Menus
 
-    /// One builder serves the platform's context menus, so a second surface cannot quietly
-    /// offer fewer apps than the first — the drift `populateSessionActions` exists to prevent
-    /// for session actions, applied to this one.
+    /// One builder serves every context menu, so a second surface cannot quietly offer fewer
+    /// apps than the first — the drift `sessionActionEntries` exists to prevent for session
+    /// actions, applied to this one.
     func testTheSubmenuNamesEveryOfferedAppAndCarriesItBack() throws {
         let target = ExternalAppTarget.folder(URL(fileURLWithPath: "/tmp"))
-        let item = try XCTUnwrap(
-            OpenInMenu.item(for: target, action: #selector(openInAppClicked), owner: self)
+        var chosen: ExternalApp?
+        let entry = try XCTUnwrap(
+            OpenInMenu.submenuEntry(for: target, onChoose: { chosen = $0 })
         )
-        let submenu = try XCTUnwrap(item.submenu)
+        let submenu = try XCTUnwrap(entry.item?.submenu)
+        let rows = submenu.compactMap(\.item)
 
         let offered = ExternalAppLauncher.shared.installed(for: target)
         XCTAssertEqual(
-            submenu.items.map(\.title),
+            rows.map(\.title),
             offered.map(\.name),
             "the submenu and the launcher disagree about what is installed"
         )
 
-        let finderItem = try XCTUnwrap(submenu.items.first { $0.title == "Finder" })
+        let finderRow = try XCTUnwrap(rows.first { $0.title == "Finder" })
+        finderRow.onChoose?()
         XCTAssertEqual(
-            OpenInMenu.app(in: finderItem)?.id,
+            chosen?.id,
             ExternalApps.finderID,
-            "a chosen item cannot say which app it named"
+            "a chosen row cannot say which app it named"
         )
         XCTAssertNotNil(
-            finderItem.image,
+            finderRow.image,
             "an app is recognised by its own icon before its name is read"
         )
-        XCTAssertTrue(finderItem.target === self, "the item would act on nobody")
     }
 
     /// The themed dropdown marks the app a plain press would use, which is the only thing that
@@ -387,7 +389,6 @@ final class OpenInTests: XCTestCase {
 
     /// Stands in for the real handler: a menu item needs a selector its owner answers to, and
     /// what is being asserted is which app the item names, not what pressing it does.
-    @objc private func openInAppClicked(_ sender: NSMenuItem) {}
 
     private func descendantGlyphViews(of view: NSView) -> [GlyphView] {
         view.subviews.flatMap { subview -> [GlyphView] in

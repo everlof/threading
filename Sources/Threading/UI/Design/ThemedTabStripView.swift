@@ -318,7 +318,10 @@ final class ThemedTabStripView: NSView {
         )
         tab.onSelect = { [weak self] in self?.onSelect?(id) }
         tab.onClose = { [weak self] in self?.onClose?(id) }
-        tab.onContextMenu = { [weak self] in self?.presentContextMenu(for: id) ?? false }
+        tab.onContextMenu = { [weak self] (anchor: ThemedMenuAnchor) -> Bool in
+            guard let self else { return false }
+            return self.presentContextMenu(for: id, at: anchor)
+        }
         tab.onDrag = { [weak self] phase, event in
             self?.handleDrag(of: id, phase: phase, event: event)
         }
@@ -341,13 +344,14 @@ final class ThemedTabStripView: NSView {
 
     /// Answers whether a menu opened, which is what the chip's accessibility route reports.
     @discardableResult
-    private func presentContextMenu(for id: UUID) -> Bool {
+    private func presentContextMenu(for id: UUID, at anchor: ThemedMenuAnchor) -> Bool {
         guard let entries = contextEntries?(id),
               entries.contains(where: { if case .item = $0 { true } else { false } }),
               let chip = chipsByID[id] else { return false }
         contextMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: chip.tab.bounds.width),
             from: chip.tab,
+            anchor: anchor,
             selectedEntryIndex: nil,
             onChoose: { _, item in item.onChoose?() },
             onDismiss: { [weak self] in self?.contextMenuSession = nil }

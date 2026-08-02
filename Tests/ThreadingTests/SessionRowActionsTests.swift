@@ -232,41 +232,40 @@ final class SessionRowActionsTests: XCTestCase {
     /// Session Options fold now, so that is where they are held to being.
     func testSharedSessionMenuIncludesAttachmentsAndBothInterfaces() throws {
         let sidebar = ProjectSidebarViewController()
-        let menu = NSMenu()
-        sidebar.populateSessionActions(
-            menu,
+        let entries = sidebar.sessionActionEntries(
             for: AgentSession(kind: .claude, title: "Terminal", usesNativeUI: false)
         )
-        let options = try sessionOptions(in: menu)
+        let options = try sessionOptions(in: entries)
 
         XCTAssertNotNil(
-            options.items.first { $0.title == SessionActionMenuDefaults.attachmentsTitle }
+            options.first { $0.item?.title == SessionActionMenuDefaults.attachmentsTitle }
         )
 
         // Nothing has muted this session or its project, so the item offers the change rather
         // than describing the state — an Unmute on something already audible would read as
         // the opposite of what is true.
         XCTAssertNotNil(
-            options.items.first { $0.title == L10n.string("Mute Notifications") },
+            options.first { $0.item?.title == L10n.string("Mute Notifications") },
             "the session menu lost its mute item"
         )
 
-        let interface = try XCTUnwrap(options.items.first { $0.title == "Interface" }?.submenu)
+        let interface = try XCTUnwrap(
+            options.compactMap(\.item).first { $0.title == "Interface" }?.submenu
+        )
         XCTAssertEqual(
-            interface.items.map(\.title),
+            interface.compactMap { $0.item?.title },
             [SessionSurfaceTogglePresentation.nativeTitle, AgentKind.claude.originalUITitle]
         )
-        XCTAssertEqual(interface.items.map(\.state), [.off, .on])
+        XCTAssertEqual(interface.compactMap { $0.item?.isSelected }, [false, true])
 
-        let nativeMenu = NSMenu()
-        sidebar.populateSessionActions(
-            nativeMenu,
+        let nativeEntries = sidebar.sessionActionEntries(
             for: AgentSession(kind: .claude, title: "Native", usesNativeUI: true)
         )
         let nativeInterface = try XCTUnwrap(
-            try sessionOptions(in: nativeMenu).items.first { $0.title == "Interface" }?.submenu
+            try sessionOptions(in: nativeEntries)
+                .compactMap(\.item).first { $0.title == "Interface" }?.submenu
         )
-        XCTAssertEqual(nativeInterface.items.map(\.state), [.on, .off])
+        XCTAssertEqual(nativeInterface.compactMap { $0.item?.isSelected }, [true, false])
     }
 
     /// The menu reads in groups — it had grown to seventeen top-level items with a twelve-item
@@ -275,15 +274,13 @@ final class SessionRowActionsTests: XCTestCase {
     /// order is stated because it is a decision, not an accident of call order.
     func testTheSessionMenuFoldsTheSetOnceItemsAndKeepsItsGroupsApart() throws {
         let sidebar = ProjectSidebarViewController()
-        let menu = NSMenu()
-        sidebar.populateSessionActions(
-            menu,
+        let entries = sidebar.sessionActionEntries(
             for: AgentSession(kind: .claude, title: "Terminal", usesNativeUI: false)
         )
 
-        let options = try sessionOptions(in: menu)
+        let options = try sessionOptions(in: entries)
         XCTAssertEqual(
-            options.items.map(\.title),
+            options.compactMap { $0.item?.title },
             [
                 "Interface",
                 "Claude Remote Control",
@@ -292,29 +289,33 @@ final class SessionRowActionsTests: XCTestCase {
             ]
         )
 
-        // Every actionable item in the fold carries its own target: the builder's retarget
-        // loop walks only the top level, and an untargeted submenu item draws, disables or —
-        // worse — silently does nothing.
-        for item in options.items where item.action != nil {
-            XCTAssertNotNil(item.target, "\(item.title) has no target inside the fold")
+        // Every row in the fold must be able to answer a choice: an action of its own, or a
+        // submenu to open — a row with neither draws, highlights and silently does nothing.
+        for item in options.compactMap(\.item) {
+            XCTAssertTrue(
+                item.onChoose != nil || item.submenu != nil,
+                "\(item.title) answers nothing inside the fold"
+            )
         }
 
-        XCTAssertNotNil(menu.items.first { $0.title == L10n.string("Theme") })
-        XCTAssertNotNil(menu.items.first { $0.title == L10n.string("Permission Mode") })
+        let titles = entries.compactMap { $0.item?.title }
+        XCTAssertTrue(titles.contains(L10n.string("Theme")))
+        XCTAssertTrue(titles.contains(L10n.string("Permission Mode")))
 
         // Most of the middle groups are conditional, so an absent group must fold its
         // separator away rather than leaving two in a row.
-        for (index, item) in menu.items.enumerated() where item.isSeparatorItem {
+        for (index, entry) in entries.enumerated() where !entry.isItem {
             XCTAssertTrue(
-                index > 0 && !menu.items[index - 1].isSeparatorItem,
+                index > 0 && entries[index - 1].isItem,
                 "an empty group left its separator behind at index \(index)"
             )
         }
     }
 
-    private func sessionOptions(in menu: NSMenu) throws -> NSMenu {
+    private func sessionOptions(in entries: [ThemedMenuEntry]) throws -> [ThemedMenuEntry] {
         try XCTUnwrap(
-            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+            entries.compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
                 .submenu,
             "the session menu has no Session Options fold"
         )

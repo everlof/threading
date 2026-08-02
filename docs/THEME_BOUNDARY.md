@@ -16,14 +16,18 @@ types that do not choose visible styling.
 System-owned chrome is allowed only behind a named containment boundary. Current examples are
 the invisible `NSColorWell` inside `ThemeSwatchView`, the private field editor inside
 `ThemedTextField`, AppKit's overlay-scroll effect pockets around `ThemedScroller`, outline
-disclosure buttons, application/context menus, toolbars, and open/save panels. The system object
+disclosure buttons, the application menu bar, toolbars, and open/save panels. The system object
 must not leak out as the component callers build against.
 
 App-owned alerts and anchored popovers are not system-owned chrome: callers use `ThemedAlert`
 and `ThemedPopover`, which own their visible surfaces, focus return, Escape handling, and live
-theme response. Application-menu and right-click/context menus remain native on purpose; they
-retain Services, responder-chain roles, type-to-select, keyboard navigation, and the platform's
-expected secondary-click behavior. Open/save panels, the colour panel, and the `NSWindow` frame
+theme response. **Menus inside the window — dropdowns and right-click/context menus alike — are
+app-owned**: `ThemedMenuPresenter` carries type-to-select, keyboard navigation (arrows walk
+submenus in and out), press-drag-release tracking, hover-safe submenu travel, and pointer
+anchoring for secondary clicks, so converting a menu gives none of that up. Only the menu *bar*
+remains native (`AppDelegate` is the named boundary and the source checker's one exception):
+its menus carry Services, responder-chain command routing, and system key equivalents that
+cannot be reproduced in-window. Open/save panels, the colour panel, and the `NSWindow` frame
 remain system workflows behind their named boundaries.
 
 Containment includes API shape, not only where construction happens. `ChipView` and

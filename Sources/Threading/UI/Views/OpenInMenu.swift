@@ -3,51 +3,50 @@ import AppKit
 // MARK: - Open In Menu
 
 /// The list of installed apps a folder or a file can be handed to, in the two forms the app
-/// needs it: an `NSMenu` submenu for the platform's context menus, and themed entries for a
-/// control that opens its own dropdown.
+/// needs it: a submenu entry for the context menus, and a flat list for a control that opens
+/// its own dropdown.
 ///
 /// One builder for both, because the two are the same offer made from different surfaces — a
 /// header button, a sidebar row, a file tree, a diff. A second list that quietly held fewer
-/// apps is exactly the drift `populateSessionActions` exists to prevent for session actions.
+/// apps is exactly the drift `sessionActionEntries` exists to prevent for session actions.
 ///
-/// Every item carries its app's `id` in `representedObject`; `app(in:)` reads it back. The
-/// *target* is not carried, because a context menu's subject is decided when it opens, not when
-/// it was built — each call site recomputes it from its own clicked row, exactly as its
-/// neighbouring items already do.
+/// The *target* is captured by the closures at build time, because a context menu is built
+/// per open for the row under the pointer — the same rule its neighbouring items follow.
 @MainActor
 enum OpenInMenu {
 
-    /// The submenu item, or nil when nothing installed can take this target.
+    /// The "Open in" parent entry, or nil when nothing installed can take this target.
     ///
     /// Nil rather than a disabled item: an "Open in" that offers nothing is a dead row in a
     /// menu the user opened for something else, and the design system's own rule is that a
     /// control offering a single dead option hides instead.
-    static func item(
+    ///
+    /// The default choice hands the target to the chosen app; pass `onChoose` where the call
+    /// site owns more of the launch (recording a preference, refreshing a control).
+    static func submenuEntry(
         for target: ExternalAppTarget,
-        action: Selector,
-        owner: AnyObject
-    ) -> NSMenuItem? {
+        onChoose: ((ExternalApp) -> Void)? = nil
+    ) -> ThemedMenuEntry? {
         let apps = ExternalAppLauncher.shared.installed(for: target)
         guard !apps.isEmpty else { return nil }
 
-        let submenu = NSMenu(title: OpenInMenuDefaults.title)
-        for app in apps {
-            let item = NSMenuItem(title: app.name, action: action, keyEquivalent: "")
-            item.representedObject = app.id
-            item.image = ExternalAppLauncher.shared.icon(for: app)
-            item.target = owner
-            submenu.addItem(item)
-        }
-
-        let item = NSMenuItem(title: OpenInMenuDefaults.title, action: nil, keyEquivalent: "")
-        item.submenu = submenu
-        return item
-    }
-
-    /// The app a chosen item names, or nil if the menu was built before it was uninstalled.
-    static func app(in sender: NSMenuItem) -> ExternalApp? {
-        guard let id = sender.representedObject as? String else { return nil }
-        return ExternalApps.app(id: id)
+        return .item(ThemedMenuItem(
+            title: OpenInMenuDefaults.title,
+            submenu: apps.map { app in
+                .item(ThemedMenuItem(
+                    title: app.name,
+                    image: ExternalAppLauncher.shared.icon(for: app),
+                    representedValue: app.id,
+                    onChoose: {
+                        if let onChoose {
+                            onChoose(app)
+                        } else {
+                            ExternalAppLauncher.shared.open(target, in: app)
+                        }
+                    }
+                ))
+            }
+        ))
     }
 
     /// The same list for a themed dropdown, each row drawing the app's own icon.

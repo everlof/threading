@@ -139,23 +139,23 @@ enum ShareChatSheet {
         guard let chosen, grants.indices.contains(chosen) else { return }
         let grant = grants[chosen]
 
-        guard let url = RemoteAccessCoordinator.shared.shareURL(
+        RemoteAccessCoordinator.shared.createSessionShare(
             for: sessionID,
             capability: grant.capability,
             canApprovePermissions: grant.canApprovePermissions
-        ) else {
-            let unavailable = ThemedAlert()
-            unavailable.messageText = L10n.string("Secure relay isn’t ready")
-            unavailable.informativeText = L10n.string(
-                "Wait for Remote Access to say it is ready, then try again."
-            )
-            unavailable.alertStyle = .warning
-            unavailable.runModal()
-            return
+        ) { result in
+            switch result {
+            case .success(let created):
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
+            case .failure(let error):
+                let unavailable = ThemedAlert()
+                unavailable.messageText = L10n.string("Secure relay isn’t ready")
+                unavailable.informativeText = error.localizedDescription
+                unavailable.alertStyle = .warning
+                unavailable.runModal()
+            }
         }
-
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url.absoluteString, forType: .string)
     }
 
     static func request(chatTitle: String, isRunning: Bool) -> ChoiceRequest {
@@ -289,15 +289,8 @@ extension ProjectSidebarViewController {
     func showRowActions(for sessionID: SessionID, from anchor: NSView) {
         guard let session = projectStore.session(withID: sessionID) else { return }
 
-        let menu = NSMenu()
         actionSessionID = sessionID
-        populateSessionActions(menu, for: session)
-
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: anchor.bounds.maxY),
-            in: anchor
-        )
+        presentSidebarMenu(sessionActionEntries(for: session), from: anchor)
     }
 
     /// The full set of session actions, shared by the row's `⋯` hover button, its right-click
@@ -305,140 +298,120 @@ extension ProjectSidebarViewController {
     /// that offered fewer actions is exactly the kind of gap that grows silently.
     ///
     /// The caller sets `actionSessionID` first: every handler here reads it, and it is set as
-    /// the menu opens, so whichever surface presents the menu targets the right session.
-    func populateSessionActions(_ menu: NSMenu, for session: AgentSession) {
+    /// the menu is built, so whichever surface presents the menu targets the right session.
+    func sessionActionEntries(for session: AgentSession) -> [ThemedMenuEntry] {
         let sessionID = session.id
+        var entries: [ThemedMenuEntry] = []
 
-        menu.addItem(
-            withTitle: session.isPinned ? L10n.string("Unpin") : L10n.string("Pin"),
-            action: #selector(togglePinnedClicked),
-            keyEquivalent: ""
-        )
+        entries.append(action(
+            session.isPinned ? L10n.string("Unpin") : L10n.string("Pin")
+        ) { [weak self] in self?.togglePinnedClicked() })
         // The sidebar only ever lists unarchived sessions, so this is always "Archive";
         // restoring one happens from Settings, where the archived sessions live.
-        menu.addItem(
-            withTitle: L10n.string("Archive"),
-            action: #selector(archiveClicked),
-            keyEquivalent: ""
-        )
+        entries.append(action(L10n.string("Archive")) { [weak self] in
+            self?.archiveClicked()
+        })
 
         if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            menu.addItem(
-                withTitle: L10n.string("Close Session"),
-                action: #selector(closeSessionClicked),
-                keyEquivalent: ""
-            )
+            entries.append(action(L10n.string("Close Session")) { [weak self] in
+                self?.closeSessionClicked()
+            })
         }
 
         // The middle of this menu was once a twelve-item unbroken run, so it now reads in
         // groups: side chats, then the appearance-and-conduct pair plus the folded options,
         // then identity-and-housekeeping. The fold takes what is set once and left alone;
         // Theme and Permission Mode stay top-level because they are reached for repeatedly.
-        addGroupSeparator(to: menu)
-        addSideChatItems(to: menu, for: session)
+        appendGroupSeparator(&entries)
+        entries.append(contentsOf: sideChatEntries(for: session))
 
-        addGroupSeparator(to: menu)
-        menu.addItem(makeSessionThemeItem(for: sessionID))
-        addPermissionModeItem(to: menu, for: session)
-        menu.addItem(makeSessionOptionsItem(for: session))
+        appendGroupSeparator(&entries)
+        entries.append(sessionThemeEntry(for: sessionID))
+        if let permissionMode = permissionModeEntry(for: session) {
+            entries.append(permissionMode)
+        }
+        entries.append(sessionOptionsEntry(for: session))
 
-        addGroupSeparator(to: menu)
+        appendGroupSeparator(&entries)
         // A session's folder is its project's checkout, so this is the same offer the project
         // row makes, made where the user already is. It leads the identity group because it is
         // the one item here that leaves the app.
         if let project = projectStore.project(forSessionID: sessionID),
-           let openIn = OpenInMenu.item(
-               for: .folder(project.folderURL),
-               action: #selector(openSessionFolderInAppClicked),
-               owner: self
-           ) {
-            menu.addItem(openIn)
+           let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
+            entries.append(openIn)
         }
-        menu.addItem(
-            withTitle: L10n.string("Rename Session…"),
-            action: #selector(renameSessionClicked),
-            keyEquivalent: ""
-        )
+        entries.append(action(L10n.string("Rename Session…")) { [weak self] in
+            self?.renameSessionClicked()
+        })
         // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
         // greyed row here would be one more thing to read in a menu that already reads long,
         // and the reason it is unavailable is not something a disabled item could say.
         if SessionCoordinator.canAskAgentToRename(sessionID) {
-            menu.addItem(
-                withTitle: L10n.string("Rename with Agent"),
-                action: #selector(askAgentToRenameClicked),
-                keyEquivalent: ""
-            )
+            entries.append(action(L10n.string("Rename with Agent")) { [weak self] in
+                self?.askAgentToRenameClicked()
+            })
         }
-        menu.addItem(
-            withTitle: L10n.string("Copy Session ID"),
-            action: #selector(copySessionIDClicked),
-            keyEquivalent: ""
-        )
+        entries.append(action(L10n.string("Copy Session ID")) { [weak self] in
+            self?.copySessionIDClicked()
+        })
         if AppSettings.shared.remoteAccessEnabled {
-            menu.addItem(
-                withTitle: L10n.string("Share Chat…"),
-                action: #selector(shareSessionClicked),
-                keyEquivalent: ""
-            )
+            entries.append(action(L10n.string("Share Chat…")) { [weak self] in
+                self?.shareSessionClicked()
+            })
             if RemoteAccessCoordinator.shared.hasSessionShares(sessionID) {
-                menu.addItem(
-                    withTitle: L10n.string("Stop Sharing Chat"),
-                    action: #selector(stopSharingSessionClicked),
-                    keyEquivalent: ""
-                )
+                entries.append(action(L10n.string("Stop Sharing Chat")) { [weak self] in
+                    self?.stopSharingSessionClicked()
+                })
             }
         }
-        addMoveToAccountItem(to: menu, for: session)
-        addContinueWithProviderItem(to: menu, for: session)
+        if let move = moveToAccountEntry(for: session) { entries.append(move) }
+        if let cont = continueWithProviderEntry(for: session) { entries.append(cont) }
 
-        addGroupSeparator(to: menu)
-        menu.addItem(
-            withTitle: L10n.string("Delete Session"),
-            action: #selector(deleteSessionClicked),
-            keyEquivalent: ""
-        )
+        appendGroupSeparator(&entries)
+        entries.append(action(L10n.string("Delete Session")) { [weak self] in
+            self?.deleteSessionClicked()
+        })
 
-        for item in menu.items { item.target = self }
-
-        // After the retarget loop: these items carry their own targets and the row's own
-        // identity, lowercased to match the sanitized snapshot IDs extensions already hold.
-        appendExtensionCommandItems(
-            to: menu,
+        // The row's own identity, lowercased to match the sanitized snapshot IDs extensions
+        // already hold.
+        entries.append(contentsOf: extensionCommandEntries(
             placement: .sessionRow,
             context: ExtensionCommandContext(
                 projectID: projectStore.project(forSessionID: sessionID)?
                     .id.uuidString.lowercased(),
                 sessionID: sessionID.uuidString.lowercased()
             )
-        )
+        ))
+        return entries
+    }
+
+    /// One plain action row.
+    private func action(_ title: String, _ body: @escaping () -> Void) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(title: title, onChoose: body))
     }
 
     /// Starts a new group. Skips where the previous group contributed nothing — most of the
     /// middle items are conditional, and two separators in a row read as a missing item rather
     /// than an empty group.
-    private func addGroupSeparator(to menu: NSMenu) {
-        guard let last = menu.items.last, !last.isSeparatorItem else { return }
-        menu.addItem(.separator())
+    private func appendGroupSeparator(_ entries: inout [ThemedMenuEntry]) {
+        guard let last = entries.last, last.isItem else { return }
+        entries.append(.separator)
     }
 
     /// The set-once configuration, folded behind one item: Interface, Claude Remote Control,
     /// Mute Notifications and Attachments. Everything in here keeps its own condition — the
     /// fold never shows an item the flat menu would have hidden — and the submenu is never
     /// empty, because the mute and attachments items are unconditional.
-    private func makeSessionOptionsItem(for session: AgentSession) -> NSMenuItem {
-        let submenu = NSMenu(title: SessionActionMenuDefaults.sessionOptionsTitle)
-        addSurfaceMenu(to: submenu, for: session)
-        addRemoteControlItem(to: submenu, for: session)
-        addMuteItem(to: submenu, for: session)
-        addAttachmentsItem(to: submenu)
-
-        let item = NSMenuItem(
+    private func sessionOptionsEntry(for session: AgentSession) -> ThemedMenuEntry {
+        var submenu: [ThemedMenuEntry] = []
+        if let interface = interfaceEntry(for: session) { submenu.append(interface) }
+        if let remote = remoteControlEntry(for: session) { submenu.append(remote) }
+        submenu.append(muteEntry(for: session))
+        submenu.append(attachmentsEntry())
+        return .item(ThemedMenuItem(
             title: SessionActionMenuDefaults.sessionOptionsTitle,
-            action: nil,
-            keyEquivalent: ""
-        )
-        item.submenu = submenu
-        return item
+            submenu: submenu
+        ))
     }
 
     /// Silences one conversation, or lets it speak again.
@@ -446,29 +419,23 @@ extension ProjectSidebarViewController {
     /// The title reads the *resolved* answer rather than the session's own field, so a session
     /// inside a muted project offers Unmute — the alternative is a Mute item on something that
     /// is already silent, which says the state is the opposite of what it is.
-    private func addMuteItem(to menu: NSMenu, for session: AgentSession) {
-        let item = menu.addItem(
-            withTitle: AttentionAlertScope.isMuted(sessionID: session.id)
+    private func muteEntry(for session: AgentSession) -> ThemedMenuEntry {
+        action(
+            AttentionAlertScope.isMuted(sessionID: session.id)
                 ? L10n.string("Unmute Notifications")
-                : L10n.string("Mute Notifications"),
-            action: #selector(toggleMutedClicked),
-            keyEquivalent: ""
-        )
-        // Inside the Session Options submenu, which the caller's retarget loop never walks.
-        item.target = self
+                : L10n.string("Mute Notifications")
+        ) { [weak self] in self?.toggleMutedClicked() }
     }
 
-    private func addAttachmentsItem(to menu: NSMenu) {
-        let item = menu.addItem(
-            withTitle: SessionActionMenuDefaults.attachmentsTitle,
-            action: #selector(attachmentsClicked),
-            keyEquivalent: ""
-        )
-        item.image = NSImage(
-            systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
-            accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
-        )
-        item.target = self
+    private func attachmentsEntry() -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: SessionActionMenuDefaults.attachmentsTitle,
+            image: NSImage(
+                systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
+                accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
+            ),
+            onChoose: { [weak self] in self?.attachmentsClicked() }
+        ))
     }
 
     @objc private func toggleMutedClicked() {
@@ -491,74 +458,46 @@ extension ProjectSidebarViewController {
         AttentionAlertCenter.shared.preferencesChanged()
     }
 
-    /// Adds the side-chat items: fork this conversation into one that starts with its context
-    /// but keeps its own record.
+    /// The side-chat rows: fork this conversation into one that starts with its context but
+    /// keeps its own record.
     ///
     /// Both are hidden until there is something to fork — an agent that supports it, and a
     /// conversation that has actually started. A fork of nothing is an ordinary new session,
     /// which the composer already offers.
-    private func addSideChatItems(to menu: NSMenu, for session: AgentSession) {
-        guard session.kind.supportsForking, session.resumeState.isResumable else { return }
+    private func sideChatEntries(for session: AgentSession) -> [ThemedMenuEntry] {
+        guard session.kind.supportsForking, session.resumeState.isResumable else { return [] }
 
-        let newItem = menu.addItem(
-            withTitle: L10n.string("New Side Chat"),
-            action: #selector(newSideChatClicked),
-            keyEquivalent: ""
-        )
-        newItem.target = self
-
-        let askItem = menu.addItem(
-            withTitle: L10n.string("Ask on the Side…"),
-            action: #selector(askOnTheSideClicked),
-            keyEquivalent: ""
-        )
-        askItem.target = self
+        return [
+            action(L10n.string("New Side Chat")) { [weak self] in
+                self?.newSideChatClicked()
+            },
+            action(L10n.string("Ask on the Side…")) { [weak self] in
+                self?.askOnTheSideClicked()
+            }
+        ]
     }
 
-    /// Adds the surface switch for an agent that has both — Threading's own conversation view or
+    /// The surface switch for an agent that has both — Threading's own conversation view or
     /// the agent's terminal.
     ///
     /// Offered as an ordinary item rather than a warning, because it is not destructive: the
     /// two surfaces drive one conversation, resumed by the session's own id, so switching
     /// relaunches where it left off rather than starting over. What it does cost is the live
     /// process, which is why a working session confirms first.
-    private func addSurfaceMenu(to menu: NSMenu, for session: AgentSession) {
-        guard session.kind.supportsNativeUI else { return }
+    private func interfaceEntry(for session: AgentSession) -> ThemedMenuEntry? {
+        guard session.kind.supportsNativeUI else { return nil }
 
-        let submenu = NSMenu(title: L10n.string("Interface"))
-        let native = NSMenuItem(
-            title: SessionSurfaceTogglePresentation.title(
-                usesNativeUI: true,
-                kind: session.kind
-            ),
-            action: #selector(setSurfaceClicked(_:)),
-            keyEquivalent: ""
-        )
-        native.target = self
-        native.representedObject = true
-        native.state = session.usesNativeUI ? .on : .off
-        submenu.addItem(native)
-
-        let original = NSMenuItem(
-            title: SessionSurfaceTogglePresentation.title(
-                usesNativeUI: false,
-                kind: session.kind
-            ),
-            action: #selector(setSurfaceClicked(_:)),
-            keyEquivalent: ""
-        )
-        original.target = self
-        original.representedObject = false
-        original.state = session.usesNativeUI ? .off : .on
-        submenu.addItem(original)
-
-        let parent = NSMenuItem(
-            title: L10n.string("Interface"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        parent.submenu = submenu
-        menu.addItem(parent)
+        let rows: [ThemedMenuEntry] = [true, false].map { usesNativeUI in
+            .item(ThemedMenuItem(
+                title: SessionSurfaceTogglePresentation.title(
+                    usesNativeUI: usesNativeUI,
+                    kind: session.kind
+                ),
+                isSelected: session.usesNativeUI == usesNativeUI,
+                onChoose: { [weak self] in self?.setSurface(usesNativeUI: usesNativeUI) }
+            ))
+        }
+        return .item(ThemedMenuItem(title: L10n.string("Interface"), submenu: rows))
     }
 
     /// Adds a "Move to Account" submenu when the conversation can move — it resumes by id, has
@@ -571,29 +510,20 @@ extension ProjectSidebarViewController {
     /// where it can and defers where it cannot: when that default is "follow", the answer lives
     /// in the account's own `/config` and resolves server-side when unset, so claiming a value
     /// here would be a guess shown as a fact.
-    private func addRemoteControlItem(to menu: NSMenu, for session: AgentSession) {
-        guard session.kind == .claude else { return }
+    private func remoteControlEntry(for session: AgentSession) -> ThemedMenuEntry? {
+        guard session.kind == .claude else { return nil }
 
-        let submenu = NSMenu()
-        for choice in RemoteControlChoice.allCases {
-            let item = NSMenuItem(
+        let rows: [ThemedMenuEntry] = RemoteControlChoice.allCases.map { choice in
+            .item(ThemedMenuItem(
                 title: choice.menuTitle,
-                action: #selector(remoteControlChoiceClicked(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = choice
-            item.state = choice.sessionValue == session.remoteControl ? .on : .off
-            submenu.addItem(item)
+                isSelected: choice.sessionValue == session.remoteControl,
+                onChoose: { [weak self] in self?.setRemoteControl(choice) }
+            ))
         }
-
-        let item = NSMenuItem(
+        return .item(ThemedMenuItem(
             title: L10n.string("Claude Remote Control"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        item.submenu = submenu
-        menu.addItem(item)
+            submenu: rows
+        ))
     }
 
     /// How much this conversation may do before it has to ask.
@@ -606,97 +536,69 @@ extension ProjectSidebarViewController {
     /// The inherit item names the app-wide default where there is one and defers where there is
     /// not — Threading cannot read `permissions.defaultMode` or `config.toml`, and a row claiming
     /// a value it guessed would be worse than one that says where the answer lives.
-    private func addPermissionModeItem(to menu: NSMenu, for session: AgentSession) {
+    private func permissionModeEntry(for session: AgentSession) -> ThemedMenuEntry? {
+        guard session.kind.supportsPermissionModes else { return nil }
         let inherited = AppSettings.shared.defaultPermissionMode
 
-        let submenu = NSMenu()
-        let inheritItem = NSMenuItem(
-            title: SessionActionMenuDefaults.inheritedPermissionModeTitle(inherited),
-            action: #selector(permissionModeClicked(_:)),
-            keyEquivalent: ""
-        )
-        inheritItem.target = self
-        inheritItem.state = session.permissionMode == nil ? .on : .off
-        submenu.addItem(inheritItem)
-
+        var rows: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: SessionActionMenuDefaults.inheritedPermissionModeTitle(inherited),
+                isSelected: session.permissionMode == nil,
+                onChoose: { [weak self] in self?.setPermissionMode(nil) }
+            ))
+        ]
         for mode in AgentPermissionMode.allCases {
-            let item = NSMenuItem(
+            // The description rides as the subtitle rather than a hover tooltip, so what a
+            // mode actually permits is read in the same glance that chooses it.
+            rows.append(.item(ThemedMenuItem(
                 title: mode.displayName,
-                action: #selector(permissionModeClicked(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = mode
-            item.state = mode == session.permissionMode ? .on : .off
-            item.toolTip = [mode.menuDescription, mode.caveat(for: session.kind)]
-                .compactMap { $0 }
-                .joined(separator: " ")
-            submenu.addItem(item)
+                subtitle: [mode.menuDescription, mode.caveat(for: session.kind)]
+                    .compactMap { $0 }
+                    .joined(separator: " "),
+                isSelected: mode == session.permissionMode,
+                onChoose: { [weak self] in self?.setPermissionMode(mode) }
+            )))
         }
 
-        let item = NSMenuItem(
+        return .item(ThemedMenuItem(
             title: L10n.string("Permission Mode"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        item.submenu = submenu
-        menu.addItem(item)
+            submenu: rows
+        ))
     }
 
-    private func addMoveToAccountItem(to menu: NSMenu, for session: AgentSession) {
+    private func moveToAccountEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard let project = projectStore.project(forSessionID: session.id),
-              SessionMigration.canMigrate(session, in: project) else { return }
+              SessionMigration.canMigrate(session, in: project) else { return nil }
 
-        let submenu = NSMenu()
-        for account in SessionMigration.destinations(for: session) {
-            let item = NSMenuItem(
+        let rows: [ThemedMenuEntry] = SessionMigration.destinations(for: session).map { account in
+            .item(ThemedMenuItem(
                 title: accountMenuLabel(account),
-                action: #selector(moveToAccountClicked(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = account
-            submenu.addItem(item)
+                onChoose: { [weak self] in self?.moveToAccount(account) }
+            ))
         }
-
-        let moveItem = NSMenuItem(
-            title: L10n.string("Move to Account"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        moveItem.submenu = submenu
-        menu.addItem(moveItem)
+        return .item(ThemedMenuItem(title: L10n.string("Move to Account"), submenu: rows))
     }
 
     /// Cross-provider is deliberately a different verb from Move. Move preserves one native
     /// transcript and can be reversed; Continue creates a new session whose first turn reads a
     /// provider-neutral handoff snapshot through MCP, while the original stays where it is.
-    private func addContinueWithProviderItem(to menu: NSMenu, for session: AgentSession) {
+    private func continueWithProviderEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard let project = projectStore.project(forSessionID: session.id),
-              ConversationContinuation.canContinue(session, in: project) else { return }
+              ConversationContinuation.canContinue(session, in: project) else { return nil }
 
         let destinations = ConversationContinuation.destinations(for: session)
-        guard let provider = destinations.first?.provider else { return }
+        guard let provider = destinations.first?.provider else { return nil }
 
-        let submenu = NSMenu()
-        for account in destinations {
-            let item = NSMenuItem(
+        let rows: [ThemedMenuEntry] = destinations.map { account in
+            .item(ThemedMenuItem(
                 title: accountMenuLabel(account),
-                action: #selector(continueWithProviderClicked(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = account
-            submenu.addItem(item)
+                onChoose: { [weak self] in self?.continueWith(account) }
+            ))
         }
-
-        let item = NSMenuItem(
+        return .item(ThemedMenuItem(
             title: L10n.format("Continue with %@", provider.displayName),
-            action: nil,
-            keyEquivalent: ""
-        )
-        item.submenu = submenu
-        menu.addItem(item)
+            submenu: rows
+        ))
     }
 
     private func accountMenuLabel(_ account: AgentAccount) -> String {
@@ -709,17 +611,13 @@ extension ProjectSidebarViewController {
     /// The move itself belongs to the coordinator, not here: it stops the session's process, so
     /// the pane showing that session has to reopen it under the new account. A sidebar reload
     /// alone leaves the terminal blank until the session is selected again.
-    @objc private func moveToAccountClicked(_ sender: NSMenuItem) {
-        guard let sessionID = actionSessionID,
-              let account = sender.representedObject as? AgentAccount else { return }
-
+    private func moveToAccount(_ account: AgentAccount) {
+        guard let sessionID = actionSessionID else { return }
         delegate?.projectSidebar(self, moveSession: sessionID, toAccount: account)
     }
 
-    @objc private func continueWithProviderClicked(_ sender: NSMenuItem) {
-        guard let sessionID = actionSessionID,
-              let account = sender.representedObject as? AgentAccount else { return }
-
+    private func continueWith(_ account: AgentAccount) {
+        guard let sessionID = actionSessionID else { return }
         delegate?.projectSidebar(
             self,
             continueSession: sessionID,
@@ -731,10 +629,8 @@ extension ProjectSidebarViewController {
     /// relaunched, because the bridge is established by the process this setting configures at
     /// startup — silently killing a live one from a sidebar menu would be a second, hidden
     /// meaning for the same item.
-    @objc private func remoteControlChoiceClicked(_ sender: NSMenuItem) {
-        guard let sessionID = actionSessionID,
-              let choice = sender.representedObject as? RemoteControlChoice else { return }
-
+    private func setRemoteControl(_ choice: RemoteControlChoice) {
+        guard let sessionID = actionSessionID else { return }
         projectStore.setRemoteControl(choice.sessionValue, for: sessionID)
     }
 
@@ -743,14 +639,10 @@ extension ProjectSidebarViewController {
     /// it launched with until it is relaunched — and Claude's own Shift+Tab, which Threading
     /// cannot see, may already have moved it somewhere else.
     ///
-    /// A nil `representedObject` is the inherit row, not a missing value.
-    @objc private func permissionModeClicked(_ sender: NSMenuItem) {
+    /// Nil is the inherit row, not a missing value.
+    private func setPermissionMode(_ mode: AgentPermissionMode?) {
         guard let sessionID = actionSessionID else { return }
-
-        projectStore.setPermissionMode(
-            sender.representedObject as? AgentPermissionMode,
-            for: sessionID
-        )
+        projectStore.setPermissionMode(mode, for: sessionID)
     }
 
     @objc private func newSideChatClicked() {
@@ -779,10 +671,9 @@ extension ProjectSidebarViewController {
         }
     }
 
-    @objc private func setSurfaceClicked(_ sender: NSMenuItem) {
+    private func setSurface(usesNativeUI: Bool) {
         guard let sessionID = actionSessionID,
               let session = projectStore.session(withID: sessionID),
-              let usesNativeUI = sender.representedObject as? Bool,
               usesNativeUI != session.usesNativeUI else { return }
 
         delegate?.projectSidebar(self, setUsesNativeUI: usesNativeUI, for: sessionID)
@@ -799,7 +690,7 @@ extension ProjectSidebarViewController {
     }
 
     /// The one archive path, shared by the menu item and the row's hover button so the two
-    /// cannot drift — the same reason `populateSessionActions` is shared with the context menu.
+    /// cannot drift — the same reason `sessionActionEntries` is shared with the context menu.
     func archiveSession(_ sessionID: SessionID) {
         delegate?.projectSidebar(self, setArchived: true, for: sessionID)
     }
@@ -816,18 +707,6 @@ extension ProjectSidebarViewController {
     @objc private func closeSessionClicked() {
         guard let sessionID = actionSessionID else { return }
         delegate?.projectSidebar(self, closeSession: sessionID)
-    }
-
-    /// Opens the session's checkout in the app the item names.
-    ///
-    /// Reads `actionSessionID` like every other handler here, which is what lets the same menu
-    /// serve the row's `⋯`, its right-click and the pane header's Context button.
-    @objc private func openSessionFolderInAppClicked(_ sender: NSMenuItem) {
-        guard let app = OpenInMenu.app(in: sender),
-              let sessionID = actionSessionID,
-              let project = projectStore.project(forSessionID: sessionID) else { return }
-
-        ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
     }
 
     /// Hands the naming back to the one thing that already knows what this chat is about.
