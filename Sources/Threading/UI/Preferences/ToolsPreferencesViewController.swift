@@ -164,15 +164,22 @@ final class ToolsPreferencesViewController: NSViewController {
         title.applyFont(.body)
         title.textColor = Design.Text.label
 
-        let detail = NSTextField(labelWithString: tool.detail)
+        // Wrapping, not a truncating single line: a non-wrapping label's full width is a
+        // demand the stack passes outward, and under a monospace theme the longest detail
+        // pushed the whole page 126pt past its pane — the pane's own pins were what broke.
+        let detail = NSTextField(wrappingLabelWithString: tool.detail)
         detail.applyFont(.subheading)
         detail.textColor = Design.Text.secondary
-        detail.lineBreakMode = .byTruncatingTail
 
         let labels = NSStackView(views: [title, detail])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
+        // The labels take the row's slack, not a spacer: a wrapping detail has no intrinsic
+        // width to argue with, and against a spacer willing to grow it collapsed to its
+        // narrowest wrap — five short lines in a row that was mostly empty. The same fix
+        // `SettingsUI.row` documents.
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let name = NSTextField(labelWithString: tool.name)
         name.applyFont(.compactToolName)
@@ -180,12 +187,10 @@ final class ToolsPreferencesViewController: NSViewController {
         name.setContentHuggingPriority(.required, for: .horizontal)
         name.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView(views: [icon, labels, spacer, name])
+        let row = NSStackView(views: [icon, labels, name])
         row.orientation = .horizontal
         row.alignment = .centerY
+        row.distribution = .fill
         row.spacing = Design.Spacing.medium
         return row
     }

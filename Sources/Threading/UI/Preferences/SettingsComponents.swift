@@ -184,9 +184,60 @@ enum SettingsUI {
         onToggle: @escaping (Bool) -> Void,
         detailRows: [NSView] = []
     ) -> NSView {
+        let disclosure = disclosureRow(
+            title: title,
+            subtitle: subtitle,
+            summary: summary,
+            summaryColor: summaryColor,
+            isExpanded: isExpanded,
+            localizes: localizes,
+            accessibilityIdentifier: accessibilityIdentifier,
+            onToggle: onToggle
+        )
+
+        let header: NSView
+        if let control {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.distribution = .fill
+            row.spacing = Design.Spacing.medium
+            row.edgeInsets = NSEdgeInsets(
+                top: 0, left: 0, bottom: 0, right: Design.Spacing.inset
+            )
+            disclosure.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            control.setContentHuggingPriority(.required, for: .horizontal)
+            row.addArrangedSubview(disclosure)
+            row.addArrangedSubview(control)
+            header = row
+        } else {
+            header = disclosure
+        }
+
+        return SettingsCard(rows: [header] + (isExpanded ? detailRows : []))
+    }
+
+    /// A bare disclosure row, for a fold *inside* a card — Storage's "N smaller directories"
+    /// tail — where `disclosureCard` would nest a card in a card.
+    @MainActor
+    static func disclosureRow(
+        title: String,
+        subtitle: String? = nil,
+        summary: String? = nil,
+        summaryColor: NSColor? = nil,
+        isExpanded: Bool,
+        localizes: Bool = true,
+        accessibilityIdentifier: String? = nil,
+        onToggle: @escaping (Bool) -> Void
+    ) -> ThemedDisclosureRow {
         let titleLabel = NSTextField(labelWithString: localized(title, if: localizes))
         titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
+        // A long title (Storage's "project · worktree" pair) truncates rather than pushing:
+        // an incompressible single-line label's width travels out through the stacks and it
+        // is the page's own pins that end up broken, not the label.
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         var labelViews: [NSView] = [titleLabel]
         if let subtitle {
@@ -226,27 +277,7 @@ enum SettingsUI {
         if let accessibilityIdentifier {
             disclosure.setAccessibilityIdentifier(accessibilityIdentifier)
         }
-
-        let header: NSView
-        if let control {
-            let row = NSStackView()
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.distribution = .fill
-            row.spacing = Design.Spacing.medium
-            row.edgeInsets = NSEdgeInsets(
-                top: 0, left: 0, bottom: 0, right: Design.Spacing.inset
-            )
-            disclosure.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            control.setContentHuggingPriority(.required, for: .horizontal)
-            row.addArrangedSubview(disclosure)
-            row.addArrangedSubview(control)
-            header = row
-        } else {
-            header = disclosure
-        }
-
-        return SettingsCard(rows: [header] + (isExpanded ? detailRows : []))
+        return disclosure
     }
 
     /// A titled section: a quiet caption above a card. Pass nil to omit the caption.

@@ -108,6 +108,9 @@ final class ArchivedPreferencesViewController: NSViewController {
         titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
+        // Truncates rather than pushing: an incompressible row title's width travels out
+        // through the stacks and breaks the page's own pins — see SettingsUI.disclosureRow.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let when = Self.relativeDate.localizedString(for: entry.session.lastActiveAt, relativeTo: Date())
         let captionLabel = NSTextField(labelWithString: "\(entry.project.name) · \(when)")
