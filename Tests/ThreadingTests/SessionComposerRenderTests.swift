@@ -73,6 +73,89 @@ final class SessionComposerRenderTests: XCTestCase {
         XCTAssertEqual(prompt.stringValue, "")
     }
 
+    /// Looking at a session and coming back to the composer is a detour, not a change of
+    /// project. Only the text is written to `DraftStore`, so everything else the user had set
+    /// up — first of all an attached screenshot — survives that trip only if being pointed at
+    /// the project it already holds leaves the composer alone. It did not: the image was gone
+    /// from the prompt on the way back, with the sentence describing it still sitting there.
+    func testReturningToTheProjectItAlreadyHoldsKeepsTheAttachment() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: fixtureFolder())
+        let elsewhere = store.addProject(folderURL: fixtureFolder())
+        defer {
+            store.removeProject(id: project.id)
+            store.removeProject(id: elsewhere.id)
+        }
+
+        let imageURL = try makeImageFile()
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        composer.show(projectID: project.id)
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        prompt.stringValue = "Crop the empty space out of this"
+        prompt.attachFiles(at: [imageURL.path])
+
+        // The session in between, then the same project selected again.
+        composer.show(projectID: project.id)
+        XCTAssertEqual(prompt.stringValue, "Crop the empty space out of this")
+        XCTAssertEqual(prompt.attachmentPaths, [imageURL.path], "the attachment was dropped")
+
+        // Another project *is* a change of project, and an image attached for one is not an
+        // attachment to a session started in another.
+        composer.show(projectID: elsewhere.id)
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+    }
+
+    /// The other half of keeping the composer: what has been sent must not still be sitting in
+    /// it. Nothing else empties it any more, and a composer returned to after starting a session
+    /// would otherwise offer that session's opening prompt, and its images, as though they were
+    /// still waiting to be sent. Only once a session exists — a start that failed is the moment
+    /// those words matter most, which is why `DraftStore` is cleared on the same answer.
+    func testStartingASessionEmptiesTheComposerButAFailedStartDoesNot() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: fixtureFolder())
+        defer { store.removeProject(id: project.id) }
+
+        let delegate = StartRecorder()
+        composer.delegate = delegate
+        composer.show(projectID: project.id)
+
+        let imageURL = try makeImageFile()
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let start = try XCTUnwrap(startButton(in: composer.view))
+        prompt.stringValue = "Read this screenshot"
+        prompt.attachFiles(at: [imageURL.path])
+
+        delegate.starts = false
+        start.performClick()
+        XCTAssertEqual(prompt.stringValue, "Read this screenshot", "a failed start took the words")
+        XCTAssertEqual(prompt.attachmentPaths, [imageURL.path])
+
+        delegate.starts = true
+        start.performClick()
+        XCTAssertEqual(
+            delegate.prompts.last,
+            "Read this screenshot \"\(imageURL.path)\"",
+            "the image has to reach the agent as a path"
+        )
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+
+        // And it stays empty when the project is selected again.
+        composer.show(projectID: project.id)
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+    }
+
     func testHeroHidesWhenThePaneIsTooShortToFloatIt() throws {
         let composer = SessionComposerViewController()
         let host = host(composer, size: Render.tall)
@@ -160,6 +243,28 @@ final class SessionComposerRenderTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private func fixtureFolder() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("threading-composer-\(UUID().uuidString)")
+    }
+
+    /// A real PNG on disk: the prompt only previews a file it can decode, and only a path can
+    /// be sent to an agent. The name carries a space so the quoting is the same every run.
+    private func makeImageFile() throws -> URL {
+        let image = NSImage(size: NSSize(width: 12, height: 8))
+        image.lockFocus()
+        NSColor.systemTeal.drawSwatch(in: NSRect(x: 0, y: 0, width: 12, height: 8))
+        image.unlockFocus()
+
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString) composer fixture.png")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
     private func host(_ composer: SessionComposerViewController, size: NSSize) -> NSView {
         let host = NSView(frame: NSRect(origin: .zero, size: size))
         let view = composer.view
@@ -212,4 +317,50 @@ final class SessionComposerRenderTests: XCTestCase {
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap { descendants(of: $0) }
     }
+}
+
+// MARK: - Start Recorder
+
+/// Stands in for `SessionCoordinator`: records what the composer sent, and answers whether a
+/// session was made of it — the answer the composer decides on whether to empty itself.
+@MainActor
+private final class StartRecorder: SessionComposerViewControllerDelegate {
+
+    var starts = true
+    private(set) var prompts: [String] = []
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        startSessionIn projectID: ProjectID,
+        kind: AgentKind,
+        accountHandle: AccountHandle,
+        model: String?,
+        branch: String?,
+        usesNativeUI: Bool,
+        permissionMode: AgentPermissionMode?,
+        prompt: String
+    ) -> Bool {
+        prompts.append(prompt)
+        return starts
+    }
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didCreateWorktreeAt url: URL,
+        branch: String
+    ) {}
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        importSession session: ImportableSession,
+        into projectID: ProjectID
+    ) {}
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didSelectProject projectID: ProjectID
+    ) {}
+
+    func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController) {}
+    func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController) {}
 }

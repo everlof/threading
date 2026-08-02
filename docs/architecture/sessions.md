@@ -199,19 +199,33 @@ composer page to the empty pane.
 **⌘, is a detour, so it ends where it started.** `MainWindowController` remembers the *page*
 Settings opened over (`preSettingsPage`), not merely a session id: remembering only sessions
 put the second ⌘, on the empty state whenever the pane held a composer, which took a
-half-written prompt off the screen with it. A composer comes back through
-`TerminalContainerViewController.restoreComposer`, which makes the existing composer visible
-again rather than re-configuring it for the project — `showComposer` resets the agent, account,
-model and checkout, and drops attachments, which are deliberately not drafts (see
-[`persistence.md`](persistence.md)). Only what the chips *derive* is re-read
-(`refreshDerivedState`), because Settings is exactly where those defaults change.
+half-written prompt off the screen with it.
+
+**Looking at something else and coming back is a detour too, and the composer is kept whole
+across it.** `SessionComposerViewController.show(projectID:)` treats being pointed at the
+project it *already holds* as a return rather than a change of project: the agent, account,
+model and checkout just chosen stay chosen, the half-written prompt stays, and so do any
+attached images — which are deliberately not drafts (see [`persistence.md`](persistence.md))
+and therefore exist nowhere but in that composer. Re-configuring on the way back is what made
+an attached screenshot disappear while the sentence describing it, restored from `DraftStore`,
+stayed on screen. Only what the chips *derive* is re-read (`refreshDerivedState`): Settings is
+where those defaults change, and a session can be read for long enough that a usage figure ages
+out. The rule lives in the composer rather than in its callers, so every route back to it —
+the sidebar, ⌘N, Back/Forward, Settings closing — gets it from one place.
+
+That makes **starting a session the thing that empties the composer** (`start(with:)`), and
+only once the session exists: the delegate answers whether one was made, which is the same
+answer `DraftStore` is cleared on. A start that failed leaves the words where they can still be
+used; a start that succeeded must not leave its opening prompt, and the images sent with it,
+standing in a composer the user comes back to.
 
 **The pane focuses whatever it puts on screen, and the composer is not an exception.** `attach`
 hands a terminal the keyboard and `attachConversation` hands a native conversation's reply box
 the caret, so a composer that arrived unfocused was the one surface asking to be clicked before
-it could be used — and it is the surface reached by ⌘N, which is a request to type. Both entry
-points focus it: `showComposer` after configuring it for the project, `restoreComposer` after
-Settings closes over it. The caret lands **after** any restored draft (`PromptView.focusAtEnd`).
+it could be used — and it is the surface reached by ⌘N, which is a request to type. Every entry
+point focuses it: `showComposer` does so whether it configured the composer for a project it had
+not held or put back the one it had. The caret lands **after** any restored draft
+(`PromptView.focusAtEnd`).
 `stringValue` deliberately leaves the selection at position 0 so a long draft is *read* from its
 beginning, which is right while nothing is focused and wrong the moment something is: the next
 keystroke would land in front of the user's own half-written sentence rather than continuing it.

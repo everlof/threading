@@ -285,6 +285,13 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Shows the composer for a project — or for none, the choose-a-project mode a store with
     /// no projects opens onto — replacing whatever session was on screen.
+    ///
+    /// Putting it back for the project it is already pointed at keeps it exactly as it was left:
+    /// the agent, account, model and checkout just chosen, the half-written prompt and any
+    /// attached images. Settings opening over the composer and a session looked at in between
+    /// are both detours rather than a change of project, and neither should reset a decision
+    /// the user is in the middle of making. The rule lives in `SessionComposerViewController`,
+    /// which is what every route here goes through.
     func showComposer(projectID: ProjectID?) {
         detachCurrentChild()
         currentComposerProjectID = projectID
@@ -300,38 +307,6 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.view.isHidden = false
         applyPaneBackground(.chrome)
         composerViewController.show(projectID: projectID)
-        composerViewController.focusPrompt()
-    }
-
-    /// Puts a composer back on screen **without resetting it**, for a detour that never changed
-    /// which project is selected — Settings opening over it and closing again.
-    ///
-    /// `showComposer` configures the composer for a project, which is right when the project is
-    /// what changed: the choices reset and the prompt is re-read from `DraftStore`. Coming back
-    /// from Settings nothing changed, and re-configuring would drop what is not in the draft —
-    /// the agent, account, model and checkout just chosen, and any attached images, which are
-    /// deliberately not drafted. The composer is still here, still holding all of it; it only
-    /// needs to be visible again.
-    ///
-    /// Falls back to a full show if the composer has since moved on to another project, so the
-    /// caller cannot use this to put a stale project's composer on screen.
-    func restoreComposer(projectID: ProjectID) {
-        guard composerViewController.projectID == projectID else {
-            showComposer(projectID: projectID)
-            return
-        }
-
-        detachCurrentChild()
-        currentComposerProjectID = projectID
-        currentSettingsPageID = nil
-        currentTerminalID = nil
-        currentSessionID = nil
-        applyDrawer(for: nil)
-
-        placeholderView.isHidden = true
-        composerViewController.view.isHidden = false
-        applyPaneBackground(.chrome)
-        composerViewController.refreshDerivedState()
         composerViewController.focusPrompt()
     }
 

@@ -11,6 +11,13 @@ final class SessionComposerViewController: NSViewController {
 
     private(set) var projectID: ProjectID?
 
+    /// Whether `show(projectID:)` has configured this composer at all yet.
+    ///
+    /// Told apart from "already showing that project" because the first show can legitimately
+    /// be `nil` — the choose-a-project mode a store with no projects opens onto — and that one
+    /// still has to configure the chips and the greeting rather than return early.
+    private var hasBeenShown = false
+
     /// The hero: the mark above a greeting that knows what day it is. It fills the room the
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
     private let heroMark = ThreadingMarkView()
@@ -361,7 +368,20 @@ final class SessionComposerViewController: NSViewController {
 
     /// Points the composer at a project — or at none, which is a real mode: the way in when
     /// nothing exists yet. Every choice resets either way.
+    ///
+    /// Being pointed at the project it already holds is a *return* to it, not a change of
+    /// project: the chips, the half-written prompt and the attached images are all left exactly
+    /// as they were. Looking at a session and coming back is the same kind of detour as opening
+    /// Settings over it, and neither is a reason to undo a decision the user is in the middle of
+    /// making. This is why a session that has started clears the prompt itself (`start(with:)`) —
+    /// nothing else does it any more.
     func show(projectID: ProjectID?) {
+        if hasBeenShown, projectID == self.projectID {
+            refreshDerivedState()
+            return
+        }
+        hasBeenShown = true
+
         // Words typed before a project was chosen are the user's work: they follow the
         // composer into the project that is chosen next, unless that project already holds a
         // draft of its own.
@@ -442,7 +462,8 @@ final class SessionComposerViewController: NSViewController {
     /// they resolve, what is left of it — while leaving every choice and the prompt untouched.
     ///
     /// For a composer coming back into view without having been re-configured. Settings is
-    /// where those defaults are changed, so a composer restored from it must state them again.
+    /// where those defaults are changed, and a session can be looked at for long enough for a
+    /// usage reading to age out, so a composer returned to must state them again.
     func refreshDerivedState() {
         refreshChips()
     }
@@ -766,7 +787,7 @@ final class SessionComposerViewController: NSViewController {
     private func start(with prompt: String) {
         guard let projectID else { return }
 
-        delegate?.sessionComposer(
+        let started = delegate?.sessionComposer(
             self,
             startSessionIn: projectID,
             kind: selectedAgent,
@@ -776,7 +797,15 @@ final class SessionComposerViewController: NSViewController {
             usesNativeUI: usesNativeUI,
             permissionMode: selectedPermissionMode,
             prompt: prompt
-        )
+        ) ?? false
+
+        // The composer is not rebuilt for the project it already holds, so what has just been
+        // sent has to be taken out of it here — otherwise coming back to the project shows the
+        // opening prompt, and the images sent with it, as though they were still waiting.
+        // Only once a session actually exists: a start that failed leaves the words where the
+        // user can still use them, which is also why `DraftStore` is cleared on the same answer.
+        guard started else { return }
+        promptView.clear()
     }
 
     /// How much the session may do before it has to ask.
@@ -913,6 +942,10 @@ final class SessionComposerViewController: NSViewController {
 
 @MainActor
 protocol SessionComposerViewControllerDelegate: AnyObject {
+    /// Answers whether a session was actually started. The composer empties itself on `true`
+    /// and keeps everything it holds on `false`, so a start that could not be recorded does not
+    /// take the prompt with it.
+    @discardableResult
     func sessionComposer(
         _ composer: SessionComposerViewController,
         startSessionIn projectID: ProjectID,
@@ -923,7 +956,7 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         prompt: String
-    )
+    ) -> Bool
 
     func sessionComposer(
         _ composer: SessionComposerViewController,

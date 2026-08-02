@@ -348,6 +348,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
     // MARK: - Composer
 
+    @discardableResult
     func sessionComposer(
         _ composer: SessionComposerViewController,
         startSessionIn projectID: ProjectID,
@@ -358,7 +359,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         prompt: String
-    ) {
+    ) -> Bool {
         let targetProjectID = Self.targetProjectID(
             startingAt: projectID,
             branch: branch,
@@ -379,7 +380,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             usesNativeUI: usesNativeUI,
             permissionMode: permissionMode,
             title: SessionNaming.promptTitle(from: task)
-        ) else { return }
+        ) else { return false }
 
         // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
         // as a mode. Reading the resolved flag back belongs to the "Launching agent" entry,
@@ -397,6 +398,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         pendingPrompt = opening
         sidebar.reload()
         sidebar.select(sessionID: session.id)
+        return true
     }
 
     /// Starts a session requested by the paired owner device through the same one-shot prompt

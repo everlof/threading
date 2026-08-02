@@ -1825,11 +1825,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 recordVisit(.terminal(terminalID))
 
             case .composer(let projectID):
-                // Restored rather than re-shown: the composer is put back as it was left,
-                // choices, attachments and half-written prompt included. Settings is a detour,
-                // not a change of project, so nothing about it should reset the decision the
-                // user was in the middle of making.
-                containerViewController.restoreComposer(projectID: projectID)
+                // Put back as it was left, choices, attachments and half-written prompt
+                // included: showing the composer the project it already holds is a return to
+                // it. Settings is a detour, not a change of project, so nothing about it
+                // should reset the decision the user was in the middle of making.
+                containerViewController.showComposer(projectID: projectID)
                 syncDisplayPane(to: nil)
                 recordVisit(.composer(projectID))
 

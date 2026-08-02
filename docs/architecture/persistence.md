@@ -146,6 +146,11 @@ Submitting records the prompt to the journal *before* clearing the draft. Cleari
 would reopen the original hole — the prompt would live only in memory and in a command line,
 which is precisely where it was when the crash took one.
 
+Attached images are **not** drafted: a pasted screenshot is a file in a temporary directory,
+and a path written to disk now can name nothing by the next launch. They survive instead by the
+composer being kept as it was left for as long as it is pointed at the same project — see
+[`sessions.md`](sessions.md), which is also where the bug that rule fixes is recorded.
+
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
 registered for. Left active, that knote is reported `EV_VANISHED` the next time the workloop
