@@ -61,6 +61,194 @@ enum SettingsUI {
         return scrollView
     }
 
+    /// A page under a fixed header: the title, an optional one-line summary and the page-level
+    /// actions stay put while the sections scroll beneath them.
+    ///
+    /// Every page used to draw its title as the first row *inside* the scroll, so the one line
+    /// saying where you are was the first thing to leave the screen — on the pages long enough
+    /// to need it most. The header also gives a page's primary action (Import…, Rescan) a seat
+    /// that does not scroll away with the content it acts on.
+    @MainActor
+    static func page(
+        title: String,
+        summary: String? = nil,
+        actions: [NSView] = [],
+        sections: [NSView],
+        hostPage: ExtensionHostSettingsPage? = nil,
+        localizes: Bool = true
+    ) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let header = pageHeader(
+            title: title,
+            summary: summary,
+            actions: actions,
+            localizes: localizes
+        )
+        let separator = SeparatorView()
+        let scroll = page(sections, hostPage: hostPage)
+
+        for view in [header, separator, scroll] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(
+                equalTo: container.topAnchor,
+                constant: Design.Spacing.large
+            ),
+            // The header's text lines up with the cards' own edge: the scroll column holds
+            // `glowGutter` clear on either side, so the header holds the same.
+            header.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: Design.Size.glowGutter
+            ),
+            header.trailingAnchor.constraint(
+                equalTo: container.trailingAnchor,
+                constant: -Design.Size.glowGutter
+            ),
+
+            separator.topAnchor.constraint(
+                equalTo: header.bottomAnchor,
+                constant: Design.Spacing.medium
+            ),
+            separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+
+        return container
+    }
+
+    /// The fixed band above a page's scroll: title leading, actions trailing, the optional
+    /// summary under the title in the secondary colour.
+    private static func pageHeader(
+        title: String,
+        summary: String?,
+        actions: [NSView],
+        localizes: Bool
+    ) -> NSView {
+        var labelViews: [NSView] = [heading(title, localizes: localizes)]
+        if let summary {
+            let line = NSTextField(labelWithString: localized(summary, if: localizes))
+            line.applyFont(.subheading)
+            line.textColor = Design.Text.secondary
+            line.lineBreakMode = .byTruncatingTail
+            labelViews.append(line)
+        }
+
+        let labels = NSStackView(views: labelViews)
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = Design.Spacing.medium
+        row.addArrangedSubview(labels)
+
+        for action in actions {
+            action.setContentHuggingPriority(.required, for: .horizontal)
+            row.addArrangedSubview(action)
+        }
+
+        return row
+    }
+
+    /// A collapsible card: a disclosure header carrying the section's name, an optional
+    /// trailing summary, and one decision-level control, with the detail rows built in only
+    /// while expanded.
+    ///
+    /// The caller keeps the expansion state (a view state, not a preference — Storage's fold
+    /// set the pattern) and rebuilds its page on toggle, which is the idiom every settings page
+    /// already follows for its own events.
+    @MainActor
+    static func disclosureCard(
+        title: String,
+        subtitle: String? = nil,
+        summary: String? = nil,
+        summaryColor: NSColor? = nil,
+        control: NSView? = nil,
+        isExpanded: Bool,
+        localizes: Bool = true,
+        accessibilityIdentifier: String? = nil,
+        onToggle: @escaping (Bool) -> Void,
+        detailRows: [NSView] = []
+    ) -> NSView {
+        let titleLabel = NSTextField(labelWithString: localized(title, if: localizes))
+        titleLabel.applyFont(.body)
+        titleLabel.textColor = Design.Text.label
+
+        var labelViews: [NSView] = [titleLabel]
+        if let subtitle {
+            let sub = NSTextField(
+                wrappingLabelWithString: localized(subtitle, if: localizes)
+            )
+            sub.applyFont(.subheading)
+            sub.textColor = Design.Text.secondary
+            labelViews.append(sub)
+        }
+
+        let labels = NSStackView(views: labelViews)
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let content = NSStackView()
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.distribution = .fill
+        content.spacing = Design.Spacing.medium
+        content.addArrangedSubview(labels)
+
+        if let summary {
+            let trailing = NSTextField(labelWithString: localized(summary, if: localizes))
+            trailing.applyFont(.subheading)
+            trailing.textColor = summaryColor ?? Design.Text.secondary
+            trailing.setContentHuggingPriority(.required, for: .horizontal)
+            trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
+            content.addArrangedSubview(trailing)
+        }
+
+        let disclosure = ThemedDisclosureRow(content: content, isExpanded: isExpanded)
+        disclosure.onToggle = onToggle
+        disclosure.setAccessibilityLabel(localized(title, if: localizes))
+        if let accessibilityIdentifier {
+            disclosure.setAccessibilityIdentifier(accessibilityIdentifier)
+        }
+
+        let header: NSView
+        if let control {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.distribution = .fill
+            row.spacing = Design.Spacing.medium
+            row.edgeInsets = NSEdgeInsets(
+                top: 0, left: 0, bottom: 0, right: Design.Spacing.inset
+            )
+            disclosure.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            control.setContentHuggingPriority(.required, for: .horizontal)
+            row.addArrangedSubview(disclosure)
+            row.addArrangedSubview(control)
+            header = row
+        } else {
+            header = disclosure
+        }
+
+        return SettingsCard(rows: [header] + (isExpanded ? detailRows : []))
+    }
+
     /// A titled section: a quiet caption above a card. Pass nil to omit the caption.
     static func section(
         _ title: String?,
@@ -459,6 +647,7 @@ final class SettingsFlippedView: NSView {
 enum SettingsUIDefaults {
     static let rowHeight: CGFloat = 44
     static let controlWidth: CGFloat = 220
+    static let wideSegmentedControlWidth: CGFloat = 380
 
     /// The width a settings page asks its pane for: the readable measure the cards keep,
     /// plus the halo gutter `SettingsUI.page` holds clear on either side. Stated here so the
