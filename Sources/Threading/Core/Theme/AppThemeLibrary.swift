@@ -186,7 +186,8 @@ enum AppThemeLibrary {
                 roles: variant.roles,
                 terminalPalette: variant.terminalPalette,
                 material: variant.material,
-                sidebar: sidebar
+                sidebar: sidebar,
+                chrome: variant.chrome
             )
         }
         return AppTheme(

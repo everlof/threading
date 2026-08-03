@@ -28,7 +28,12 @@ anchoring for secondary clicks, so converting a menu gives none of that up. Only
 remains native (`AppDelegate` is the named boundary and the source checker's one exception):
 its menus carry Services, responder-chain command routing, and system key equivalents that
 cannot be reproduced in-window. Open/save panels, the colour panel, and the `NSWindow` frame
-remain system workflows behind their named boundaries.
+remain system workflows behind their named boundaries — the frame with one stated exception:
+a theme carrying a `WindowChromeStyle` opts the main window into an **app-drawn frame**
+(`WindowChromeCoordinator`, `docs/architecture/window-chrome.md`), whose band, buttons and
+border are ordinary `UI/Design/` components inside the content root, fully subject to this
+policy and to `ThemeBoundaryAudit`. Under every other theme the native frame stays exactly the
+system workflow it always was.
 
 Containment includes API shape, not only where construction happens. `ChipView` and
 `ThemedPopUp` accept `ThemedMenuEntry` values and present them through the app-owned

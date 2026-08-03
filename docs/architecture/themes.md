@@ -624,3 +624,44 @@ A test that needs to read a choice back reads it through `PreferenceStore.shared
 app no longer writes. `PreferenceStore.isRedirected` exists so the redirect is asserted rather
 than assumed: a full 1868-test run now leaves the stored choice untouched, which is the
 regression this is really guarding.
+
+## 2026-08-02 — the window frame belongs to the theme (opt-in), and surfaces learn to bevel
+
+Two additions arrived together for the stock **Windows 98** theme (`retro-98`), and both are
+vocabulary rather than components: the theme states data, one interpreter draws it.
+
+**`WindowChromeStyle` — the `chrome:` block.** The second and last regional block after
+`SidebarStyle`, following all of its rules (variant-owned, optional, hex on the wire,
+`decodeIfPresent` everywhere, an `inherit`/`remove`/`set` patch idiom in
+`AppThemeEditing.ChromeChange`, carried by hand through `assemble`'s rename pass). Its
+*presence* is an opt-in with teeth: while the theme is worn, the main window gives up its
+native frame — titled mask, traffic lights, rounded corners, toolbar — and wears an app-drawn
+title band, window buttons and border. The mechanics live in
+[`window-chrome.md`](window-chrome.md); the block itself carries the band's active and
+inactive gradients, its ink, alignment, height (22–44), the button glyph style
+(`squares`/`plain`), and a frame width (1–6). Gates: the active band's ink holds the label's
+3:1 against every stop — the band carries the window's own close button — while the inactive
+band gets the softer 2:1 "tellable" floor, because inactive title text signals inactivity by
+carrying less ink (the authentic 1998 inactive pair sits at 2.6:1). An adaptive theme states
+chrome in both variants or neither: band colours may differ by appearance, whether the window
+wears its own frame may not.
+
+**`Material.bevel` and the two edge roles.** A bevel material
+(`bevel: {width: 1...3}`, square radii required by validation) turns every applied or drawn
+surface's flat border into the classic two-tone edge: `bevelHighlight` on top and leading,
+`bevelShadow` on bottom and trailing, mitred diagonally, swapped for surfaces that state
+`SurfaceBevel.sunken` (text wells: `ThemedTextField`, the composer's `PromptView`). The two
+roles are *roles* — not `.authored`, deriving from `surface` at ±0.45 — precisely so
+`applySurface` records participation rather than colours and the theme sweep re-resolves both
+directions of a live switch: arriving raises every automatic surface, leaving strips every
+edge (the glow's "cleared rather than skipped" rule). The layer path hangs a nine-part
+stretched bitmap (`BevelArtwork`) so resizing never rebuilds a path; the draw path
+(`ThemedSurface.draw`) draws the same construction live. A rounded shape under a bevel
+material keeps its flat border — a rectilinear edge has no honest offset curve — which is the
+rule that lets discs and pills coexist with the material. `SurfaceBevelTests` pins all of it,
+including that every pre-existing stock theme draws byte-identically.
+
+Both blocks have full MCP parity (`create_app_theme`/`update_app_theme`/`get_app_theme`
+round-trip them; `chrome.remove` hands the frame back live) and are deliberately **not**
+projected to iOS by `RemoteThemeBridge` — no window frame there, no bevel interpreter, and the
+two roles ride the resolved colour map anyway. `ThemeToolTests` holds the tool loop.

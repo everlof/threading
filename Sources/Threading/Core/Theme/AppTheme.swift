@@ -92,6 +92,25 @@ struct AppTheme: Codable, Equatable {
         variant(for: appearance)?.material ?? .system
     }
 
+    /// The chrome block for the appearance the app currently wears — consumed as data by the
+    /// coordinator and the band, so it anchors to the application's appearance the way
+    /// `terminalPalette` does, not to whatever `NSAppearance.currentDrawing()` last held.
+    @MainActor
+    var windowChrome: WindowChromeStyle? {
+        windowChrome(for: NSApplication.shared.effectiveAppearance)
+    }
+
+    func windowChrome(for appearance: NSAppearance) -> WindowChromeStyle? {
+        variant(for: appearance)?.chrome
+    }
+
+    /// Whether this theme opts the main window out of its native frame. Asked of the theme,
+    /// not of a variant: validation holds an adaptive theme to chrome-in-both-or-neither, so
+    /// any variant answers for all of them.
+    var takesOverWindowChrome: Bool {
+        variants.values.contains { $0.chrome != nil }
+    }
+
     enum VariantKind: String, Codable, CaseIterable, Hashable {
         case light, dark
 
@@ -123,21 +142,29 @@ struct AppTheme: Codable, Equatable {
         /// pale one. Absent means the sidebar as it always was.
         let sidebar: SidebarStyle?
 
+        /// The window frame's dressing — and, by its presence, the opt-in to drawing the whole
+        /// frame. Variant-owned like the sidebar, but validation additionally requires an
+        /// adaptive theme to state it in both variants or neither: band colours may differ by
+        /// appearance, whether the window wears its own frame may not.
+        let chrome: WindowChromeStyle?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
-            case material, sidebar
+            case material, sidebar, chrome
         }
 
         init(
             roles: [AppThemeRole: NSColor],
             terminalPalette: TerminalTheme,
             material: Material,
-            sidebar: SidebarStyle? = nil
+            sidebar: SidebarStyle? = nil,
+            chrome: WindowChromeStyle? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
             self.material = material
             self.sidebar = sidebar
+            self.chrome = chrome
         }
 
         init(from decoder: Decoder) throws {
@@ -153,6 +180,7 @@ struct AppTheme: Codable, Equatable {
             material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
             terminalPalette = try container.decode(TerminalTheme.self, forKey: .terminalPalette)
             sidebar = try container.decodeIfPresent(SidebarStyle.self, forKey: .sidebar)
+            chrome = try container.decodeIfPresent(WindowChromeStyle.self, forKey: .chrome)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -164,6 +192,7 @@ struct AppTheme: Codable, Equatable {
             try container.encode(material, forKey: .material)
             try container.encode(terminalPalette, forKey: .terminalPalette)
             try container.encodeIfPresent(sidebar, forKey: .sidebar)
+            try container.encodeIfPresent(chrome, forKey: .chrome)
         }
     }
 
@@ -189,6 +218,17 @@ struct AppTheme: Codable, Equatable {
         /// weight exists; `Design.Typography` is the one interpreter. Code and the terminal
         /// deliberately do not follow it.
         var typeface: Typeface = .standard
+
+        /// A raised-and-sunken edge treatment on every applied surface — the vocabulary that
+        /// makes a mid-nineties chrome expressible as data instead of as components.
+        ///
+        /// Nil — every theme written before the field existed — draws exactly what
+        /// `applySurface` always drew. Stated, every surface whose resolved corner is square
+        /// wears a two-tone edge in the `bevelHighlight`/`bevelShadow` roles: raised by
+        /// default, sunken where a component says so (`SurfaceBevel.sunken` — text wells),
+        /// never on a shape with a rounded corner, whose offset curve a rectilinear bevel
+        /// cannot draw. Validation therefore requires a bevel material to author square radii.
+        var bevel: Bevel?
 
         /// A named font family, for a theme whose identity is a *particular* face rather than a
         /// typeface class.
@@ -255,6 +295,7 @@ struct AppTheme: Codable, Equatable {
             controlRadius: CGFloat = 8,
             borderWidth: CGFloat = 1,
             glow: Glow? = nil,
+            bevel: Bevel? = nil,
             typeface: Typeface = .standard,
             fontFamily: String? = nil
         ) {
@@ -262,12 +303,13 @@ struct AppTheme: Codable, Equatable {
             self.controlRadius = controlRadius
             self.borderWidth = borderWidth
             self.glow = glow
+            self.bevel = bevel
             self.typeface = typeface
             self.fontFamily = fontFamily
         }
 
         private enum CodingKeys: String, CodingKey {
-            case panelRadius, controlRadius, borderWidth, glow, typeface, fontFamily
+            case panelRadius, controlRadius, borderWidth, glow, bevel, typeface, fontFamily
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -280,8 +322,31 @@ struct AppTheme: Codable, Equatable {
             controlRadius = try container.decodeIfPresent(CGFloat.self, forKey: .controlRadius) ?? 8
             borderWidth = try container.decodeIfPresent(CGFloat.self, forKey: .borderWidth) ?? 1
             glow = try container.decodeIfPresent(Glow.self, forKey: .glow)
+            bevel = try container.decodeIfPresent(Bevel.self, forKey: .bevel)
             typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface) ?? .standard
             fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+        }
+    }
+
+    /// The measure of a bevel material's edge. A struct rather than a bare width so the
+    /// vocabulary can grow — a two-line outer/inner treatment, a corner style — without a
+    /// second wire format.
+    struct Bevel: Codable, Equatable {
+        /// Points per edge, bounded by validation to 1...3: one point is a whisper, two is
+        /// the classic, and past three the edges stop framing a surface and start being one.
+        var width: CGFloat = 2
+
+        init(width: CGFloat = 2) {
+            self.width = width
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case width
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            width = try container.decodeIfPresent(CGFloat.self, forKey: .width) ?? 2
         }
     }
 
@@ -436,6 +501,10 @@ struct AppTheme: Codable, Equatable {
             return roles[.ground]
         case .panel:
             return roles[.surface]?.lightened(by: kind == .dark ? 0.05 : -0.03)
+        case .bevelHighlight:
+            return roles[.surface]?.lightened(by: 0.45)
+        case .bevelShadow:
+            return roles[.surface]?.lightened(by: -0.45)
         default:
             return nil
         }

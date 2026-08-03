@@ -21,19 +21,24 @@ private final class RecordedSurface {
     /// keeps whatever radius it was last given.
     let radius: SurfaceRadius
     let glow: Bool
+    /// Recorded as participation rather than result, like the radius: whether an edge is
+    /// actually drawn is the *next* theme's material to decide.
+    let bevel: SurfaceBevel
 
     init(
         fill: NSColor,
         border: NSColor?,
         borderWidth: CGFloat?,
         radius: SurfaceRadius,
-        glow: Bool
+        glow: Bool,
+        bevel: SurfaceBevel
     ) {
         self.fill = fill
         self.border = border
         self.borderWidth = borderWidth
         self.radius = radius
         self.glow = glow
+        self.bevel = bevel
     }
 }
 
@@ -94,15 +99,16 @@ extension NSView {
     /// Re-applies whatever `applySurface` last set, resolving its colours again.
     fileprivate func reapplyRecordedSurface() {
         guard let recorded = recordedSurface else { return }
-        // Re-run the whole application rather than only the fill: radius, border weight and the
-        // halo are all theme-derived, and a style that changed only the colours would leave
-        // every card wearing the previous theme's silhouette.
+        // Re-run the whole application rather than only the fill: radius, border weight, the
+        // halo and the bevel are all theme-derived, and a style that changed only the colours
+        // would leave every card wearing the previous theme's silhouette.
         applySurface(
             fill: recorded.fill,
             radius: recorded.radius,
             border: recorded.border,
             borderWidth: recorded.borderWidth,
-            glow: recorded.glow
+            glow: recorded.glow,
+            bevel: recorded.bevel
         )
     }
 
@@ -156,14 +162,16 @@ extension NSView {
         border: NSColor?,
         borderWidth: CGFloat?,
         radius: SurfaceRadius,
-        glow: Bool
+        glow: Bool,
+        bevel: SurfaceBevel = .automatic
     ) {
         recordedSurface = RecordedSurface(
             fill: fill,
             border: border,
             borderWidth: borderWidth,
             radius: radius,
-            glow: glow
+            glow: glow,
+            bevel: bevel
         )
     }
 

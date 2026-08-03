@@ -379,6 +379,7 @@ extension AgentToolCoordinator {
             themeID: themeID,
             kind: kind
         )
+        let chrome = try appThemeChrome(patch?.chrome, base: source?.chrome)
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -386,8 +387,118 @@ extension AgentToolCoordinator {
             roles: roles,
             material: material,
             terminalPalette: terminal,
-            sidebar: sidebar
+            sidebar: sidebar,
+            chrome: chrome
         )
+    }
+
+    // MARK: Chrome Parsing
+
+    /// Turns a chrome patch into the change `makeVariant` applies — the sidebar's idiom, for
+    /// the block whose presence hands the whole window frame to the theme.
+    private func appThemeChrome(
+        _ patch: AppThemeChromeArguments?,
+        base: WindowChromeStyle?
+    ) throws -> AppThemeEditing.ChromeChange {
+        guard let patch else { return .inherit }
+        if patch.remove == true {
+            guard patch.titleBar == nil, patch.frame == nil else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set fields and remove in the same patch."
+                )
+            }
+            return .remove
+        }
+
+        var style: WindowChromeStyle
+        if let base {
+            style = base
+        } else {
+            guard let active = patch.titleBar?.activeGradient else {
+                throw AppThemeEditingError.invalid(
+                    "A theme stating chrome for the first time needs "
+                        + "chrome.title_bar.active_gradient."
+                )
+            }
+            style = WindowChromeStyle(
+                titleBar: WindowChromeStyle.TitleBar(
+                    activeGradient: try sidebarGradient(active)
+                )
+            )
+        }
+
+        if let titleBar = patch.titleBar {
+            guard titleBar.inactiveGradient == nil
+                || titleBar.removeInactiveGradient != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set inactive_gradient and remove_inactive_gradient "
+                        + "in the same patch."
+                )
+            }
+            if let active = titleBar.activeGradient {
+                style.titleBar.activeGradient = try sidebarGradient(active)
+            }
+            if titleBar.removeInactiveGradient == true {
+                style.titleBar.inactiveGradient = nil
+            } else if let inactive = titleBar.inactiveGradient {
+                style.titleBar.inactiveGradient = try sidebarGradient(inactive)
+            }
+            if let rawInk = cleaned(titleBar.ink) {
+                guard let color = NSColor(hex: rawInk) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.ink must be #RRGGBB or #RRGGBBAA."
+                    )
+                }
+                style.titleBar.ink = color
+            }
+            if let rawInk = cleaned(titleBar.inactiveInk) {
+                guard let color = NSColor(hex: rawInk) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.inactive_ink must be #RRGGBB or #RRGGBBAA."
+                    )
+                }
+                style.titleBar.inactiveInk = color
+            }
+            if let rawAlignment = cleaned(titleBar.titleAlignment) {
+                guard let parsed = WindowChromeStyle.TitleBar.Alignment(
+                    rawValue: rawAlignment
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.title_alignment must be \"leading\" or \"center\"."
+                    )
+                }
+                style.titleBar.titleAlignment = parsed
+            }
+            if let height = titleBar.height {
+                style.titleBar.height = height
+            }
+            if let rawGlyphs = cleaned(titleBar.buttonGlyphStyle) {
+                guard let parsed = WindowChromeStyle.TitleBar.ButtonGlyphStyle(
+                    rawValue: rawGlyphs
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.button_glyph_style must be \"squares\" or \"plain\"."
+                    )
+                }
+                style.titleBar.buttonGlyphStyle = parsed
+            }
+        }
+
+        guard patch.frame == nil || patch.removeFrame != true else {
+            throw AppThemeEditingError.invalid(
+                "chrome cannot set frame and remove_frame in the same patch."
+            )
+        }
+        if patch.removeFrame == true {
+            style.frame = nil
+        } else if let frame = patch.frame {
+            guard let width = frame.width else {
+                throw AppThemeEditingError.invalid("chrome.frame needs a width in points.")
+            }
+            style.frame = WindowChromeStyle.Frame(width: width)
+        }
+
+        return .set(style)
     }
 
     // MARK: Sidebar Parsing
@@ -618,10 +729,24 @@ extension AgentToolCoordinator {
             )
         }
 
+        guard patch.bevel == nil || patch.removeBevel != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set bevel and remove_bevel in the same patch."
+            )
+        }
+
         var material = base
         if let value = patch.panelRadius { material.panelRadius = CGFloat(value) }
         if let value = patch.controlRadius { material.controlRadius = CGFloat(value) }
         if let value = patch.borderWidth { material.borderWidth = CGFloat(value) }
+
+        if patch.removeBevel == true {
+            material.bevel = nil
+        } else if let bevel = patch.bevel {
+            material.bevel = AppTheme.Bevel(
+                width: CGFloat(bevel.width ?? Double(base.bevel?.width ?? 2))
+            )
+        }
 
         if let rawTypeface = cleaned(patch.typeface) {
             // Named rather than positional, and the accepted list travels with the refusal: an
@@ -772,6 +897,39 @@ extension AgentToolCoordinator {
         if let sidebar = variant?.sidebar {
             document["sidebar"] = appThemeSidebarDocument(sidebar)
         }
+        if let chrome = variant?.chrome {
+            document["chrome"] = appThemeChromeDocument(chrome)
+        }
+        return document
+    }
+
+    /// The chrome block as create/update speak it; everything round-trips.
+    private func appThemeChromeDocument(_ chrome: WindowChromeStyle) -> [String: Any] {
+        func gradientDocument(_ gradient: SidebarStyle.Gradient) -> [String: Any] {
+            [
+                "angle_degrees": gradient.angleDegrees,
+                "stops": gradient.stops.map {
+                    ["color": $0.color.hexString, "position": $0.position]
+                }
+            ]
+        }
+
+        var titleBar: [String: Any] = [
+            "active_gradient": gradientDocument(chrome.titleBar.activeGradient),
+            "title_alignment": chrome.titleBar.titleAlignment.rawValue,
+            "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue
+        ]
+        if let inactive = chrome.titleBar.inactiveGradient {
+            titleBar["inactive_gradient"] = gradientDocument(inactive)
+        }
+        if let ink = chrome.titleBar.ink { titleBar["ink"] = ink.hexString }
+        if let ink = chrome.titleBar.inactiveInk { titleBar["inactive_ink"] = ink.hexString }
+        if let height = chrome.titleBar.height { titleBar["height"] = height }
+
+        var document: [String: Any] = ["title_bar": titleBar]
+        if let frame = chrome.frame {
+            document["frame"] = ["width": frame.width]
+        }
         return document
     }
 
@@ -820,6 +978,9 @@ extension AgentToolCoordinator {
             "typeface": material.typeface.rawValue
         ]
         if let family = material.fontFamily { document["font_family"] = family }
+        if let bevel = material.bevel {
+            document["bevel"] = ["width": Double(bevel.width)]
+        }
         if let glow = material.glow {
             document["glow"] = [
                 "role": glow.role.wireName,

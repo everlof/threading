@@ -1,11 +1,17 @@
 # Window Chrome
 
-The toolbar, the pane headers, and why the sidebar is a plain split item.
+The toolbar, the pane headers, why the sidebar is a plain split item — and the takeover, where
+a theme draws the frame itself.
 
-This boundary is already app-owned where it should be: the full-height sidebar ground, split
-rule, headers, and toolbar item views are themed; `NSWindow`, traffic lights, resizing, sheets,
-and full-screen integration remain AppKit's. Replacing the window frame would remove behavior,
-not system-coloured application chrome, so further work here is an audit rather than a rewrite.
+In **native dress** (every theme that states no chrome, which is all of them but one) this
+boundary is app-owned exactly where it should be: the full-height sidebar ground, split rule,
+headers, and toolbar item views are themed; `NSWindow`, traffic lights, resizing, sheets, and
+full-screen integration remain AppKit's. This file long recorded "replacing the window frame
+would remove behavior, not system-coloured application chrome" — that judgement still holds
+*as a default*, and it is why the takeover below is an **opt-in a theme states**
+(`WindowChromeStyle`, 2026-08) rather than a rewrite: the System theme and every existing theme
+keep the native frame untouched, and the removed behaviours are re-provided deliberately, one
+by one, where the takeover is worn. See [The takeover](#the-takeover-a-theme-that-draws-the-frame).
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -281,3 +287,69 @@ A session row's trailing edge is one fixed-size slot holding the status indicato
 `⋯` actions button overlaid, crossfaded on hover via `alphaValue` rather than `isHidden` —
 a stack view detaches hidden arranged views, so toggling visibility would re-lay out the row
 under the pointer.
+
+## The takeover: a theme that draws the frame
+
+A theme stating a `WindowChromeStyle` (a `chrome:` block on its variant — the second and last
+regional block after `SidebarStyle`, following all of its rules) opts the main window out of its
+native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and observing
+`AppThemeDidChange`, performs the exchange in both directions, live. The stock **Windows 98**
+theme (`retro-98`) is the first user; the mechanism is the feature, the theme is its worked
+example.
+
+**The masks.** Native is what `createWindow` always made:
+`[.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]`. Takeover keeps every
+bit AppKit can still serve behind a frameless window —
+`[.closable, .miniaturizable, .resizable]` — so edge-resize, the Dock genie, and `performClose`
+semantics stay AppKit's. Only `.titled` (traffic lights, rounded corners, toolbar mount) and
+`.fullSizeContentView` (meaningless without a titlebar) leave.
+
+**Flip ordering is load-bearing.** The toolbar detaches *before* `.titled` leaves and returns
+only *after* it is back — an attached `NSToolbar` on an untitled window is an AppKit exception.
+The mask assignment can nudge the frame and drops key status, so both are captured before and
+re-asserted after (`makeKeyAndOrderFront` only for a window actually visible — a hosted test's
+unshown window must not be ordered on screen by a theme change). `.fullScreenPrimary` is
+inserted on entry (a frameless window is not fullscreen-capable on its own) and the prior
+collection behaviour restored on exit. A window *inside* fullscreen never has its mask touched:
+the change is parked and completed from `windowDidExitFullScreen`, because a mid-fullscreen
+mask flip detaches the window from its space. A takeover theme active at launch is honoured at
+**creation** — `AppThemeLibrary.restore()` runs before `MainWindowController` exists, so the
+window is born frameless and nothing flips.
+
+**What is re-provided, and where.** `TitlebarActionWindow` answers `canBecomeKey`/`canBecomeMain`
+unconditionally (a frameless `NSWindow` refuses both); its double-click machinery goes inert by
+geometry (frameless `contentLayoutRect` covers the whole content) and the gesture moves to the
+band. `WindowTitleBandView` re-states the titlebar's obligations one for one: a press drags the
+window (`performDrag`), a double-click performs `TitlebarDoubleClick.preferredAction`, the band
+dims through its inactive gradient when the window resigns key, and the title follows
+`window.title` by observation. `WindowChromeButton` (close/minimize/zoom) calls the **semantic**
+operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
+`perform*` forms animate a standard button a frameless window does not have and refuse outright
+(measured; the buttons were dead until this). `WindowChromeFrameView` draws the border, and
+draws nothing at all in native dress, where the terminal-palette backdrop showing through the
+titlebar strip is load-bearing.
+
+**The content root is permanent.** `WindowChromeHostViewController` is the window's
+`contentViewController` in *both* dress states — assigning a content controller resizes the
+window (`applyInitialFrame`), so the root must never be swapped mid-flip. In native dress the
+band is hidden at zero height and the frame inset is zero, which is geometrically identical to
+the workspace being the root; `WindowChromeComponentTests` pins that. This also moves the
+chrome tree inside `ThemeBoundaryAudit`'s reach, which is the point: an app-drawn frame is
+app-owned surface.
+
+**The measurements answer differently.** In takeover nothing floats over the panes — no
+traffic lights, no toolbar — so `windowControlsTrailingEdge()` answers 0, the header inset is
+the plain `PaneHeaderDefaults.inset` in both sidebar states, and the sidebar's floor falls back
+to `SidebarDefaults.minWidth`. The zero safe area becomes steady state: the content header's
+999-priority constraint and its 40pt floor (written as a launch transient) now size the strip
+permanently, and `WindowChromeTakeoverTests` states it so it stops being luck. The window's own
+controls (sidebar toggle, history pair) rehome into the band's leading slot as fresh
+`ThemedIconButton`s inked from `InkSource.titleBand` — the third ground, whose gradient the
+theme authors directly — and the controller's weak references re-point so
+`updateToolbarControlStates()` never learns which dress is worn. `PaneBandMargin.paneEdge`'s
+corner-adapted clearance is left alone in v1: harmless over-inset under square corners.
+
+**Scope.** Main window only. The Component Gallery and Onboarding windows keep native chrome
+under every theme; `ThemedAlertPanel`/`ThemedPopover` were already frameless and app-drawn.
+Fullscreen under takeover keeps the band visible (it lives in the content tree; auto-reveal is
+titlebar machinery a frameless window does not have).

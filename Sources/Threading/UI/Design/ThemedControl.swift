@@ -258,8 +258,27 @@ enum ThemedSurface {
         _ bounds: NSRect,
         fill: NSColor,
         border: NSColor? = nil,
-        radius: CGFloat? = nil
+        radius: CGFloat? = nil,
+        bevel: SurfaceBevel = .automatic
     ) -> Shape {
+        // A bevel material bevels the drawn controls too — this is the draw-time half of
+        // `applySurface`'s interpretation, under the same rules: participation stated by the
+        // call site, square corners only, and the bevel replaces the flat border. A surface
+        // that draws *nothing* — a resting icon button's clear fill, no border — stays
+        // nothing: the period toolbar button is flat until the pointer arrives, and a bevel
+        // ring around empty air read as a plate nobody drew.
+        if let spec = AppThemePalette.current.material.bevel,
+           bevel != .none,
+           fill.alphaComponent > 0 || border != nil,
+           (radius ?? Design.Radius.control(fitting: bounds.size)) == 0 {
+            return drawBevelled(
+                bounds,
+                fill: fill,
+                edgeWidth: spec.width,
+                sunken: bevel == .sunken
+            )
+        }
+
         let width = Design.Radius.border
         // Half a point in, so a one-point border falls inside the control rather than straddling
         // its edge and drawing at half intensity.
@@ -279,6 +298,62 @@ enum ThemedSurface {
             path.stroke()
         }
         return shape
+    }
+
+    /// The classic construction, at draw time — `BevelArtwork`'s two square-cornered rings,
+    /// painted as exact edge rects so a translucent fill (a tab's 14% lift) never has an
+    /// opaque construction bleeding through it. Which way is "up" is asked of the context, so
+    /// the light always comes from the window's top-leading corner whether or not the view
+    /// is flipped.
+    private static func drawBevelled(
+        _ bounds: NSRect,
+        fill: NSColor,
+        edgeWidth: CGFloat,
+        sunken: Bool
+    ) -> Shape {
+        let flipped = NSGraphicsContext.current?.isFlipped ?? false
+        let colors = BevelArtwork.edgeColors(
+            highlight: Design.Surface.bevelHighlight,
+            shadow: Design.Surface.bevelShadow,
+            sunken: sunken
+        )
+        let widths = BevelArtwork.ringWidths(for: edgeWidth)
+
+        // A bevel is pixel art: every edge is a hard line, and an antialiased one is a gray
+        // halo that reads as a faded imitation of the real thing however right the colours
+        // are. Off for the whole construction, restored before anything else draws.
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+
+        fill.setFill()
+        bounds.insetBy(dx: edgeWidth, dy: edgeWidth).fill()
+
+        func ring(_ rect: NSRect, width: CGFloat, topLeft: NSColor, bottomRight: NSColor) {
+            guard width > 0 else { return }
+            let visualTopY = flipped ? rect.minY : rect.maxY - width
+            let visualBottomY = flipped ? rect.maxY - width : rect.minY
+            // The dark side owns both mixed corners: its column runs the full height, its
+            // row the full width — the square meeting that reads as an edge, where a mitre
+            // read as a cast shadow.
+            bottomRight.setFill()
+            NSRect(x: rect.maxX - width, y: rect.minY,
+                   width: width, height: rect.height).fill()
+            NSRect(x: rect.minX, y: visualBottomY,
+                   width: rect.width, height: width).fill()
+            topLeft.setFill()
+            NSRect(x: rect.minX, y: visualTopY,
+                   width: rect.width - width, height: width).fill()
+            NSRect(x: rect.minX, y: flipped ? rect.minY : rect.minY + width,
+                   width: width, height: rect.height - width).fill()
+        }
+
+        ring(bounds, width: widths.outer,
+             topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
+        ring(bounds.insetBy(dx: widths.outer, dy: widths.outer), width: widths.inner,
+             topLeft: colors.topLeftInner, bottomRight: colors.bottomRightInner)
+
+        return Shape(rect: bounds, radius: 0)
     }
 }
 

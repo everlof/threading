@@ -1760,6 +1760,16 @@ Deleting a theme leaves anything using it inheriting again. Renaming one keeps t
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
+**One theme takes over the whole window frame.** The stock **Windows 98** theme draws the
+entire frame itself: the macOS titlebar, traffic lights and rounded corners give way to a navy
+title band with its own close, minimize and maximize buttons, square corners, a silver border,
+and raised-and-sunken bevelled surfaces throughout. Everything still works the way a window
+does — drag the band to move, double-click it for your System Settings titlebar action, resize
+from any edge, minimize to the Dock, and enter full screen as usual (the band stays visible
+there). The sidebar toggle and Back/Forward move into the band while the theme is worn.
+Switching to any other theme brings the native macOS frame straight back, exactly as you left
+it. Custom themes can opt into the same takeover through the theme tools.
+
 **The Dock icon follows the app theme.** Choosing anything other than System redraws Threading's
 icon in that theme's ground and accent — Cyberpunk's neon green on near-black, Bauhaus's red
 with its hard printed shadow — and the ⌘-Tab switcher shows the same. The chevron itself never

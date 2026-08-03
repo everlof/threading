@@ -252,11 +252,16 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         // of circles beside the rounded tabs and chips they sit with reads as a second silhouette
         // in one strip of chrome. `Design.Radius.control` is the one a theme states for exactly
         // this: small things nested in the window's own furniture.
+        //
+        // Under a bevel material a pressed or toggled-on button reads *sunken* — pressed-in
+        // is what "active" has meant on a bevelled desktop since there were bevelled
+        // desktops — and everything else raises only when it draws a surface at all.
         let shape = ThemedSurface.draw(
             bounds,
             fill: fill,
             border: border,
-            radius: Design.Radius.control(fitting: bounds.size)
+            radius: Design.Radius.control(fitting: bounds.size),
+            bevel: (isPressed || isSelected) ? .sunken : .automatic
         )
 
         drawKeyboardFocus(around: shape, color: ink.label)

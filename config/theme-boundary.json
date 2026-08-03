@@ -341,6 +341,12 @@
       "kind": "interactiveComponent",
       "symbol": "ThemedSplitView",
       "reason": "The divider drag stays AppKit's — super runs the whole tracking loop, and the override only reads where it ended. There is no activation to route: the panes it shuts are reachable by keyboard and by the toolbar's own themed controls."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/WindowTitleBandView.swift",
+      "kind": "interactiveComponent",
+      "symbol": "WindowTitleBandView",
+      "reason": "The press is a titlebar's press: it hands the window to performDrag, and a double-click performs the user's own System Settings choice — the gestures NSWindow ran before the takeover theme replaced its frame. Subclassing ThemedControl would give the whole band a focus ring, an enabled state and a press action, none of which a titlebar has; every activation in the band belongs to its buttons, which are real ThemedControls with the full accessibility contract."
     }
   ]
 }

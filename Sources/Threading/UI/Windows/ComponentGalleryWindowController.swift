@@ -143,7 +143,10 @@ final class ComponentGalleryViewController: NSViewController {
         "ToastView",
         "ToolbarButtonGroupView",
         "WorkingOrbView",
-        "WindowBackdrop"
+        "WindowBackdrop",
+        "WindowChromeButton",
+        "WindowChromeFrameView",
+        "WindowTitleBandView"
     ]
 
     /// The toast story's presenter, retained so the button beside the pane can send a band into
@@ -361,6 +364,7 @@ final class ComponentGalleryViewController: NSViewController {
             makePresentationSection(),
             makeContainersSection(),
             makeBrowserChromeSection(),
+            makeWindowChromeSection(),
             makeColourSection(),
             makeExtensionSection(),
             makeInfrastructureSection()
@@ -2486,6 +2490,91 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     // MARK: Building blocks
+
+    /// The chrome a takeover theme draws in place of the window frame, previewed through the
+    /// components' fixture seam — the styles here are stated, never taken from the active
+    /// theme, so the story reads the same whatever the gallery is wearing.
+    private func makeWindowChromeSection() -> NSView {
+        func style(
+            _ glyphs: WindowChromeStyle.TitleBar.ButtonGlyphStyle
+        ) -> WindowChromeAppearance.Resolved {
+            WindowChromeAppearance.resolved(from: WindowChromeStyle(
+                titleBar: .init(
+                    activeGradient: .init(stops: [
+                        .init(color: NSColor(hex: "#000080")!, position: 0),
+                        .init(color: NSColor(hex: "#1084D0")!, position: 1)
+                    ], angleDegrees: 90),
+                    ink: .white,
+                    buttonGlyphStyle: glyphs
+                ),
+                frame: .init(width: 4)
+            ))
+        }
+
+        let squares = style(.squares)
+        let band = WindowTitleBandView()
+        band.fixtureStyle = squares
+        band.setTitle(AppInfo.name)
+        NSLayoutConstraint.activate([
+            band.widthAnchor.constraint(equalToConstant: 420),
+            band.heightAnchor.constraint(equalToConstant: squares.bandHeight)
+        ])
+
+        let plain = style(.plain)
+        let plainButtons = NSStackView(views: [
+            WindowChromeButton.Role.minimize, .zoom, .close
+        ].map { role in
+            let button = WindowChromeButton(role: role)
+            button.fixtureStyle = plain
+            return button
+        })
+        plainButtons.orientation = .horizontal
+        plainButtons.spacing = Design.Spacing.hairline
+        let backplate = NSView()
+        backplate.translatesAutoresizingMaskIntoConstraints = false
+        backplate.applyLayerBackground(NSColor(hex: "#000080")!)
+        backplate.addSubview(plainButtons)
+        plainButtons.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            plainButtons.centerXAnchor.constraint(equalTo: backplate.centerXAnchor),
+            plainButtons.centerYAnchor.constraint(equalTo: backplate.centerYAnchor),
+            backplate.widthAnchor.constraint(
+                equalTo: plainButtons.widthAnchor,
+                constant: Design.Spacing.large
+            ),
+            backplate.heightAnchor.constraint(equalToConstant: squares.bandHeight)
+        ])
+
+        let frame = WindowChromeFrameView()
+        frame.fixtureStyle = squares
+        frame.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            frame.widthAnchor.constraint(equalToConstant: 220),
+            frame.heightAnchor.constraint(equalToConstant: 96)
+        ])
+
+        let bandRow = NSStackView(views: [band, backplate])
+        bandRow.orientation = .vertical
+        bandRow.alignment = .leading
+        bandRow.spacing = Design.Spacing.small
+
+        return section(
+            "Window chrome",
+            note: "A takeover theme's frame, drawn by the app. The band drags this very window, and its buttons really close, minimize, and zoom it.",
+            rows: [
+                story(
+                    "WindowTitleBandView & WindowChromeButton",
+                    "The title band with square-plate buttons, and the bare-glyph style on its own ground.",
+                    bandRow
+                ),
+                story(
+                    "WindowChromeFrameView",
+                    "The border drawn around a takeover window's edges, seated by the theme's border role.",
+                    frame
+                )
+            ]
+        )
+    }
 
     private func section(_ title: String, note: String, rows: [NSView]) -> NSView {
         let heading = NSTextField(labelWithString: L10n.string(title))

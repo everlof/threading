@@ -32,6 +32,12 @@ enum AppThemeRole: String, CaseIterable, Codable {
 
     case border
     case divider
+    /// The lit edge of a bevelled surface — top and leading when raised. Only drawn under a
+    /// material that states a bevel (`Material.bevel`), which System never does; the role
+    /// exists so `applySurface` can record *which edge colour* rather than a frozen value.
+    case bevelHighlight
+    /// The shaded edge — bottom and trailing when raised, swapped when sunken.
+    case bevelShadow
 
     // MARK: Text
 
@@ -91,6 +97,11 @@ enum AppThemeRole: String, CaseIterable, Codable {
         case .controlResting: return .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
         case .controlHover: return .unemphasizedSelectedContentBackgroundColor
         case .border: return .separatorColor
+        // Honest answers for a treatment System never draws: the classic lit-and-shaded pair
+        // any gray surface could wear. A custom System-derived theme that states a bevel gets
+        // something sensible rather than clear.
+        case .bevelHighlight: return NSColor(white: 1, alpha: 0.9)
+        case .bevelShadow: return NSColor(white: 0, alpha: 0.35)
         // Resolve, then multiply — `withAlphaComponent` *replaces* alpha, and `separatorColor`
         // is the rare catalog colour that carries its own (white or black at 10%). Replacing
         // gave white at **50%**: a hairline five times louder than the border it is meant to

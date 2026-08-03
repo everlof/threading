@@ -27,6 +27,7 @@ enum AppThemeStyles {
         newsprint,
         botanical,
         industrial,
+        win98,
         christmas
     ]
 

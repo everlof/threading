@@ -584,6 +584,8 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let borderWidth: Double?
   let glow: AppThemeGlowArguments?
   let removeGlow: Bool?
+  let bevel: AppThemeBevelArguments?
+  let removeBevel: Bool?
   let typeface: String?
   let fontFamily: String?
   let removeFontFamily: Bool?
@@ -594,10 +596,16 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case borderWidth = "border_width"
     case glow
     case removeGlow = "remove_glow"
+    case bevel
+    case removeBevel = "remove_bevel"
     case typeface
     case fontFamily = "font_family"
     case removeFontFamily = "remove_font_family"
   }
+}
+
+struct AppThemeBevelArguments: Decodable, Sendable {
+  let width: Double?
 }
 
 /// An image handed to a theme tool: a file path the host reads, or the bytes inline.
@@ -665,6 +673,49 @@ struct AppThemeSidebarArguments: Decodable, Sendable {
   }
 }
 
+/// The chrome block of a variant patch — the window-frame takeover. Presence of the block
+/// with a title bar opts the theme into drawing the entire frame; `remove` hands the frame
+/// back to macOS; each `remove_*` takes one stated half back to its default.
+struct AppThemeChromeArguments: Decodable, Sendable {
+  let titleBar: AppThemeChromeTitleBarArguments?
+  let frame: AppThemeChromeFrameArguments?
+  let removeFrame: Bool?
+  let remove: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case titleBar = "title_bar"
+    case frame
+    case removeFrame = "remove_frame"
+    case remove
+  }
+}
+
+struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
+  let activeGradient: AppThemeGradientArguments?
+  let inactiveGradient: AppThemeGradientArguments?
+  let removeInactiveGradient: Bool?
+  let ink: String?
+  let inactiveInk: String?
+  let titleAlignment: String?
+  let height: Double?
+  let buttonGlyphStyle: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case activeGradient = "active_gradient"
+    case inactiveGradient = "inactive_gradient"
+    case removeInactiveGradient = "remove_inactive_gradient"
+    case ink
+    case inactiveInk = "inactive_ink"
+    case titleAlignment = "title_alignment"
+    case height
+    case buttonGlyphStyle = "button_glyph_style"
+  }
+}
+
+struct AppThemeChromeFrameArguments: Decodable, Sendable {
+  let width: Double?
+}
+
 /// `"mark"`, `"hidden"`, or `{path|base64}` — mirroring the document's own logo spelling.
 enum AppThemeSidebarLogoArguments: Decodable, Sendable {
   case mark
@@ -696,25 +747,28 @@ struct AppThemeVariantArguments: Decodable, Sendable {
   let material: AppThemeMaterialArguments?
   let terminalColors: [String: String]?
   let sidebar: AppThemeSidebarArguments?
+  let chrome: AppThemeChromeArguments?
 
-  /// Defaulted so the call sites (and tests) written before `sidebar` existed keep reading
-  /// as they did.
+  /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
+  /// keep reading as they did.
   init(
     roles: [String: String]? = nil,
     material: AppThemeMaterialArguments? = nil,
     terminalColors: [String: String]? = nil,
-    sidebar: AppThemeSidebarArguments? = nil
+    sidebar: AppThemeSidebarArguments? = nil,
+    chrome: AppThemeChromeArguments? = nil
   ) {
     self.roles = roles
     self.material = material
     self.terminalColors = terminalColors
     self.sidebar = sidebar
+    self.chrome = chrome
   }
 
   private enum CodingKeys: String, CodingKey {
     case roles, material
     case terminalColors = "terminal_colors"
-    case sidebar
+    case sidebar, chrome
   }
 }
 
@@ -3691,7 +3745,12 @@ enum MCPTools {
         theme is applied by default. A variant's optional `sidebar` block dresses the \
         project sidebar: a gradient or image behind the list, a custom logo, and the \
         wordmark's text and face — supplied images arrive as a file path or base64 and \
-        are stored with the theme.
+        are stored with the theme. A variant's optional `chrome` block goes further: a \
+        theme stating chrome draws the entire window frame itself — an app-drawn title \
+        band, window buttons and border replace the native macOS titlebar, traffic \
+        lights and rounded corners while the theme is worn. The material's optional \
+        `bevel` turns flat borders into raised/sunken two-tone edges (square corners \
+        required) — state bevel_highlight and bevel_shadow roles alongside it.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -3775,7 +3834,10 @@ enum MCPTools {
         Built-in themes are immutable. Only supplied variants and fields change; this can \
         add a missing light or dark variant without replacing the existing one. Set \
         appearance to "adaptive" once both exist to follow macOS. An active theme repaints \
-        live; an inactive theme stays inactive unless `apply` is true.
+        live; an inactive theme stays inactive unless `apply` is true. A patch that says \
+        nothing about a variant's `sidebar` or `chrome` block leaves it exactly as it \
+        was; `chrome.remove` is how a theme hands the window frame back to macOS, and \
+        the exchange happens live when the theme is the active one.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4041,6 +4103,18 @@ enum MCPTools {
           """,
         properties: appSidebarSchema
       ),
+      "chrome": MCPPropertySchema(
+        type: .object,
+        description: """
+          The window frame's dressing — and, by its presence, the theme's opt-in to \
+          drawing the entire frame itself. While a theme stating chrome is applied, \
+          the main window gives up its native macOS titlebar, traffic lights and \
+          rounded corners and wears an app-drawn title band, window buttons and \
+          border instead. Omitted, the block inherits from the base variant; an \
+          adaptive theme must state chrome in both variants or neither.
+          """,
+        properties: appChromeSchema
+      ),
     ]
   }
 
@@ -4246,6 +4320,129 @@ enum MCPTools {
       "remove_font_family": MCPPropertySchema(
         type: .boolean,
         description: "True removes the base theme's font family, falling back to typeface."
+      ),
+      "bevel": MCPPropertySchema(
+        type: .object,
+        description: """
+          A raised-and-sunken edge treatment on every square-cornered surface, drawn \
+          in the bevel_highlight/bevel_shadow roles — the mid-nineties material. \
+          Requires panel_radius 0 and control_radius 0: bevels draw only on square \
+          corners. Buttons and panels read raised; text wells read sunken.
+          """,
+        properties: [
+          "width": MCPPropertySchema(
+            type: .number,
+            description: "Points per edge, 1–3. 2 is the classic. Default 2."
+          )
+        ]
+      ),
+      "remove_bevel": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the base theme's bevel, returning flat borders."
+      ),
+    ]
+  }
+
+  /// The chrome block's schema, shared by create and update so the two cannot drift.
+  private static var appChromeSchema: [String: MCPPropertySchema] {
+    let gradient: (String) -> MCPPropertySchema = { name in
+      MCPPropertySchema(
+        type: .object,
+        description: name,
+        properties: [
+          "angle_degrees": MCPPropertySchema(
+            type: .number,
+            description: "CSS convention, degrees clockwise from straight up; 90 flows "
+              + "toward the trailing edge. Default 180."
+          ),
+          "stops": MCPPropertySchema(
+            type: .array,
+            description: "2–8 stops, each a colour at a position along the run.",
+            items: MCPArrayItemSchema(
+              type: .object,
+              properties: [
+                "color": MCPPropertySchema(
+                  type: .string,
+                  description: "#RRGGBB or #RRGGBBAA."
+                ),
+                "position": MCPPropertySchema(
+                  type: .number,
+                  description: "0 at the start of the run, 1 at its end."
+                ),
+              ],
+              required: ["color", "position"]
+            )
+          ),
+        ]
+      )
+    }
+    return [
+      "title_bar": MCPPropertySchema(
+        type: .object,
+        description: """
+          The app-drawn title band: its gradient while the window is key and while it \
+          is not, the ink its title and buttons draw in, and its measures.
+          """,
+        properties: [
+          "active_gradient": gradient(
+            "The band's fill while the window is key. Required when the block is set. "
+              + "Every stop must keep the ink at 3:1 — the band carries the window's "
+              + "own close button."
+          ),
+          "inactive_gradient": gradient(
+            "The band's fill while another window is key. Absent derives the active "
+              + "stops toward gray. Held to a softer 2:1 floor — inactive title text "
+              + "signals inactivity by carrying less ink."
+          ),
+          "remove_inactive_gradient": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns the inactive band to the derived gray."
+          ),
+          "ink": MCPPropertySchema(
+            type: .string,
+            description: "Title and button colour as #RRGGBB. Default white."
+          ),
+          "inactive_ink": MCPPropertySchema(
+            type: .string,
+            description: "Ink while inactive. Absent dims the active ink."
+          ),
+          "title_alignment": MCPPropertySchema(
+            type: .string,
+            description: "\"leading\" or \"center\". Default \"leading\"."
+          ),
+          "height": MCPPropertySchema(
+            type: .number,
+            description: "Band height, 22–44 points. Default 28."
+          ),
+          "button_glyph_style": MCPPropertySchema(
+            type: .string,
+            description: "How close/minimize/zoom draw: \"squares\" (plates in the "
+              + "theme's control surface, bevelled under a bevel material — the "
+              + "Windows lineage) or \"plain\" (bare glyphs in the band's ink)."
+          ),
+        ]
+      ),
+      "frame": MCPPropertySchema(
+        type: .object,
+        description: """
+          The border drawn around the window's edges, in the theme's border role. \
+          Absent means a one-point seat.
+          """,
+        properties: [
+          "width": MCPPropertySchema(
+            type: .number,
+            description: "Frame width, 1–6 points."
+          )
+        ]
+      ),
+      "remove_frame": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the frame to the one-point default."
+      ),
+      "remove": MCPPropertySchema(
+        type: .boolean,
+        description: "True clears the whole chrome block: the window returns to its "
+          + "native macOS frame the moment the theme is applied."
       ),
     ]
   }

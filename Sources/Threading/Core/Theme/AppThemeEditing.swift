@@ -85,6 +85,24 @@ enum AppThemeEditing {
         }
     }
 
+    /// The same three-way statement for the chrome block, for the same reason: a plain optional
+    /// cannot tell "leave it alone" from "take it away", and an update that changed one colour
+    /// must not silently hand the window frame back to AppKit. No empty-normalisation arm —
+    /// a chrome block's title bar is required, so there is no empty style to normalise.
+    enum ChromeChange {
+        case inherit
+        case remove
+        case set(WindowChromeStyle)
+
+        func applied(to source: WindowChromeStyle?) -> WindowChromeStyle? {
+            switch self {
+            case .inherit: return source
+            case .remove: return nil
+            case .set(let style): return style
+            }
+        }
+    }
+
     static func makeVariant(
         named name: String,
         from base: AppTheme,
@@ -92,7 +110,8 @@ enum AppThemeEditing {
         roles overrides: [AppThemeRole: NSColor] = [:],
         material: AppTheme.Material? = nil,
         terminalPalette: TerminalTheme? = nil,
-        sidebar: SidebarChange = .inherit
+        sidebar: SidebarChange = .inherit,
+        chrome: ChromeChange = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -113,7 +132,8 @@ enum AppThemeEditing {
                 ?? source?.terminalPalette
                 ?? base.terminalPalette).renamed(name),
             material: material ?? source?.material ?? base.material,
-            sidebar: sidebar.applied(to: source?.sidebar)
+            sidebar: sidebar.applied(to: source?.sidebar),
+            chrome: chrome.applied(to: source?.chrome)
         )
     }
 
@@ -128,12 +148,17 @@ enum AppThemeEditing {
         guard !cleanName.isEmpty else {
             throw AppThemeEditingError.invalid("Provide a name for the app theme.")
         }
+        // Every optional block must ride through this rebuild by hand. The rename pass
+        // reconstructs each variant, and a field left off the call vanishes from every theme
+        // assemble touches while looking untouched in the caller's patch — the trap
+        // `SidebarStyleTests` and `WindowChromeStyleTests` each pin for their block.
         let renamed = variants.mapValues { variant in
             AppTheme.Variant(
                 roles: variant.roles,
                 terminalPalette: variant.terminalPalette.renamed(cleanName),
                 material: variant.material,
-                sidebar: variant.sidebar
+                sidebar: variant.sidebar,
+                chrome: variant.chrome
             )
         }
         let theme = AppTheme(
@@ -204,6 +229,16 @@ enum AppThemeEditing {
             )
         default:
             break
+        }
+
+        // Band colours may differ between appearances; whether the window wears its own frame
+        // may not. An adaptive theme whose light half stated chrome and whose dark half did
+        // not would swap the entire window frame every time macOS changed appearance.
+        if theme.isAdaptive,
+           (theme.variant(.light)?.chrome != nil) != (theme.variant(.dark)?.chrome != nil) {
+            throw AppThemeEditingError.invalid(
+                "An adaptive theme must state window chrome in both variants or neither."
+            )
         }
 
         for kind in theme.availableVariants {
@@ -339,6 +374,21 @@ enum AppThemeEditing {
             throw AppThemeEditingError.invalid("border_width must be between 0.5 and 4.")
         }
 
+        if let bevel = material.bevel {
+            guard (1...3).contains(bevel.width) else {
+                throw AppThemeEditingError.invalid("bevel.width must be between 1 and 3.")
+            }
+            // A bevel only draws on square corners (a rectilinear edge has no honest offset
+            // curve for a rounded one), so a material stating both would author a treatment
+            // that never appears. Refused rather than silently ignored.
+            guard material.panelRadius == 0, material.controlRadius == 0 else {
+                throw AppThemeEditingError.invalid(
+                    "A bevelled material must state panel_radius 0 and control_radius 0 — "
+                        + "bevels draw only on square corners."
+                )
+            }
+        }
+
         if let glow = material.glow {
             // Layout reserves a constant gutter, so a tool-authored shadow may not silently
             // spill beyond it and become clipped by every scroll view. A directed shadow uses
@@ -369,6 +419,94 @@ enum AppThemeEditing {
 
         if let sidebar = variant.sidebar {
             try validate(sidebar, kind: kind, resolved: resolved, appearance: appearance)
+        }
+
+        if let chrome = variant.chrome {
+            try validate(chrome, kind: kind, resolved: resolved, appearance: appearance)
+        }
+    }
+
+    /// The chrome block's own gates. The band gets the sidebar gradient's treatment — its ink
+    /// is the window's title and buttons, and a band that swallows them loses the window its
+    /// close button. The inactive band is deliberately held to the softer "tellable" floor:
+    /// inactive title text signals inactivity by carrying less ink, and the classic inactive
+    /// palettes sit below full label contrast on purpose.
+    nonisolated private static func validate(
+        _ chrome: WindowChromeStyle,
+        kind: AppTheme.VariantKind,
+        resolved: AppTheme,
+        appearance: NSAppearance
+    ) throws {
+        let ground = resolved.resolved(.ground, appearance: appearance)
+
+        func check(
+            _ gradient: SidebarStyle.Gradient,
+            named name: String,
+            ink: NSColor,
+            floor: CGFloat
+        ) throws {
+            guard (2...WindowChromeStyleLimits.maximumGradientStops)
+                .contains(gradient.stops.count) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.\(name) needs 2 to "
+                        + "\(WindowChromeStyleLimits.maximumGradientStops) stops."
+                )
+            }
+            guard gradient.stops.allSatisfy({ (0...1).contains($0.position) }) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.\(name) stop positions must be between 0 and 1."
+                )
+            }
+            for stop in gradient.stops {
+                // A stop may be translucent; the band sits over the window ground, so that
+                // is what a translucent stop is measured against.
+                let band = ground.composited(under: stop.color)
+                let effectiveInk = band.composited(under: ink)
+                let ratio = ThemeContrast.ratio(effectiveInk, band)
+                guard ratio >= floor else {
+                    throw AppThemeEditingError.invalid(
+                        "\(kind.rawValue) chrome ink on the \(name) stop "
+                            + "\(stop.color.hexString) has \(formatted(ratio)):1 contrast; "
+                            + "at least \(Int(floor)):1 is required."
+                    )
+                }
+            }
+        }
+
+        let titleBar = chrome.titleBar
+        try check(
+            titleBar.activeGradient,
+            named: "title_bar.active_gradient",
+            ink: titleBar.ink ?? .white,
+            floor: ThemeContrast.minimumRatio
+        )
+        if let inactive = titleBar.inactiveGradient {
+            try check(
+                inactive,
+                named: "title_bar.inactive_gradient",
+                ink: titleBar.inactiveInk ?? titleBar.ink ?? .white,
+                floor: WindowChromeStyleLimits.inactiveInkMinimumRatio
+            )
+        }
+
+        if let height = titleBar.height {
+            guard WindowChromeStyleLimits.bandHeightRange.contains(height) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.title_bar.height must be between "
+                        + "\(Int(WindowChromeStyleLimits.bandHeightRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.bandHeightRange.upperBound)) points."
+                )
+            }
+        }
+
+        if let frame = chrome.frame {
+            guard WindowChromeStyleLimits.frameWidthRange.contains(frame.width) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.frame.width must be between "
+                        + "\(Int(WindowChromeStyleLimits.frameWidthRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.frameWidthRange.upperBound)) points."
+                )
+            }
         }
     }
 

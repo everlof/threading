@@ -117,6 +117,12 @@ enum Design {
         /// Compact controls floating in the transparent window toolbar.
         static let toolbarButtonWidth: CGFloat = 30
         static let toolbarButtonHeight: CGFloat = 28
+
+        /// A chrome-takeover window's own buttons — close, minimize, zoom — in the app-drawn
+        /// title band. Wider than tall, the proportion every windowing system's buttons share,
+        /// and sized to sit inside the band's default 28 points with air above and below.
+        static let windowButtonWidth: CGFloat = 22
+        static let windowButtonHeight: CGFloat = 18
         /// Height of a single-line text field — see `ThemedTextField`.
         ///
         /// Its own step rather than `chipHeight`, which it borrowed for as long as a field was
@@ -524,6 +530,11 @@ enum Design {
         static var border: NSColor {
             Accessibility.color(.border, increasedContrastAlphaFloor: 0.70)
         }
+
+        /// The lit and shaded edges of a bevelled surface. Only ever drawn under a material
+        /// that states a bevel — see `SurfaceBevel`.
+        static var bevelHighlight: NSColor { AppThemePalette.color(.bevelHighlight) }
+        static var bevelShadow: NSColor { AppThemePalette.color(.bevelShadow) }
 
         /// A rule between rows, quieter than a border around them — and *held* quieter.
         ///
@@ -1155,6 +1166,25 @@ enum SurfaceRadius {
     }
 }
 
+/// How an applied or drawn surface participates in a bevel material (`Material.bevel`).
+///
+/// Recorded like `SurfaceRadius` — as a role rather than a result — so the theme sweep
+/// re-resolves it: switching to a bevel theme raises every automatic surface, and switching
+/// away strips every edge. A bevel only ever draws on a surface whose resolved corner is
+/// square; a rectilinear edge treatment has no honest answer for a rounded offset curve, so a
+/// disc or pill under a bevel material simply keeps its flat border.
+@MainActor
+enum SurfaceBevel: Equatable {
+    /// What nearly every call site means without saying so: raised under a bevel material,
+    /// exactly today's flat surface otherwise.
+    case automatic
+    /// Inset wells — text fields, the editor's scroll well — which read as carved into the
+    /// surface rather than resting on it. Stated by the component, never guessed.
+    case sunken
+    /// Never bevelled: swatches, indicators, anything whose edge *is* its content.
+    case none
+}
+
 extension NSView {
 
     /// Applies a rounded, filled surface using the design tokens.
@@ -1175,11 +1205,17 @@ extension NSView {
         radius: SurfaceRadius,
         border: NSColor? = nil,
         borderWidth: CGFloat? = nil,
-        glow: Bool = false
+        glow: Bool = false,
+        bevel: SurfaceBevel = .automatic
     ) {
         wantsLayer = true
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius.current
+
+        // A bevel replaces the flat border outright — two edge colours and a hairline would
+        // be three lines around one surface — and only on a square corner (see SurfaceBevel).
+        let bevelWidth = AppThemePalette.current.material.bevel?.width
+        let bevelActive = bevelWidth != nil && bevel != .none && radius.current == 0
 
         // Frozen in the view's **own** effective appearance rather than the thread's ambient
         // drawing appearance, which from setup code and notification handlers is whatever
@@ -1188,7 +1224,13 @@ extension NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = fill.cgColor
 
-            if let border {
+            applyThemeBevel(
+                bevelActive ? bevel : nil,
+                width: bevelWidth ?? 0,
+                soft: { if case .panel = radius { return true } else { return false } }()
+            )
+
+            if let border, !bevelActive {
                 layer?.borderWidth = borderWidth ?? Design.Radius.border
                 layer?.borderColor = border.cgColor
             } else {
@@ -1206,8 +1248,63 @@ extension NSView {
             border: border,
             borderWidth: borderWidth,
             radius: radius,
-            glow: glow
+            glow: glow,
+            bevel: bevel
         )
+    }
+
+    /// Installs, updates, or strips the two-tone edge a bevel material asks for.
+    ///
+    /// Cleared rather than skipped when `participation` is nil — switching *away* from a
+    /// bevel theme has to take every edge with it, the `applyThemeGlow` rule.
+    ///
+    /// The edge is a nine-part stretched bitmap rather than shape layers: a bevel's corners
+    /// are fixed-size miters and its runs are uniform colour, which is exactly what
+    /// `contentsCenter` stretching preserves under any later resize — no path to rebuild, no
+    /// per-resize hook `applySurface` does not have. The bitmap's colours are frozen like any
+    /// recorded layer colour and re-frozen by the theme sweep, which re-runs the whole
+    /// application.
+    private func applyThemeBevel(_ participation: SurfaceBevel?, width: CGFloat, soft: Bool) {
+        let name = "threading.bevel"
+        let existing = layer?.sublayers?.first { $0.name == name }
+        guard let participation, width > 0, let layer else {
+            existing?.removeFromSuperlayer()
+            return
+        }
+
+        // Panels wear the soft one-point edge whatever the material says buttons wear —
+        // see `BevelArtwork.edgeColors`.
+        let effectiveWidth = soft ? BevelArtwork.softEdgeWidth : width
+        guard let image = BevelArtwork.ninePatch(
+            edgeWidth: width,
+            highlight: Design.Surface.bevelHighlight,
+            shadow: Design.Surface.bevelShadow,
+            sunken: participation == .sunken,
+            soft: soft
+        ) else {
+            existing?.removeFromSuperlayer()
+            return
+        }
+
+        let bevelLayer = existing ?? CALayer()
+        bevelLayer.name = name
+        bevelLayer.frame = layer.bounds
+        bevelLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        bevelLayer.contentsGravity = .resize
+        bevelLayer.contentsScale = BevelArtwork.scale
+        // The stretchable middle, in the image's own unit space: everything but the fixed
+        // edge ring.
+        let side = effectiveWidth * 2 + BevelArtwork.stretchableCore
+        bevelLayer.contentsCenter = CGRect(
+            x: effectiveWidth / side,
+            y: effectiveWidth / side,
+            width: BevelArtwork.stretchableCore / side,
+            height: BevelArtwork.stretchableCore / side
+        )
+        bevelLayer.contents = image
+        if existing == nil {
+            layer.addSublayer(bevelLayer)
+        }
     }
 
     private func applyThemeGlow(_ wantsGlow: Bool) {
@@ -1223,5 +1320,130 @@ extension NSView {
         layer?.shadowRadius = spec.radius
         layer?.shadowOpacity = Float(spec.opacity)
         layer?.shadowOffset = CGSize(width: spec.offsetX, height: spec.offsetY)
+    }
+}
+
+// MARK: - Bevel Artwork
+
+/// The one description of how a bevelled edge is built, shared by the layer path (the
+/// nine-patch bitmap `applyThemeBevel` hangs) and the draw path (`ThemedSurface`).
+///
+/// The construction is the classic `DrawEdge` one, not a mitre: **two square-cornered
+/// rings**, the dark side owning both mixed corners (its right column runs the full height,
+/// its bottom row the full width), so raised reads as a plate lit from the window's
+/// top-leading corner. A first version drew a single two-point band with 45° mitred corners,
+/// and every control looked like it was *casting a shadow* rather than standing proud — soft,
+/// smeared, and outward. The period look is crisp because its four edge colours are four
+/// distinct values: sheen and highlight on the lit side, frame-dark and shadow on the shaded
+/// one, inverted exactly for sunken.
+@MainActor
+enum BevelArtwork {
+
+    /// Rendered at retina scale whatever the display: a bevel is a hard-edged figure, and one
+    /// backing scale keeps its rings identical across screens.
+    static let scale: CGFloat = 2
+
+    /// The stretchable middle's size in points — the smallest square `contentsCenter` can
+    /// scale from without sampling the ring.
+    static let stretchableCore: CGFloat = 2
+
+    /// The four edge colours, derived from the theme's two roles: the sheen is the highlight
+    /// pulled slightly toward the surface, the frame is the shadow pulled nearly to black —
+    /// the classic `3DLIGHT`/`WINDOWFRAME` pair, stated as derivations so a theme authors
+    /// two colours and gets four.
+    struct EdgeColors {
+        let topLeftOuter: NSColor
+        let topLeftInner: NSColor
+        let bottomRightOuter: NSColor
+        let bottomRightInner: NSColor
+    }
+
+    /// `soft` is the panel variant: one point of highlight against one point of plain
+    /// shadow, no near-black frame line. The period reserves the heavy two-ring build for
+    /// *controls*; a large surface wearing it draws its edges as long dark bars across the
+    /// window — which is exactly how it read here before the distinction existed.
+    static func edgeColors(
+        highlight: NSColor,
+        shadow: NSColor,
+        sunken: Bool,
+        soft: Bool = false
+    ) -> EdgeColors {
+        // Both derivations were checked against a real 98 screenshot by sampling pixels:
+        // the sheen lands on the measured #DEDEDE, and the frame line is *pure black* —
+        // a first pass derived it at #131313, which is precisely the kind of almost that
+        // reads as "the shadow is off" without the eye saying why.
+        let sheen = highlight.lightened(by: -0.12)
+        let frame = soft ? shadow : shadow.lightened(by: -1)
+        return sunken
+            ? EdgeColors(
+                topLeftOuter: shadow,
+                topLeftInner: frame,
+                bottomRightOuter: highlight,
+                bottomRightInner: sheen
+            )
+            : EdgeColors(
+                topLeftOuter: highlight,
+                topLeftInner: sheen,
+                bottomRightOuter: frame,
+                bottomRightInner: shadow
+            )
+    }
+
+    /// A panel's edge width is the soft build's own: one point, whatever the material says
+    /// buttons wear.
+    static let softEdgeWidth: CGFloat = 1
+
+    /// How a total edge width splits into the two rings: the outer takes the first point,
+    /// the inner whatever remains (a one-point bevel is outer ring only).
+    static func ringWidths(for edgeWidth: CGFloat) -> (outer: CGFloat, inner: CGFloat) {
+        let outer = max(1, (edgeWidth / 2).rounded(.down))
+        return (outer, max(0, edgeWidth - outer))
+    }
+
+    static func ninePatch(
+        edgeWidth: CGFloat,
+        highlight: NSColor,
+        shadow: NSColor,
+        sunken: Bool,
+        soft: Bool = false
+    ) -> CGImage? {
+        let edgeWidth = soft ? softEdgeWidth : edgeWidth
+        let side = edgeWidth * 2 + stretchableCore
+        let pixels = Int(side * scale)
+        guard pixels > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: pixels,
+                  height: pixels,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+
+        context.scaleBy(x: scale, y: scale)
+        let bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        let colors = edgeColors(highlight: highlight, shadow: shadow, sunken: sunken, soft: soft)
+        let widths = soft ? (outer: edgeWidth, inner: 0) : ringWidths(for: edgeWidth)
+
+        // CG's origin is bottom-left, so "top" is maxY. The interior is never painted —
+        // the fill beneath shows through the nine-patch's transparent middle.
+        func ring(_ rect: CGRect, width: CGFloat, topLeft: NSColor, bottomRight: NSColor) {
+            guard width > 0 else { return }
+            context.setFillColor(bottomRight.cgColor)
+            context.fill(CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height))
+            context.fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: width))
+            context.setFillColor(topLeft.cgColor)
+            context.fill(CGRect(x: rect.minX, y: rect.maxY - width, width: rect.width - width, height: width))
+            context.fill(CGRect(x: rect.minX, y: rect.minY + width, width: width, height: rect.height - width))
+        }
+
+        ring(bounds, width: widths.outer,
+             topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
+        ring(bounds.insetBy(dx: widths.outer, dy: widths.outer), width: widths.inner,
+             topLeft: colors.topLeftInner, bottomRight: colors.bottomRightInner)
+
+        return context.makeImage()
     }
 }

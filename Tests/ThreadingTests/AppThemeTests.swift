@@ -1395,7 +1395,7 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        XCTAssertEqual(ids.count, 13, "the curated stock catalogue unexpectedly changed size")
+        XCTAssertEqual(ids.count, 14, "the curated stock catalogue unexpectedly changed size")
     }
 
     func testEveryStockStylePassesTheSameValidationAsAgentCreatedThemes() throws {

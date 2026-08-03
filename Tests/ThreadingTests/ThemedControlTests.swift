@@ -3712,7 +3712,10 @@ final class ThemedControlTests: XCTestCase {
                 "ToastView",
                 "ToolbarButtonGroupView",
                 "WorkingOrbView",
-                "WindowBackdrop"
+                "WindowBackdrop",
+                "WindowChromeButton",
+                "WindowChromeFrameView",
+                "WindowTitleBandView"
             ]
         )
 

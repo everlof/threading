@@ -144,10 +144,13 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     }
 
     private func drawSurface() {
+        // A text well is carved into the surface, not resting on it — the one place a bevel
+        // material reads sunken rather than raised.
         let shape = ThemedSurface.draw(
             bounds,
             fill: Design.Surface.controlResting,
-            border: isEditing ? Design.Surface.accent : Design.Surface.border
+            border: isEditing ? Design.Surface.accent : Design.Surface.border,
+            bevel: .sunken
         )
 
         guard isEditing else { return }

@@ -599,6 +599,8 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func updateSurface() {
+        // The prompt is where text is typed, so under a bevel material it reads sunken — a
+        // carved well, like every text field.
         applySurface(
             fill: Design.Surface.panel,
             radius: .panel,
@@ -606,7 +608,8 @@ final class PromptView: NSView, ThemedComponent {
             borderWidth: isTextFocused
                 ? Design.Accessibility.focusRingWidth
                 : Design.Radius.border,
-            glow: true
+            glow: true,
+            bevel: .sunken
         )
     }
 

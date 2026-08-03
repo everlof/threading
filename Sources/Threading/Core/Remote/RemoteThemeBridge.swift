@@ -20,6 +20,10 @@ enum RemoteThemeBridge {
         )
     }
 
+    /// The chrome block and the material's bevel are deliberately not projected: the remote
+    /// client has no window frame to dress and no bevel interpreter, and a DTO field nothing
+    /// renders is churn. The two bevel roles ride along in the resolved colour map like every
+    /// role — harmless, and a future client that learns to bevel finds its colours waiting.
     static func appTheme(_ theme: AppTheme) -> RemoteThemeDTO {
         var colors: [String: String] = [:]
         var mode = theme.mode.rawValue

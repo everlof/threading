@@ -39,11 +39,17 @@ enum InkSource: Equatable {
     /// what a host names through `BackdropThemedControl.hostGround`.
     case selection
 
+    /// The title band a chrome-takeover theme draws across the window's top — the third
+    /// ground, whose gradient the theme authors directly rather than through roles. Only the
+    /// controls the band itself hosts sit on it (`WindowTitleBandView`).
+    case titleBand
+
     var ink: Design.Ink {
         switch self {
         case .chrome: Design.Ink.chrome
         case .backdrop: WindowBackdrop.ink
         case .selection: Design.Ink.selection
+        case .titleBand: WindowChromeAppearance.bandInk
         }
     }
 
@@ -55,6 +61,7 @@ enum InkSource: Equatable {
         case .chrome: Design.Surface.ground
         case .backdrop: WindowBackdrop.color
         case .selection: Design.Surface.selectionFill
+        case .titleBand: WindowChromeAppearance.bandGround
         }
     }
 }

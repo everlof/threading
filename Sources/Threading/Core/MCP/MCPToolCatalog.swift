@@ -723,6 +723,15 @@ enum MCPToolCatalog {
       face, size and weight. Gradient stops must keep the theme's label readable; image \
       legibility is yours — wash a photograph well below 0.4 opacity. Absent means the \
       default sidebar, and each remove_* field takes one choice back.
+
+      A variant's `chrome` block is the deepest a theme reaches: stating it opts the \
+      theme into drawing the entire window frame — an app-drawn title band with the \
+      window's own close/minimize/zoom buttons and a border replace the native macOS \
+      titlebar, traffic lights and rounded corners while the theme is worn, live in \
+      both directions. The band's ink must read on every active-gradient stop, and an \
+      adaptive theme states chrome in both variants or neither. Pair it with the \
+      material's `bevel` (square corners required) for the full mid-nineties treatment; \
+      the stock Windows 98 theme is the worked example — read it with get_app_theme.
       """
   )
 

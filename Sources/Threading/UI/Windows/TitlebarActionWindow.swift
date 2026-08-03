@@ -28,6 +28,30 @@ final class TitlebarActionWindow: NSWindow {
     /// worth asserting against a known one.
     var doubleClickAction: () -> TitlebarDoubleClick.Action = { TitlebarDoubleClick.preferredAction }
 
+    /// `NSWindow` answers `false` to both of these the moment `.titled` leaves the style mask,
+    /// which under a chrome-takeover theme (`WindowChromeCoordinator`) would leave the app's
+    /// only window unable to take keyboard focus at all.
+    ///
+    /// Deliberately **conditional**, not a bare `true`: a titled window keeps AppKit's own
+    /// answer. The first version answered `true` unconditionally on the grounds that a titled
+    /// window "already answered true" — but AppKit's answer consults state the documentation
+    /// does not name, and overriding it for titled windows shifted `zoom()`'s animation path
+    /// on unshown fixtures enough to surface a use-after-free in
+    /// `_NSWindowTransformAnimation` two test suites away. Only the frameless case, where the
+    /// default is a hard `false`, gets the override.
+    ///
+    /// In takeover the rest of this class is inert by geometry rather than by flag: a
+    /// frameless window's `contentLayoutRect` is its whole content, so `isInTitlebarStrip` is
+    /// never true, `mouseDown` always falls through to `super`, and the double-click gesture
+    /// belongs to the app-drawn title band instead — which reads the same
+    /// `TitlebarDoubleClick.preferredAction`.
+    override var canBecomeKey: Bool {
+        styleMask.contains(.titled) ? super.canBecomeKey : true
+    }
+    override var canBecomeMain: Bool {
+        styleMask.contains(.titled) ? super.canBecomeMain : true
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == TitlebarDoubleClick.clickCount,
               isInTitlebarStrip(event.locationInWindow) else {

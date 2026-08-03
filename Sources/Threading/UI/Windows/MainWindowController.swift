@@ -33,6 +33,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     )
 
+    /// The window's permanent content root: the app-drawn chrome, collapsed to nothing in
+    /// native dress, around the extension hook and the workspace inside it.
+    private lazy var chromeHostViewController = WindowChromeHostViewController(
+        workspace: extensionHookViewController
+    )
+
     /// Retained so the sidebar can be collapsed and restored directly.
     private lazy var sidebarItem = NSSplitViewItem(viewController: workspaceSidebarViewController)
 
@@ -87,6 +93,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
+
+    /// Exchanges the window's frame with a takeover theme's own chrome and back. Optional
+    /// because it needs the real window; every consumer asks with `?.` and reads nil as
+    /// "native frame", which is also what it means.
+    private(set) var chromeCoordinator: WindowChromeCoordinator?
 
     /// The active page, drawn as the selected tab of the window's page strip.
     ///
@@ -188,6 +199,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     convenience init() {
         self.init(window: Self.createWindow())
         setupSplitViewController()
+        setupChromeCoordinator()
         window?.delegate = self
         applyInitialFrame()
         updateWindowTitle()
@@ -203,6 +215,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             height: WindowDefaults.defaultHeight
         )
 
+        // A theme that takes the chrome over must be honoured at creation, never by flipping
+        // a just-made titled window: `AppThemeLibrary.restore()` runs before this controller
+        // exists (`AppDelegate`), so the current theme is already the right one to ask.
+        let takeover = WindowChromeCoordinator.takeoverRequested
+
         // Full-size content so the sidebar runs the whole height of the window and the
         // traffic lights sit over it, rather than above a separate title bar. Views that
         // must not slide under the toolbar pin to their safe area instead.
@@ -211,23 +228,34 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // lines cost together: full-size content *and* a transparent titlebar is the one
         // combination in which AppKit stops hit-testing the strip, so a double-click there
         // reaches the content view and the platform's zoom-on-double-click never runs. That
-        // class puts the gesture back — see its own note.
+        // class puts the gesture back — see its own note. (Under a chrome takeover the class
+        // is inert by geometry; see its `canBecomeKey` note.)
         let window = TitlebarActionWindow(
             contentRect: contentRect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: takeover
+                ? WindowChromeCoordinator.takeoverMask
+                : WindowChromeCoordinator.nativeMask,
             backing: .buffered,
             defer: false
         )
 
         window.minSize = NSSize(width: WindowDefaults.minWidth, height: WindowDefaults.minHeight)
-        window.titleVisibility = .hidden
 
-        // Transparent so the toolbar draws no material bar of its own. Without it, that bar sits
-        // between the window's rounded top corner and the content, and the window's lighter
-        // default background shows in the gap as a pale sliver at the corner. Transparent, the
-        // sidebar's material and the terminal's colour run cleanly up to the rounded corner.
-        // (Wrongly blamed once for a mono-colour bug that was actually a missing COLORTERM.)
-        window.titlebarAppearsTransparent = true
+        if takeover {
+            // A frameless window is not fullscreen-capable on its own; the coordinator makes
+            // the same statement when it flips a live window.
+            window.collectionBehavior.insert(.fullScreenPrimary)
+        } else {
+            window.titleVisibility = .hidden
+
+            // Transparent so the toolbar draws no material bar of its own. Without it, that
+            // bar sits between the window's rounded top corner and the content, and the
+            // window's lighter default background shows in the gap as a pale sliver at the
+            // corner. Transparent, the sidebar's material and the terminal's colour run
+            // cleanly up to the rounded corner. (Wrongly blamed once for a mono-colour bug
+            // that was actually a missing COLORTERM.)
+            window.titlebarAppearsTransparent = true
+        }
         window.isReleasedWhenClosed = false
 
         return window
@@ -311,15 +339,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         setupDisplayPane()
         setupAgentToolCoordinator()
 
-        window?.contentViewController = extensionHookViewController
+        window?.contentViewController = chromeHostViewController
 
-        // Installed after the split view exists: the tracking separator item needs it.
-        window?.toolbar = makeToolbar()
-        updateToolbarControlStates()
+        // A frameless window has nowhere to mount a toolbar — under a takeover theme the
+        // coordinator reinstalls it the moment the native frame returns.
+        if window?.styleMask.contains(.titled) == true {
+            // Installed after the split view exists: the tracking separator item needs it.
+            window?.toolbar = makeToolbar()
+            updateToolbarControlStates()
 
-        // Compact, not `.unified`: the large style reserves a title-scale toolbar row, which
-        // dwarfs the deliberately quiet session tab and its compact app-owned actions.
-        window?.toolbarStyle = .unifiedCompact
+            // Compact, not `.unified`: the large style reserves a title-scale toolbar row,
+            // which dwarfs the deliberately quiet session tab and its compact app-owned
+            // actions.
+            window?.toolbarStyle = .unifiedCompact
+        }
 
         // The pane's own header, built here because the window controller owns what these
         // controls do, and installed there because the pane owns where they sit.
@@ -348,6 +381,102 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self.updateSidebarMinimumThickness()
             self.restoreSidebarWidth()
         }
+    }
+
+    /// Wires the frame exchange up once the window and split view exist.
+    ///
+    /// The coordinator observes theme changes itself; the controller only lends it the three
+    /// operations that are genuinely the controller's — the toolbar's lifecycle and the
+    /// measurements that assume one frame or the other.
+    private func setupChromeCoordinator() {
+        guard let window = window as? TitlebarActionWindow else { return }
+        chromeCoordinator = WindowChromeCoordinator(
+            window: window,
+            callbacks: .init(
+                removeToolbar: { [weak self] in
+                    self?.window?.toolbar = nil
+                },
+                reinstallToolbar: { [weak self] in
+                    self?.reinstallNativeToolbar()
+                },
+                takeoverDidChange: { [weak self] active in
+                    self?.windowChromeTakeoverDidChange(active)
+                }
+            )
+        )
+
+        // A window created straight into takeover never flips, so the content-side chrome is
+        // brought in line here rather than by the callback nothing will fire.
+        if chromeCoordinator?.isTakeoverActive == true {
+            windowChromeTakeoverDidChange(true)
+        }
+    }
+
+    private func reinstallNativeToolbar() {
+        window?.toolbar = makeToolbar()
+        updateToolbarControlStates()
+        window?.toolbarStyle = .unifiedCompact
+    }
+
+    /// The frame changed hands: the chrome host dresses or undresses, the window's own
+    /// controls move between the toolbar and the band, and the measurements that assumed the
+    /// other frame answer again — now, for everything that reads them this turn, and once
+    /// more a turn later because a reinstalled toolbar's items have no real frames yet (the
+    /// rule `setupSplitViewController` already follows).
+    private func windowChromeTakeoverDidChange(_ active: Bool) {
+        chromeHostViewController.setTakeoverActive(active)
+        if active {
+            installBandControls()
+        } else {
+            // The toolbar reinstall has already re-created its buttons and re-pointed the
+            // weak references at them; the band only has to let go of its copies.
+            chromeHostViewController.bandView.setLeadingControls([])
+        }
+
+        updateHeaderInset()
+        updateSidebarMinimumThickness()
+        DispatchQueue.main.async { [weak self] in
+            self?.updateHeaderInset()
+            self?.updateSidebarMinimumThickness()
+        }
+    }
+
+    /// The two toolbar residents, rebuilt for the band with the band's own ink. Fresh
+    /// instances rather than the toolbar's: an `NSToolbarItem`'s view belongs to the item,
+    /// and the weak references exist precisely so `updateToolbarControlStates` reaches
+    /// whichever copies are live.
+    private func installBandControls() {
+        let sidebar = ThemedIconButton(
+            symbolName: "sidebar.leading",
+            accessibility: L10n.string("Show or hide sidebar"),
+            inkSource: .titleBand
+        )
+        sidebar.toolTip = L10n.string("Show or Hide the Sidebar (⌃⌘S)")
+        sidebar.onPress = { [weak self] in self?.toggleSidebar() }
+        sidebarToolbarButton = sidebar
+
+        let back = ThemedIconButton(
+            symbolName: "chevron.left",
+            accessibility: L10n.string("Go back"),
+            inkSource: .titleBand
+        )
+        back.toolTip = L10n.string("Go Back (⌃⌘←)")
+        back.onPress = { [weak self] in self?.goBack() }
+        back.isEnabled = false
+        navBackToolbarButton = back
+
+        let forward = ThemedIconButton(
+            symbolName: "chevron.right",
+            accessibility: L10n.string("Go forward"),
+            inkSource: .titleBand
+        )
+        forward.toolTip = L10n.string("Go Forward (⌃⌘→)")
+        forward.onPress = { [weak self] in self?.goForward() }
+        forward.isEnabled = false
+        navForwardToolbarButton = forward
+
+        chromeHostViewController.bandView.setLeadingControls([sidebar, back, forward])
+        updateToolbarControlStates()
     }
 
     private func configureWorkspaceNavigator() {
@@ -553,6 +682,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// simply where the toggle ends. One value per collapse, not a feedback loop — the strip's
     /// contents do not move while the sidebar is out.
     private func updateHeaderInset(sidebarIsCollapsed: Bool? = nil) {
+        // Under a takeover theme there is nothing to clear: the traffic lights are gone and
+        // the window's own controls live inside the title band, above the panes, so the
+        // header begins at its plain inset in both sidebar states.
+        guard chromeCoordinator?.isTakeoverActive != true else {
+            containerViewController.headerLeadingInset = PaneHeaderDefaults.inset
+            return
+        }
         guard sidebarIsCollapsed ?? sidebarItem.isCollapsed else {
             containerViewController.headerLeadingInset = PaneHeaderDefaults.inset
             return
@@ -584,6 +720,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// frame (notably while attaching a hosted test window). That is not a measurement, so the
     /// launch fallback stands until AppKit has actually placed the control.
     private func windowControlsTrailingEdge() -> CGFloat {
+        // A takeover window floats no controls over the panes at all — no traffic lights, no
+        // toolbar — so nothing ends anywhere: the sidebar's floor falls back to its own
+        // minimum and the header to its plain inset.
+        guard chromeCoordinator?.isTakeoverActive != true else { return 0 }
+
         let measured = [sidebarToolbarButton, navBackToolbarButton, navForwardToolbarButton]
             .compactMap { control in
                 control.map { $0.convert($0.bounds, to: nil).maxX }
@@ -1978,6 +2119,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func updateWindowTitle() {
         window?.title = MainWindowDefaults.defaultTitle
         window?.subtitle = ""
+        // The band shows the same name the window carries; pushed rather than observed —
+        // see `WindowTitleBandView.setTitle`.
+        chromeHostViewController.setTitle(MainWindowDefaults.defaultTitle)
 
         // Still tracked: it drives the proxy icon and path menu if the title bar is shown.
         window?.representedURL = currentFolderURL
@@ -2378,6 +2522,12 @@ extension MainWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         AgentRuntime.shared.terminateAll()
         ProjectTerminalRuntime.shared.terminateAll()
+    }
+
+    /// A theme change that arrived while the window was fullscreen parked its frame exchange
+    /// (`WindowChromeCoordinator.applyCurrentTheme`); this is where the parked change runs.
+    func windowDidExitFullScreen(_ notification: Notification) {
+        chromeCoordinator?.windowDidExitFullScreen()
     }
 }
 
