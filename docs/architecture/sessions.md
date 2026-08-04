@@ -382,14 +382,41 @@ Select session → AgentLauncher.plan() → login shell → cd <project> && exec
 ```
 
 Launches go through a **login shell** because a GUI app does not inherit the user's
-interactive `PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix.
+interactive `PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix. It is also why
+`AgentEnvironment` can *delete* rather than correct: anything the user genuinely sets is
+re-exported by their own profile on the way back up, so what a filter removes is only ever what
+the launcher left behind.
 
-Claude accepts `--session-id <uuid>`, so the id is minted up front. Codex has no equivalent,
-so its id is read back from the `session_meta` record at the head of the rollout file it
-writes under `~/.codex/sessions/`.
+**And a launcher leaves behind more than a `PATH`.** `open` forwards its caller's environment
+through LaunchServices, so a Threading opened from an agent's tool call — an ordinary thing to do
+here — inherits that run's whole posture and hands it to every session under it. Measured on a
+running app opened from a Codex shell: `CODEX_SANDBOX_NETWORK_DISABLED=1`,
+`CODEX_PERMISSION_PROFILE=:workspace`, `CODEX_CI=1`, `CODEX_SHELL=1`, and the flattening a
+non-interactive caller applies to everything it runs — `NO_COLOR=1`, `TERM=dumb`, `PAGER=cat`.
+Every one of those describes a run that had already ended, and the sharp end is not cosmetic: a
+Codex session launched inside the app was told its network was disabled by a sandbox that no
+longer existed.
 
-**The opening prompt is an operand, not a word.** Both CLIs take it as a trailing positional
-argument, and both reject one that begins with `-` before the session exists: Claude answers
+`AgentEnvironment.inheritedIdentityPrefixes` therefore names **families** — `CLAUDE_`, `CODEX_`,
+`GROK_`, `OPENCODE_`, `AI_AGENT` — rather than variables. It was written variable by variable and
+the gap that produced is exactly the failure mode: `CODEX_THREAD` was listed and `CODEX_CI` beside
+it was not, and nothing reports a variable that should have been dropped. The one exception is
+`AgentKind.accountEnvironmentKey` — `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`,
+`OPENCODE_CONFIG_DIR` — which names *where a login lives* rather than who is running, and is how a
+launch reaches an account other than the default. Reading it off `AgentKind` means a new runtime
+arrives already covered. What the terminal path adds on top of this — the colour and pager claims,
+which are about a stream rather than a run — is in [`themes.md`](themes.md).
+
+Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok does not persist
+that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`
+polls the supported `grok sessions list` command and marks it resumable only after it appears.
+Codex has no equivalent, so its id is read back from the `session_meta` record at the head of the
+rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own `ses_…` id; discovery polls
+its supported `opencode session list --format json` command and selects the newest record for
+the launching checkout. This intentionally avoids its private storage schema.
+
+**Claude, Codex, and Grok take the opening prompt as an operand, not a word.** The first two reject one that
+begins with `-` before the session exists: Claude answers
 `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
 `unexpected argument '- ' found` and points at the fix in its own message. A bulleted opening —
 a list of things to do, one per line — is an ordinary thing to type into the composer, and it

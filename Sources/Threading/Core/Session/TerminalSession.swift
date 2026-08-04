@@ -323,6 +323,25 @@ final class TerminalSession: NSObject {
         // terminal that started the app happened to leave here describes *that* terminal.
         env[EnvironmentKeys.colorFGBG] = profile.theme.colorFGBG
 
+        // The same inheritance, one step further. A caller with nothing watching its output
+        // flattens the environment on the way in — `NO_COLOR=1`, `PAGER=cat` — and every one of
+        // those claims is about *that* stream. The stream here is a PTY this app draws, so all
+        // of them are false by the time a session sees them, and unlike `TERM` above they were
+        // never restated. The first thing it costs is not a hue but a rank: the agent CLIs mark
+        // their own chrome with bare SGR 2 (faint), so under `NO_COLOR` a proposed prompt
+        // reaches the terminal at exactly the strength of one the user typed, and the missing
+        // faint reads as a rendering bug on this side of the PTY.
+        //
+        // Cleared, not answered: absence is how "colour is fine" is spelled, and a pager is the
+        // login shell's to choose on the way back up.
+        env.removeValue(forKey: EnvironmentKeys.noColor)
+        for key in EnvironmentKeys.colorVetoes where env[key] == "0" {
+            env.removeValue(forKey: key)
+        }
+        for key in EnvironmentKeys.pagers where env[key] == EnvironmentKeys.nonPager {
+            env.removeValue(forKey: key)
+        }
+
         if env[EnvironmentKeys.lang] == nil {
             env[EnvironmentKeys.lang] = "en_US.UTF-8"
         }

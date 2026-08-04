@@ -212,8 +212,39 @@ applied profile actually changes the emulator's background — palette first, re
 the re-ask hears the new page; font tweaks and re-applies of the same palette stay silent.
 Driven against Claude Code 2.1.220 in a PTY: dark ink, report, re-ask, light ink, live.
 
-`TerminalColorQueryTests` pins all three — the bytes on the wire, the environment the child is
-launched into, and the announce → re-ask → new-answer exchange.
+**The fourth leg is a claim the app has to *stop* passing on.** `NO_COLOR` describes a stream,
+and the stream a session hands its child is a PTY that Threading paints — so an inherited one is
+always a statement about somewhere else. It arrives whenever the app is opened from a pipe, a CI
+shell, or another agent's tool call, all of which set it alongside `TERM=dumb`; `buildEnvironment`
+already restated `TERM`, so the claim outlived everything that made it true and nothing
+contradicted it. Every agent in that app instance then drew its whole TUI unstyled.
+
+What that costs first is not a hue but a **rank**. The agent CLIs mark their own chrome with bare
+SGR 2 (faint) and no colour of its own — the composer's `Try "…"` hint, a proposed prompt, the
+status footer's rules — so under `NO_COLOR` a suggestion reaches the terminal at exactly the
+strength of text the user typed. That is
+[`dependencies.md`](dependencies.md)'s faint bug arriving from the far side, where no renderer fix
+can reach it, and it reads identically on screen: the renderer was measured correct against the
+CLI's own captured bytes while the app was still handing every session the reason there were none.
+The tell was the rest of the same frame — Claude Code paints `⏵⏵ auto mode on` amber and the line
+after it `#999999`, and a screenshot with *zero* saturated pixels anywhere in that footer is not a
+faint regression.
+
+`NO_COLOR` is cleared outright, because absence is the only way to say "colour is fine".
+`CLICOLOR` and `FORCE_COLOR` are cleared only when spelled `0`: any other value is the user asking
+*for* colour, and this is the same rule as `COLORFGBG` — describe the terminal, do not choose for
+the program. `PAGER`/`GIT_PAGER`/`GH_PAGER` set to `cat` go the same way and for the same reason,
+a caller that cannot page saying so; a real pager is a choice and stays. All of it is scoped to
+`TerminalSession.buildEnvironment`, never `AgentEnvironment.launchEnvironment`, because on the
+headless path there is no PTY and every one of these claims is simply true.
+
+The rest of what a launcher leaves behind — `CODEX_SANDBOX_NETWORK_DISABLED` and the runner
+identity families it travels with — is not about the stream and is filtered a step earlier; see
+[`sessions.md`](sessions.md).
+
+`TerminalColorQueryTests` pins all four — the bytes on the wire, the environment the child is
+launched into, the announce → re-ask → new-answer exchange, and what the environment must not
+carry.
 
 ## A theme states a typeface
 

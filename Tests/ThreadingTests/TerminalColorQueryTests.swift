@@ -237,6 +237,127 @@ final class TerminalColorQueryTests: XCTestCase {
         )
     }
 
+    // MARK: - What the Session Refuses to Pass On
+
+    /// `NO_COLOR` describes a *stream*, and the stream a session hands its child is a PTY that
+    /// Threading paints — so an inherited one is always a statement about somewhere else. It
+    /// arrives whenever the app is opened from a pipe or from another agent's tool call, both of
+    /// which set it alongside `TERM=dumb`; the app already restates `TERM`, so the claim outlived
+    /// everything that made it true and nothing contradicted it.
+    ///
+    /// The visible cost is not colour but *rank*. Claude Code marks its composer's proposed text
+    /// with bare SGR 2 (faint) and nothing else, so under `NO_COLOR` a suggestion reaches the
+    /// terminal at exactly the strength of text the user typed — which is
+    /// `testFaintTextDrawsDimmerThanTypedText`'s bug arriving from the far side, where no
+    /// renderer fix can reach it.
+    func testAnInheritedNoColourIsNotPassedOn() {
+        setenv(EnvironmentKeys.noColor, "1", 1)
+        defer { unsetenv(EnvironmentKeys.noColor) }
+
+        XCTAssertNil(
+            environment(for: AppThemeStyles.artDeco.terminalPalette)[EnvironmentKeys.noColor],
+            "every agent in every session would draw its own chrome unstyled"
+        )
+    }
+
+    /// `CLICOLOR`/`FORCE_COLOR` mean "off" only when spelled `0`. That spelling goes the same
+    /// way as `NO_COLOR`; any other value is the user asking *for* colour and is theirs to keep.
+    func testOnlyTheOffSpellingOfAColourVetoIsDropped() {
+        setenv("CLICOLOR", "0", 1)
+        setenv("FORCE_COLOR", "3", 1)
+        defer {
+            unsetenv("CLICOLOR")
+            unsetenv("FORCE_COLOR")
+        }
+
+        let env = environment(for: AppThemeStyles.artDeco.terminalPalette)
+        XCTAssertNil(env["CLICOLOR"])
+        XCTAssertEqual(env["FORCE_COLOR"], "3", "a request for colour was read as a veto")
+    }
+
+    /// A pager set to something that does not page says the same thing `NO_COLOR` does, and it
+    /// is equally untrue of a PTY. Only that spelling goes: a real pager is a choice.
+    func testAPagerThatCannotPageIsNotPassedOn() {
+        setenv("GIT_PAGER", "cat", 1)
+        setenv("PAGER", "less -R", 1)
+        defer {
+            unsetenv("GIT_PAGER")
+            unsetenv("PAGER")
+        }
+
+        let env = environment(for: AppThemeStyles.artDeco.terminalPalette)
+        XCTAssertNil(env["GIT_PAGER"])
+        XCTAssertEqual(env["PAGER"], "less -R", "the user's own pager was thrown away")
+    }
+
+    /// The headless path has no PTY, so there the same claims are simply true — a stream
+    /// nothing is watching should not be paged into, whoever said so.
+    func testTheHeadlessPathKeepsTheClaimsThatAreTrueOfIt() {
+        setenv("GIT_PAGER", "cat", 1)
+        setenv(EnvironmentKeys.noColor, "1", 1)
+        defer {
+            unsetenv("GIT_PAGER")
+            unsetenv(EnvironmentKeys.noColor)
+        }
+
+        let env = AgentEnvironment.launchEnvironment()
+        XCTAssertEqual(env["GIT_PAGER"], "cat")
+        XCTAssertEqual(env[EnvironmentKeys.noColor], "1")
+    }
+
+    // MARK: - What the Launcher Was Running Inside
+
+    /// `open` forwards its caller's environment through LaunchServices, so a Threading opened
+    /// from an agent's tool call inherits that run's whole posture — and hands it on. The
+    /// sandbox is the sharp end: a Codex session launched here was told its network was
+    /// disabled by a sandbox that had already ended.
+    ///
+    /// Listed by family rather than one variable at a time because the gap is silent —
+    /// `CODEX_THREAD` was covered and `CODEX_CI` beside it was not.
+    func testARunnersOwnPostureIsNotPassedOn() {
+        let inherited = [
+            "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+            "CODEX_PERMISSION_PROFILE": ":workspace",
+            "CODEX_CI": "1",
+            "CODEX_SHELL": "1",
+            "CODEX_THREAD_ID": "019fcb4a-0dd6-7461-87bb-bbb390c848d7",
+            "CLAUDE_CODE_SESSION_ID": "b6a0b082-a6fe-4d90-85d6-2ece300c8b41",
+            "CLAUDECODE": "1",
+            "AI_AGENT": "claude-code_2-1-221_agent"
+        ]
+        for (key, value) in inherited { setenv(key, value, 1) }
+        defer { for key in inherited.keys { unsetenv(key) } }
+
+        let env = environment(for: AppThemeStyles.artDeco.terminalPalette)
+        for key in inherited.keys {
+            XCTAssertNil(env[key], "\(key) followed its runner into a session it says nothing about")
+        }
+    }
+
+    /// The exception, and the reason the rule is not simply "drop the whole family": these name
+    /// where a login's config lives, which is how a session reaches an account other than the
+    /// default. Read from `AgentKind`, so a new runtime arrives already covered.
+    func testWhereAnAccountLivesSurvivesTheSameFilter() {
+        for key in AgentEnvironment.accountConfigKeys {
+            setenv(key, "/tmp/config-\(key)", 1)
+        }
+        defer { for key in AgentEnvironment.accountConfigKeys { unsetenv(key) } }
+
+        let env = environment(for: AppThemeStyles.artDeco.terminalPalette)
+        for key in AgentEnvironment.accountConfigKeys {
+            XCTAssertEqual(
+                env[key],
+                "/tmp/config-\(key)",
+                "every session would have been stranded on the default login"
+            )
+        }
+        XCTAssertEqual(
+            AgentEnvironment.accountConfigKeys.count,
+            AgentKind.allCases.count,
+            "a runtime names no config directory of its own"
+        )
+    }
+
     // MARK: - What the Session Announces Later
 
     /// The two answers above are both given **once, at startup** — and a theme switched under

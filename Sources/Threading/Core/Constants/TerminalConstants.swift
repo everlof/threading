@@ -39,6 +39,26 @@ enum EnvironmentKeys {
     /// `<foreground>;<background>`, as ANSI colour indices — rxvt's convention for telling a
     /// program whether it is drawing on paper or on ink. See `TerminalTheme.colorFGBG`.
     static let colorFGBG = "COLORFGBG"
+
+    /// Says "the stream you are writing to is not a colour terminal", whatever it is set to.
+    /// Inside a session that stream is a PTY Threading draws, so an inherited value describes
+    /// wherever the *app* was started from and is never true of a session. Cleared rather than
+    /// overwritten: absence is the only way to say "colour is fine".
+    static let noColor = "NO_COLOR"
+
+    /// The same claim, but only when spelled `0` — any other value is the user *asking* for
+    /// colour and is left alone.
+    static let colorVetoes = ["CLICOLOR", "FORCE_COLOR"]
+
+    /// The other half of "nothing is watching this": a caller that cannot page sets these to a
+    /// program that does not page. A session *can* page, so the claim is dropped there — and
+    /// only there. On the headless path it is true, and `AgentEnvironment.launchEnvironment`
+    /// leaves it alone.
+    static let pagers = ["PAGER", "GIT_PAGER", "GH_PAGER"]
+
+    /// How that claim is spelled. Anything else is a pager the user chose, which is theirs.
+    static let nonPager = "cat"
+
     static let lang = "LANG"
     static let path = "PATH"
     static let home = "HOME"
@@ -168,24 +188,40 @@ enum AgentDefaults {
 
 // MARK: - Agent Environment
 
-/// Environment variables identifying an agent session, which must not be inherited by the
+/// Everything an agent runner exports about **its own run**, which must not be inherited by the
 /// sessions Threading launches.
 ///
 /// A session started from inside another agent's shell would otherwise be handed that
-/// conversation's identifiers and treat itself as a nested child of it.
+/// conversation's identifiers and treat itself as a nested child of it — and, worse than
+/// identity, the *posture* that run was given. `open` forwards its caller's environment through
+/// LaunchServices, so a Threading opened from a Codex tool call carried
+/// `CODEX_SANDBOX_NETWORK_DISABLED=1` and `CODEX_PERMISSION_PROFILE=:workspace` into every
+/// session under it: an agent told the network is off, by a sandbox that ended hours ago.
+///
+/// Named by family rather than variable by variable, because the failure is silent and the
+/// families keep growing — `CODEX_THREAD` was listed and `CODEX_CI` was not, which is the kind of
+/// gap nothing reports.
 enum AgentEnvironment {
-    /// Prefixes covering the identity variables the agent CLIs export.
+    /// The families. Each is a runner describing a run, never a machine describing itself.
     static let inheritedIdentityPrefixes = [
-        "CLAUDE_CODE_",
+        "CLAUDE_",
         "CLAUDECODE",
-        "CLAUDE_PID",
-        "CLAUDE_EFFORT",
-        "CODEX_SESSION",
-        "CODEX_THREAD"
+        "CODEX_",
+        "GROK_",
+        "OPENCODE_",
+        "AI_AGENT"
     ]
 
+    /// The exception inside those families: where an account's config lives is a *place*, not a
+    /// run, and it is how a launch reaches a login other than the default. `AgentKind` owns the
+    /// four names, so a new runtime cannot be added and forgotten here.
+    static var accountConfigKeys: Set<String> {
+        Set(AgentKind.allCases.map(\.accountEnvironmentKey))
+    }
+
     static func isInheritedAgentIdentity(_ key: String) -> Bool {
-        inheritedIdentityPrefixes.contains { key.hasPrefix($0) }
+        guard !accountConfigKeys.contains(key) else { return false }
+        return inheritedIdentityPrefixes.contains { key.hasPrefix($0) }
     }
 
     /// The app's environment with inherited agent identity removed, for launches that do not
