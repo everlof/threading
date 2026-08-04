@@ -204,6 +204,12 @@ struct AppTheme: Codable, Equatable {
         var controlRadius: CGFloat = 8
         var borderWidth: CGFloat = 1
 
+        /// A theme-level multiplier for semantic app text. One preserves every historical
+        /// theme; a deliberately dense visual language can compact the same roles without
+        /// components inventing smaller point sizes. This composes with the user's text-size
+        /// preference, which remains the final authority.
+        var textScale: CGFloat = 1
+
         /// A shadow behind opted-in panels, in one of the theme's own colours. A zero offset
         /// reads as a glow; a non-zero, zero-radius shadow gives Bauhaus and Neo Brutalism
         /// their hard printed lift without teaching feature views about either style.
@@ -294,6 +300,7 @@ struct AppTheme: Codable, Equatable {
             panelRadius: CGFloat = 12,
             controlRadius: CGFloat = 8,
             borderWidth: CGFloat = 1,
+            textScale: CGFloat = 1,
             glow: Glow? = nil,
             bevel: Bevel? = nil,
             typeface: Typeface = .standard,
@@ -302,6 +309,7 @@ struct AppTheme: Codable, Equatable {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
             self.borderWidth = borderWidth
+            self.textScale = textScale
             self.glow = glow
             self.bevel = bevel
             self.typeface = typeface
@@ -309,7 +317,8 @@ struct AppTheme: Codable, Equatable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case panelRadius, controlRadius, borderWidth, glow, bevel, typeface, fontFamily
+            case panelRadius, controlRadius, borderWidth, textScale
+            case glow, bevel, typeface, fontFamily
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -321,6 +330,7 @@ struct AppTheme: Codable, Equatable {
             panelRadius = try container.decodeIfPresent(CGFloat.self, forKey: .panelRadius) ?? 12
             controlRadius = try container.decodeIfPresent(CGFloat.self, forKey: .controlRadius) ?? 8
             borderWidth = try container.decodeIfPresent(CGFloat.self, forKey: .borderWidth) ?? 1
+            textScale = try container.decodeIfPresent(CGFloat.self, forKey: .textScale) ?? 1
             glow = try container.decodeIfPresent(Glow.self, forKey: .glow)
             bevel = try container.decodeIfPresent(Bevel.self, forKey: .bevel)
             typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface) ?? .standard

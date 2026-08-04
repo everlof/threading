@@ -373,6 +373,9 @@ enum AppThemeEditing {
         guard (0.5...4).contains(material.borderWidth) else {
             throw AppThemeEditingError.invalid("border_width must be between 0.5 and 4.")
         }
+        guard (0.65...1.5).contains(material.textScale) else {
+            throw AppThemeEditingError.invalid("text_scale must be between 0.65 and 1.5.")
+        }
 
         if let bevel = material.bevel {
             guard (1...3).contains(bevel.width) else {
@@ -521,6 +524,24 @@ enum AppThemeEditing {
         resolved: AppTheme,
         appearance: NSAppearance
     ) throws {
+        if let navigator = sidebar.navigatorWell {
+            guard navigator.fill.alphaComponent >= 0.999 else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.navigator_well.fill must be opaque so its text contrast is stable."
+                )
+            }
+            let label = resolved.resolved(.label, appearance: appearance)
+            let ink = composite(label, over: navigator.fill)
+            let ratio = ThemeContrast.ratio(ink, navigator.fill)
+            guard ratio >= ThemeContrast.minimumRatio else {
+                throw AppThemeEditingError.invalid(
+                    "\(kind.rawValue) sidebar text on navigator_well.fill "
+                        + "\(navigator.fill.hexString) has \(formatted(ratio)):1 contrast; "
+                        + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                )
+            }
+        }
+
         if let gradient = sidebar.background?.gradient {
             guard (2...SidebarStyleLimits.maximumGradientStops).contains(gradient.stops.count) else {
                 throw AppThemeEditingError.invalid(

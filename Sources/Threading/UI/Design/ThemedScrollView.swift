@@ -263,6 +263,17 @@ class ThemedClipView: NSClipView, ThemedComponent {
 /// to AppKit, so the identity theme remains genuinely native rather than an imitation.
 class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
+    enum SurfaceRole {
+        /// The long-standing default: the document is visually part of its containing pane.
+        case transparent
+        /// A theme-authored project-tree work area, if the active theme states one.
+        case sidebarNavigator
+    }
+
+    var surfaceRole: SurfaceRole = .transparent {
+        didSet { applySurfaceRole() }
+    }
+
     /// Hands vertical-dominant gestures to the nearest enclosing scroll view.
     ///
     /// Opt this in for a nested, horizontal-only viewport such as a Markdown code block. AppKit
@@ -278,6 +289,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// programmatic scrolls from being mistaken for the user leaving. Scroller-thumb drags
     /// never pass through `scrollWheel` — watch the live-scroll notifications for those.
     var onUserScroll: (() -> Void)?
+    private let appEvents = AppEventObservations()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -285,11 +297,43 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         contentView = ThemedClipView(frame: contentView.frame)
         verticalScroller = ThemedScroller(frame: .zero)
         horizontalScroller = ThemedScroller(frame: .zero)
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applySurfaceRole()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if surfaceRole == .sidebarNavigator,
+           let well = SidebarAppearance.navigatorWell(for: effectiveAppearance) {
+            ThemedSurface.draw(
+                bounds,
+                fill: well.fill,
+                radius: 0,
+                bevel: well.bevel
+            )
+        }
+        super.draw(dirtyRect)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applySurfaceRole()
+    }
+
+    private func applySurfaceRole() {
+        let well = surfaceRole == .sidebarNavigator
+            ? SidebarAppearance.navigatorWell(for: effectiveAppearance)
+            : nil
+        let inset = well?.edgeWidth ?? 0
+        let edges = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
+        contentInsets = edges
+        scrollerInsets = edges
+        needsDisplay = true
     }
 
     override func scrollWheel(with event: NSEvent) {

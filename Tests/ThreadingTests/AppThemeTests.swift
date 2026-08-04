@@ -533,8 +533,13 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.panelRadius, 18)
         XCTAssertEqual(material.typeface, .serif)
         XCTAssertNil(material.fontFamily)
+        XCTAssertEqual(material.textScale, 1)
 
-        let named = AppTheme.Material(typeface: .serif, fontFamily: "Baskerville")
+        let named = AppTheme.Material(
+            textScale: 0.8,
+            typeface: .serif,
+            fontFamily: "Baskerville"
+        )
         XCTAssertEqual(
             try JSONDecoder().decode(
                 AppTheme.Material.self, from: try JSONEncoder().encode(named)
@@ -1647,6 +1652,25 @@ final class AppThemeTests: XCTestCase {
             bodyAtStandard * AppTextSize.extraLarge.scale,
             accuracy: 0.001,
             "an existing host-rendered label did not follow the new text scale"
+        )
+    }
+
+    func testThemeTextScaleCompactsEverySemanticRoleBeforeTheUserScale() {
+        AppThemePalette.set(.system)
+        let bodyAtOne = Design.Typography.body().pointSize
+        let codeAtOne = Design.Typography.code().pointSize
+
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        XCTAssertEqual(
+            Design.Typography.body().pointSize,
+            bodyAtOne * AppThemeStyles.win98.material.textScale,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            Design.Typography.code().pointSize,
+            codeAtOne * AppThemeStyles.win98.material.textScale,
+            accuracy: 0.001
         )
     }
 

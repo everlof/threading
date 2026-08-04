@@ -79,10 +79,19 @@ extension AppThemeStyles {
                 panelRadius: 0,
                 controlRadius: 0,
                 borderWidth: 1,
+                // Win98 shell UI was set around eight points. Scaling semantic roles keeps
+                // that density throughout the chrome instead of shrinking one title label.
+                textScale: 0.72,
                 glow: nil,
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
                 fontFamily: "Tahoma"
+            ),
+            sidebar: SidebarStyle(
+                // Explorer separates its white work area from the surrounding button-face
+                // chrome with a sunken 3D edge. Keeping this regional prevents ordinary
+                // panels from becoming white merely to make the tree authentic.
+                navigatorWell: .init(fill: hex("#FFFFFF"), bevel: .sunken)
             ),
             chrome: WindowChromeStyle(
                 titleBar: WindowChromeStyle.TitleBar(
@@ -100,10 +109,10 @@ extension AppThemeStyles {
                     ink: hex("#FFFFFF"),
                     inactiveInk: hex("#FFFFFF"),
                     titleAlignment: .leading,
-                    height: 28,
+                    height: 20,
                     buttonGlyphStyle: .squares
                 ),
-                frame: WindowChromeStyle.Frame(width: 4)
+                frame: WindowChromeStyle.Frame(width: 3)
             )
         )]
     )

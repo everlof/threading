@@ -243,6 +243,7 @@ final class ThemeToolTests: XCTestCase {
                     "roles": {"accent": "#AA77FFFF", "status_positive": "#44DD88"},
                     "material": {
                       "panel_radius": 5,
+                      "text_scale": 0.8,
                       "glow": {
                         "role": "accent",
                         "radius": 8,
@@ -267,6 +268,7 @@ final class ThemeToolTests: XCTestCase {
         let dark = try XCTUnwrap(arguments.variants?["dark"])
         XCTAssertEqual(dark.roles?["status_positive"], "#44DD88")
         XCTAssertEqual(dark.material?.panelRadius, 5)
+        XCTAssertEqual(dark.material?.textScale, 0.8)
         XCTAssertEqual(dark.material?.glow?.radius, 8)
         XCTAssertEqual(dark.material?.glow?.offsetX, 3)
         XCTAssertEqual(dark.material?.glow?.offsetY, -4)
@@ -526,8 +528,10 @@ final class ThemeToolTests: XCTestCase {
                             weight: "semibold",
                             hidden: nil
                         ),
-                        removeTitle: nil,
-                        remove: nil
+                        navigatorWell: AppThemeSidebarNavigatorWellArguments(
+                            fill: surface,
+                            bevel: "sunken"
+                        )
                     )
                 )
             ],
@@ -569,6 +573,9 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(image["mode"] as? String, "tile")
         let title = try XCTUnwrap(sidebar["title"] as? [String: Any])
         XCTAssertEqual(title["text"] as? String, "Atelier")
+        let navigator = try XCTUnwrap(sidebar["navigator_well"] as? [String: Any])
+        XCTAssertEqual(navigator["fill"] as? String, surface)
+        XCTAssertEqual(navigator["bevel"] as? String, "sunken")
 
         let undress = UpdateAppThemeArguments(
             themeID: theme.id.rawValue,
@@ -659,7 +666,10 @@ final class ThemeToolTests: XCTestCase {
             "the variant schema does not describe the sidebar block"
         )
         let sidebarProperties = try XCTUnwrap(sidebar["properties"] as? [String: Any])
-        for field in ["gradient", "image", "logo", "title", "remove"] {
+        for field in [
+            "gradient", "image", "navigator_well", "remove_navigator_well",
+            "logo", "title", "remove"
+        ] {
             XCTAssertNotNil(sidebarProperties[field], "sidebar schema lost \(field)")
         }
     }
@@ -774,6 +784,7 @@ final class ThemeToolTests: XCTestCase {
         // agent reads has to offer both — and the named family beside them, for a theme whose
         // identity is a particular face rather than one of the four classes.
         XCTAssertNotNil(materialProperties["typeface"])
+        XCTAssertNotNil(materialProperties["text_scale"])
         XCTAssertNotNil(materialProperties["font_family"])
         XCTAssertNotNil(materialProperties["remove_font_family"])
         XCTAssertNil(materialProperties["fontFamily"], "the wire vocabulary is snake_case")
@@ -797,7 +808,7 @@ final class ThemeToolTests: XCTestCase {
               "arguments": {
                 "theme_id": "custom-violet",
                 "variants": {
-                  "light": {"material": {"typeface": "serif", "font_family": "Baskerville"}}
+                  "light": {"material": {"text_scale": 0.85, "typeface": "serif", "font_family": "Baskerville"}}
                 }
               }
             }
@@ -809,6 +820,7 @@ final class ThemeToolTests: XCTestCase {
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.typeface, "serif")
         XCTAssertEqual(material.fontFamily, "Baskerville")
+        XCTAssertEqual(material.textScale, 0.85)
     }
 
     /// `get_app_theme` reports the typeface it is actually set in, so an agent asked to make a

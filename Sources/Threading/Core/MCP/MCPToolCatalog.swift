@@ -719,8 +719,9 @@ enum MCPToolCatalog {
 
       A variant's `sidebar` block dresses the project sidebar: a gradient or image \
       behind the list (images arrive as {path} or {base64} and are stored with the \
-      theme), a custom logo in place of the Threading mark, and the wordmark's text, \
-      face, size and weight. Gradient stops must keep the theme's label readable; image \
+      theme), an optional opaque navigator_well with raised/sunken/flat edges, a custom \
+      logo in place of the Threading mark, and the wordmark's text, face, size and weight. \
+      Gradient and navigator fills must keep the theme's label readable; image \
       legibility is yours — wash a photograph well below 0.4 opacity. Absent means the \
       default sidebar, and each remove_* field takes one choice back.
 

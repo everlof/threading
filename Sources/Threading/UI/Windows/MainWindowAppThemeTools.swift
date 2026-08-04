@@ -515,7 +515,7 @@ extension AgentToolCoordinator {
         guard let patch else { return .inherit }
         if patch.remove == true {
             let statesAnything = patch.gradient != nil || patch.image != nil
-                || patch.logo != nil || patch.title != nil
+                || patch.logo != nil || patch.title != nil || patch.navigatorWell != nil
             guard !statesAnything else {
                 throw AppThemeEditingError.invalid(
                     "sidebar cannot set fields and remove in the same patch."
@@ -536,6 +536,11 @@ extension AgentToolCoordinator {
         guard patch.title == nil || patch.removeTitle != true else {
             throw AppThemeEditingError.invalid(
                 "sidebar cannot set title and remove_title in the same patch."
+            )
+        }
+        guard patch.navigatorWell == nil || patch.removeNavigatorWell != true else {
+            throw AppThemeEditingError.invalid(
+                "sidebar cannot set navigator_well and remove_navigator_well in the same patch."
             )
         }
 
@@ -584,6 +589,39 @@ extension AgentToolCoordinator {
                 mode: mode,
                 opacity: image.opacity ?? 1
             )
+        }
+
+        if patch.removeNavigatorWell == true {
+            style.navigatorWell = nil
+        } else if let wellPatch = patch.navigatorWell {
+            let fill: NSColor
+            if let rawFill = cleaned(wellPatch.fill) {
+                guard let parsed = NSColor(hex: rawFill) else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.navigator_well.fill must be #RRGGBB or #RRGGBBAA."
+                    )
+                }
+                fill = parsed
+            } else if let existing = style.navigatorWell?.fill {
+                fill = existing
+            } else {
+                throw AppThemeEditingError.invalid(
+                    "A newly stated sidebar.navigator_well needs an opaque fill."
+                )
+            }
+
+            let bevel: SidebarStyle.NavigatorWell.Bevel
+            if let rawBevel = cleaned(wellPatch.bevel) {
+                guard let parsed = SidebarStyle.NavigatorWell.Bevel(rawValue: rawBevel) else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.navigator_well.bevel must be \"sunken\", \"raised\" or \"none\"."
+                    )
+                }
+                bevel = parsed
+            } else {
+                bevel = style.navigatorWell?.bevel ?? .sunken
+            }
+            style.navigatorWell = SidebarStyle.NavigatorWell(fill: fill, bevel: bevel)
         }
 
         var brand = style.brand ?? SidebarStyle.Brand()
@@ -739,6 +777,7 @@ extension AgentToolCoordinator {
         if let value = patch.panelRadius { material.panelRadius = CGFloat(value) }
         if let value = patch.controlRadius { material.controlRadius = CGFloat(value) }
         if let value = patch.borderWidth { material.borderWidth = CGFloat(value) }
+        if let value = patch.textScale { material.textScale = CGFloat(value) }
 
         if patch.removeBevel == true {
             material.bevel = nil
@@ -967,6 +1006,12 @@ extension AgentToolCoordinator {
                 document["title"] = titleDocument
             }
         }
+        if let well = sidebar.navigatorWell {
+            document["navigator_well"] = [
+                "fill": well.fill.hexString,
+                "bevel": well.bevel.rawValue
+            ]
+        }
         return document
     }
 
@@ -975,6 +1020,7 @@ extension AgentToolCoordinator {
             "panel_radius": Double(material.panelRadius),
             "control_radius": Double(material.controlRadius),
             "border_width": Double(material.borderWidth),
+            "text_scale": Double(material.textScale),
             "typeface": material.typeface.rawValue
         ]
         if let family = material.fontFamily { document["font_family"] = family }

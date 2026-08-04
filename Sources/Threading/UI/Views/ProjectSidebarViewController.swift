@@ -30,6 +30,7 @@ final class ProjectSidebarViewController: NSViewController {
     }()
     private lazy var scrollView: NSScrollView = {
         let scroll = ThemedScrollView()
+        scroll.surfaceRole = .sidebarNavigator
         scroll.documentView = outlineView
         scroll.hasVerticalScroller = true
         scroll.translatesAutoresizingMaskIntoConstraints = false

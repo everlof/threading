@@ -582,6 +582,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let panelRadius: Double?
   let controlRadius: Double?
   let borderWidth: Double?
+  let textScale: Double?
   let glow: AppThemeGlowArguments?
   let removeGlow: Bool?
   let bevel: AppThemeBevelArguments?
@@ -594,6 +595,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case panelRadius = "panel_radius"
     case controlRadius = "control_radius"
     case borderWidth = "border_width"
+    case textScale = "text_scale"
     case glow
     case removeGlow = "remove_glow"
     case bevel
@@ -650,6 +652,11 @@ struct AppThemeSidebarTitleArguments: Decodable, Sendable {
   }
 }
 
+struct AppThemeSidebarNavigatorWellArguments: Decodable, Sendable {
+  let fill: String?
+  let bevel: String?
+}
+
 /// The sidebar block of a variant patch. `logo` is `"mark"`, `"hidden"`, or an image object;
 /// each `remove_*` takes one stated half back to its default, and `remove` clears the block.
 struct AppThemeSidebarArguments: Decodable, Sendable {
@@ -660,7 +667,33 @@ struct AppThemeSidebarArguments: Decodable, Sendable {
   let logo: AppThemeSidebarLogoArguments?
   let title: AppThemeSidebarTitleArguments?
   let removeTitle: Bool?
+  let navigatorWell: AppThemeSidebarNavigatorWellArguments?
+  let removeNavigatorWell: Bool?
   let remove: Bool?
+
+  init(
+    gradient: AppThemeGradientArguments? = nil,
+    removeGradient: Bool? = nil,
+    image: AppThemeSidebarImageArguments? = nil,
+    removeImage: Bool? = nil,
+    logo: AppThemeSidebarLogoArguments? = nil,
+    title: AppThemeSidebarTitleArguments? = nil,
+    removeTitle: Bool? = nil,
+    navigatorWell: AppThemeSidebarNavigatorWellArguments? = nil,
+    removeNavigatorWell: Bool? = nil,
+    remove: Bool? = nil
+  ) {
+    self.gradient = gradient
+    self.removeGradient = removeGradient
+    self.image = image
+    self.removeImage = removeImage
+    self.logo = logo
+    self.title = title
+    self.removeTitle = removeTitle
+    self.navigatorWell = navigatorWell
+    self.removeNavigatorWell = removeNavigatorWell
+    self.remove = remove
+  }
 
   private enum CodingKeys: String, CodingKey {
     case gradient
@@ -669,6 +702,8 @@ struct AppThemeSidebarArguments: Decodable, Sendable {
     case removeImage = "remove_image"
     case logo, title
     case removeTitle = "remove_title"
+    case navigatorWell = "navigator_well"
+    case removeNavigatorWell = "remove_navigator_well"
     case remove
   }
 }
@@ -4096,8 +4131,9 @@ enum MCPTools {
         type: .object,
         description: """
           The sidebar's dressing for this appearance: a background gradient and/or \
-          image under the project list, and the brand row at the top (logo and \
-          wordmark). Everything is optional; an omitted half keeps the base \
+          image under the project list, an optional contrasting navigator work \
+          area, and the brand row at the top (logo and wordmark). Everything is \
+          optional; an omitted half keeps the base \
           variant's, and an absent block is the plain themed sidebar with the \
           Threading mark beside the app's name.
           """,
@@ -4199,6 +4235,26 @@ enum MCPTools {
         type: .boolean,
         description: "True removes the base variant's background image."
       ),
+      "navigator_well": MCPPropertySchema(
+        type: .object,
+        description: "A contrasting project-tree work area. Its fill must be opaque and keep "
+          + "the theme label readable; bevel is \"sunken\", \"raised\" or \"none\". "
+          + "Sunken matches classic Explorer and is the default.",
+        properties: [
+          "fill": MCPPropertySchema(
+            type: .string,
+            description: "Opaque #RRGGBB fill behind project rows."
+          ),
+          "bevel": MCPPropertySchema(
+            type: .string,
+            description: "\"sunken\", \"raised\" or \"none\". Default \"sunken\"."
+          ),
+        ]
+      ),
+      "remove_navigator_well": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the navigator to the transparent sidebar default."
+      ),
       "logo": MCPPropertySchema(
         type: .string,
         description: """
@@ -4262,6 +4318,11 @@ enum MCPTools {
       "border_width": MCPPropertySchema(
         type: .number,
         description: "Border width, 0.5–4 points."
+      ),
+      "text_scale": MCPPropertySchema(
+        type: .number,
+        description: "Multiplier for semantic app text, 0.65–1.5. It composes with the "
+          + "user's own text-size preference; default 1."
       ),
       "glow": MCPPropertySchema(
         type: .object,

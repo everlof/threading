@@ -15,6 +15,37 @@ import AppKit
 @MainActor
 enum SidebarAppearance {
 
+    // MARK: - Navigator Work Area
+
+    struct NavigatorWell: Equatable {
+        let fill: NSColor
+        let bevel: SurfaceBevel
+        /// Content starts inside the authored edge so the document view cannot paint over it.
+        let edgeWidth: CGFloat
+    }
+
+    /// Nil preserves the original transparent navigator. A stated well is a region-level
+    /// decision, not a new global surface role: a theme may want white Explorer work areas
+    /// while keeping every ordinary panel silver.
+    static func navigatorWell() -> NavigatorWell? {
+        navigatorWell(for: NSApplication.shared.effectiveAppearance)
+    }
+
+    static func navigatorWell(for appearance: NSAppearance) -> NavigatorWell? {
+        let theme = AppThemePalette.current
+        guard let stated = theme.variant(for: appearance)?.sidebar?.navigatorWell else {
+            return nil
+        }
+        let bevel: SurfaceBevel
+        switch stated.bevel {
+        case .raised: bevel = .automatic
+        case .sunken: bevel = .sunken
+        case .none: bevel = .none
+        }
+        let edgeWidth = stated.bevel == .none ? 0 : theme.material(for: appearance).bevel?.width ?? 0
+        return NavigatorWell(fill: stated.fill, bevel: bevel, edgeWidth: edgeWidth)
+    }
+
     // MARK: - Background
 
     struct Background: Equatable {

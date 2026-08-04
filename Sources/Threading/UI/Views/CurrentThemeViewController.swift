@@ -285,6 +285,7 @@ final class CurrentThemeViewController: NSViewController {
         }
         return "\(typeface) · \(points(material.panelRadius)) panels · "
             + "\(points(material.controlRadius)) controls · \(points(material.borderWidth)) rules"
+            + L10n.format(" · %g%% text", Double(material.textScale * 100))
     }
 
     private func sidebarDescription(_ sidebar: SidebarStyle?) -> String {
@@ -295,6 +296,7 @@ final class CurrentThemeViewController: NSViewController {
         var parts: [String] = []
         if sidebar.background?.gradient != nil { parts.append(L10n.string("gradient")) }
         if sidebar.background?.image != nil { parts.append(L10n.string("image")) }
+        if sidebar.navigatorWell != nil { parts.append(L10n.string("navigator well")) }
         if sidebar.brand != nil { parts.append(L10n.string("custom brand")) }
         return parts.isEmpty
             ? L10n.string("Plain themed surface with the default Threading brand.")

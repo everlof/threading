@@ -89,6 +89,18 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(window.zoomCount, 1, "the zoom button performs the window's own zoom")
     }
 
+    func testTheZoomButtonBecomesRestoreForAZoomedWindow() {
+        let button = WindowChromeButton(role: .zoom)
+        button.fixtureIsZoomed = true
+
+        XCTAssertTrue(button.displaysRestore)
+        XCTAssertEqual(button.accessibilityLabel(), L10n.string("Restore"))
+
+        button.fixtureIsZoomed = false
+        XCTAssertFalse(button.displaysRestore)
+        XCTAssertEqual(button.accessibilityLabel(), L10n.string("Zoom"))
+    }
+
     func testTheMinimizeButtonAsksItsWindowToMiniaturize() {
         let window = makeWindow()
         let button = WindowChromeButton(role: .minimize)
@@ -198,7 +210,10 @@ final class WindowChromeComponentTests: XCTestCase {
     // MARK: - Gallery
 
     func testGalleryTellsTheirStories() {
-        for name in ["WindowTitleBandView", "WindowChromeButton", "WindowChromeFrameView"] {
+        for name in [
+            "WindowTitleBandView", "WindowChromeButton", "WindowCommandBandView",
+            "WindowChromeFrameView"
+        ] {
             XCTAssertTrue(
                 ComponentGalleryViewController.componentNames.contains(name),
                 "A design-system component without a gallery story is invisible to review"
@@ -209,7 +224,7 @@ final class WindowChromeComponentTests: XCTestCase {
     // MARK: - Host
 
     /// In native dress the chrome host must be geometrically invisible: the band hidden at
-    /// zero height, no frame inset, the workspace filling the root exactly.
+    /// zero height, the command band hidden too, no frame inset, the workspace filling the root exactly.
     func testTheHostCollapsesToNothingInNativeDress() {
         let workspace = NSViewController()
         workspace.view = NSView()
@@ -219,6 +234,8 @@ final class WindowChromeComponentTests: XCTestCase {
 
         XCTAssertTrue(host.bandView.isHidden)
         XCTAssertEqual(host.bandView.frame.height, 0)
+        XCTAssertTrue(host.commandBandView.isHidden)
+        XCTAssertEqual(host.commandBandView.frame.height, 0)
         XCTAssertEqual(workspace.view.frame, host.view.bounds)
     }
 
@@ -247,10 +264,13 @@ final class WindowChromeComponentTests: XCTestCase {
         host.view.layoutSubtreeIfNeeded()
 
         XCTAssertFalse(host.bandView.isHidden)
+        XCTAssertFalse(host.commandBandView.isHidden)
         XCTAssertEqual(
             host.bandView.frame.height,
             WindowChromeStyleLimits.defaultBandHeight
         )
+        XCTAssertEqual(host.commandBandView.frame.height, WindowCommandBandView.bandHeight)
+        XCTAssertEqual(workspace.view.frame.maxY, host.commandBandView.frame.minY)
         XCTAssertEqual(workspace.view.frame.minX, 4, "the frame's width insets the workspace")
         XCTAssertEqual(
             host.view.bounds.maxY - host.bandView.frame.maxY,
@@ -261,6 +281,7 @@ final class WindowChromeComponentTests: XCTestCase {
         host.setTakeoverActive(false)
         host.view.layoutSubtreeIfNeeded()
         XCTAssertTrue(host.bandView.isHidden)
+        XCTAssertTrue(host.commandBandView.isHidden)
         XCTAssertEqual(workspace.view.frame, host.view.bounds)
     }
 

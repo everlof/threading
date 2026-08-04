@@ -145,6 +145,7 @@ final class ComponentGalleryViewController: NSViewController {
         "WorkingOrbView",
         "WindowBackdrop",
         "WindowChromeButton",
+        "WindowCommandBandView",
         "WindowChromeFrameView",
         "WindowTitleBandView"
     ]
@@ -2558,6 +2559,24 @@ final class ComponentGalleryViewController: NSViewController {
         bandRow.alignment = .leading
         bandRow.spacing = Design.Spacing.small
 
+        let commandBand = WindowCommandBandView()
+        commandBand.setLeadingControls([
+            ThemedIconButton(
+                symbolName: "sidebar.leading",
+                accessibility: L10n.string("Show or hide sidebar"),
+                inkSource: .chrome
+            ),
+            ThemedIconButton(
+                symbolName: "chevron.left",
+                accessibility: L10n.string("Go back"),
+                inkSource: .chrome
+            )
+        ])
+        NSLayoutConstraint.activate([
+            commandBand.widthAnchor.constraint(equalToConstant: 420),
+            commandBand.heightAnchor.constraint(equalToConstant: WindowCommandBandView.bandHeight)
+        ])
+
         return section(
             "Window chrome",
             note: "A takeover theme's frame, drawn by the app. The band drags this very window, and its buttons really close, minimize, and zoom it.",
@@ -2566,6 +2585,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "WindowTitleBandView & WindowChromeButton",
                     "The title band with square-plate buttons, and the bare-glyph style on its own ground.",
                     bandRow
+                ),
+                story(
+                    "WindowCommandBandView",
+                    "Application navigation stays on its own chrome row below the title band.",
+                    commandBand
                 ),
                 story(
                     "WindowChromeFrameView",

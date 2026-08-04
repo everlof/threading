@@ -463,6 +463,7 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
         XCTAssertTrue(chrome.colors.values.allSatisfy { $0.hasPrefix("#") })
         XCTAssertTrue(["light", "dark"].contains(chrome.mode))
+        XCTAssertNotNil(chrome.material.textScale)
 
         let terminal = RemoteThemeBridge.terminalTheme(for: SessionID())
         XCTAssertEqual(terminal.ansi.count, 16)

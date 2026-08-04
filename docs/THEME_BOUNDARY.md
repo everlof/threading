@@ -31,7 +31,7 @@ cannot be reproduced in-window. Open/save panels, the colour panel, and the `NSW
 remain system workflows behind their named boundaries — the frame with one stated exception:
 a theme carrying a `WindowChromeStyle` opts the main window into an **app-drawn frame**
 (`WindowChromeCoordinator`, `docs/architecture/window-chrome.md`), whose band, buttons and
-border are ordinary `UI/Design/` components inside the content root, fully subject to this
+command row, and border are ordinary `UI/Design/` components inside the content root, fully subject to this
 policy and to `ThemeBoundaryAudit`. Under every other theme the native frame stays exactly the
 system workflow it always was.
 

@@ -514,6 +514,7 @@ final class ThemeSettingsRenderTests: XCTestCase {
                     panelRadius: material.panelRadius,
                     controlRadius: material.controlRadius,
                     borderWidth: material.borderWidth,
+                    textScale: material.textScale,
                     glow: material.glow,
                     typeface: typeface
                 )

@@ -242,6 +242,12 @@ body, detail, code, numerics, conversations, Settings, and host-rendered extensi
 together without flattening their hierarchy. The terminal remains outside that scale because
 its profile owns an explicit point size.
 
+`Material.textScale` is the theme's companion multiplier (0.65–1.5), interpreted in the same
+one transform and then composed with the user's scale. It lets a dense visual language such as
+Windows 98 state period-sized chrome throughout instead of hard-coding an eight-point exception
+in one title label. Absence is 1, so every older document is byte-for-byte the previous geometry;
+the user remains the final multiplier. The app-theme tools and remote material DTO expose it.
+
 The conversation gets its own slot for the reason the terminal always had one: it is the surface
 that is *read*. `Typography.FontSurface` is a parameter on that single transform rather than a
 second namespace — twenty factories in two copies would have to keep agreeing — and the composer
@@ -492,7 +498,8 @@ plus `AppThemeDidChange` — one event, the consumers it already has.
 
 `SidebarStyle` is the one place a theme reaches past colours-and-material into a *region* of
 the window: background layers under the project list (a gradient, then an image — tiled,
-fitted or filled, at stated opacity) and the brand row at the top (the logo slot, the
+fitted or filled, at stated opacity), an optional navigator work area (opaque fill plus
+raised/sunken/flat edge), and the brand row at the top (the logo slot, the
 wordmark's text, family, size and weight). It is **variant-owned**, like the material and for
 the same reason: a wash authored for a dark ground is wrong on a pale one. Everything is
 optional, and absent means the sidebar exactly as it was — a document written before the
@@ -525,6 +532,11 @@ Four rules that were decisions rather than defaults:
   label at the same 3:1 floor. An image is not gated — its pixels are arbitrary, so its gates
   are bounds (bytes, opacity) and legibility stays the author's to check by looking; the tool
   description says a photograph usually wants opacity well below 0.4.
+- **The navigator well is regional, not another surface role.** Explorer's white, sunken tree
+  sits inside silver chrome; making `surface` white would also repaint every panel. An absent
+  well preserves the historical transparent list. A stated fill must be opaque and keep the
+  variant's label at 3:1, and its edge only appears when the material supplies a bevel. The
+  project scroll view opts into this semantic role; other `ThemedScrollView`s remain transparent.
 - **An update says what happens to the block, not merely a new value.**
   `AppThemeEditing.SidebarChange` is inherit/remove/set, because a plain optional cannot tell
   "leave it alone" from "take it away" — and losing that difference means an update that

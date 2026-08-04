@@ -41,7 +41,19 @@ final class WindowChromeButton: ThemedControl {
         didSet { needsDisplay = true }
     }
 
+    /// Zoom state stated by a fixture. Real buttons follow `window.isZoomed` and exchange the
+    /// maximize figure for Restore, just as the system caption button does.
+    var fixtureIsZoomed: Bool? {
+        didSet { applyWindowState() }
+    }
+
     private var isPressed = false { didSet { needsDisplay = true } }
+    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+
+    var displaysRestore: Bool {
+        guard case .zoom = role else { return false }
+        return fixtureIsZoomed ?? window?.isZoomed == true
+    }
 
     init(role: Role) {
         self.role = role
@@ -54,8 +66,44 @@ final class WindowChromeButton: ThemedControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
+    }
+
     override var intrinsicContentSize: NSSize {
         NSSize(width: Design.Size.windowButtonWidth, height: Design.Size.windowButtonHeight)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
+        windowStateObservations = []
+
+        guard let newWindow else {
+            applyWindowState()
+            return
+        }
+        for name in [
+            NSWindow.didResizeNotification,
+            NSWindow.didEnterFullScreenNotification,
+            NSWindow.didExitFullScreenNotification
+        ] {
+            windowStateObservations.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applyWindowState() }
+            })
+        }
+        applyWindowState()
+    }
+
+    private func applyWindowState() {
+        let label = displaysRestore ? L10n.string("Restore") : role.accessibilityLabel
+        setAccessibilityLabel(label)
+        toolTip = label
+        needsDisplay = true
     }
 
     // MARK: - Press
@@ -182,14 +230,32 @@ final class WindowChromeButton: ThemedControl {
             path.move(to: NSPoint(x: glyph.minX, y: glyph.minY + Glyph.strokeWidth / 2))
             path.line(to: NSPoint(x: glyph.maxX, y: glyph.minY + Glyph.strokeWidth / 2))
         case .zoom:
-            path.appendRect(glyph.insetBy(
-                dx: Glyph.strokeWidth / 2,
-                dy: Glyph.strokeWidth / 2
-            ))
-            // The heavier lintel is what reads "window" rather than "checkbox" at this size —
-            // the frame's own title bar in eight points.
-            path.move(to: NSPoint(x: glyph.minX, y: glyph.maxY - Glyph.strokeWidth))
-            path.line(to: NSPoint(x: glyph.maxX, y: glyph.maxY - Glyph.strokeWidth))
+            if displaysRestore {
+                let side = min(glyph.width, glyph.height) * 0.72
+                let front = NSRect(
+                    x: glyph.minX,
+                    y: glyph.minY,
+                    width: side,
+                    height: side
+                ).insetBy(dx: Glyph.strokeWidth / 2, dy: Glyph.strokeWidth / 2)
+                let back = front.offsetBy(
+                    dx: glyph.width - side,
+                    dy: glyph.height - side
+                )
+                path.appendRect(back)
+                path.appendRect(front)
+                path.move(to: NSPoint(x: front.minX, y: front.maxY - Glyph.strokeWidth))
+                path.line(to: NSPoint(x: front.maxX, y: front.maxY - Glyph.strokeWidth))
+            } else {
+                path.appendRect(glyph.insetBy(
+                    dx: Glyph.strokeWidth / 2,
+                    dy: Glyph.strokeWidth / 2
+                ))
+                // The heavier lintel is what reads "window" rather than "checkbox" at this size —
+                // the frame's own title bar in eight points.
+                path.move(to: NSPoint(x: glyph.minX, y: glyph.maxY - Glyph.strokeWidth))
+                path.line(to: NSPoint(x: glyph.maxX, y: glyph.maxY - Glyph.strokeWidth))
+            }
         }
 
         ink.setStroke()
@@ -223,12 +289,21 @@ final class WindowChromeButton: ThemedControl {
             // full width the way the original does.
             dot(1, 0, size - 2, 2)
         case .zoom:
-            // A window in miniature: a one-point frame under a two-point title bar.
-            dot(0, 0, size, 1)
-            dot(0, size - 1, size, 1)
-            dot(0, 0, 1, size)
-            dot(size - 1, 0, 1, size)
-            dot(0, size - 3, size, 2)
+            func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
+                dot(x, y, side, 1)
+                dot(x, y + side - 1, side, 1)
+                dot(x, y, 1, side)
+                dot(x + side - 1, y, 1, side)
+                dot(x, y + side - 3, side, 2)
+            }
+            if displaysRestore {
+                let windowSide = max(3, size - 2)
+                frame(2, 2, side: windowSide)
+                frame(0, 0, side: windowSide)
+            } else {
+                // A window in miniature: a one-point frame under a two-point title bar.
+                frame(0, 0, side: size)
+            }
         }
     }
 

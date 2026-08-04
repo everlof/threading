@@ -1,7 +1,8 @@
 import AppKit
 
 /// The title band a chrome-takeover theme draws across the window's top: gradient, title, the
-/// window's own buttons, and a leading slot for the controls the toolbar used to hold.
+/// window identity, and the window's own buttons. Application commands live in the command
+/// band below it; title-bar geometry should never depend on toolbar-sized controls.
 ///
 /// This is the app-drawn half of what `.titled` provided. The behaviours a titlebar owes its
 /// window are re-stated here one for one — a press drags the window, a double-click performs
@@ -45,6 +46,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     }
 
     private let titleLabel = NSTextField(labelWithString: "")
+    private let appIcon = NSImageView()
     private let leadingStack = NSStackView()
     private let buttonStack = NSStackView()
     private(set) lazy var minimizeButton = WindowChromeButton(role: .minimize)
@@ -52,7 +54,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private(set) lazy var closeButton = WindowChromeButton(role: .close)
 
     private let appEvents = AppEventObservations()
-    private var windowStateObservations: [NSObjectProtocol] = []
+    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
     private var centeredTitleConstraint: NSLayoutConstraint?
     private var leadingTitleConstraint: NSLayoutConstraint?
 
@@ -88,27 +90,25 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         titleLabel.stringValue = title
     }
 
-    /// The controls the window controller rehomes into the band while the toolbar is gone —
-    /// the sidebar toggle and the history pair. The band owns where they sit; the controller
-    /// keeps owning what they do, the pane-header rule.
-    ///
-    /// Each control is held to the window-button height: a toolbar-sized control is exactly
-    /// as tall as the band, and a plate flush with the band's own edges read as a rendering
-    /// fault rather than a control. The window's buttons are the band's measure of "fits
-    /// with air", so its guests take the same one.
+    /// An optional title-bar leading slot retained for authored previews and future identity
+    /// furniture. Its guests keep their own semantic size; forcing toolbar controls down to the
+    /// caption-button height created two conflicting required constraints.
     func setLeadingControls(_ views: [NSView]) {
         leadingStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for view in views {
             leadingStack.addArrangedSubview(view)
-            view.heightAnchor.constraint(
-                equalToConstant: Design.Size.windowButtonHeight
-            ).isActive = true
         }
     }
 
     // MARK: - Setup
 
     private func setup() {
+        appIcon.image = NSApplication.shared.applicationIconImage
+        appIcon.imageScaling = .scaleProportionallyUpOrDown
+        appIcon.translatesAutoresizingMaskIntoConstraints = false
+        appIcon.setAccessibilityElement(false)
+        addSubview(appIcon)
+
         leadingStack.orientation = .horizontal
         leadingStack.alignment = .centerY
         leadingStack.spacing = Design.Spacing.tight
@@ -124,7 +124,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.applyFont(.control)
+        titleLabel.applyFont(.detail(weight: .bold))
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(titleLabel)
 
@@ -136,9 +136,17 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         centeredTitleConstraint = titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor)
 
         NSLayoutConstraint.activate([
-            leadingStack.leadingAnchor.constraint(
+            appIcon.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
-                constant: Design.Spacing.small
+                constant: Design.Spacing.tight
+            ),
+            appIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            appIcon.widthAnchor.constraint(equalToConstant: 14),
+            appIcon.heightAnchor.constraint(equalToConstant: 14),
+
+            leadingStack.leadingAnchor.constraint(
+                equalTo: appIcon.trailingAnchor,
+                constant: Design.Spacing.hairline
             ),
             leadingStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 

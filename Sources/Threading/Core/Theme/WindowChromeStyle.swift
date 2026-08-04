@@ -182,9 +182,9 @@ extension WindowChromeStyle.TitleBar: Codable {
 /// The bounds `AppThemeEditing.validate` holds a chrome block to, stated beside the model so
 /// a limit and the field it limits travel together — the `SidebarStyleLimits` rule.
 enum WindowChromeStyleLimits {
-    /// Points. Below 22 the band cannot hold its own buttons at a clickable size; past 44 it
+    /// Points. Below 18 the band cannot hold its compact caption buttons; past 44 it
     /// stops being a title bar and starts being a pane.
-    static let bandHeightRange: ClosedRange<Double> = 22...44
+    static let bandHeightRange: ClosedRange<Double> = 18...44
     /// What a band measures when the theme does not say — the native pane-tab height's
     /// neighbourhood, so the window's top does not jump between modes more than it must.
     static let defaultBandHeight: Double = 28

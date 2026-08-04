@@ -325,14 +325,15 @@ dims through its inactive gradient when the window resigns key, and the title fo
 `window.title` by observation. `WindowChromeButton` (close/minimize/zoom) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
-(measured; the buttons were dead until this). `WindowChromeFrameView` draws the border, and
+(measured; the buttons were dead until this). The zoom button follows `window.isZoomed` and
+draws/names itself Restore while zoomed. `WindowChromeFrameView` draws the border, and
 draws nothing at all in native dress, where the terminal-palette backdrop showing through the
 titlebar strip is load-bearing.
 
 **The content root is permanent.** `WindowChromeHostViewController` is the window's
 `contentViewController` in *both* dress states — assigning a content controller resizes the
 window (`applyInitialFrame`), so the root must never be swapped mid-flip. In native dress the
-band is hidden at zero height and the frame inset is zero, which is geometrically identical to
+title and command bands are hidden at zero height and the frame inset is zero, which is geometrically identical to
 the workspace being the root; `WindowChromeComponentTests` pins that. This also moves the
 chrome tree inside `ThemeBoundaryAudit`'s reach, which is the point: an app-drawn frame is
 app-owned surface.
@@ -343,9 +344,11 @@ the plain `PaneHeaderDefaults.inset` in both sidebar states, and the sidebar's f
 to `SidebarDefaults.minWidth`. The zero safe area becomes steady state: the content header's
 999-priority constraint and its 40pt floor (written as a launch transient) now size the strip
 permanently, and `WindowChromeTakeoverTests` states it so it stops being luck. The window's own
-controls (sidebar toggle, history pair) rehome into the band's leading slot as fresh
-`ThemedIconButton`s inked from `InkSource.titleBand` — the third ground, whose gradient the
-theme authors directly — and the controller's weak references re-point so
+controls (sidebar toggle, history pair) rehome into `WindowCommandBandView`, a button-face row
+below the title bar, as fresh `ThemedIconButton`s inked from `InkSource.chrome`. The title band
+therefore carries only app icon/title and caption buttons, matching the structural distinction
+the native toolbar previously supplied and avoiding a toolbar button's required 28pt height
+conflicting with the caption row's compact height. The controller's weak references re-point so
 `updateToolbarControlStates()` never learns which dress is worn. `PaneBandMargin.paneEdge`'s
 corner-adapted clearance is left alone in v1: harmless over-inset under square corners.
 

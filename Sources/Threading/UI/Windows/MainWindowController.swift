@@ -419,18 +419,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     /// The frame changed hands: the chrome host dresses or undresses, the window's own
-    /// controls move between the toolbar and the band, and the measurements that assumed the
+    /// controls move between the toolbar and the app-drawn command band, and the measurements that assumed the
     /// other frame answer again — now, for everything that reads them this turn, and once
     /// more a turn later because a reinstalled toolbar's items have no real frames yet (the
     /// rule `setupSplitViewController` already follows).
     private func windowChromeTakeoverDidChange(_ active: Bool) {
         chromeHostViewController.setTakeoverActive(active)
         if active {
-            installBandControls()
+            installTakeoverControls()
         } else {
             // The toolbar reinstall has already re-created its buttons and re-pointed the
-            // weak references at them; the band only has to let go of its copies.
-            chromeHostViewController.bandView.setLeadingControls([])
+            // weak references at them; the command band only has to let go of its copies.
+            chromeHostViewController.commandBandView.setLeadingControls([])
         }
 
         updateHeaderInset()
@@ -441,15 +441,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
-    /// The two toolbar residents, rebuilt for the band with the band's own ink. Fresh
+    /// The toolbar residents, rebuilt for the command band with ordinary chrome ink. Fresh
     /// instances rather than the toolbar's: an `NSToolbarItem`'s view belongs to the item,
     /// and the weak references exist precisely so `updateToolbarControlStates` reaches
     /// whichever copies are live.
-    private func installBandControls() {
+    private func installTakeoverControls() {
         let sidebar = ThemedIconButton(
             symbolName: "sidebar.leading",
             accessibility: L10n.string("Show or hide sidebar"),
-            inkSource: .titleBand
+            inkSource: .chrome
         )
         sidebar.toolTip = L10n.string("Show or Hide the Sidebar (⌃⌘S)")
         sidebar.onPress = { [weak self] in self?.toggleSidebar() }
@@ -458,7 +458,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let back = ThemedIconButton(
             symbolName: "chevron.left",
             accessibility: L10n.string("Go back"),
-            inkSource: .titleBand
+            inkSource: .chrome
         )
         back.toolTip = L10n.string("Go Back (⌃⌘←)")
         back.onPress = { [weak self] in self?.goBack() }
@@ -468,14 +468,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let forward = ThemedIconButton(
             symbolName: "chevron.right",
             accessibility: L10n.string("Go forward"),
-            inkSource: .titleBand
+            inkSource: .chrome
         )
         forward.toolTip = L10n.string("Go Forward (⌃⌘→)")
         forward.onPress = { [weak self] in self?.goForward() }
         forward.isEnabled = false
         navForwardToolbarButton = forward
 
-        chromeHostViewController.bandView.setLeadingControls([sidebar, back, forward])
+        chromeHostViewController.commandBandView.setLeadingControls([sidebar, back, forward])
         updateToolbarControlStates()
     }
 

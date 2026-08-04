@@ -160,7 +160,8 @@ final class RemoteProtocolTests: XCTestCase {
                 panelRadius: 3,
                 controlRadius: 2,
                 borderWidth: 1,
-                glow: .init(color: "#00FF88", radius: 10, opacity: 0.28)
+                glow: .init(color: "#00FF88", radius: 10, opacity: 0.28),
+                textScale: 0.8
             )
         )
         let me = RemoteMeDTO(
@@ -365,6 +366,7 @@ final class RemoteProtocolTests: XCTestCase {
         let theme = try JSONDecoder().decode(RemoteThemeDTO.self, from: data)
         XCTAssertNil(theme.material.glow?.offsetX)
         XCTAssertNil(theme.material.glow?.offsetY)
+        XCTAssertNil(theme.material.textScale, "an older sender has no authored text scale")
     }
 
     func testThemeSelectionRequestsRoundTrip() throws {

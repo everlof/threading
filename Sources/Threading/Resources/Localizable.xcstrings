@@ -22531,11 +22531,23 @@
     "The title band with square-plate buttons, and the bare-glyph style on its own ground.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "The title band with square-plate buttons, and the bare-glyph style on its own ground." } } }
     },
+    "Application navigation stays on its own chrome row below the title band.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Programnavigering ligger på en egen kromrad under titelfältet." } } }
+    },
+    " · %g%% text": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": " · %g%% text" } } }
+    },
+    "navigator well": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "navigatorfält" } } }
+    },
     "Window chrome": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fönsterkrom" } } }
     },
     "WindowChromeFrameView": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WindowChromeFrameView" } } }
+    },
+    "WindowCommandBandView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WindowCommandBandView" } } }
     },
     "WindowTitleBandView & WindowChromeButton": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WindowTitleBandView & WindowChromeButton" } } }

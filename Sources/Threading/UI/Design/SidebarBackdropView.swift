@@ -100,7 +100,14 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         material.isHidden = !isSystem
         fill.isHidden = isSystem
         if !isSystem {
-            fill.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+            // A region ground is neither a plate nor a well. The project tree may state its
+            // own edge through `SidebarStyle.navigatorWell`; raising the whole sidebar made
+            // the Windows 98 column look like one giant button.
+            fill.applySurface(
+                fill: Design.Surface.background,
+                radius: .fixed(0),
+                bevel: .none
+            )
         }
 
         let background = isSystem ? nil : SidebarAppearance.background(for: effectiveAppearance)

@@ -7,7 +7,8 @@ import AppKit
 ///
 /// This is deliberately the **one** place a theme reaches past colours-and-material into a
 /// specific region of the window. The sidebar is the surface people asked to make their own —
-/// a wordmark for their team, a gradient, a tiled pattern — and it is also the one pane whose
+/// a wordmark for their team, a gradient, a tiled pattern, a deliberately inset navigator —
+/// and it is also the one pane whose
 /// content is entirely ours (rows of names), so a background can sit *under* it without any
 /// feature view having to know. The content pane's ground stays the terminal's or the
 /// conversation's; a theme that could paint behind those would be painting behind another
@@ -30,14 +31,42 @@ struct SidebarStyle: Codable, Equatable {
     /// The brand row at the sidebar's top: logo and wordmark.
     var brand: Brand?
 
-    init(background: Background? = nil, brand: Brand? = nil) {
+    /// The project tree's own work area. Absent keeps the historical transparent list over the
+    /// sidebar background; stated themes can make it a contrasting raised, sunken, or flat
+    /// field without feature code knowing which visual language it belongs to.
+    var navigatorWell: NavigatorWell?
+
+    init(
+        background: Background? = nil,
+        brand: Brand? = nil,
+        navigatorWell: NavigatorWell? = nil
+    ) {
         self.background = background
         self.brand = brand
+        self.navigatorWell = navigatorWell
     }
 
     /// Nothing stated at all — indistinguishable from a document without the block, and what
     /// an update that removes both halves normalises to.
-    var isEmpty: Bool { background == nil && brand == nil }
+    var isEmpty: Bool { background == nil && brand == nil && navigatorWell == nil }
+
+    // MARK: - Navigator Work Area
+
+    struct NavigatorWell: Equatable {
+        var fill: NSColor
+        var bevel: Bevel
+
+        init(fill: NSColor, bevel: Bevel = .sunken) {
+            self.fill = fill
+            self.bevel = bevel
+        }
+
+        enum Bevel: String, Codable, CaseIterable {
+            case raised
+            case sunken
+            case none
+        }
+    }
 
     // MARK: - Background
 
@@ -191,6 +220,32 @@ struct SidebarStyle: Codable, Equatable {
 }
 
 // MARK: - Codable (hex colours, string-or-object logo)
+
+extension SidebarStyle.NavigatorWell: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case fill, bevel
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let hex = try container.decode(String.self, forKey: .fill)
+        guard let parsed = NSColor(hex: hex) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .fill,
+                in: container,
+                debugDescription: "\(hex) is not a colour."
+            )
+        }
+        fill = parsed
+        bevel = try container.decodeIfPresent(Bevel.self, forKey: .bevel) ?? .sunken
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fill.hexString, forKey: .fill)
+        try container.encode(bevel, forKey: .bevel)
+    }
+}
 
 extension SidebarStyle.Gradient: Codable {
     private enum CodingKeys: String, CodingKey {

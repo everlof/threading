@@ -49,6 +49,10 @@ final class SidebarStyleTests: XCTestCase {
                     weight: .bold,
                     hidden: false
                 )
+            ),
+            navigatorWell: .init(
+                fill: NSColor(hex: "#FFFDF8")!,
+                bevel: .sunken
             )
         )
 
@@ -211,6 +215,26 @@ final class SidebarStyleTests: XCTestCase {
         )), "a brand with nothing left in it should be removed, not stated")
     }
 
+    @MainActor
+    func testNavigatorWellMustBeOpaqueAndReadable() throws {
+        XCTAssertThrowsError(try themed(SidebarStyle(
+            navigatorWell: .init(fill: NSColor.white.withAlphaComponent(0.5))
+        )))
+
+        let base = AppThemeStyles.cyberpunk
+        let kind = base.availableVariants[0]
+        let appearance = kind.appearance ?? NSAppearance.currentDrawing()
+        let label = base.resolved(.label, appearance: appearance)
+        XCTAssertThrowsError(try themed(SidebarStyle(
+            navigatorWell: .init(fill: label)
+        )), "a navigator field painted in the label colour should be refused")
+
+        let surface = base.resolved(.surface, appearance: appearance)
+        XCTAssertNoThrow(try themed(SidebarStyle(
+            navigatorWell: .init(fill: surface, bevel: .none)
+        )))
+    }
+
     // MARK: - Resolution
 
     /// Absence at every level resolves to the default brand: the mark beside the app's name.
@@ -221,6 +245,41 @@ final class SidebarStyleTests: XCTestCase {
         XCTAssertEqual(brand.logo, .mark)
         XCTAssertEqual(brand.title, AppInfo.name)
         XCTAssertNil(SidebarAppearance.background())
+        XCTAssertNil(SidebarAppearance.navigatorWell())
+    }
+
+    @MainActor
+    func testAStatedNavigatorWellResolvesItsFillBevelAndEdge() throws {
+        AppThemeLibrary.apply(AppThemeStyles.win98)
+        let kind = AppThemeStyles.win98.availableVariants[0]
+        let appearance = kind.appearance ?? NSAppearance.currentDrawing()
+        let well = try XCTUnwrap(SidebarAppearance.navigatorWell(for: appearance))
+
+        XCTAssertEqual(well.fill.hexString, "#FFFFFF")
+        XCTAssertEqual(well.bevel, .sunken)
+        XCTAssertEqual(well.edgeWidth, 2)
+    }
+
+    @MainActor
+    func testTheProjectScrollRoleInsetsItsDocumentInsideTheAuthoredEdge() {
+        AppThemeLibrary.apply(AppThemeStyles.win98)
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 180, height: 240))
+        scroll.surfaceRole = .sidebarNavigator
+
+        XCTAssertEqual(scroll.contentInsets.top, 2)
+        XCTAssertEqual(scroll.contentInsets.left, 2)
+        XCTAssertEqual(scroll.scrollerInsets.right, 2)
+
+        // `NSEdgeInsets` is not `Equatable`, so the four edges are asserted individually.
+        AppThemeLibrary.apply(.system)
+        XCTAssertEqual(scroll.contentInsets.top, 0)
+        XCTAssertEqual(scroll.contentInsets.left, 0)
+        XCTAssertEqual(scroll.contentInsets.bottom, 0)
+        XCTAssertEqual(scroll.contentInsets.right, 0)
+        XCTAssertEqual(scroll.scrollerInsets.top, 0)
+        XCTAssertEqual(scroll.scrollerInsets.left, 0)
+        XCTAssertEqual(scroll.scrollerInsets.bottom, 0)
+        XCTAssertEqual(scroll.scrollerInsets.right, 0)
     }
 
     @MainActor

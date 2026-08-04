@@ -121,8 +121,8 @@ enum Design {
         /// A chrome-takeover window's own buttons — close, minimize, zoom — in the app-drawn
         /// title band. Wider than tall, the proportion every windowing system's buttons share,
         /// and sized to sit inside the band's default 28 points with air above and below.
-        static let windowButtonWidth: CGFloat = 22
-        static let windowButtonHeight: CGFloat = 18
+        static let windowButtonWidth: CGFloat = 18
+        static let windowButtonHeight: CGFloat = 16
         /// Height of a single-line text field — see `ThemedTextField`.
         ///
         /// Its own step rather than `chipHeight`, which it borrowed for as long as a field was
@@ -202,7 +202,10 @@ enum Design {
         /// the design system. This reaches prose, code, aligned numerics, marks, and every
         /// host-rendered extension node while leaving an explicit terminal profile untouched.
         private static func scaled(_ pointSize: CGFloat) -> CGFloat {
-            pointSize * AppSettings.appTextSize.scale
+            let material = AppThemePalette.current.material(
+                for: NSApplication.shared.effectiveAppearance
+            )
+            return pointSize * material.textScale * AppSettings.appTextSize.scale
         }
 
         /// A prose font, resolved through the four layers that may have an opinion about it.
