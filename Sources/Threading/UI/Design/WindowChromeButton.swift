@@ -1,9 +1,9 @@
 import AppKit
 
-/// One of a chrome-takeover window's own buttons: Window menu, close, minimize, or zoom.
+/// One of a chrome-takeover window's own buttons: Window menu, close, minimize, zoom, or depth.
 ///
 /// Exists because a takeover window has no traffic lights — the theme asked for the entire
-/// frame, and these four are the frame's working parts. One component for all four roles and
+/// frame, and these are the frame's working parts. One component for every semantic role and
 /// every glyph style (`WindowChromeStyle.TitleBar.ButtonGlyphStyle`): a theme picks a style, it
 /// never draws its own buttons, and a fourth role or another style arrives here rather than as
 /// a sibling class — the tab strip's "every" lesson, applied before there are two.
@@ -18,6 +18,7 @@ final class WindowChromeButton: ThemedControl {
         case close
         case minimize
         case zoom
+        case depth
 
         var accessibilityLabel: String {
             switch self {
@@ -25,6 +26,7 @@ final class WindowChromeButton: ThemedControl {
             case .close: L10n.string("Close")
             case .minimize: L10n.string("Minimize")
             case .zoom: L10n.string("Zoom")
+            case .depth: L10n.string("Send to Back")
             }
         }
     }
@@ -34,7 +36,10 @@ final class WindowChromeButton: ThemedControl {
     /// A style stated by a fixture — a gallery story, a render test — instead of resolved
     /// from the active theme. Per instance, so a preview can never dress the real window.
     var fixtureStyle: WindowChromeAppearance.Resolved? {
-        didSet { needsDisplay = true }
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
     }
 
     /// Key-state stated by a fixture: an unshown render window is never key, and the band
@@ -78,7 +83,12 @@ final class WindowChromeButton: ThemedControl {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: Design.Size.windowButtonWidth, height: Design.Size.windowButtonHeight)
+        if (fixtureStyle ?? WindowChromeAppearance.resolve())?.glyphStyle == .amiga {
+            // Intuition gadgets consume almost the full 26px title strip. The generic 18×16
+            // caption slot made the same figures float in the blue rather than partition it.
+            return NSSize(width: 24, height: 22)
+        }
+        return NSSize(width: Design.Size.windowButtonWidth, height: Design.Size.windowButtonHeight)
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -148,6 +158,8 @@ final class WindowChromeButton: ThemedControl {
             window.miniaturize(nil)
         case .zoom:
             window.zoom(nil)
+        case .depth:
+            window.orderBack(nil)
         }
         return true
     }
@@ -239,6 +251,21 @@ final class WindowChromeButton: ThemedControl {
             outline.lineWidth = 1
             outline.stroke()
             ink = Design.Text.label
+        case .amiga:
+            // Intuition's gadgets are cut from the title strip itself. The active blue is
+            // therefore both the band and each control's plate; inactive gadgets fall back
+            // to the Workbench gray with the rest of the title. Hard black/white bevel edges
+            // and one-bit figures do all the separation.
+            let gradient = isKeyOrHasNoWindow
+                ? resolved?.activeGradient
+                : resolved?.inactiveGradient
+            ThemedSurface.draw(
+                bounds,
+                fill: gradient?.colors.first ?? Design.Surface.controlResting,
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
+            )
+            ink = Design.Text.label
         case .plain:
             // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
             if isHovered || isPressed {
@@ -263,6 +290,8 @@ final class WindowChromeButton: ThemedControl {
             drawOpenStepGlyph(in: bounds, ink: ink)
         } else if style == .irix {
             drawIRIXGlyph(in: bounds, ink: ink)
+        } else if style == .amiga {
+            drawAmigaGlyph(in: bounds, ink: ink)
         } else {
             drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
         }
@@ -334,6 +363,13 @@ final class WindowChromeButton: ThemedControl {
                 path.move(to: NSPoint(x: glyph.minX, y: glyph.maxY - Glyph.strokeWidth))
                 path.line(to: NSPoint(x: glyph.maxX, y: glyph.maxY - Glyph.strokeWidth))
             }
+        case .depth:
+            let side = min(glyph.width, glyph.height) * 0.72
+            let front = NSRect(x: glyph.minX, y: glyph.minY, width: side, height: side)
+                .insetBy(dx: Glyph.strokeWidth / 2, dy: Glyph.strokeWidth / 2)
+            let back = front.offsetBy(dx: glyph.width - side, dy: glyph.height - side)
+            path.appendRect(back)
+            path.appendRect(front)
         }
 
         ink.setStroke()
@@ -384,6 +420,16 @@ final class WindowChromeButton: ThemedControl {
                 // A window in miniature: a one-point frame under a two-point title bar.
                 frame(0, 0, side: size)
             }
+        case .depth:
+            let windowSide = max(3, size - 2)
+            func depthFrame(_ x: CGFloat, _ y: CGFloat) {
+                dot(x, y, windowSide, 1)
+                dot(x, y + windowSide - 1, windowSide, 1)
+                dot(x, y, 1, windowSide)
+                dot(x + windowSide - 1, y, 1, windowSide)
+            }
+            depthFrame(2, 2)
+            depthFrame(0, 0)
         }
     }
 
@@ -424,6 +470,9 @@ final class WindowChromeButton: ThemedControl {
                 frame(0, 0, side: 8)
                 dot(1, 6, 6, 1)
             }
+        case .depth:
+            frame(2, 2, side: 5)
+            frame(0, 0, side: 5)
         }
     }
 
@@ -461,6 +510,9 @@ final class WindowChromeButton: ThemedControl {
                 frame(1, 1, 6, 6)
                 dot(2, 5, 4, 1)
             }
+        case .depth:
+            frame(2, 2, 5, 5)
+            frame(0, 0, 5, 5)
         }
     }
 
@@ -507,6 +559,14 @@ final class WindowChromeButton: ThemedControl {
             dot(1, 1, 1, 6)
             dot(6, 1, 1, 6)
             dot(2, 5, 4, 1)
+        case .depth:
+            dot(2, 2, 5, 1)
+            dot(2, 6, 5, 1)
+            dot(2, 2, 1, 5)
+            dot(6, 2, 1, 5)
+            dot(0, 0, 5, 1)
+            dot(0, 4, 2, 1)
+            dot(0, 0, 1, 5)
         }
     }
 
@@ -545,6 +605,54 @@ final class WindowChromeButton: ThemedControl {
                 dot(CGFloat(step), CGFloat(step))
                 dot(CGFloat(7 - step), CGFloat(step))
             }
+        case .depth:
+            frame(2, 2, side: 5)
+            frame(0, 0, side: 5)
+        }
+    }
+
+    /// Workbench 3.1's Intuition gadget alphabet, reconstructed on its original eight-point
+    /// grid. Close is the small upright inset lozenge; Zoom is the single recessed window;
+    /// Depth is the unmistakable pair of overlapping windows at the far right. The figures
+    /// deliberately use black, white, and Workbench gray rather than a modern monochrome icon.
+    private func drawAmigaGlyph(in rect: NSRect, ink: NSColor) {
+        let size: CGFloat = 10
+        let originX = (rect.midX - size / 2).rounded()
+        let originY = (rect.midY - size / 2).rounded()
+
+        func fill(_ color: NSColor, _ x: CGFloat, _ y: CGFloat,
+                  _ width: CGFloat = 1, _ height: CGFloat = 1) {
+            color.setFill()
+            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        }
+
+        func window(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+            fill(ink, x, y, width, height)
+            fill(.white, x + 1, y + 1, width - 2, height - 2)
+            fill(Design.Surface.controlResting, x + 2, y + 2, width - 3, height - 3)
+        }
+
+        switch role {
+        case .windowMenu:
+            fill(ink, 2, 4, 6, 2)
+        case .close:
+            // The original is a narrow upright recess, not a cross or a filled stop box.
+            fill(ink, 3, 1, 5, 8)
+            fill(.white, 4, 2, 3, 6)
+            fill(Design.Surface.controlResting, 5, 3, 2, 5)
+        case .minimize:
+            // Workbench has no standard minimize gadget, but authored mixtures still need a
+            // coherent member of this family.
+            fill(ink, 2, 2, 6, 6)
+            fill(.white, 3, 3, 4, 4)
+            fill(ink, 4, 4, 2, 2)
+        case .zoom:
+            window(1, 1, 8, 8)
+            fill(ink, 5, 5, 3, 3)
+            fill(.white, 5, 6, 2, 1)
+        case .depth:
+            window(1, 3, 7, 6)
+            window(3, 1, 7, 6)
         }
     }
 

@@ -84,7 +84,7 @@ final class WindowChromeStyleTests: XCTestCase {
                 inactiveTexture: .init(kind: .pinstripes),
                 shape: .leadingTab,
                 tabWidth: 210,
-                visibleButtons: [.close, .zoom]
+                visibleButtons: [.close, .zoom, .depth]
             ),
             frame: .init(width: 4)
         )

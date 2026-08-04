@@ -754,6 +754,56 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
   let visibleButtons: [String]?
   let resetVisibleButtons: Bool?
 
+  init(
+    activeGradient: AppThemeGradientArguments? = nil,
+    inactiveGradient: AppThemeGradientArguments? = nil,
+    removeInactiveGradient: Bool? = nil,
+    ink: String? = nil,
+    removeInk: Bool? = nil,
+    inactiveInk: String? = nil,
+    removeInactiveInk: Bool? = nil,
+    titleAlignment: String? = nil,
+    titleFontStyle: String? = nil,
+    height: Double? = nil,
+    removeHeight: Bool? = nil,
+    buttonGlyphStyle: String? = nil,
+    buttonPlacement: String? = nil,
+    showsAppIcon: Bool? = nil,
+    activeTexture: AppThemeChromeTextureArguments? = nil,
+    removeActiveTexture: Bool? = nil,
+    inactiveTexture: AppThemeChromeTextureArguments? = nil,
+    removeInactiveTexture: Bool? = nil,
+    shape: String? = nil,
+    tabWidth: Double? = nil,
+    removeTabWidth: Bool? = nil,
+    visibleButtons: [String]? = nil,
+    resetVisibleButtons: Bool? = nil
+  ) {
+    self.activeGradient = activeGradient
+    self.inactiveGradient = inactiveGradient
+    self.removeInactiveGradient = removeInactiveGradient
+    self.ink = ink
+    self.removeInk = removeInk
+    self.inactiveInk = inactiveInk
+    self.removeInactiveInk = removeInactiveInk
+    self.titleAlignment = titleAlignment
+    self.titleFontStyle = titleFontStyle
+    self.height = height
+    self.removeHeight = removeHeight
+    self.buttonGlyphStyle = buttonGlyphStyle
+    self.buttonPlacement = buttonPlacement
+    self.showsAppIcon = showsAppIcon
+    self.activeTexture = activeTexture
+    self.removeActiveTexture = removeActiveTexture
+    self.inactiveTexture = inactiveTexture
+    self.removeInactiveTexture = removeInactiveTexture
+    self.shape = shape
+    self.tabWidth = tabWidth
+    self.removeTabWidth = removeTabWidth
+    self.visibleButtons = visibleButtons
+    self.resetVisibleButtons = resetVisibleButtons
+  }
+
   private enum CodingKeys: String, CodingKey {
     case activeGradient = "active_gradient"
     case inactiveGradient = "inactive_gradient"
@@ -4579,12 +4629,13 @@ enum MCPTools {
           ),
           "button_glyph_style": MCPPropertySchema(
             type: .string,
-            description: "How close/minimize/zoom draw: \"squares\" (plates in the "
+            description: "How semantic window-operation glyphs draw: \"squares\" (plates in the "
               + "theme's control surface, bevelled under a bevel material — the "
               + "Windows lineage), \"platinum\" (classic Macintosh boxes), \"beos\" "
               + "(raised boxes cut from a yellow title tab), \"openstep\" (gray NeXT "
               + "plates with period bitmap marks), \"irix\" (black-outlined 4Dwm "
-              + "caption boxes), or "
+              + "caption boxes), \"amiga\" (one-bit Workbench Close, Zoom, and Depth "
+              + "gadgets), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(
@@ -4623,7 +4674,7 @@ enum MCPTools {
           "visible_buttons": MCPPropertySchema(
             type: .array,
             description: "One or more unique operations from window_menu, close, "
-              + "minimize, and zoom.",
+              + "minimize, zoom, and depth. Depth sends the window behind its peers.",
             items: MCPArrayItemSchema(
               type: .string,
               description: "A semantic window operation."

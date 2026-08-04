@@ -14115,6 +14115,16 @@
         }
       }
     },
+    "Send to Back": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka längst bak"
+          }
+        }
+      }
+    },
     "SeparatorView": {
       "extractionState": "stale",
       "localizations": {

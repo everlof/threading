@@ -533,7 +533,8 @@ extension AgentToolCoordinator {
                 ) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
-                            + "\"platinum\", \"beos\", \"openstep\", \"irix\", or \"plain\"."
+                            + "\"platinum\", \"beos\", \"openstep\", \"irix\", "
+                            + "\"amiga\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -576,7 +577,7 @@ extension AgentToolCoordinator {
                 guard parsed.count == rawButtons.count else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.visible_buttons accepts only \"close\", "
-                            + "\"minimize\", \"zoom\", and \"window_menu\"."
+                            + "\"minimize\", \"zoom\", \"depth\", and \"window_menu\"."
                     )
                 }
                 style.titleBar.visibleButtons = parsed

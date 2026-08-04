@@ -2565,6 +2565,17 @@ final class ComponentGalleryViewController: NSViewController {
             irixBand.heightAnchor.constraint(equalToConstant: irix.bandHeight)
         ])
 
+        let amigaChrome = AppThemeStyles.amiga.variant(.light)?.chrome
+        precondition(amigaChrome != nil, "the stock Amiga theme must state window chrome")
+        let amiga = WindowChromeAppearance.resolved(from: amigaChrome!)
+        let amigaBand = WindowTitleBandView()
+        amigaBand.fixtureStyle = amiga
+        amigaBand.setTitle("hd02  50% full, 2,047M free, 2,048M in use")
+        NSLayoutConstraint.activate([
+            amigaBand.widthAnchor.constraint(equalToConstant: 420),
+            amigaBand.heightAnchor.constraint(equalToConstant: amiga.bandHeight)
+        ])
+
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
             WindowChromeButton.Role.minimize, .zoom, .close
@@ -2599,7 +2610,7 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         let bandRow = NSStackView(
-            views: [band, platinumBand, beOSBand, openStepBand, irixBand, backplate]
+            views: [band, platinumBand, beOSBand, openStepBand, irixBand, amigaBand, backplate]
         )
         bandRow.orientation = .vertical
         bandRow.alignment = .leading

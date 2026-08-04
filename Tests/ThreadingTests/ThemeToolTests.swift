@@ -968,6 +968,81 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(texture["color"] as? String, "#D5D4B4")
     }
 
+    /// Workbench's contribution is public vocabulary too: the exact gadget family and the
+    /// semantic Depth operation can be authored by a prompt that never names the stock ID.
+    func testAgentCanAuthorAndReadAmigaChrome() throws {
+        let name = "Amiga Tool Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "swiss-minimalist",
+                "appearance": "light",
+                "variants": {
+                  "light": {
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {"stops": [
+                          {"color": "#6688BB", "position": 0},
+                          {"color": "#6688BB", "position": 1}
+                        ]},
+                        "inactive_gradient": {"stops": [
+                          {"color": "#AAAAAA", "position": 0},
+                          {"color": "#AAAAAA", "position": 1}
+                        ]},
+                        "ink": "#000000",
+                        "title_alignment": "leading",
+                        "height": 26,
+                        "button_glyph_style": "amiga",
+                        "button_placement": "split",
+                        "shows_app_icon": false,
+                        "visible_buttons": ["close", "zoom", "depth"]
+                      },
+                      "frame": {"width": 3}
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
+        XCTAssertEqual(decoded.buttonGlyphStyle, "amiga")
+        XCTAssertEqual(decoded.visibleButtons, ["close", "zoom", "depth"])
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light)?.chrome?.titleBar)
+        XCTAssertEqual(stored.buttonGlyphStyle, .amiga)
+        XCTAssertEqual(stored.buttonPlacement, .split)
+        XCTAssertEqual(stored.visibleButtons, [.close, .zoom, .depth])
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
+        let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
+        XCTAssertEqual(title["button_glyph_style"] as? String, "amiga")
+        XCTAssertEqual(title["visible_buttons"] as? [String], ["close", "zoom", "depth"])
+    }
+
     func testVariantSchemaDescribesTheCompleteChromeVocabulary() throws {
         let schema = try schema(for: MCPTools.createAppTheme)
         let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])

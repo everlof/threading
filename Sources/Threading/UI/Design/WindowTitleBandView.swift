@@ -23,7 +23,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     /// the band's own buttons so the cluster previews as one piece.
     var fixtureStyle: WindowChromeAppearance.Resolved? {
         didSet {
-            [menuButton, minimizeButton, zoomButton, closeButton].forEach {
+            [menuButton, minimizeButton, zoomButton, closeButton, depthButton].forEach {
                 $0.fixtureStyle = fixtureStyle
             }
             apply()
@@ -34,7 +34,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     /// key, so without this the band's hero form — the active gradient — is unrenderable.
     var fixtureIsKey: Bool? {
         didSet {
-            [menuButton, minimizeButton, zoomButton, closeButton].forEach {
+            [menuButton, minimizeButton, zoomButton, closeButton, depthButton].forEach {
                 $0.fixtureIsKey = fixtureIsKey
             }
             apply()
@@ -60,6 +60,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private(set) lazy var minimizeButton = WindowChromeButton(role: .minimize)
     private(set) lazy var zoomButton = WindowChromeButton(role: .zoom)
     private(set) lazy var closeButton = WindowChromeButton(role: .close)
+    private(set) lazy var depthButton = WindowChromeButton(role: .depth)
 
     private let appEvents = AppEventObservations()
     nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
@@ -164,7 +165,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         buttonStack.alignment = .centerY
         buttonStack.spacing = Design.Spacing.hairline
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
-        [minimizeButton, zoomButton, closeButton].forEach(buttonStack.addArrangedSubview)
+        [minimizeButton, zoomButton, closeButton, depthButton].forEach(buttonStack.addArrangedSubview)
         addSubview(buttonStack)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -232,6 +233,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private func apply() {
         let resolved = resolvedStyle
         let isKey = drawsAsKey
+        [menuButton, minimizeButton, zoomButton, closeButton, depthButton].forEach {
+            $0.invalidateIntrinsicContentSize()
+        }
         titleLabel.textColor = isKey
             ? resolved?.ink ?? .white
             : resolved?.inactiveInk ?? .white
@@ -270,6 +274,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             case .close: return closeButton
             case .minimize: return minimizeButton
             case .zoom: return zoomButton
+            case .depth: return depthButton
             }
         }
 

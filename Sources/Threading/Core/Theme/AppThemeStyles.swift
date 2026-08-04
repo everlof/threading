@@ -31,6 +31,7 @@ enum AppThemeStyles {
         beOS,
         openStep,
         irix,
+        amiga,
         win98,
         christmas
     ]

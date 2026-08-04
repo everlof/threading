@@ -300,7 +300,8 @@ partial-width leading title tab and the period's Close/Zoom-only window furnitur
 same regional model; **OPENSTEP 4.2** (`openstep-42`) adds ordered bookends so Miniaturize can
 lead while Close trails, plus its own one-bit control figures; **IRIX Indigo Magic**
 (`irix-indigo-magic`) combines a dithered italic title with a leading Window-menu operation and
-trailing Minimize/Maximize boxes.
+trailing Minimize/Maximize boxes; **Amiga Workbench 3.1** (`amiga-workbench-31`) adds the
+Intuition gadget alphabet and the real Depth operation beside Zoom.
 The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
@@ -337,13 +338,17 @@ rest. A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.
-`WindowChromeButton` (window menu/close/minimize/zoom) calls the **semantic**
-operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
+`WindowChromeButton` (window menu/close/minimize/zoom/depth) calls the **semantic**
+operations — `zoom(nil)`, `miniaturize(nil)`, `orderBack(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
 (measured; the buttons were dead until this). The zoom button follows `window.isZoomed` and
 draws/names itself Restore while zoomed. `WindowChromeFrameView` draws the border, and
 draws nothing at all in native dress, where the terminal-palette backdrop showing through the
 titlebar strip is load-bearing.
+
+Workbench's Depth role remains opt-in. It sends the current window behind its peers and is not
+folded into Minimize, so a custom theme can state the original stacking operation without
+changing the standard three-button default inherited by older documents.
 
 The Window-menu role is not an `NSMenu` exception inside the frame. It presents semantic
 `ThemedMenuItem` values through `ThemedMenuPresenter`, keeping every pixel app-owned and making

@@ -55,10 +55,12 @@ final class WindowChromeComponentTests: XCTestCase {
     private final class OperationRecordingWindow: NSWindow {
         var zoomCount = 0
         var miniaturizeCount = 0
+        var orderBackCount = 0
 
         override var canBecomeKey: Bool { true }
         override func zoom(_ sender: Any?) { zoomCount += 1 }
         override func miniaturize(_ sender: Any?) { miniaturizeCount += 1 }
+        override func orderBack(_ sender: Any?) { orderBackCount += 1 }
     }
 
     private func makeWindow() -> OperationRecordingWindow {
@@ -109,6 +111,17 @@ final class WindowChromeComponentTests: XCTestCase {
         press(button)
 
         XCTAssertEqual(window.miniaturizeCount, 1)
+    }
+
+    func testTheDepthButtonSendsItsWindowBehindItsPeers() {
+        let window = makeWindow()
+        let button = WindowChromeButton(role: .depth)
+        window.contentView?.addSubview(button)
+
+        press(button)
+
+        XCTAssertEqual(window.orderBackCount, 1)
+        XCTAssertEqual(button.accessibilityLabel(), L10n.string("Send to Back"))
     }
 
     /// Asserted through a refusing delegate rather than a real close: closing a key-capable
@@ -231,6 +244,18 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(band.leadingWindowButtonRoles, [.windowMenu])
         XCTAssertEqual(band.trailingWindowButtonRoles, [.minimize, .zoom])
         XCTAssertFalse(band.showsApplicationIcon)
+    }
+
+    func testAmigaSplitsCloseFromZoomAndTheRealDepthGadget() throws {
+        let band = WindowTitleBandView()
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.amiga.variant(.light)?.chrome)
+        )
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.close])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.zoom, .depth])
+        XCTAssertFalse(band.showsApplicationIcon)
+        XCTAssertEqual(band.closeButton.intrinsicContentSize, NSSize(width: 24, height: 22))
     }
 
     func testWindowMenuRoleBuildsTheWindowOperationsMenu() throws {
@@ -411,6 +436,7 @@ final class WindowChromeComponentTests: XCTestCase {
             (AppThemeStyles.beOS, "window-chrome-beos-window"),
             (AppThemeStyles.openStep, "window-chrome-openstep-window"),
             (AppThemeStyles.irix, "window-chrome-irix-window"),
+            (AppThemeStyles.amiga, "window-chrome-amiga-window"),
             (AppThemeStyles.win98, "window-chrome-takeover-window")
         ] {
             AppThemePalette.set(theme)

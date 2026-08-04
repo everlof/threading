@@ -66,7 +66,7 @@ struct WindowChromeStyle: Codable, Equatable {
         /// `WindowChromeStyleLimits.defaultBandHeight`.
         var height: Double?
 
-        /// How the close/minimize/zoom glyphs draw. One vocabulary interpreted by one
+        /// How the semantic window-operation glyphs draw. One vocabulary interpreted by one
         /// component — a theme picks a style, it never draws its own buttons.
         var buttonGlyphStyle: ButtonGlyphStyle
 
@@ -157,6 +157,9 @@ struct WindowChromeStyle: Codable, Equatable {
             /// IRIX 4Dwm's black-outlined gray caption boxes: Window menu at the leading
             /// edge, then Minimize and Maximize at the trailing edge.
             case irix
+            /// Amiga Workbench 3.1's one-bit Intuition gadgets: the inset Close mark at the
+            /// leading edge and Zoom/Depth window figures at the trailing edge.
+            case amiga
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
@@ -180,6 +183,9 @@ struct WindowChromeStyle: Codable, Equatable {
             case minimize
             case zoom
             case close
+            /// Sends the window behind its peers. Workbench calls this its Depth gadget;
+            /// it is not minimization and remains an authored, opt-in operation.
+            case depth
 
             /// The operations the original takeover implementation exposed. Kept explicit
             /// so adding a new semantic role does not silently add furniture to old themes.

@@ -729,3 +729,14 @@ default. IRIX states `[window_menu, minimize, zoom]` with `bookends`, reproducin
 leading menu box and trailing pair. Every added field and enum value round-trips through the
 same create/update/get tool surface, so an agent can author this combination without knowing
 the stock theme id.
+
+**Amiga Workbench 3.1** (`amiga-workbench-31`) is based on the unmodified Workbench 3.1
+palette, not the more colourful MagicWB setup commonly shown in retrospectives. The frame uses
+the screenshot's exact `#6688BB` active title, `#AAAAAA` application gray, black rules and
+white highlights. A monospaced Monaco fallback and stippled legacy scroller carry the
+pixel-era rhythm through the application panes. Glyph family `amiga` renders the original
+Intuition Close, Zoom, and overlapping-window Depth figures; semantic operation `depth`
+orders the window behind its peers. `[close, zoom, depth]` plus `split` reproduces the
+historical left/right gadget order without teaching the stock theme a private code path. Both
+additions are accepted and returned by the public theme tools, so a custom prompt can build
+the same chrome from data.
