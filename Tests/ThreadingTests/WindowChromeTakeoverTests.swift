@@ -222,6 +222,39 @@ final class WindowChromeTakeoverTests: XCTestCase {
         XCTAssertNotNil(window.toolbar)
     }
 
+    /// BeOS's body is rectangular but its top is only a title tab. The shoulders must really
+    /// be transparent so AppKit's shadow follows that outline, including a takeover-to-
+    /// takeover switch where the style mask itself does not change.
+    func testAShapedTabOwnsAndRestoresTheWindowsBackingSurface() throws {
+        AppThemePalette.set(.system)
+        let controller = MainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        let coordinator = try XCTUnwrap(controller.chromeCoordinator)
+        let originalOpaque = window.isOpaque
+        let originalBackground = window.backgroundColor
+
+        AppThemePalette.set(AppThemeStyles.beOS)
+        coordinator.applyCurrentTheme()
+        XCTAssertFalse(window.isOpaque)
+        XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001)
+
+        AppThemePalette.set(AppThemeStyles.win98)
+        coordinator.applyCurrentTheme()
+        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.takeoverMask)
+        XCTAssertEqual(window.isOpaque, originalOpaque)
+        XCTAssertEqual(window.backgroundColor, originalBackground)
+
+        AppThemePalette.set(AppThemeStyles.beOS)
+        coordinator.applyCurrentTheme()
+        XCTAssertFalse(window.isOpaque)
+
+        AppThemePalette.set(.system)
+        coordinator.applyCurrentTheme()
+        XCTAssertEqual(window.isOpaque, originalOpaque)
+        XCTAssertEqual(window.backgroundColor, originalBackground)
+    }
+
     // MARK: - The Window Itself
 
     /// Frameless windows refuse key and main by default, which would leave the app's only

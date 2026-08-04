@@ -693,3 +693,14 @@ removal of optional ink, height, and texture choices and partial texture updates
 load-bearing custom-theme rule: a prompt discovered outside the stock catalogue can reproduce
 the same layout and material without adding Swift code. `get_app_theme` returns those choices
 in the same snake-case document.
+
+**BeOS R5** (`beos-r5`) extends that vocabulary structurally rather than adding a theme-ID
+branch. `TitleBar.shape` is `full_width` or `leading_tab`; a tab states an optional 120–360pt
+width. `visible_buttons` is an ordered, non-empty set of semantic operations, so BeOS can state
+Close and Zoom without inventing a disabled Minimize box. Its `beos` glyph family draws raised
+boxes from the title-tab ground. `WindowTitleBandView` constrains all furniture to a layout
+guide matching that tab, draws and hit-tests no yellow shoulder, and exposes the same shape to
+`WindowChromeFrameView`. The coordinator makes only a shaped takeover nonopaque and restores
+the native backing (including on a takeover-to-takeover switch), allowing AppKit's shadow to
+follow the tab plus body instead of a hidden rectangular title strip. Shape, width, and button
+set have the same create/update/get parity as the earlier fields.

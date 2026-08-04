@@ -28,6 +28,7 @@ enum AppThemeStyles {
         botanical,
         industrial,
         platinum,
+        beOS,
         win98,
         christmas
     ]

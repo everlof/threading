@@ -295,7 +295,9 @@ regional block after `SidebarStyle`, following all of its rules) opts the main w
 native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and observing
 `AppThemeDidChange`, performs the exchange in both directions, live. **Windows 98**
 (`retro-98`) was the first user; **Mac OS 9 Platinum** (`platinum-9`) adds split window boxes,
-a hidden application icon, and striped centred-title texture through the same regional model.
+a hidden application icon, and striped centred-title texture; **BeOS R5** (`beos-r5`) adds a
+partial-width leading title tab and the period's Close/Zoom-only window furniture through the
+same regional model.
 The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
@@ -325,7 +327,12 @@ window (`performDrag`), a double-click performs `TitlebarDoubleClick.preferredAc
 dims through its inactive gradient when the window resigns key, and the title follows
 `window.title` by observation. The band also interprets theme-stated button placement,
 application-icon visibility, and active/inactive texture; it contains no stock-theme ID
-branches. `WindowChromeButton` (close/minimize/zoom) calls the **semantic**
+branches. It also interprets a full-width or leading-tab shape, authored tab width, and the
+ordered visible-button set. A leading tab owns a fixed-width layout guide: title and buttons
+centre within the yellow tab while its remaining top shoulder stays transparent. The frame
+draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
+window backing nonopaque only for that shape so the system shadow follows the silhouette.
+`WindowChromeButton` (close/minimize/zoom) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
 (measured; the buttons were dead until this). The zoom button follows `window.isZoomed` and

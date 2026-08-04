@@ -743,6 +743,11 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
   let removeActiveTexture: Bool?
   let inactiveTexture: AppThemeChromeTextureArguments?
   let removeInactiveTexture: Bool?
+  let shape: String?
+  let tabWidth: Double?
+  let removeTabWidth: Bool?
+  let visibleButtons: [String]?
+  let resetVisibleButtons: Bool?
 
   private enum CodingKeys: String, CodingKey {
     case activeGradient = "active_gradient"
@@ -762,6 +767,11 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
     case removeActiveTexture = "remove_active_texture"
     case inactiveTexture = "inactive_texture"
     case removeInactiveTexture = "remove_inactive_texture"
+    case shape
+    case tabWidth = "tab_width"
+    case removeTabWidth = "remove_tab_width"
+    case visibleButtons = "visible_buttons"
+    case resetVisibleButtons = "reset_visible_buttons"
   }
 }
 
@@ -4549,7 +4559,8 @@ enum MCPTools {
             type: .string,
             description: "How close/minimize/zoom draw: \"squares\" (plates in the "
               + "theme's control surface, bevelled under a bevel material — the "
-              + "Windows lineage), \"platinum\" (classic Macintosh boxes), or "
+              + "Windows lineage), \"platinum\" (classic Macintosh boxes), \"beos\" "
+              + "(raised boxes cut from a yellow title tab), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(
@@ -4570,6 +4581,30 @@ enum MCPTools {
           "remove_inactive_texture": MCPPropertySchema(
             type: .boolean,
             description: "True removes the inactive title-band texture."
+          ),
+          "shape": MCPPropertySchema(
+            type: .string,
+            description: "\"full_width\" or \"leading_tab\". Default \"full_width\"."
+          ),
+          "tab_width": MCPPropertySchema(
+            type: .number,
+            description: "Leading-tab width, 120–360 points. Default 200."
+          ),
+          "remove_tab_width": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns a leading tab to its default width."
+          ),
+          "visible_buttons": MCPPropertySchema(
+            type: .array,
+            description: "One or more unique operations from close, minimize, and zoom.",
+            items: MCPArrayItemSchema(
+              type: .string,
+              description: "A semantic window operation."
+            )
+          ),
+          "reset_visible_buttons": MCPPropertySchema(
+            type: .boolean,
+            description: "True restores all three standard window operations."
           ),
         ]
       ),

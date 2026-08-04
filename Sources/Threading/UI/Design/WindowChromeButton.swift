@@ -185,6 +185,22 @@ final class WindowChromeButton: ThemedControl {
                 bevel: isPressed ? .sunken : .automatic
             )
             ink = Design.Text.label
+        case .beOS:
+            // BeOS caption boxes are cut from the tab itself, not from the gray application
+            // surface. That shared yellow is what makes them read as part of the tab while the
+            // raised edge keeps each operation independently pressable.
+            let gradient = isKeyOrHasNoWindow
+                ? resolved?.activeGradient
+                : resolved?.inactiveGradient
+            ThemedSurface.draw(
+                bounds,
+                fill: gradient?.colors.first ?? Design.Surface.controlResting,
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
+            )
+            ink = isKeyOrHasNoWindow
+                ? (resolved?.ink ?? Design.Text.label)
+                : (resolved?.inactiveInk ?? Design.Text.secondary)
         case .plain:
             // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
             if isHovered || isPressed {
@@ -203,6 +219,8 @@ final class WindowChromeButton: ThemedControl {
 
         if style == .platinum {
             drawPlatinumGlyph(in: bounds, ink: ink)
+        } else if style == .beOS {
+            drawBeOSGlyph(in: bounds, ink: ink)
         } else {
             drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
         }
@@ -356,6 +374,41 @@ final class WindowChromeButton: ThemedControl {
             } else {
                 frame(0, 0, side: 8)
                 dot(1, 6, 6, 1)
+            }
+        }
+    }
+
+    /// BeOS's caption figures are tiny bitmap marks inside a raised yellow plate. Close is a
+    /// solid stop box; Zoom is the two-level window figure shown at the other end of the tab.
+    /// They intentionally do not borrow the Windows cross/maximize alphabet.
+    private func drawBeOSGlyph(in rect: NSRect, ink: NSColor) {
+        let size: CGFloat = 8
+        let originX = (rect.midX - size / 2).rounded()
+        let originY = (rect.midY - size / 2).rounded()
+        ink.setFill()
+
+        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
+            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        }
+        func frame(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+            dot(x, y, width, 1)
+            dot(x, y + height - 1, width, 1)
+            dot(x, y, 1, height)
+            dot(x + width - 1, y, 1, height)
+        }
+
+        switch role {
+        case .close:
+            dot(2, 2, 4, 4)
+        case .minimize:
+            dot(1, 1, 6, 2)
+        case .zoom:
+            if displaysRestore {
+                frame(2, 2, 5, 5)
+                frame(0, 0, 5, 5)
+            } else {
+                frame(1, 1, 6, 6)
+                dot(2, 5, 4, 1)
             }
         }
     }

@@ -502,6 +502,28 @@ enum AppThemeEditing {
             }
         }
 
+        if let tabWidth = titleBar.tabWidth {
+            guard WindowChromeStyleLimits.tabWidthRange.contains(tabWidth) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.title_bar.tab_width must be between "
+                        + "\(Int(WindowChromeStyleLimits.tabWidthRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.tabWidthRange.upperBound)) points."
+                )
+            }
+        }
+
+        guard !titleBar.visibleButtons.isEmpty else {
+            throw AppThemeEditingError.invalid(
+                "chrome.title_bar.visible_buttons must contain at least one window operation."
+            )
+        }
+        guard Set(titleBar.visibleButtons.map(\.rawValue)).count
+            == titleBar.visibleButtons.count else {
+            throw AppThemeEditingError.invalid(
+                "chrome.title_bar.visible_buttons cannot repeat a window operation."
+            )
+        }
+
         for (name, texture) in [
             ("active_texture", titleBar.activeTexture),
             ("inactive_texture", titleBar.inactiveTexture)

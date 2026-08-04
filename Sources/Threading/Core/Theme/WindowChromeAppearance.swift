@@ -40,6 +40,9 @@ enum WindowChromeAppearance {
         let showsAppIcon: Bool
         let activeTexture: Texture?
         let inactiveTexture: Texture?
+        let shape: WindowChromeStyle.TitleBar.Shape
+        let tabWidth: CGFloat
+        let visibleButtons: [WindowChromeStyle.TitleBar.ButtonRole]
         let frameWidth: CGFloat
     }
 
@@ -81,6 +84,9 @@ enum WindowChromeAppearance {
                 from: titleBar.inactiveTexture,
                 fallbackInk: titleBar.inactiveInk ?? ink.withAlphaComponent(0.7)
             ),
+            shape: titleBar.shape,
+            tabWidth: CGFloat(titleBar.tabWidth ?? WindowChromeStyleLimits.defaultTabWidth),
+            visibleButtons: titleBar.visibleButtons,
             frameWidth: CGFloat(
                 chrome.frame?.width ?? WindowChromeStyleLimits.defaultFrameWidth
             )

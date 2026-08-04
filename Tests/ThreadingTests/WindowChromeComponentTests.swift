@@ -195,6 +195,22 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertFalse(band.showsApplicationIcon)
     }
 
+    func testBeOSUsesARealLeadingTitleTabAndOnlyItsTwoWindowBoxes() throws {
+        let band = WindowTitleBandView()
+        band.frame = NSRect(x: 0, y: 0, width: 480, height: 28)
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.beOS.variant(.light)?.chrome)
+        )
+        band.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.close])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.zoom])
+        XCTAssertFalse(band.showsApplicationIcon)
+        XCTAssertEqual(band.occupiedTitleWidth, 210, accuracy: 0.5)
+        XCTAssertLessThan(band.occupiedTitleWidth, band.bounds.width,
+                          "BeOS needs a title tab, not a yellow full-width title bar")
+    }
+
     func testABandDoubleClickPerformsTheChosenAction() throws {
         let window = makeWindow()
         let band = WindowTitleBandView()
@@ -306,8 +322,10 @@ final class WindowChromeComponentTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         // The takeover themes join the usual pair because their material reaches these
-        // components: Windows has square plates; Platinum has split inset boxes and rules.
-        let styled = ["Cyberpunk", "Swiss Minimalist", "Mac OS 9 Platinum", "Windows 98"].map { name in
+        // components: Windows has square plates, Platinum split inset boxes, and BeOS a tab.
+        let styled = [
+            "Cyberpunk", "Swiss Minimalist", "Mac OS 9 Platinum", "BeOS R5", "Windows 98"
+        ].map { name in
             AppThemeLibrary.stock.first { $0.name == name }
         }
         let themes = try [AppTheme.system] + styled.map { try XCTUnwrap($0) }
@@ -347,6 +365,7 @@ final class WindowChromeComponentTests: XCTestCase {
         for (theme, name) in [
             (AppTheme.system, "window-chrome-native-window"),
             (AppThemeStyles.platinum, "window-chrome-platinum-window"),
+            (AppThemeStyles.beOS, "window-chrome-beos-window"),
             (AppThemeStyles.win98, "window-chrome-takeover-window")
         ] {
             AppThemePalette.set(theme)

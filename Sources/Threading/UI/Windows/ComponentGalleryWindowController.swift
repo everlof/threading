@@ -2532,6 +2532,17 @@ final class ComponentGalleryViewController: NSViewController {
             platinumBand.heightAnchor.constraint(equalToConstant: platinum.bandHeight)
         ])
 
+        let beOSChrome = AppThemeStyles.beOS.variant(.light)?.chrome
+        precondition(beOSChrome != nil, "the stock BeOS theme must state window chrome")
+        let beOS = WindowChromeAppearance.resolved(from: beOSChrome!)
+        let beOSBand = WindowTitleBandView()
+        beOSBand.fixtureStyle = beOS
+        beOSBand.setTitle(AppInfo.name)
+        NSLayoutConstraint.activate([
+            beOSBand.widthAnchor.constraint(equalToConstant: 420),
+            beOSBand.heightAnchor.constraint(equalToConstant: beOS.bandHeight)
+        ])
+
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
             WindowChromeButton.Role.minimize, .zoom, .close
@@ -2565,7 +2576,7 @@ final class ComponentGalleryViewController: NSViewController {
             frame.heightAnchor.constraint(equalToConstant: 96)
         ])
 
-        let bandRow = NSStackView(views: [band, platinumBand, backplate])
+        let bandRow = NSStackView(views: [band, platinumBand, beOSBand, backplate])
         bandRow.orientation = .vertical
         bandRow.alignment = .leading
         bandRow.spacing = Design.Spacing.small

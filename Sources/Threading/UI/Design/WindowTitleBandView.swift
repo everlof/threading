@@ -51,6 +51,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private let leadingButtonStack = NSStackView()
     private let leadingStack = NSStackView()
     private let buttonStack = NSStackView()
+    private let contentGuide = NSLayoutGuide()
     private(set) lazy var minimizeButton = WindowChromeButton(role: .minimize)
     private(set) lazy var zoomButton = WindowChromeButton(role: .zoom)
     private(set) lazy var closeButton = WindowChromeButton(role: .close)
@@ -59,6 +60,8 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
     private var centeredTitleConstraint: NSLayoutConstraint?
     private var leadingTitleConstraint: NSLayoutConstraint?
+    private var fullWidthContentConstraint: NSLayoutConstraint?
+    private var tabWidthContentConstraint: NSLayoutConstraint?
 
     // MARK: - Initialization
 
@@ -100,6 +103,15 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     var showsApplicationIcon: Bool { !appIcon.isHidden }
 
+    /// Width occupied by the current title shape. Exposed as geometry rather than a private
+    /// guide so tests can distinguish a genuine BeOS tab from a full-width yellow strip.
+    var occupiedTitleWidth: CGFloat {
+        switch resolvedStyle?.shape ?? .fullWidth {
+        case .fullWidth: bounds.width
+        case .leadingTab: min(resolvedStyle?.tabWidth ?? 0, bounds.width)
+        }
+    }
+
     /// The window controller pushes the title — it owns `updateWindowTitle` and is the one
     /// place the name is decided. Deliberately not KVO on `window.title`: the band lives in
     /// the window's own view tree, so on window dealloc an observation would unregister
@@ -122,6 +134,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     // MARK: - Setup
 
     private func setup() {
+        addLayoutGuide(contentGuide)
         appIcon.image = NSApplication.shared.applicationIconImage
         appIcon.imageScaling = .scaleProportionallyUpOrDown
         appIcon.translatesAutoresizingMaskIntoConstraints = false
@@ -160,21 +173,36 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             constant: Design.Spacing.medium
         )
         leadingTitleConstraint = leadingTitle
-        centeredTitleConstraint = titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor)
+        centeredTitleConstraint = titleLabel.centerXAnchor.constraint(
+            equalTo: contentGuide.centerXAnchor
+        )
+
+        let fullWidthContent = contentGuide.trailingAnchor.constraint(equalTo: trailingAnchor)
+        let tabWidthContent = contentGuide.widthAnchor.constraint(
+            equalToConstant: WindowChromeStyleLimits.defaultTabWidth
+        )
+        fullWidthContentConstraint = fullWidthContent
+        tabWidthContentConstraint = tabWidthContent
 
         NSLayoutConstraint.activate([
             appIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
             appIcon.widthAnchor.constraint(equalToConstant: 14),
             appIcon.heightAnchor.constraint(equalToConstant: 14),
 
+            contentGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentGuide.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
+            fullWidthContent,
+
             leftStack.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
+                equalTo: contentGuide.leadingAnchor,
                 constant: Design.Spacing.tight
             ),
             leftStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             buttonStack.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
+                equalTo: contentGuide.trailingAnchor,
                 constant: -Design.Spacing.tight
             ),
             buttonStack.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -211,21 +239,38 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         }
 
         appIcon.isHidden = resolved?.showsAppIcon == false
-        applyButtonPlacement(resolved?.buttonPlacement ?? .trailing)
+        applyButtonPlacement(
+            resolved?.buttonPlacement ?? .trailing,
+            visible: resolved?.visibleButtons ?? WindowChromeStyle.TitleBar.ButtonRole.allCases
+        )
+        applyShape(resolved)
 
         needsDisplay = true
     }
 
-    private func applyButtonPlacement(_ placement: WindowChromeStyle.TitleBar.ButtonPlacement) {
+    private func applyButtonPlacement(
+        _ placement: WindowChromeStyle.TitleBar.ButtonPlacement,
+        visible: [WindowChromeStyle.TitleBar.ButtonRole]
+    ) {
+        let visibleSet = Set(visible.map(\.rawValue))
+        func shown(_ role: WindowChromeStyle.TitleBar.ButtonRole) -> WindowChromeButton? {
+            guard visibleSet.contains(role.rawValue) else { return nil }
+            switch role {
+            case .close: return closeButton
+            case .minimize: return minimizeButton
+            case .zoom: return zoomButton
+            }
+        }
+
         let leading: [WindowChromeButton]
         let trailing: [WindowChromeButton]
         switch placement {
         case .trailing:
             leading = []
-            trailing = [minimizeButton, zoomButton, closeButton]
+            trailing = visible.compactMap(shown)
         case .split:
-            leading = [closeButton]
-            trailing = [minimizeButton, zoomButton]
+            leading = shown(.close).map { [$0] } ?? []
+            trailing = visible.filter { $0 != .close }.compactMap(shown)
         }
 
         let currentLeading = leadingButtonStack.arrangedSubviews.compactMap {
@@ -240,6 +285,14 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         buttonStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         leading.forEach(leadingButtonStack.addArrangedSubview)
         trailing.forEach(buttonStack.addArrangedSubview)
+    }
+
+    private func applyShape(_ resolved: WindowChromeAppearance.Resolved?) {
+        let isTab = resolved?.shape == .leadingTab
+        fullWidthContentConstraint?.isActive = !isTab
+        tabWidthContentConstraint?.constant = resolved?.tabWidth
+            ?? CGFloat(WindowChromeStyleLimits.defaultTabWidth)
+        tabWidthContentConstraint?.isActive = isTab
     }
 
     // MARK: - Window Following
@@ -293,6 +346,12 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     override func draw(_ dirtyRect: NSRect) {
         guard let resolved = resolvedStyle else { return }
         let gradient = drawsAsKey ? resolved.activeGradient : resolved.inactiveGradient
+        let bandRect = titleBandRect(for: resolved)
+
+        if resolved.shape == .leadingTab {
+            NSColor.clear.setFill()
+            bounds.fill(using: .copy)
+        }
 
         guard gradient.colors.count >= 2,
               let drawn = NSGradient(
@@ -301,24 +360,43 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                   colorSpace: .sRGB
               ) else {
             (gradient.colors.first ?? Design.Surface.ground).setFill()
-            bounds.fill()
+            bandRect.fill()
             drawTexture(drawsAsKey ? resolved.activeTexture : resolved.inactiveTexture,
-                        over: gradient)
+                        over: gradient,
+                        in: bandRect)
+            drawTabEdge(ifNeededFor: resolved, in: bandRect)
             return
         }
 
         // The document's angle is CSS's — degrees clockwise from "toward the top" —
         // and `NSGradient` wants degrees counterclockwise from "toward the trailing edge".
-        drawn.draw(in: bounds, angle: 90 - gradient.angleDegrees)
+        drawn.draw(in: bandRect, angle: 90 - gradient.angleDegrees)
         drawTexture(
             drawsAsKey ? resolved.activeTexture : resolved.inactiveTexture,
-            over: gradient
+            over: gradient,
+            in: bandRect
         )
+        drawTabEdge(ifNeededFor: resolved, in: bandRect)
+    }
+
+    private func titleBandRect(for resolved: WindowChromeAppearance.Resolved) -> NSRect {
+        switch resolved.shape {
+        case .fullWidth:
+            return bounds
+        case .leadingTab:
+            return NSRect(
+                x: bounds.minX,
+                y: bounds.minY,
+                width: min(resolved.tabWidth, bounds.width),
+                height: bounds.height
+            )
+        }
     }
 
     private func drawTexture(
         _ texture: WindowChromeAppearance.Resolved.Texture?,
-        over gradient: WindowChromeAppearance.Gradient
+        over gradient: WindowChromeAppearance.Gradient,
+        in rect: NSRect
     ) {
         guard let texture else { return }
 
@@ -329,9 +407,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         switch texture.kind {
         case .pinstripes:
             texture.color.setFill()
-            var y = bounds.minY + 1
-            while y < bounds.maxY - 1 {
-                NSRect(x: bounds.minX, y: y.rounded(), width: bounds.width, height: 1).fill()
+            var y = rect.minY + 1
+            while y < rect.maxY - 1 {
+                NSRect(x: rect.minX, y: y.rounded(), width: rect.width, height: 1).fill()
                 y += texture.spacing
             }
 
@@ -343,6 +421,45 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                 backdrop.fill()
             }
         }
+    }
+
+    private func drawTabEdge(
+        ifNeededFor resolved: WindowChromeAppearance.Resolved,
+        in rect: NSRect
+    ) {
+        guard resolved.shape == .leadingTab else { return }
+
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+
+        guard AppThemePalette.current.material.bevel != nil else {
+            Design.Surface.border.setStroke()
+            let path = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+            path.lineWidth = 1
+            path.stroke()
+            return
+        }
+
+        let colors = BevelArtwork.edgeColors(
+            highlight: Design.Surface.bevelHighlight,
+            shadow: Design.Surface.bevelShadow,
+            sunken: false
+        )
+        func ring(_ box: NSRect, topLeft: NSColor, bottomRight: NSColor) {
+            bottomRight.setFill()
+            NSRect(x: box.maxX - 1, y: box.minY, width: 1, height: box.height).fill()
+            NSRect(x: box.minX, y: box.minY, width: box.width, height: 1).fill()
+            topLeft.setFill()
+            NSRect(x: box.minX, y: box.maxY - 1, width: box.width - 1, height: 1).fill()
+            NSRect(x: box.minX, y: box.minY + 1, width: 1, height: box.height - 1).fill()
+        }
+        ring(rect, topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
+        ring(
+            rect.insetBy(dx: 1, dy: 1),
+            topLeft: colors.topLeftInner,
+            bottomRight: colors.bottomRightInner
+        )
     }
 
     // MARK: - Accessibility

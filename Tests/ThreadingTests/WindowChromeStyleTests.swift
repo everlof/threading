@@ -80,7 +80,10 @@ final class WindowChromeStyleTests: XCTestCase {
                     color: NSColor(hex: "#777777")!,
                     spacing: 3
                 ),
-                inactiveTexture: .init(kind: .pinstripes)
+                inactiveTexture: .init(kind: .pinstripes),
+                shape: .leadingTab,
+                tabWidth: 210,
+                visibleButtons: [.close, .zoom]
             ),
             frame: .init(width: 4)
         )
@@ -130,6 +133,9 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertTrue(style.titleBar.showsAppIcon)
         XCTAssertNil(style.titleBar.activeTexture)
         XCTAssertNil(style.titleBar.inactiveTexture)
+        XCTAssertEqual(style.titleBar.shape, .fullWidth)
+        XCTAssertNil(style.titleBar.tabWidth)
+        XCTAssertEqual(style.titleBar.visibleButtons, [.minimize, .zoom, .close])
         XCTAssertNil(style.frame)
     }
 
@@ -246,6 +252,28 @@ final class WindowChromeStyleTests: XCTestCase {
         sparseTexture.inactiveTexture = .init(kind: .pinstripes, spacing: 9)
         XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: sparseTexture)),
                              "a texture too sparse to read as title chrome should be refused")
+
+        var narrowTab = navyTitleBar()
+        narrowTab.shape = .leadingTab
+        narrowTab.tabWidth = 119
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: narrowTab)),
+                             "a tab too narrow for its furniture should be refused")
+
+        var wideTab = navyTitleBar()
+        wideTab.shape = .leadingTab
+        wideTab.tabWidth = 361
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: wideTab)),
+                             "a title tab that stops reading as a tab should be refused")
+
+        var noButtons = navyTitleBar()
+        noButtons.visibleButtons = []
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: noButtons)),
+                             "custom chrome must leave a visible way to operate the window")
+
+        var duplicateButton = navyTitleBar()
+        duplicateButton.visibleButtons = [.close, .close]
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: duplicateButton)),
+                             "one semantic window operation may not be drawn twice")
 
         XCTAssertNoThrow(try themed(WindowChromeStyle(
             titleBar: navyTitleBar(), frame: .init(width: 4)

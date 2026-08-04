@@ -802,6 +802,84 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNil(updated.variant(.light)?.chrome?.titleBar.height)
     }
 
+    /// BeOS exercises the structural half of the public contract: a prompt can author the
+    /// partial tab, omit Minimize, and retrieve those choices without knowing a stock ID.
+    func testAgentCanAuthorAndReadABeOSTitleTab() throws {
+        let name = "BeOS Tool Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "swiss-minimalist",
+                "appearance": "light",
+                "variants": {
+                  "light": {
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {
+                          "stops": [
+                            {"color": "#FFE77A", "position": 0},
+                            {"color": "#F2C400", "position": 1}
+                          ]
+                        },
+                        "ink": "#101010",
+                        "title_alignment": "center",
+                        "height": 28,
+                        "button_glyph_style": "beos",
+                        "button_placement": "split",
+                        "shows_app_icon": false,
+                        "shape": "leading_tab",
+                        "tab_width": 210,
+                        "visible_buttons": ["close", "zoom"]
+                      },
+                      "frame": {"width": 2}
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
+        XCTAssertEqual(decoded.shape, "leading_tab")
+        XCTAssertEqual(decoded.tabWidth, 210)
+        XCTAssertEqual(decoded.visibleButtons, ["close", "zoom"])
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light)?.chrome?.titleBar)
+        XCTAssertEqual(stored.buttonGlyphStyle, .beOS)
+        XCTAssertEqual(stored.shape, .leadingTab)
+        XCTAssertEqual(stored.tabWidth, 210)
+        XCTAssertEqual(stored.visibleButtons, [.close, .zoom])
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
+        let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
+        XCTAssertEqual(title["shape"] as? String, "leading_tab")
+        XCTAssertEqual(title["tab_width"] as? Double, 210)
+        XCTAssertEqual(title["visible_buttons"] as? [String], ["close", "zoom"])
+    }
+
     func testVariantSchemaDescribesTheCompleteChromeVocabulary() throws {
         let schema = try schema(for: MCPTools.createAppTheme)
         let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
@@ -819,7 +897,8 @@ final class ThemeToolTests: XCTestCase {
             "active_gradient", "inactive_gradient", "ink", "inactive_ink",
             "title_alignment", "height", "button_glyph_style", "button_placement",
             "shows_app_icon", "active_texture", "inactive_texture",
-            "remove_active_texture", "remove_inactive_texture"
+            "remove_active_texture", "remove_inactive_texture", "shape", "tab_width",
+            "remove_tab_width", "visible_buttons", "reset_visible_buttons"
         ] {
             XCTAssertNotNil(titleProperties[field], "chrome schema lost \(field)")
         }

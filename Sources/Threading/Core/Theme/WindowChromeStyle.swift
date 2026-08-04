@@ -80,6 +80,19 @@ struct WindowChromeStyle: Codable, Equatable {
         var activeTexture: Texture?
         var inactiveTexture: Texture?
 
+        /// The outline occupied by the title band. Most systems span the window; BeOS seats a
+        /// compact tab on the leading edge and leaves the rest of the window top transparent.
+        var shape: Shape
+
+        /// Width of a leading tab in points. Meaningful only for `leadingTab`; absent uses the
+        /// period-sized default. Kept separate from `shape` so an authored theme can tune the
+        /// tab without replacing the outline vocabulary.
+        var tabWidth: Double?
+
+        /// Which semantic window operations are present. Behaviour is still owned by the app;
+        /// this list only lets a system omit furniture it never had (BeOS has no Minimize box).
+        var visibleButtons: [ButtonRole]
+
         init(
             activeGradient: SidebarStyle.Gradient,
             inactiveGradient: SidebarStyle.Gradient? = nil,
@@ -91,7 +104,10 @@ struct WindowChromeStyle: Codable, Equatable {
             buttonPlacement: ButtonPlacement = .trailing,
             showsAppIcon: Bool = true,
             activeTexture: Texture? = nil,
-            inactiveTexture: Texture? = nil
+            inactiveTexture: Texture? = nil,
+            shape: Shape = .fullWidth,
+            tabWidth: Double? = nil,
+            visibleButtons: [ButtonRole] = ButtonRole.allCases
         ) {
             self.activeGradient = activeGradient
             self.inactiveGradient = inactiveGradient
@@ -104,6 +120,9 @@ struct WindowChromeStyle: Codable, Equatable {
             self.showsAppIcon = showsAppIcon
             self.activeTexture = activeTexture
             self.inactiveTexture = inactiveTexture
+            self.shape = shape
+            self.tabWidth = tabWidth
+            self.visibleButtons = visibleButtons
         }
 
         enum Alignment: String, Codable, CaseIterable {
@@ -119,11 +138,24 @@ struct WindowChromeStyle: Codable, Equatable {
             /// Platinum's small inset boxes: Close at the leading edge, WindowShade and Zoom
             /// at the trailing edge, all drawn as hard one-pixel figures.
             case platinum
+            /// BeOS's small raised boxes, drawn in the title tab itself.
+            case beOS = "beos"
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
             case trailing
             case split
+        }
+
+        enum Shape: String, Codable, CaseIterable {
+            case fullWidth = "full_width"
+            case leadingTab = "leading_tab"
+        }
+
+        enum ButtonRole: String, Codable, CaseIterable {
+            case minimize
+            case zoom
+            case close
         }
 
         struct Texture: Equatable {
@@ -177,7 +209,7 @@ extension WindowChromeStyle.TitleBar: Codable {
     private enum CodingKeys: String, CodingKey {
         case activeGradient, inactiveGradient, ink, inactiveInk
         case titleAlignment, height, buttonGlyphStyle, buttonPlacement, showsAppIcon
-        case activeTexture, inactiveTexture
+        case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons
     }
 
     /// Every field but the active gradient is optional on the wire, the `Material` rule: a
@@ -205,6 +237,12 @@ extension WindowChromeStyle.TitleBar: Codable {
         showsAppIcon = try container.decodeIfPresent(Bool.self, forKey: .showsAppIcon) ?? true
         activeTexture = try container.decodeIfPresent(Texture.self, forKey: .activeTexture)
         inactiveTexture = try container.decodeIfPresent(Texture.self, forKey: .inactiveTexture)
+        shape = try container.decodeIfPresent(Shape.self, forKey: .shape) ?? .fullWidth
+        tabWidth = try container.decodeIfPresent(Double.self, forKey: .tabWidth)
+        visibleButtons = try container.decodeIfPresent(
+            [ButtonRole].self,
+            forKey: .visibleButtons
+        ) ?? ButtonRole.allCases
     }
 
     func encode(to encoder: Encoder) throws {
@@ -220,6 +258,9 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encode(showsAppIcon, forKey: .showsAppIcon)
         try container.encodeIfPresent(activeTexture, forKey: .activeTexture)
         try container.encodeIfPresent(inactiveTexture, forKey: .inactiveTexture)
+        try container.encode(shape, forKey: .shape)
+        try container.encodeIfPresent(tabWidth, forKey: .tabWidth)
+        try container.encode(visibleButtons, forKey: .visibleButtons)
     }
 
     private static func decodeColor(
@@ -298,4 +339,8 @@ enum WindowChromeStyleLimits {
     /// the treatment stops reading as a texture tied to the chrome.
     static let textureSpacingRange: ClosedRange<Double> = 2...8
     static let defaultTextureSpacing: Double = 2
+    /// Points. Narrower cannot hold two caption boxes and a useful title; wider stops reading
+    /// as a tab. The default follows the compact BeOS application-window proportions.
+    static let tabWidthRange: ClosedRange<Double> = 120...360
+    static let defaultTabWidth: Double = 200
 }

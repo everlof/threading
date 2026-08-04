@@ -69,6 +69,8 @@ final class WindowChromeCoordinator {
     /// The collection behaviour the window had before takeover inserted `.fullScreenPrimary`,
     /// put back exactly on exit.
     private var savedCollectionBehavior: NSWindow.CollectionBehavior?
+    private var savedIsOpaque: Bool?
+    private var savedBackgroundColor: NSColor?
 
     /// How the coordinator asks whether the window is inside fullscreen. A closure because a
     /// test cannot put a real window there: AppKit refuses `.fullScreen` set on a mask
@@ -96,6 +98,11 @@ final class WindowChromeCoordinator {
         guard wanted != isTakeoverActive else {
             // A parked change the theme has since walked back — un-park it.
             pendingChange = nil
+            if wanted, let window {
+                // Takeover → takeover can still exchange a full-width band for a shaped tab.
+                // The mask stays put, but the window's opaque backing must follow the shape.
+                applyTakeoverSurface(to: window)
+            }
             return
         }
         guard let window else { return }
@@ -130,6 +137,8 @@ final class WindowChromeCoordinator {
 
         // The toolbar first: it may only exist on a titled window.
         callbacks.removeToolbar()
+        savedIsOpaque = window.isOpaque
+        savedBackgroundColor = window.backgroundColor
         window.styleMask = Self.takeoverMask
         // The mask assignment can nudge the frame (titled and frameless content geometry
         // differ); the window the user had is the window they keep.
@@ -139,7 +148,7 @@ final class WindowChromeCoordinator {
         // still have to work. Saved so exit restores whatever the window had.
         savedCollectionBehavior = window.collectionBehavior
         window.collectionBehavior.insert(.fullScreenPrimary)
-        window.invalidateShadow()
+        applyTakeoverSurface(to: window)
 
         isTakeoverActive = true
         callbacks.takeoverDidChange(true)
@@ -169,6 +178,14 @@ final class WindowChromeCoordinator {
             window.collectionBehavior = saved
             savedCollectionBehavior = nil
         }
+        if let savedIsOpaque {
+            window.isOpaque = savedIsOpaque
+            self.savedIsOpaque = nil
+        }
+        if let savedBackgroundColor {
+            window.backgroundColor = savedBackgroundColor
+            self.savedBackgroundColor = nil
+        }
         window.invalidateShadow()
 
         isTakeoverActive = false
@@ -177,5 +194,19 @@ final class WindowChromeCoordinator {
         if wasKey, window.isVisible {
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    /// A shaped title tab needs transparent shoulders so the window shadow follows the actual
+    /// BeOS outline. Full-width takeover themes retain the window's original opaque backing.
+    private func applyTakeoverSurface(to window: TitlebarActionWindow) {
+        let isShaped = WindowChromeAppearance.resolve()?.shape == .leadingTab
+        if isShaped {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        } else {
+            window.isOpaque = savedIsOpaque ?? true
+            window.backgroundColor = savedBackgroundColor ?? Design.Surface.ground
+        }
+        window.invalidateShadow()
     }
 }

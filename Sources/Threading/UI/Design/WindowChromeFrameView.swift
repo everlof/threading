@@ -29,8 +29,26 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
             return
         }
 
+        let frameRect: NSRect
+        switch resolved.shape {
+        case .fullWidth:
+            frameRect = bounds
+        case .leadingTab:
+            // The title tab is the only thing above the application body. Clear the rest with
+            // copy compositing so a live full-width → tab theme switch cannot leave stale
+            // pixels in the window's newly transparent shoulders.
+            NSColor.clear.setFill()
+            bounds.fill(using: .copy)
+            frameRect = NSRect(
+                x: bounds.minX,
+                y: bounds.minY,
+                width: bounds.width,
+                height: max(0, bounds.height - resolved.bandHeight)
+            )
+        }
+
         Design.Surface.ground.setFill()
-        bounds.fill()
+        frameRect.fill()
 
         // The window's edge wears the raised construction, not a hairline: measured off a
         // real 98 screenshot, a window's bottom-right runs #808080 then pure black to the
@@ -38,7 +56,7 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
         // edge colours draw it; without one the border role seats a plain single ring, so a
         // future takeover theme without bevels still gets an edge.
         guard AppThemePalette.current.material.bevel != nil else {
-            let seat = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+            let seat = NSBezierPath(rect: frameRect.insetBy(dx: 0.5, dy: 0.5))
             seat.lineWidth = 1
             Design.Surface.border.setStroke()
             seat.stroke()
@@ -66,8 +84,8 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
             NSRect(x: rect.minX, y: rect.minY + 1, width: 1, height: rect.height - 1).fill()
         }
 
-        ring(bounds, topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
-        ring(bounds.insetBy(dx: 1, dy: 1),
+        ring(frameRect, topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
+        ring(frameRect.insetBy(dx: 1, dy: 1),
              topLeft: colors.topLeftInner, bottomRight: colors.bottomRightInner)
     }
 }

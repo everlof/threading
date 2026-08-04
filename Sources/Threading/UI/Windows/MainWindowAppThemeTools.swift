@@ -462,6 +462,18 @@ extension AgentToolCoordinator {
                         + "in the same patch."
                 )
             }
+            guard titleBar.tabWidth == nil || titleBar.removeTabWidth != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set tab_width and remove_tab_width in the same patch."
+                )
+            }
+            guard titleBar.visibleButtons == nil
+                || titleBar.resetVisibleButtons != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set visible_buttons and reset_visible_buttons "
+                        + "in the same patch."
+                )
+            }
             if let active = titleBar.activeGradient {
                 style.titleBar.activeGradient = try sidebarGradient(active)
             }
@@ -511,7 +523,7 @@ extension AgentToolCoordinator {
                 ) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
-                            + "\"platinum\", or \"plain\"."
+                            + "\"platinum\", \"beos\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -528,6 +540,34 @@ extension AgentToolCoordinator {
             }
             if let showsAppIcon = titleBar.showsAppIcon {
                 style.titleBar.showsAppIcon = showsAppIcon
+            }
+            if let rawShape = cleaned(titleBar.shape) {
+                guard let parsed = WindowChromeStyle.TitleBar.Shape(rawValue: rawShape) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.shape must be \"full_width\" or \"leading_tab\"."
+                    )
+                }
+                style.titleBar.shape = parsed
+            }
+            if titleBar.removeTabWidth == true {
+                style.titleBar.tabWidth = nil
+            } else if let tabWidth = titleBar.tabWidth {
+                style.titleBar.tabWidth = tabWidth
+            }
+            if titleBar.resetVisibleButtons == true {
+                style.titleBar.visibleButtons = WindowChromeStyle.TitleBar.ButtonRole.allCases
+            } else if let rawButtons = titleBar.visibleButtons {
+                let parsed = rawButtons.compactMap { raw -> WindowChromeStyle.TitleBar.ButtonRole? in
+                    guard let value = cleaned(raw) else { return nil }
+                    return WindowChromeStyle.TitleBar.ButtonRole(rawValue: value)
+                }
+                guard parsed.count == rawButtons.count else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.visible_buttons accepts only \"close\", "
+                            + "\"minimize\", and \"zoom\"."
+                    )
+                }
+                style.titleBar.visibleButtons = parsed
             }
             if titleBar.removeActiveTexture == true {
                 style.titleBar.activeTexture = nil
@@ -1073,7 +1113,9 @@ extension AgentToolCoordinator {
             "title_alignment": chrome.titleBar.titleAlignment.rawValue,
             "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue,
             "button_placement": chrome.titleBar.buttonPlacement.rawValue,
-            "shows_app_icon": chrome.titleBar.showsAppIcon
+            "shows_app_icon": chrome.titleBar.showsAppIcon,
+            "shape": chrome.titleBar.shape.rawValue,
+            "visible_buttons": chrome.titleBar.visibleButtons.map(\.rawValue)
         ]
         if let inactive = chrome.titleBar.inactiveGradient {
             titleBar["inactive_gradient"] = gradientDocument(inactive)
@@ -1081,6 +1123,7 @@ extension AgentToolCoordinator {
         if let ink = chrome.titleBar.ink { titleBar["ink"] = ink.hexString }
         if let ink = chrome.titleBar.inactiveInk { titleBar["inactive_ink"] = ink.hexString }
         if let height = chrome.titleBar.height { titleBar["height"] = height }
+        if let width = chrome.titleBar.tabWidth { titleBar["tab_width"] = width }
         if let texture = chrome.titleBar.activeTexture {
             titleBar["active_texture"] = appThemeChromeTextureDocument(texture)
         }
