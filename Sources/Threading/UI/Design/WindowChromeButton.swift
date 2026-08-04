@@ -201,6 +201,17 @@ final class WindowChromeButton: ThemedControl {
             ink = isKeyOrHasNoWindow
                 ? (resolved?.ink ?? Design.Text.label)
                 : (resolved?.inactiveInk ?? Design.Text.secondary)
+        case .openStep:
+            // OPENSTEP's title controls are gray hardware seated in a black title band.
+            // They keep the application material's hard directional light in both key states;
+            // only the surrounding band changes when the window resigns key.
+            ThemedSurface.draw(
+                bounds,
+                fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
+            )
+            ink = Design.Text.label
         case .plain:
             // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
             if isHovered || isPressed {
@@ -221,6 +232,8 @@ final class WindowChromeButton: ThemedControl {
             drawPlatinumGlyph(in: bounds, ink: ink)
         } else if style == .beOS {
             drawBeOSGlyph(in: bounds, ink: ink)
+        } else if style == .openStep {
+            drawOpenStepGlyph(in: bounds, ink: ink)
         } else {
             drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
         }
@@ -410,6 +423,50 @@ final class WindowChromeButton: ThemedControl {
                 frame(1, 1, 6, 6)
                 dot(2, 5, 4, 1)
             }
+        }
+    }
+
+    /// OPENSTEP 4.2's two title figures. Miniaturize is a small window nested inside the
+    /// control; Close is the sharply aliased diagonal figure from the opposite bookend.
+    /// Whole-point rectangles preserve the one-bit workstation drawing instead of turning it
+    /// into a modern SF Symbol.
+    private func drawOpenStepGlyph(in rect: NSRect, ink: NSColor) {
+        let size: CGFloat = 8
+        let originX = (rect.midX - size / 2).rounded()
+        let originY = (rect.midY - size / 2).rounded()
+        ink.setFill()
+
+        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
+            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        }
+
+        switch role {
+        case .minimize:
+            // A six-point outer window with a second inset outline.
+            dot(1, 1, 6, 1)
+            dot(1, 6, 6, 1)
+            dot(1, 1, 1, 6)
+            dot(6, 1, 1, 6)
+            dot(3, 3, 3, 1)
+            dot(3, 3, 1, 3)
+            dot(3, 5, 3, 1)
+            dot(5, 3, 1, 3)
+        case .close:
+            for step in 0..<6 {
+                let point = CGFloat(step + 1)
+                dot(point, point)
+                dot(7 - point, point)
+            }
+            // The center of the original mark is heavier than the diagonal tips.
+            dot(3, 3, 2, 2)
+        case .zoom:
+            // OPENSTEP does not normally expose Zoom, but an authored theme may choose to.
+            // Use the same nested-window alphabet as its Miniaturize control.
+            dot(1, 1, 6, 1)
+            dot(1, 6, 6, 1)
+            dot(1, 1, 1, 6)
+            dot(6, 1, 1, 6)
+            dot(2, 5, 4, 1)
         }
     }
 

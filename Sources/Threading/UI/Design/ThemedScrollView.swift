@@ -214,7 +214,43 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         }
 
         let ink = inkSource.ink
-        draw(flag ? ink.surfaceHover : ink.surface, in: slotRect)
+        let ground = flag ? ink.surfaceHover : ink.surface
+        guard AppThemePalette.current.material(
+            for: effectiveAppearance
+        ).scrollerTrackStyle == .stippled else {
+            draw(ground, in: slotRect)
+            return
+        }
+
+        drawStippledTrack(ground: ground, ink: ink.secondary, in: slotRect)
+    }
+
+    private func drawStippledTrack(ground: NSColor, ink: NSColor, in rect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        NSBezierPath(rect: rect).addClip()
+        ground.setFill()
+        rect.fill()
+        ink.setFill()
+
+        // A one-point checker on a two-point lattice: visible at 1×, still mechanically
+        // regular on Retina, and never softened into a contemporary noise texture.
+        let minX = floor(rect.minX)
+        let maxX = ceil(rect.maxX)
+        let minY = floor(rect.minY)
+        let maxY = ceil(rect.maxY)
+        var y = minY
+        var row = 0
+        while y < maxY {
+            var x = minX + CGFloat(row % 2)
+            while x < maxX {
+                NSRect(x: x, y: y, width: 1, height: 1).fill()
+                x += 2
+            }
+            y += 1
+            row += 1
+        }
     }
 
     private func draw(_ color: NSColor, in rect: NSRect) {
@@ -333,6 +369,8 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         let edges = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
         contentInsets = edges
         scrollerInsets = edges
+        needsLayout = true
+        tile()
         needsDisplay = true
     }
 
@@ -364,6 +402,37 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// background is still ours to neutralise.
     override func tile() {
         super.tile()
+        if AppThemePalette.current.material(
+            for: effectiveAppearance
+        ).scrollerPlacement == .leading,
+           hasVerticalScroller,
+           let verticalScroller,
+           verticalScroller.frame.width > 0 {
+            let trailingFrame = verticalScroller.frame
+            verticalScroller.frame.origin.x = bounds.minX + scrollerInsets.left
+
+            // Overlay scrollers float above content, so only the scroller changes edges.
+            // A legacy scroller owns layout space; mirror AppKit's trailing reservation by
+            // translating the already-sized content, header, and horizontal scroller.
+            if scrollerStyle == .legacy {
+                let leadingContentX = verticalScroller.frame.maxX
+                for case let clip as NSClipView in subviews {
+                    var frame = clip.frame
+                    frame.origin.x = leadingContentX
+                    clip.frame = frame
+                }
+                if let horizontalScroller, horizontalScroller.frame.width > 0 {
+                    var frame = horizontalScroller.frame
+                    frame.origin.x = leadingContentX
+                    horizontalScroller.frame = frame
+                }
+
+                assert(
+                    verticalScroller.frame.width == trailingFrame.width,
+                    "moving a vertical scroller must not resize it"
+                )
+            }
+        }
         for case let clip as NSClipView in subviews where clip !== contentView {
             clip.drawsBackground = false
         }

@@ -2543,6 +2543,17 @@ final class ComponentGalleryViewController: NSViewController {
             beOSBand.heightAnchor.constraint(equalToConstant: beOS.bandHeight)
         ])
 
+        let openStepChrome = AppThemeStyles.openStep.variant(.light)?.chrome
+        precondition(openStepChrome != nil, "the stock OPENSTEP theme must state window chrome")
+        let openStep = WindowChromeAppearance.resolved(from: openStepChrome!)
+        let openStepBand = WindowTitleBandView()
+        openStepBand.fixtureStyle = openStep
+        openStepBand.setTitle(AppInfo.name)
+        NSLayoutConstraint.activate([
+            openStepBand.widthAnchor.constraint(equalToConstant: 420),
+            openStepBand.heightAnchor.constraint(equalToConstant: openStep.bandHeight)
+        ])
+
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
             WindowChromeButton.Role.minimize, .zoom, .close
@@ -2576,7 +2587,7 @@ final class ComponentGalleryViewController: NSViewController {
             frame.heightAnchor.constraint(equalToConstant: 96)
         ])
 
-        let bandRow = NSStackView(views: [band, platinumBand, beOSBand, backplate])
+        let bandRow = NSStackView(views: [band, platinumBand, beOSBand, openStepBand, backplate])
         bandRow.orientation = .vertical
         bandRow.alignment = .leading
         bandRow.spacing = Design.Spacing.small

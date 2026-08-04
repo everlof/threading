@@ -211,6 +211,17 @@ final class WindowChromeComponentTests: XCTestCase {
                           "BeOS needs a title tab, not a yellow full-width title bar")
     }
 
+    func testOpenStepBookendsMiniaturizeAndCloseInItsHistoricalOrder() throws {
+        let band = WindowTitleBandView()
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.openStep.variant(.light)?.chrome)
+        )
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.minimize])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.close])
+        XCTAssertFalse(band.showsApplicationIcon)
+    }
+
     func testABandDoubleClickPerformsTheChosenAction() throws {
         let window = makeWindow()
         let band = WindowTitleBandView()
@@ -366,6 +377,7 @@ final class WindowChromeComponentTests: XCTestCase {
             (AppTheme.system, "window-chrome-native-window"),
             (AppThemeStyles.platinum, "window-chrome-platinum-window"),
             (AppThemeStyles.beOS, "window-chrome-beos-window"),
+            (AppThemeStyles.openStep, "window-chrome-openstep-window"),
             (AppThemeStyles.win98, "window-chrome-takeover-window")
         ] {
             AppThemePalette.set(theme)
@@ -386,6 +398,44 @@ final class WindowChromeComponentTests: XCTestCase {
             try png.write(to: url)
             print("Rendered \(name) to \(url.path)")
         }
+    }
+
+    func testRendersOpenStepLeadingStippledScroller() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        AppThemePalette.set(AppThemeStyles.openStep)
+
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 180, height: 280))
+        scroll.surfaceRole = .sidebarNavigator
+        scroll.scrollerStyle = .legacy
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = false
+
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 760))
+        document.wantsLayer = true
+        document.layer?.backgroundColor = Design.Surface.elevated.cgColor
+        for index in 0..<18 {
+            let label = NSTextField(labelWithString: index.isMultiple(of: 3)
+                ? "Workspace \(index / 3 + 1)"
+                : "  Session \(index + 1)")
+            label.font = Design.Typography.body()
+            label.textColor = Design.Text.label
+            label.frame = NSRect(x: 12, y: 720 - CGFloat(index * 36), width: 132, height: 20)
+            document.addSubview(label)
+        }
+        scroll.documentView = document
+        scroll.layoutSubtreeIfNeeded()
+        let scroller = try XCTUnwrap(scroll.verticalScroller)
+        scroller.isEnabled = true
+        scroller.doubleValue = 0.28
+        scroller.knobProportion = 0.30
+
+        let rep = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: scroll.bounds))
+        scroll.cacheDisplay(in: scroll.bounds, to: rep)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = directory.appendingPathComponent("openstep-leading-scroller.png")
+        try png.write(to: url)
+        print("Rendered OPENSTEP scroller to \(url.path)")
     }
 
     private func firstBand(in view: NSView) -> WindowTitleBandView? {

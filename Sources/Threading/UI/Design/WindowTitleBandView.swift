@@ -271,6 +271,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         case .split:
             leading = shown(.close).map { [$0] } ?? []
             trailing = visible.filter { $0 != .close }.compactMap(shown)
+        case .bookends:
+            leading = visible.first.flatMap(shown).map { [$0] } ?? []
+            trailing = visible.dropFirst().compactMap(shown)
         }
 
         let currentLeading = leadingButtonStack.arrangedSubviews.compactMap {

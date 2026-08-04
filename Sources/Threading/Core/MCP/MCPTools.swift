@@ -590,6 +590,8 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let typeface: String?
   let fontFamily: String?
   let removeFontFamily: Bool?
+  let scrollerPlacement: String?
+  let scrollerTrackStyle: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
@@ -603,6 +605,8 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case typeface
     case fontFamily = "font_family"
     case removeFontFamily = "remove_font_family"
+    case scrollerPlacement = "scroller_placement"
+    case scrollerTrackStyle = "scroller_track_style"
   }
 }
 
@@ -4424,6 +4428,17 @@ enum MCPTools {
         type: .boolean,
         description: "True removes the base theme's font family, falling back to typeface."
       ),
+      "scroller_placement": MCPPropertySchema(
+        type: .string,
+        description: "Which edge owns vertical scrollers: \"trailing\" (the default) or "
+          + "\"leading\" (OPENSTEP-style). Managed legacy scrollers reserve that edge; "
+          + "overlay scrollers float there without moving content."
+      ),
+      "scroller_track_style": MCPPropertySchema(
+        type: .string,
+        description: "\"solid\" (the default) or \"stippled\" for a crisp workstation-era "
+          + "checker track behind the thumb."
+      ),
       "bevel": MCPPropertySchema(
         type: .object,
         description: """
@@ -4560,13 +4575,16 @@ enum MCPTools {
             description: "How close/minimize/zoom draw: \"squares\" (plates in the "
               + "theme's control surface, bevelled under a bevel material — the "
               + "Windows lineage), \"platinum\" (classic Macintosh boxes), \"beos\" "
-              + "(raised boxes cut from a yellow title tab), or "
+              + "(raised boxes cut from a yellow title tab), \"openstep\" (gray NeXT "
+              + "plates with period bitmap marks), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(
             type: .string,
             description: "\"trailing\" clusters all buttons at the end; \"split\" puts "
-              + "Close at the leading edge and minimize/zoom at the trailing edge."
+              + "Close at the leading edge and minimize/zoom at the trailing edge; "
+              + "\"bookends\" puts the first visible operation at the leading edge and "
+              + "the remaining operations at the trailing edge."
           ),
           "shows_app_icon": MCPPropertySchema(
             type: .boolean,

@@ -29,6 +29,7 @@ enum AppThemeStyles {
         industrial,
         platinum,
         beOS,
+        openStep,
         win98,
         christmas
     ]

@@ -584,6 +584,8 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.controlRadius, 10)
         XCTAssertEqual(material.borderWidth, 2)
         XCTAssertEqual(material.typeface, .standard)
+        XCTAssertEqual(material.scrollerPlacement, .trailing)
+        XCTAssertEqual(material.scrollerTrackStyle, .solid)
 
         let sparse = Data(#"{}"#.utf8)
         XCTAssertEqual(
@@ -597,6 +599,22 @@ final class AppThemeTests: XCTestCase {
             from: JSONEncoder().encode(updated)
         )
         XCTAssertEqual(round.typeface, .serif)
+        XCTAssertEqual(round.scrollerPlacement, .trailing)
+        XCTAssertEqual(round.scrollerTrackStyle, .solid)
+    }
+
+    func testScrollerMaterialRoundTrips() throws {
+        let authored = AppTheme.Material(
+            scrollerPlacement: .leading,
+            scrollerTrackStyle: .stippled
+        )
+        let roundTrip = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: JSONEncoder().encode(authored)
+        )
+
+        XCTAssertEqual(roundTrip.scrollerPlacement, .leading)
+        XCTAssertEqual(roundTrip.scrollerTrackStyle, .stippled)
     }
 
     /// The paired terminal's cursor is the palette's own ink, never its accent.
@@ -1400,7 +1418,7 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        XCTAssertEqual(ids.count, 16, "the curated stock catalogue unexpectedly changed size")
+        XCTAssertEqual(ids.count, 17, "the curated stock catalogue unexpectedly changed size")
     }
 
     func testEveryStockStylePassesTheSameValidationAsAgentCreatedThemes() throws {

@@ -297,7 +297,8 @@ native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and obs
 (`retro-98`) was the first user; **Mac OS 9 Platinum** (`platinum-9`) adds split window boxes,
 a hidden application icon, and striped centred-title texture; **BeOS R5** (`beos-r5`) adds a
 partial-width leading title tab and the period's Close/Zoom-only window furniture through the
-same regional model.
+same regional model; **OPENSTEP 4.2** (`openstep-42`) adds ordered bookends so Miniaturize can
+lead while Close trails, plus its own one-bit control figures.
 The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
@@ -328,7 +329,9 @@ dims through its inactive gradient when the window resigns key, and the title fo
 `window.title` by observation. The band also interprets theme-stated button placement,
 application-icon visibility, and active/inactive texture; it contains no stock-theme ID
 branches. It also interprets a full-width or leading-tab shape, authored tab width, and the
-ordered visible-button set. A leading tab owns a fixed-width layout guide: title and buttons
+ordered visible-button set. `split` gives Close its classic-Mac leading exception; `bookends`
+instead preserves authored order by leading with the first visible operation and trailing the
+rest. A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.

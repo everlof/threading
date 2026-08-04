@@ -1023,6 +1023,8 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNotNil(materialProperties["text_scale"])
         XCTAssertNotNil(materialProperties["font_family"])
         XCTAssertNotNil(materialProperties["remove_font_family"])
+        XCTAssertNotNil(materialProperties["scroller_placement"])
+        XCTAssertNotNil(materialProperties["scroller_track_style"])
         XCTAssertNil(materialProperties["fontFamily"], "the wire vocabulary is snake_case")
 
         // The accepted values travel in the description: an agent reading a style brief that
@@ -1057,6 +1059,83 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(material.typeface, "serif")
         XCTAssertEqual(material.fontFamily, "Baskerville")
         XCTAssertEqual(material.textScale, 0.85)
+    }
+
+    func testAgentCanAuthorAndReadOpenStepScrollerMaterial() throws {
+        let name = "OPENSTEP Tool Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "swiss-minimalist",
+                "appearance": "light",
+                "variants": {
+                  "light": {
+                    "material": {
+                      "scroller_placement": "leading",
+                      "scroller_track_style": "stippled"
+                    },
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {"stops": [
+                          {"color": "#111111", "position": 0},
+                          {"color": "#111111", "position": 1}
+                        ]},
+                        "ink": "#FFFFFF",
+                        "title_alignment": "center",
+                        "button_glyph_style": "openstep",
+                        "button_placement": "bookends",
+                        "shows_app_icon": false,
+                        "visible_buttons": ["minimize", "close"]
+                      }
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let materialPatch = try XCTUnwrap(create.variants?["light"]?.material)
+        XCTAssertEqual(materialPatch.scrollerPlacement, "leading")
+        XCTAssertEqual(materialPatch.scrollerTrackStyle, "stippled")
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light))
+        XCTAssertEqual(stored.material.scrollerPlacement, .leading)
+        XCTAssertEqual(stored.material.scrollerTrackStyle, .stippled)
+        XCTAssertEqual(stored.chrome?.titleBar.buttonGlyphStyle, .openStep)
+        XCTAssertEqual(stored.chrome?.titleBar.buttonPlacement, .bookends)
+        XCTAssertEqual(stored.chrome?.titleBar.visibleButtons, [.minimize, .close])
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let material = try XCTUnwrap(light["material"] as? [String: Any])
+        XCTAssertEqual(material["scroller_placement"] as? String, "leading")
+        XCTAssertEqual(material["scroller_track_style"] as? String, "stippled")
+        let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
+        let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
+        XCTAssertEqual(title["button_glyph_style"] as? String, "openstep")
+        XCTAssertEqual(title["button_placement"] as? String, "bookends")
+        XCTAssertEqual(title["visible_buttons"] as? [String], ["minimize", "close"])
     }
 
     /// `get_app_theme` reports the typeface it is actually set in, so an agent asked to make a

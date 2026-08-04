@@ -253,6 +253,15 @@ struct AppTheme: Codable, Equatable {
         /// Nothing bundled still holds. This names a family the machine already has.
         var fontFamily: String?
 
+        /// Which edge owns a managed scroll view's vertical scroller. AppKit's native answer
+        /// remains the trailing edge; period systems such as OPENSTEP can state the leading
+        /// edge without any feature view moving its own content.
+        var scrollerPlacement: ScrollerPlacement = .trailing
+
+        /// The material behind the scroll thumb. Most themes use a solid surface; a stippled
+        /// track is the one-bit texture used by workstation-era interfaces.
+        var scrollerTrackStyle: ScrollerTrackStyle = .solid
+
         enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
             case standard = "default"
@@ -271,6 +280,16 @@ struct AppTheme: Codable, Equatable {
                 case .monospaced: return .monospaced
                 }
             }
+        }
+
+        enum ScrollerPlacement: String, Codable, CaseIterable {
+            case trailing
+            case leading
+        }
+
+        enum ScrollerTrackStyle: String, Codable, CaseIterable {
+            case solid
+            case stippled
         }
 
         static let system = Material()
@@ -304,7 +323,9 @@ struct AppTheme: Codable, Equatable {
             glow: Glow? = nil,
             bevel: Bevel? = nil,
             typeface: Typeface = .standard,
-            fontFamily: String? = nil
+            fontFamily: String? = nil,
+            scrollerPlacement: ScrollerPlacement = .trailing,
+            scrollerTrackStyle: ScrollerTrackStyle = .solid
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -314,11 +335,14 @@ struct AppTheme: Codable, Equatable {
             self.bevel = bevel
             self.typeface = typeface
             self.fontFamily = fontFamily
+            self.scrollerPlacement = scrollerPlacement
+            self.scrollerTrackStyle = scrollerTrackStyle
         }
 
         private enum CodingKeys: String, CodingKey {
             case panelRadius, controlRadius, borderWidth, textScale
             case glow, bevel, typeface, fontFamily
+            case scrollerPlacement, scrollerTrackStyle
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -335,6 +359,14 @@ struct AppTheme: Codable, Equatable {
             bevel = try container.decodeIfPresent(Bevel.self, forKey: .bevel)
             typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface) ?? .standard
             fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+            scrollerPlacement = try container.decodeIfPresent(
+                ScrollerPlacement.self,
+                forKey: .scrollerPlacement
+            ) ?? .trailing
+            scrollerTrackStyle = try container.decodeIfPresent(
+                ScrollerTrackStyle.self,
+                forKey: .scrollerTrackStyle
+            ) ?? .solid
         }
     }
 

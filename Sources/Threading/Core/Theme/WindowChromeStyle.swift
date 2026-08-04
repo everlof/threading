@@ -140,11 +140,18 @@ struct WindowChromeStyle: Codable, Equatable {
             case platinum
             /// BeOS's small raised boxes, drawn in the title tab itself.
             case beOS = "beos"
+            /// OPENSTEP's gray title plates: a nested-square miniaturize mark and the
+            /// diagonal close figure from the NeXT window frame.
+            case openStep = "openstep"
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
             case trailing
             case split
+            /// Places the first authored visible operation at the leading edge and the rest
+            /// at the trailing edge. Unlike `split`, this preserves a system's own ordering:
+            /// OPENSTEP starts with Miniaturize and ends with Close.
+            case bookends
         }
 
         enum Shape: String, Codable, CaseIterable {

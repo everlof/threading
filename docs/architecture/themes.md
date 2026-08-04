@@ -704,3 +704,16 @@ guide matching that tab, draws and hit-tests no yellow shoulder, and exposes the
 the native backing (including on a takeover-to-takeover switch), allowing AppKit's shadow to
 follow the tab plus body instead of a hidden rectangular title strip. Shape, width, and button
 set have the same create/update/get parity as the earlier fields.
+
+**OPENSTEP 4.2** (`openstep-42`) adds two more period primitives, again without a stock-ID
+branch. `button_placement: bookends` puts the first authored visible operation at the leading
+edge and the remaining operations at the trailing edge, so `[minimize, close]` reproduces the
+NeXT frame instead of inheriting the classic Mac meaning of `split`. Its `openstep` glyph family
+draws the nested miniaturize window and diagonal close mark on hard gray plates. The material
+now also states `scroller_placement` (`trailing` or `leading`) and `scroller_track_style`
+(`solid` or `stippled`). `ThemedScrollView` mirrors AppKit's already-sized legacy reservation
+to the leading edge, while an overlay scroller merely floats there; repeated layout begins
+from `super.tile()` so it cannot drift. `ThemedScroller` owns only the stipple pixels, leaving
+geometry, tracking, dragging and fade policy with AppKit. Both material fields round-trip
+through create/update/get and decode old documents to trailing/solid. They are macOS chrome and
+are deliberately not projected by `RemoteThemeBridge`.

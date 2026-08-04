@@ -3308,6 +3308,58 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertNotEqual(cyber, swiss)
     }
 
+    func testOpenStepMovesALegacyScrollerAndItsReservationToTheLeadingEdge() throws {
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 180))
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 720))
+        scroll.scrollerStyle = .legacy
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = false
+
+        AppThemeLibrary.apply(.system)
+        scroll.layoutSubtreeIfNeeded()
+        let trailingScroller = try XCTUnwrap(scroll.verticalScroller).frame
+        let trailingContent = scroll.contentView.frame
+        XCTAssertGreaterThanOrEqual(trailingScroller.minX, trailingContent.maxX)
+
+        AppThemeLibrary.apply(AppThemeStyles.openStep)
+        scroll.layoutSubtreeIfNeeded()
+        let leadingScroller = try XCTUnwrap(scroll.verticalScroller).frame
+        let leadingContent = scroll.contentView.frame
+        XCTAssertLessThanOrEqual(leadingScroller.maxX, leadingContent.minX)
+        XCTAssertEqual(leadingContent.width, trailingContent.width, accuracy: 0.5)
+        XCTAssertEqual(leadingScroller.width, trailingScroller.width, accuracy: 0.5)
+
+        scroll.tile()
+        XCTAssertEqual(scroll.contentView.frame, leadingContent,
+                       "repeated layout must not walk the document across the window")
+
+        AppThemeLibrary.apply(.system)
+        scroll.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(
+            try XCTUnwrap(scroll.verticalScroller).frame.minX,
+            scroll.contentView.frame.maxX,
+            "leaving OPENSTEP must restore AppKit's native trailing geometry"
+        )
+    }
+
+    func testOpenStepOverlayScrollerFloatsOnTheLeftWithoutMovingContent() throws {
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 180))
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 720))
+        scroll.scrollerStyle = .overlay
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = false
+
+        AppThemeLibrary.apply(.system)
+        scroll.layoutSubtreeIfNeeded()
+        let nativeContent = scroll.contentView.frame
+
+        AppThemeLibrary.apply(AppThemeStyles.openStep)
+        scroll.layoutSubtreeIfNeeded()
+        let scroller = try XCTUnwrap(scroll.verticalScroller)
+        XCTAssertLessThan(scroller.frame.midX, scroll.bounds.midX)
+        XCTAssertEqual(scroll.contentView.frame, nativeContent)
+    }
+
     func testScrollerRedrawsWhenItsInkSourceChanges() {
         let chrome = ThemedScroller(frame: NSRect(x: 0, y: 0, width: 17, height: 180))
         let backdrop = ThemedScroller(

@@ -523,7 +523,7 @@ extension AgentToolCoordinator {
                 ) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
-                            + "\"platinum\", \"beos\", or \"plain\"."
+                            + "\"platinum\", \"beos\", \"openstep\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -533,7 +533,8 @@ extension AgentToolCoordinator {
                     rawValue: rawPlacement
                 ) else {
                     throw AppThemeEditingError.invalid(
-                        "chrome.title_bar.button_placement must be \"trailing\" or \"split\"."
+                        "chrome.title_bar.button_placement must be \"trailing\", \"split\", "
+                            + "or \"bookends\"."
                     )
                 }
                 style.titleBar.buttonPlacement = parsed
@@ -934,6 +935,23 @@ extension AgentToolCoordinator {
         if let value = patch.borderWidth { material.borderWidth = CGFloat(value) }
         if let value = patch.textScale { material.textScale = CGFloat(value) }
 
+        if let rawPlacement = cleaned(patch.scrollerPlacement) {
+            guard let parsed = AppTheme.Material.ScrollerPlacement(rawValue: rawPlacement) else {
+                throw AppThemeEditingError.invalid(
+                    "material.scroller_placement must be \"trailing\" or \"leading\"."
+                )
+            }
+            material.scrollerPlacement = parsed
+        }
+        if let rawTrack = cleaned(patch.scrollerTrackStyle) {
+            guard let parsed = AppTheme.Material.ScrollerTrackStyle(rawValue: rawTrack) else {
+                throw AppThemeEditingError.invalid(
+                    "material.scroller_track_style must be \"solid\" or \"stippled\"."
+                )
+            }
+            material.scrollerTrackStyle = parsed
+        }
+
         if patch.removeBevel == true {
             material.bevel = nil
         } else if let bevel = patch.bevel {
@@ -1196,7 +1214,9 @@ extension AgentToolCoordinator {
             "control_radius": Double(material.controlRadius),
             "border_width": Double(material.borderWidth),
             "text_scale": Double(material.textScale),
-            "typeface": material.typeface.rawValue
+            "typeface": material.typeface.rawValue,
+            "scroller_placement": material.scrollerPlacement.rawValue,
+            "scroller_track_style": material.scrollerTrackStyle.rawValue
         ]
         if let family = material.fontFamily { document["font_family"] = family }
         if let bevel = material.bevel {
