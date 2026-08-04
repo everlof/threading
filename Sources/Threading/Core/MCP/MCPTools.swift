@@ -738,6 +738,7 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
   let inactiveInk: String?
   let removeInactiveInk: Bool?
   let titleAlignment: String?
+  let titleFontStyle: String?
   let height: Double?
   let removeHeight: Bool?
   let buttonGlyphStyle: String?
@@ -762,6 +763,7 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
     case inactiveInk = "inactive_ink"
     case removeInactiveInk = "remove_inactive_ink"
     case titleAlignment = "title_alignment"
+    case titleFontStyle = "title_font_style"
     case height
     case removeHeight = "remove_height"
     case buttonGlyphStyle = "button_glyph_style"
@@ -4500,7 +4502,8 @@ enum MCPTools {
       properties: [
         "kind": MCPPropertySchema(
           type: .string,
-          description: "\"pinstripes\" draws horizontal one-point rules."
+          description: "\"pinstripes\" draws horizontal one-point rules; \"dither\" "
+            + "draws a one-bit checker stipple."
         ),
         "color": MCPPropertySchema(
           type: .string,
@@ -4562,6 +4565,10 @@ enum MCPTools {
             type: .string,
             description: "\"leading\" or \"center\". Default \"leading\"."
           ),
+          "title_font_style": MCPPropertySchema(
+            type: .string,
+            description: "\"upright\" or \"italic\". Default \"upright\"."
+          ),
           "height": MCPPropertySchema(
             type: .number,
             description: "Band height, 18–44 points. Default 28."
@@ -4576,7 +4583,8 @@ enum MCPTools {
               + "theme's control surface, bevelled under a bevel material — the "
               + "Windows lineage), \"platinum\" (classic Macintosh boxes), \"beos\" "
               + "(raised boxes cut from a yellow title tab), \"openstep\" (gray NeXT "
-              + "plates with period bitmap marks), or "
+              + "plates with period bitmap marks), \"irix\" (black-outlined 4Dwm "
+              + "caption boxes), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(
@@ -4614,7 +4622,8 @@ enum MCPTools {
           ),
           "visible_buttons": MCPPropertySchema(
             type: .array,
-            description: "One or more unique operations from close, minimize, and zoom.",
+            description: "One or more unique operations from window_menu, close, "
+              + "minimize, and zoom.",
             items: MCPArrayItemSchema(
               type: .string,
               description: "A semantic window operation."

@@ -512,6 +512,16 @@ extension AgentToolCoordinator {
                 }
                 style.titleBar.titleAlignment = parsed
             }
+            if let rawFontStyle = cleaned(titleBar.titleFontStyle) {
+                guard let parsed = WindowChromeStyle.TitleBar.TitleFontStyle(
+                    rawValue: rawFontStyle
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.title_font_style must be \"upright\" or \"italic\"."
+                    )
+                }
+                style.titleBar.titleFontStyle = parsed
+            }
             if titleBar.removeHeight == true {
                 style.titleBar.height = nil
             } else if let height = titleBar.height {
@@ -523,7 +533,7 @@ extension AgentToolCoordinator {
                 ) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
-                            + "\"platinum\", \"beos\", \"openstep\", or \"plain\"."
+                            + "\"platinum\", \"beos\", \"openstep\", \"irix\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -556,7 +566,8 @@ extension AgentToolCoordinator {
                 style.titleBar.tabWidth = tabWidth
             }
             if titleBar.resetVisibleButtons == true {
-                style.titleBar.visibleButtons = WindowChromeStyle.TitleBar.ButtonRole.allCases
+                style.titleBar.visibleButtons = WindowChromeStyle.TitleBar.ButtonRole
+                    .standardOperations
             } else if let rawButtons = titleBar.visibleButtons {
                 let parsed = rawButtons.compactMap { raw -> WindowChromeStyle.TitleBar.ButtonRole? in
                     guard let value = cleaned(raw) else { return nil }
@@ -565,7 +576,7 @@ extension AgentToolCoordinator {
                 guard parsed.count == rawButtons.count else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.visible_buttons accepts only \"close\", "
-                            + "\"minimize\", and \"zoom\"."
+                            + "\"minimize\", \"zoom\", and \"window_menu\"."
                     )
                 }
                 style.titleBar.visibleButtons = parsed
@@ -626,7 +637,9 @@ extension AgentToolCoordinator {
         let kind: WindowChromeStyle.TitleBar.Texture.Kind
         if let rawKind = cleaned(patch.kind) {
             guard let parsed = WindowChromeStyle.TitleBar.Texture.Kind(rawValue: rawKind) else {
-                throw AppThemeEditingError.invalid("\(path).kind must be \"pinstripes\".")
+                throw AppThemeEditingError.invalid(
+                    "\(path).kind must be \"pinstripes\" or \"dither\"."
+                )
             }
             kind = parsed
         } else if let base {
@@ -1129,6 +1142,7 @@ extension AgentToolCoordinator {
         var titleBar: [String: Any] = [
             "active_gradient": gradientDocument(chrome.titleBar.activeGradient),
             "title_alignment": chrome.titleBar.titleAlignment.rawValue,
+            "title_font_style": chrome.titleBar.titleFontStyle.rawValue,
             "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue,
             "button_placement": chrome.titleBar.buttonPlacement.rawValue,
             "shows_app_icon": chrome.titleBar.showsAppIcon,

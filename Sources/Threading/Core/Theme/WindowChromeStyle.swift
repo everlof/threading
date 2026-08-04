@@ -57,6 +57,11 @@ struct WindowChromeStyle: Codable, Equatable {
 
         var titleAlignment: Alignment
 
+        /// The title's slant. Weight and size remain semantic design-system choices; this
+        /// one authored distinction is enough for workstation chrome such as IRIX, whose
+        /// bold italic caption is part of the frame rather than the application's typography.
+        var titleFontStyle: TitleFontStyle
+
         /// Points, bounded by `WindowChromeStyleLimits.bandHeightRange`. Absent means
         /// `WindowChromeStyleLimits.defaultBandHeight`.
         var height: Double?
@@ -99,6 +104,7 @@ struct WindowChromeStyle: Codable, Equatable {
             ink: NSColor? = nil,
             inactiveInk: NSColor? = nil,
             titleAlignment: Alignment = .leading,
+            titleFontStyle: TitleFontStyle = .upright,
             height: Double? = nil,
             buttonGlyphStyle: ButtonGlyphStyle = .plain,
             buttonPlacement: ButtonPlacement = .trailing,
@@ -107,13 +113,14 @@ struct WindowChromeStyle: Codable, Equatable {
             inactiveTexture: Texture? = nil,
             shape: Shape = .fullWidth,
             tabWidth: Double? = nil,
-            visibleButtons: [ButtonRole] = ButtonRole.allCases
+            visibleButtons: [ButtonRole] = ButtonRole.standardOperations
         ) {
             self.activeGradient = activeGradient
             self.inactiveGradient = inactiveGradient
             self.ink = ink
             self.inactiveInk = inactiveInk
             self.titleAlignment = titleAlignment
+            self.titleFontStyle = titleFontStyle
             self.height = height
             self.buttonGlyphStyle = buttonGlyphStyle
             self.buttonPlacement = buttonPlacement
@@ -127,6 +134,10 @@ struct WindowChromeStyle: Codable, Equatable {
 
         enum Alignment: String, Codable, CaseIterable {
             case leading, center
+        }
+
+        enum TitleFontStyle: String, Codable, CaseIterable {
+            case upright, italic
         }
 
         enum ButtonGlyphStyle: String, Codable, CaseIterable {
@@ -143,6 +154,9 @@ struct WindowChromeStyle: Codable, Equatable {
             /// OPENSTEP's gray title plates: a nested-square miniaturize mark and the
             /// diagonal close figure from the NeXT window frame.
             case openStep = "openstep"
+            /// IRIX 4Dwm's black-outlined gray caption boxes: Window menu at the leading
+            /// edge, then Minimize and Maximize at the trailing edge.
+            case irix
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
@@ -160,9 +174,16 @@ struct WindowChromeStyle: Codable, Equatable {
         }
 
         enum ButtonRole: String, Codable, CaseIterable {
+            /// Opens the window manager's operations menu. It is furniture rather than an
+            /// application command, so it belongs beside the other semantic frame roles.
+            case windowMenu = "window_menu"
             case minimize
             case zoom
             case close
+
+            /// The operations the original takeover implementation exposed. Kept explicit
+            /// so adding a new semantic role does not silently add furniture to old themes.
+            static let standardOperations: [Self] = [.minimize, .zoom, .close]
         }
 
         struct Texture: Equatable {
@@ -182,6 +203,9 @@ struct WindowChromeStyle: Codable, Equatable {
                 /// Horizontal one-pixel rules interrupted by the centred title — Platinum's
                 /// active-window signature.
                 case pinstripes
+                /// A one-bit checker over the title fill. At two-point spacing this is the
+                /// dense stipple used by workstation window managers such as IRIX 4Dwm.
+                case dither
             }
         }
     }
@@ -215,7 +239,7 @@ extension WindowChromeStyle.TitleBar: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case activeGradient, inactiveGradient, ink, inactiveInk
-        case titleAlignment, height, buttonGlyphStyle, buttonPlacement, showsAppIcon
+        case titleAlignment, titleFontStyle, height, buttonGlyphStyle, buttonPlacement, showsAppIcon
         case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons
     }
 
@@ -232,6 +256,10 @@ extension WindowChromeStyle.TitleBar: Codable {
         inactiveInk = try Self.decodeColor(container, key: .inactiveInk)
         titleAlignment = try container.decodeIfPresent(Alignment.self, forKey: .titleAlignment)
             ?? .leading
+        titleFontStyle = try container.decodeIfPresent(
+            TitleFontStyle.self,
+            forKey: .titleFontStyle
+        ) ?? .upright
         height = try container.decodeIfPresent(Double.self, forKey: .height)
         buttonGlyphStyle = try container.decodeIfPresent(
             ButtonGlyphStyle.self,
@@ -249,7 +277,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         visibleButtons = try container.decodeIfPresent(
             [ButtonRole].self,
             forKey: .visibleButtons
-        ) ?? ButtonRole.allCases
+        ) ?? ButtonRole.standardOperations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -259,6 +287,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encodeIfPresent(ink?.hexString, forKey: .ink)
         try container.encodeIfPresent(inactiveInk?.hexString, forKey: .inactiveInk)
         try container.encode(titleAlignment, forKey: .titleAlignment)
+        try container.encode(titleFontStyle, forKey: .titleFontStyle)
         try container.encodeIfPresent(height, forKey: .height)
         try container.encode(buttonGlyphStyle, forKey: .buttonGlyphStyle)
         try container.encode(buttonPlacement, forKey: .buttonPlacement)

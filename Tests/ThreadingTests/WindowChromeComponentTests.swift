@@ -222,6 +222,37 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertFalse(band.showsApplicationIcon)
     }
 
+    func testIRIXBookendsTheWindowMenuAndItsTwoRightCaptionBoxes() throws {
+        let band = WindowTitleBandView()
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.irix.variant(.light)?.chrome)
+        )
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.windowMenu])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.minimize, .zoom])
+        XCTAssertFalse(band.showsApplicationIcon)
+    }
+
+    func testWindowMenuRoleBuildsTheWindowOperationsMenu() throws {
+        let window = makeWindow()
+        let button = WindowChromeButton(role: .windowMenu)
+        window.contentView?.addSubview(button)
+        var presented: ThemedMenuPresentation?
+        button.fixtureMenuPresentation = { presented = $0 }
+
+        XCTAssertTrue(button.performPrimaryAction())
+        let menu = try XCTUnwrap(presented)
+
+        XCTAssertEqual(
+            menu.entries.compactMap { entry in
+                guard case .item(let item) = entry else { return nil }
+                return item.title
+            },
+            ["Restore", "Minimize", "Maximize", "Close"]
+        )
+        XCTAssertEqual(button.accessibilityLabel(), L10n.string("Window menu"))
+    }
+
     func testABandDoubleClickPerformsTheChosenAction() throws {
         let window = makeWindow()
         let band = WindowTitleBandView()
@@ -335,7 +366,8 @@ final class WindowChromeComponentTests: XCTestCase {
         // The takeover themes join the usual pair because their material reaches these
         // components: Windows has square plates, Platinum split inset boxes, and BeOS a tab.
         let styled = [
-            "Cyberpunk", "Swiss Minimalist", "Mac OS 9 Platinum", "BeOS R5", "Windows 98"
+            "Cyberpunk", "Swiss Minimalist", "Mac OS 9 Platinum", "BeOS R5",
+            "IRIX Indigo Magic", "Windows 98"
         ].map { name in
             AppThemeLibrary.stock.first { $0.name == name }
         }
@@ -378,6 +410,7 @@ final class WindowChromeComponentTests: XCTestCase {
             (AppThemeStyles.platinum, "window-chrome-platinum-window"),
             (AppThemeStyles.beOS, "window-chrome-beos-window"),
             (AppThemeStyles.openStep, "window-chrome-openstep-window"),
+            (AppThemeStyles.irix, "window-chrome-irix-window"),
             (AppThemeStyles.win98, "window-chrome-takeover-window")
         ] {
             AppThemePalette.set(theme)

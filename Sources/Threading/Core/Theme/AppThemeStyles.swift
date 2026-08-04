@@ -30,6 +30,7 @@ enum AppThemeStyles {
         platinum,
         beOS,
         openStep,
+        irix,
         win98,
         christmas
     ]

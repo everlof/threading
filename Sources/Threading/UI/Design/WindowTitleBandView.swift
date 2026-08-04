@@ -23,7 +23,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     /// the band's own buttons so the cluster previews as one piece.
     var fixtureStyle: WindowChromeAppearance.Resolved? {
         didSet {
-            [minimizeButton, zoomButton, closeButton].forEach { $0.fixtureStyle = fixtureStyle }
+            [menuButton, minimizeButton, zoomButton, closeButton].forEach {
+                $0.fixtureStyle = fixtureStyle
+            }
             apply()
         }
     }
@@ -32,7 +34,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     /// key, so without this the band's hero form — the active gradient — is unrenderable.
     var fixtureIsKey: Bool? {
         didSet {
-            [minimizeButton, zoomButton, closeButton].forEach { $0.fixtureIsKey = fixtureIsKey }
+            [menuButton, minimizeButton, zoomButton, closeButton].forEach {
+                $0.fixtureIsKey = fixtureIsKey
+            }
             apply()
         }
     }
@@ -52,6 +56,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private let leadingStack = NSStackView()
     private let buttonStack = NSStackView()
     private let contentGuide = NSLayoutGuide()
+    private(set) lazy var menuButton = WindowChromeButton(role: .windowMenu)
     private(set) lazy var minimizeButton = WindowChromeButton(role: .minimize)
     private(set) lazy var zoomButton = WindowChromeButton(role: .zoom)
     private(set) lazy var closeButton = WindowChromeButton(role: .close)
@@ -230,6 +235,10 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         titleLabel.textColor = isKey
             ? resolved?.ink ?? .white
             : resolved?.inactiveInk ?? .white
+        let titleFont = Design.Typography.detail(weight: .bold)
+        titleLabel.font = resolved?.titleFontStyle == .italic
+            ? NSFontManager.shared.convert(titleFont, toHaveTrait: .italicFontMask)
+            : titleFont
 
         let centered = resolved?.titleAlignment == .center
         centeredTitleConstraint?.isActive = centered
@@ -241,7 +250,8 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         appIcon.isHidden = resolved?.showsAppIcon == false
         applyButtonPlacement(
             resolved?.buttonPlacement ?? .trailing,
-            visible: resolved?.visibleButtons ?? WindowChromeStyle.TitleBar.ButtonRole.allCases
+            visible: resolved?.visibleButtons
+                ?? WindowChromeStyle.TitleBar.ButtonRole.standardOperations
         )
         applyShape(resolved)
 
@@ -256,6 +266,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         func shown(_ role: WindowChromeStyle.TitleBar.ButtonRole) -> WindowChromeButton? {
             guard visibleSet.contains(role.rawValue) else { return nil }
             switch role {
+            case .windowMenu: return menuButton
             case .close: return closeButton
             case .minimize: return minimizeButton
             case .zoom: return zoomButton
@@ -422,6 +433,20 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                 let backdrop = titleLabel.frame.insetBy(dx: -Design.Spacing.tight, dy: 0)
                 (gradient.colors.first ?? Design.Surface.ground).setFill()
                 backdrop.fill()
+            }
+        case .dither:
+            texture.color.setFill()
+            let step = max(2, texture.spacing.rounded())
+            var y = rect.minY + 1
+            var row = 0
+            while y < rect.maxY - 1 {
+                var x = rect.minX + 1 + (row.isMultiple(of: 2) ? 0 : step / 2)
+                while x < rect.maxX - 1 {
+                    NSRect(x: x.rounded(), y: y.rounded(), width: 1, height: 1).fill()
+                    x += step
+                }
+                y += step / 2
+                row += 1
             }
         }
     }

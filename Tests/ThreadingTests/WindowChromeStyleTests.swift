@@ -71,6 +71,7 @@ final class WindowChromeStyleTests: XCTestCase {
                 ink: NSColor(hex: "#FFFFFF")!,
                 inactiveInk: NSColor(hex: "#F0F0F0")!,
                 titleAlignment: .center,
+                titleFontStyle: .italic,
                 height: 30,
                 buttonGlyphStyle: .platinum,
                 buttonPlacement: .split,
@@ -128,6 +129,7 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertNil(style.titleBar.inactiveGradient)
         XCTAssertNil(style.titleBar.height)
         XCTAssertEqual(style.titleBar.titleAlignment, .leading)
+        XCTAssertEqual(style.titleBar.titleFontStyle, .upright)
         XCTAssertEqual(style.titleBar.buttonGlyphStyle, .plain)
         XCTAssertEqual(style.titleBar.buttonPlacement, .trailing)
         XCTAssertTrue(style.titleBar.showsAppIcon)

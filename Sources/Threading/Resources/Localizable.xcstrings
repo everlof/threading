@@ -18582,6 +18582,16 @@
         }
       }
     },
+    "Window menu": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fönstermeny"
+          }
+        }
+      }
+    },
     "Wipe ↔": {
       "extractionState": "stale",
       "localizations": {

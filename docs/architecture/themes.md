@@ -717,3 +717,15 @@ from `super.tile()` so it cannot drift. `ThemedScroller` owns only the stipple p
 geometry, tracking, dragging and fade policy with AppKit. Both material fields round-trip
 through create/update/get and decode old documents to trailing/solid. They are macOS chrome and
 are deliberately not projected by `RemoteThemeBridge`.
+
+**IRIX Indigo Magic** (`irix-indigo-magic`) adds the pieces 4Dwm actually needs rather than
+approximating it as purple Motif. `title_font_style` is `upright` or `italic`; texture kind
+`dither` draws a one-bit checker stipple; glyph family `irix` draws the black-outlined SGI
+caption plates. The ordered button set gains `window_menu`, a semantic frame role whose press
+opens the app-owned `ThemedMenuPresenter` with Restore, Minimize, Maximize, and Close. Adding
+the role did not change old documents: their absent `visible_buttons` still decodes to the
+original three standard operations, and `reset_visible_buttons` restores that same historical
+default. IRIX states `[window_menu, minimize, zoom]` with `bookends`, reproducing the real
+leading menu box and trailing pair. Every added field and enum value round-trips through the
+same create/update/get tool surface, so an agent can author this combination without knowing
+the stock theme id.

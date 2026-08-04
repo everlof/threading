@@ -35,6 +35,7 @@ enum WindowChromeAppearance {
         let inactiveInk: NSColor
         let bandHeight: CGFloat
         let titleAlignment: WindowChromeStyle.TitleBar.Alignment
+        let titleFontStyle: WindowChromeStyle.TitleBar.TitleFontStyle
         let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
         let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
         let showsAppIcon: Bool
@@ -76,6 +77,7 @@ enum WindowChromeAppearance {
                 titleBar.height ?? WindowChromeStyleLimits.defaultBandHeight
             ),
             titleAlignment: titleBar.titleAlignment,
+            titleFontStyle: titleBar.titleFontStyle,
             glyphStyle: titleBar.buttonGlyphStyle,
             buttonPlacement: titleBar.buttonPlacement,
             showsAppIcon: titleBar.showsAppIcon,

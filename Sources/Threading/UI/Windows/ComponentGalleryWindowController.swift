@@ -2554,6 +2554,17 @@ final class ComponentGalleryViewController: NSViewController {
             openStepBand.heightAnchor.constraint(equalToConstant: openStep.bandHeight)
         ])
 
+        let irixChrome = AppThemeStyles.irix.variant(.light)?.chrome
+        precondition(irixChrome != nil, "the stock IRIX theme must state window chrome")
+        let irix = WindowChromeAppearance.resolved(from: irixChrome!)
+        let irixBand = WindowTitleBandView()
+        irixBand.fixtureStyle = irix
+        irixBand.setTitle(AppInfo.name)
+        NSLayoutConstraint.activate([
+            irixBand.widthAnchor.constraint(equalToConstant: 420),
+            irixBand.heightAnchor.constraint(equalToConstant: irix.bandHeight)
+        ])
+
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
             WindowChromeButton.Role.minimize, .zoom, .close
@@ -2587,7 +2598,9 @@ final class ComponentGalleryViewController: NSViewController {
             frame.heightAnchor.constraint(equalToConstant: 96)
         ])
 
-        let bandRow = NSStackView(views: [band, platinumBand, beOSBand, openStepBand, backplate])
+        let bandRow = NSStackView(
+            views: [band, platinumBand, beOSBand, openStepBand, irixBand, backplate]
+        )
         bandRow.orientation = .vertical
         bandRow.alignment = .leading
         bandRow.spacing = Design.Spacing.small

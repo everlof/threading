@@ -298,7 +298,9 @@ native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and obs
 a hidden application icon, and striped centred-title texture; **BeOS R5** (`beos-r5`) adds a
 partial-width leading title tab and the period's Close/Zoom-only window furniture through the
 same regional model; **OPENSTEP 4.2** (`openstep-42`) adds ordered bookends so Miniaturize can
-lead while Close trails, plus its own one-bit control figures.
+lead while Close trails, plus its own one-bit control figures; **IRIX Indigo Magic**
+(`irix-indigo-magic`) combines a dithered italic title with a leading Window-menu operation and
+trailing Minimize/Maximize boxes.
 The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
@@ -327,7 +329,7 @@ band. `WindowTitleBandView` re-states the titlebar's obligations one for one: a 
 window (`performDrag`), a double-click performs `TitlebarDoubleClick.preferredAction`, the band
 dims through its inactive gradient when the window resigns key, and the title follows
 `window.title` by observation. The band also interprets theme-stated button placement,
-application-icon visibility, and active/inactive texture; it contains no stock-theme ID
+application-icon visibility, title slant, and active/inactive texture; it contains no stock-theme ID
 branches. It also interprets a full-width or leading-tab shape, authored tab width, and the
 ordered visible-button set. `split` gives Close its classic-Mac leading exception; `bookends`
 instead preserves authored order by leading with the first visible operation and trailing the
@@ -335,13 +337,17 @@ rest. A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.
-`WindowChromeButton` (close/minimize/zoom) calls the **semantic**
+`WindowChromeButton` (window menu/close/minimize/zoom) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
 (measured; the buttons were dead until this). The zoom button follows `window.isZoomed` and
 draws/names itself Restore while zoomed. `WindowChromeFrameView` draws the border, and
 draws nothing at all in native dress, where the terminal-palette backdrop showing through the
 titlebar strip is load-bearing.
+
+The Window-menu role is not an `NSMenu` exception inside the frame. It presents semantic
+`ThemedMenuItem` values through `ThemedMenuPresenter`, keeping every pixel app-owned and making
+the operations menu follow custom themes exactly like the window that opened it.
 
 **The content root is permanent.** `WindowChromeHostViewController` is the window's
 `contentViewController` in *both* dress states — assigning a content controller resizes the

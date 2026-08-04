@@ -1,9 +1,9 @@
 import AppKit
 
-/// One of a chrome-takeover window's own buttons: close, minimize, or zoom.
+/// One of a chrome-takeover window's own buttons: Window menu, close, minimize, or zoom.
 ///
 /// Exists because a takeover window has no traffic lights — the theme asked for the entire
-/// frame, and these three are the frame's working parts. One component for all three roles and
+/// frame, and these four are the frame's working parts. One component for all four roles and
 /// every glyph style (`WindowChromeStyle.TitleBar.ButtonGlyphStyle`): a theme picks a style, it
 /// never draws its own buttons, and a fourth role or another style arrives here rather than as
 /// a sibling class — the tab strip's "every" lesson, applied before there are two.
@@ -14,12 +14,14 @@ import AppKit
 final class WindowChromeButton: ThemedControl {
 
     enum Role: Equatable {
+        case windowMenu
         case close
         case minimize
         case zoom
 
         var accessibilityLabel: String {
             switch self {
+            case .windowMenu: L10n.string("Window menu")
             case .close: L10n.string("Close")
             case .minimize: L10n.string("Minimize")
             case .zoom: L10n.string("Zoom")
@@ -49,6 +51,11 @@ final class WindowChromeButton: ThemedControl {
 
     private var isPressed = false { didSet { needsDisplay = true } }
     nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+
+    /// Replaces presentation in a component test while still receiving the exact semantic
+    /// menu a real press would show. Nil in production.
+    var fixtureMenuPresentation: ((ThemedMenuPresentation) -> Void)?
+    private var menuSession: AnyObject?
 
     var displaysRestore: Bool {
         guard case .zoom = role else { return false }
@@ -131,6 +138,8 @@ final class WindowChromeButton: ThemedControl {
     override func performPrimaryAction() -> Bool {
         guard isEnabled, let window else { return false }
         switch role {
+        case .windowMenu:
+            presentWindowMenu()
         case .close:
             if window.delegate?.windowShouldClose?(window) ?? true {
                 window.close()
@@ -212,6 +221,24 @@ final class WindowChromeButton: ThemedControl {
                 bevel: isPressed ? .sunken : .automatic
             )
             ink = Design.Text.label
+        case .irix:
+            // 4Dwm seats its caption figures in a gray button with a black outer rule and a
+            // softer lit inner edge. A two-point bevel supplies the inner construction; the
+            // explicit rule is the workstation outline, not an extra theme-specific surface.
+            let fill = isPressed
+                ? Design.Surface.controlHover
+                : (resolved?.activeGradient.colors.first ?? Design.Surface.controlResting)
+            ThemedSurface.draw(
+                bounds,
+                fill: fill,
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
+            )
+            Design.Surface.border.setStroke()
+            let outline = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = 1
+            outline.stroke()
+            ink = Design.Text.label
         case .plain:
             // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
             if isHovered || isPressed {
@@ -234,6 +261,8 @@ final class WindowChromeButton: ThemedControl {
             drawBeOSGlyph(in: bounds, ink: ink)
         } else if style == .openStep {
             drawOpenStepGlyph(in: bounds, ink: ink)
+        } else if style == .irix {
+            drawIRIXGlyph(in: bounds, ink: ink)
         } else {
             drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
         }
@@ -267,6 +296,9 @@ final class WindowChromeButton: ThemedControl {
         path.lineCapStyle = .butt
 
         switch role {
+        case .windowMenu:
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.midY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.midY))
         case .close:
             path.move(to: NSPoint(x: glyph.minX, y: glyph.minY))
             path.line(to: NSPoint(x: glyph.maxX, y: glyph.maxY))
@@ -323,6 +355,8 @@ final class WindowChromeButton: ThemedControl {
         }
 
         switch role {
+        case .windowMenu:
+            dot(1, floor(size / 2), size - 2, 2)
         case .close:
             // Two stair-stepped diagonals, each step one point square — the aliased cross
             // the original bitmap draws.
@@ -375,6 +409,8 @@ final class WindowChromeButton: ThemedControl {
         }
 
         switch role {
+        case .windowMenu:
+            dot(1, 3, 6, 2)
         case .close:
             frame(1, 1, side: 6)
         case .minimize:
@@ -411,6 +447,8 @@ final class WindowChromeButton: ThemedControl {
         }
 
         switch role {
+        case .windowMenu:
+            dot(1, 3, 6, 2)
         case .close:
             dot(2, 2, 4, 4)
         case .minimize:
@@ -441,6 +479,8 @@ final class WindowChromeButton: ThemedControl {
         }
 
         switch role {
+        case .windowMenu:
+            dot(1, 3, 6, 2)
         case .minimize:
             // A six-point outer window with a second inset outline.
             dot(1, 1, 6, 1)
@@ -468,6 +508,108 @@ final class WindowChromeButton: ThemedControl {
             dot(6, 1, 1, 6)
             dot(2, 5, 4, 1)
         }
+    }
+
+    /// The deliberately tiny 4Dwm figures visible in original IRIX 6.5 captures: a broad
+    /// dash for the Window menu, a two-pixel minimization mark, and an outlined maximize box.
+    private func drawIRIXGlyph(in rect: NSRect, ink: NSColor) {
+        let size: CGFloat = 8
+        let originX = (rect.midX - size / 2).rounded()
+        let originY = (rect.midY - size / 2).rounded()
+        ink.setFill()
+
+        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
+            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        }
+        func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
+            dot(x, y, side, 1)
+            dot(x, y + side - 1, side, 1)
+            dot(x, y, 1, side)
+            dot(x + side - 1, y, 1, side)
+        }
+
+        switch role {
+        case .windowMenu:
+            dot(1, 3, 6, 2)
+        case .minimize:
+            dot(3, 3, 2, 2)
+        case .zoom:
+            if displaysRestore {
+                frame(2, 2, side: 5)
+                frame(0, 0, side: 5)
+            } else {
+                frame(1, 1, side: 6)
+            }
+        case .close:
+            for step in 1..<7 {
+                dot(CGFloat(step), CGFloat(step))
+                dot(CGFloat(7 - step), CGFloat(step))
+            }
+        }
+    }
+
+    // MARK: - Window menu
+
+    private func presentWindowMenu() {
+        let menu = makeWindowMenu()
+        if let fixtureMenuPresentation {
+            fixtureMenuPresentation(menu)
+            return
+        }
+        menuSession = ThemedMenuPresenter.present(
+            menu,
+            from: self,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.menuSession = nil }
+        )
+    }
+
+    /// The menu belongs to the semantic role rather than to IRIX: any authored chrome can
+    /// expose it, and every item invokes the same window operations as the caption buttons.
+    func makeWindowMenuForTesting() -> ThemedMenuPresentation { makeWindowMenu() }
+
+    private func makeWindowMenu() -> ThemedMenuPresentation {
+        func item(
+            _ title: String,
+            enabled: Bool = true,
+            action: @escaping () -> Void
+        ) -> ThemedMenuEntry {
+            .item(ThemedMenuItem(
+                title: L10n.string(title),
+                isEnabled: enabled,
+                onChoose: action
+            ))
+        }
+
+        let canRestore = window?.isMiniaturized == true || window?.isZoomed == true
+        return ThemedMenuPresentation(entries: [
+            item("Restore", enabled: canRestore) { [weak self] in self?.restoreFromMenu() },
+            .separator,
+            item("Minimize") { [weak self] in self?.minimizeFromMenu() },
+            item("Maximize") { [weak self] in self?.maximizeFromMenu() },
+            .separator,
+            item("Close") { [weak self] in self?.closeFromMenu() }
+        ], minimumWidth: 148)
+    }
+
+    private func restoreFromMenu() {
+        if window?.isMiniaturized == true {
+            window?.deminiaturize(nil)
+        } else if window?.isZoomed == true {
+            window?.zoom(nil)
+        }
+    }
+
+    private func minimizeFromMenu() { window?.miniaturize(nil) }
+    private func maximizeFromMenu() {
+        guard window?.isZoomed != true else { return }
+        window?.zoom(nil)
+    }
+
+    private func closeFromMenu() {
+        guard let window, window.delegate?.windowShouldClose?(window) ?? true else { return }
+        window.close()
     }
 
     private enum Glyph {

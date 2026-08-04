@@ -880,6 +880,94 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(title["visible_buttons"] as? [String], ["close", "zoom"])
     }
 
+    /// Every IRIX-specific choice is ordinary public chrome vocabulary: an agent can author
+    /// the italic stippled band and real Window-menu role without selecting the stock theme.
+    func testAgentCanAuthorAndReadIRIXChrome() throws {
+        let name = "IRIX Tool Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "swiss-minimalist",
+                "appearance": "light",
+                "variants": {
+                  "light": {
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {"stops": [
+                          {"color": "#A8A789", "position": 0},
+                          {"color": "#9E9D80", "position": 1}
+                        ]},
+                        "ink": "#101010",
+                        "title_alignment": "leading",
+                        "title_font_style": "italic",
+                        "button_glyph_style": "irix",
+                        "button_placement": "bookends",
+                        "shows_app_icon": false,
+                        "active_texture": {
+                          "kind": "dither",
+                          "color": "#D5D4B4",
+                          "spacing": 2
+                        },
+                        "visible_buttons": ["window_menu", "minimize", "zoom"]
+                      },
+                      "frame": {"width": 2}
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
+        XCTAssertEqual(decoded.titleFontStyle, "italic")
+        XCTAssertEqual(decoded.buttonGlyphStyle, "irix")
+        XCTAssertEqual(decoded.activeTexture?.kind, "dither")
+        XCTAssertEqual(decoded.visibleButtons, ["window_menu", "minimize", "zoom"])
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light)?.chrome?.titleBar)
+        XCTAssertEqual(stored.titleFontStyle, .italic)
+        XCTAssertEqual(stored.buttonGlyphStyle, .irix)
+        XCTAssertEqual(stored.buttonPlacement, .bookends)
+        XCTAssertEqual(stored.activeTexture?.kind, .dither)
+        XCTAssertEqual(stored.activeTexture?.color?.hexString, "#D5D4B4")
+        XCTAssertEqual(stored.visibleButtons, [.windowMenu, .minimize, .zoom])
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
+        let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
+        XCTAssertEqual(title["title_font_style"] as? String, "italic")
+        XCTAssertEqual(title["button_glyph_style"] as? String, "irix")
+        XCTAssertEqual(
+            title["visible_buttons"] as? [String],
+            ["window_menu", "minimize", "zoom"]
+        )
+        let texture = try XCTUnwrap(title["active_texture"] as? [String: Any])
+        XCTAssertEqual(texture["kind"] as? String, "dither")
+        XCTAssertEqual(texture["color"] as? String, "#D5D4B4")
+    }
+
     func testVariantSchemaDescribesTheCompleteChromeVocabulary() throws {
         let schema = try schema(for: MCPTools.createAppTheme)
         let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
@@ -895,7 +983,8 @@ final class ThemeToolTests: XCTestCase {
 
         for field in [
             "active_gradient", "inactive_gradient", "ink", "inactive_ink",
-            "title_alignment", "height", "button_glyph_style", "button_placement",
+            "title_alignment", "title_font_style", "height", "button_glyph_style",
+            "button_placement",
             "shows_app_icon", "active_texture", "inactive_texture",
             "remove_active_texture", "remove_inactive_texture", "shape", "tab_width",
             "remove_tab_width", "visible_buttons", "reset_visible_buttons"
