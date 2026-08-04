@@ -184,6 +184,17 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(band.displayedTitle, "Threading — retro")
     }
 
+    func testPlatinumSplitsItsWindowBoxesAndDropsTheApplicationIcon() throws {
+        let band = WindowTitleBandView()
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.platinum.variant(.light)?.chrome)
+        )
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.close])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.minimize, .zoom])
+        XCTAssertFalse(band.showsApplicationIcon)
+    }
+
     func testABandDoubleClickPerformsTheChosenAction() throws {
         let window = makeWindow()
         let band = WindowTitleBandView()
@@ -294,9 +305,9 @@ final class WindowChromeComponentTests: XCTestCase {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        // Windows 98 joins the usual pair because it is the one stock theme whose material
-        // reaches these components — the square-plate buttons take its bevel.
-        let styled = ["Cyberpunk", "Swiss Minimalist", "Windows 98"].map { name in
+        // The takeover themes join the usual pair because their material reaches these
+        // components: Windows has square plates; Platinum has split inset boxes and rules.
+        let styled = ["Cyberpunk", "Swiss Minimalist", "Mac OS 9 Platinum", "Windows 98"].map { name in
             AppThemeLibrary.stock.first { $0.name == name }
         }
         let themes = try [AppTheme.system] + styled.map { try XCTUnwrap($0) }
@@ -322,7 +333,7 @@ final class WindowChromeComponentTests: XCTestCase {
     }
 
     /// The whole takeover window as one picture: the real `MainWindowController` dressed by
-    /// the stock Windows 98 theme, drawn unshown. In takeover the app draws every pixel of
+    /// the stock takeover themes, drawn unshown. In takeover the app draws every pixel of
     /// the frame, so the content render *is* the window — the one picture that shows band,
     /// buttons, frame, bevels and panes as one thing, which no per-component strip can.
     func testRendersTheWholeTakeoverWindow() throws {
@@ -335,6 +346,7 @@ final class WindowChromeComponentTests: XCTestCase {
         // alone — the takeover half is the one where the content *is* the whole window.
         for (theme, name) in [
             (AppTheme.system, "window-chrome-native-window"),
+            (AppThemeStyles.platinum, "window-chrome-platinum-window"),
             (AppThemeStyles.win98, "window-chrome-takeover-window")
         ] {
             AppThemePalette.set(theme)

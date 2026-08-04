@@ -2521,6 +2521,17 @@ final class ComponentGalleryViewController: NSViewController {
             band.heightAnchor.constraint(equalToConstant: squares.bandHeight)
         ])
 
+        let platinumChrome = AppThemeStyles.platinum.variant(.light)?.chrome
+        precondition(platinumChrome != nil, "the stock Platinum theme must state window chrome")
+        let platinum = WindowChromeAppearance.resolved(from: platinumChrome!)
+        let platinumBand = WindowTitleBandView()
+        platinumBand.fixtureStyle = platinum
+        platinumBand.setTitle(AppInfo.name)
+        NSLayoutConstraint.activate([
+            platinumBand.widthAnchor.constraint(equalToConstant: 420),
+            platinumBand.heightAnchor.constraint(equalToConstant: platinum.bandHeight)
+        ])
+
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
             WindowChromeButton.Role.minimize, .zoom, .close
@@ -2554,7 +2565,7 @@ final class ComponentGalleryViewController: NSViewController {
             frame.heightAnchor.constraint(equalToConstant: 96)
         ])
 
-        let bandRow = NSStackView(views: [band, backplate])
+        let bandRow = NSStackView(views: [band, platinumBand, backplate])
         bandRow.orientation = .vertical
         bandRow.alignment = .leading
         bandRow.spacing = Design.Spacing.small

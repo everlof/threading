@@ -65,6 +65,21 @@ struct WindowChromeStyle: Codable, Equatable {
         /// component — a theme picks a style, it never draws its own buttons.
         var buttonGlyphStyle: ButtonGlyphStyle
 
+        /// Where the three semantic window operations sit. The Windows lineage keeps one
+        /// cluster at the trailing edge; classic Macintosh chrome places Close at the leading
+        /// edge and its collapse/zoom pair at the trailing edge. This is layout *inside the
+        /// title bar*, not application layout, and therefore belongs to the regional block.
+        var buttonPlacement: ButtonPlacement
+
+        /// Whether the application icon occupies the band's leading identity slot. Absent on
+        /// the wire means true, preserving the first takeover implementation exactly.
+        var showsAppIcon: Bool
+
+        /// Optional raster-like treatments over the active and inactive fills. A texture is
+        /// data interpreted by the shared band, never a theme-specific drawing branch.
+        var activeTexture: Texture?
+        var inactiveTexture: Texture?
+
         init(
             activeGradient: SidebarStyle.Gradient,
             inactiveGradient: SidebarStyle.Gradient? = nil,
@@ -72,7 +87,11 @@ struct WindowChromeStyle: Codable, Equatable {
             inactiveInk: NSColor? = nil,
             titleAlignment: Alignment = .leading,
             height: Double? = nil,
-            buttonGlyphStyle: ButtonGlyphStyle = .plain
+            buttonGlyphStyle: ButtonGlyphStyle = .plain,
+            buttonPlacement: ButtonPlacement = .trailing,
+            showsAppIcon: Bool = true,
+            activeTexture: Texture? = nil,
+            inactiveTexture: Texture? = nil
         ) {
             self.activeGradient = activeGradient
             self.inactiveGradient = inactiveGradient
@@ -81,6 +100,10 @@ struct WindowChromeStyle: Codable, Equatable {
             self.titleAlignment = titleAlignment
             self.height = height
             self.buttonGlyphStyle = buttonGlyphStyle
+            self.buttonPlacement = buttonPlacement
+            self.showsAppIcon = showsAppIcon
+            self.activeTexture = activeTexture
+            self.inactiveTexture = inactiveTexture
         }
 
         enum Alignment: String, Codable, CaseIterable {
@@ -93,6 +116,34 @@ struct WindowChromeStyle: Codable, Equatable {
             /// Square plates holding the glyphs — the Windows lineage. The plates take the
             /// theme's control surface and, under a bevel material, its bevel.
             case squares
+            /// Platinum's small inset boxes: Close at the leading edge, WindowShade and Zoom
+            /// at the trailing edge, all drawn as hard one-pixel figures.
+            case platinum
+        }
+
+        enum ButtonPlacement: String, Codable, CaseIterable {
+            case trailing
+            case split
+        }
+
+        struct Texture: Equatable {
+            var kind: Kind
+            var color: NSColor?
+            /// Points between repeated one-point lines. Absent means the kind's historical
+            /// default; validation bounds it so a line cannot disappear or become a panel.
+            var spacing: Double?
+
+            init(kind: Kind, color: NSColor? = nil, spacing: Double? = nil) {
+                self.kind = kind
+                self.color = color
+                self.spacing = spacing
+            }
+
+            enum Kind: String, Codable, CaseIterable {
+                /// Horizontal one-pixel rules interrupted by the centred title — Platinum's
+                /// active-window signature.
+                case pinstripes
+            }
         }
     }
 
@@ -125,7 +176,8 @@ extension WindowChromeStyle.TitleBar: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case activeGradient, inactiveGradient, ink, inactiveInk
-        case titleAlignment, height, buttonGlyphStyle
+        case titleAlignment, height, buttonGlyphStyle, buttonPlacement, showsAppIcon
+        case activeTexture, inactiveTexture
     }
 
     /// Every field but the active gradient is optional on the wire, the `Material` rule: a
@@ -146,6 +198,13 @@ extension WindowChromeStyle.TitleBar: Codable {
             ButtonGlyphStyle.self,
             forKey: .buttonGlyphStyle
         ) ?? .plain
+        buttonPlacement = try container.decodeIfPresent(
+            ButtonPlacement.self,
+            forKey: .buttonPlacement
+        ) ?? .trailing
+        showsAppIcon = try container.decodeIfPresent(Bool.self, forKey: .showsAppIcon) ?? true
+        activeTexture = try container.decodeIfPresent(Texture.self, forKey: .activeTexture)
+        inactiveTexture = try container.decodeIfPresent(Texture.self, forKey: .inactiveTexture)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -157,6 +216,10 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encode(titleAlignment, forKey: .titleAlignment)
         try container.encodeIfPresent(height, forKey: .height)
         try container.encode(buttonGlyphStyle, forKey: .buttonGlyphStyle)
+        try container.encode(buttonPlacement, forKey: .buttonPlacement)
+        try container.encode(showsAppIcon, forKey: .showsAppIcon)
+        try container.encodeIfPresent(activeTexture, forKey: .activeTexture)
+        try container.encodeIfPresent(inactiveTexture, forKey: .inactiveTexture)
     }
 
     private static func decodeColor(
@@ -174,6 +237,38 @@ extension WindowChromeStyle.TitleBar: Codable {
             )
         }
         return parsed
+    }
+}
+
+extension WindowChromeStyle.TitleBar.Texture: Codable {
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, color, spacing
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
+        if let hex = try container.decodeIfPresent(String.self, forKey: .color) {
+            guard let parsed = NSColor(hex: hex) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .color,
+                    in: container,
+                    debugDescription: "\(hex) is not a colour."
+                )
+            }
+            color = parsed
+        } else {
+            color = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(color?.hexString, forKey: .color)
+        try container.encodeIfPresent(spacing, forKey: .spacing)
     }
 }
 
@@ -199,4 +294,8 @@ enum WindowChromeStyleLimits {
     /// ground" rule rather than the label's, because inactive text signals inactivity by
     /// carrying less ink (Windows itself set `#D4D0C8` on `#808080`, which is 2.6:1).
     static let inactiveInkMinimumRatio: CGFloat = 2
+    /// Points between title-band texture strokes. One collapses into a solid fill; past eight
+    /// the treatment stops reading as a texture tied to the chrome.
+    static let textureSpacingRange: ClosedRange<Double> = 2...8
+    static let defaultTextureSpacing: Double = 2
 }

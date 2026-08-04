@@ -72,7 +72,15 @@ final class WindowChromeStyleTests: XCTestCase {
                 inactiveInk: NSColor(hex: "#F0F0F0")!,
                 titleAlignment: .center,
                 height: 30,
-                buttonGlyphStyle: .squares
+                buttonGlyphStyle: .platinum,
+                buttonPlacement: .split,
+                showsAppIcon: false,
+                activeTexture: .init(
+                    kind: .pinstripes,
+                    color: NSColor(hex: "#777777")!,
+                    spacing: 3
+                ),
+                inactiveTexture: .init(kind: .pinstripes)
             ),
             frame: .init(width: 4)
         )
@@ -118,6 +126,10 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertNil(style.titleBar.height)
         XCTAssertEqual(style.titleBar.titleAlignment, .leading)
         XCTAssertEqual(style.titleBar.buttonGlyphStyle, .plain)
+        XCTAssertEqual(style.titleBar.buttonPlacement, .trailing)
+        XCTAssertTrue(style.titleBar.showsAppIcon)
+        XCTAssertNil(style.titleBar.activeTexture)
+        XCTAssertNil(style.titleBar.inactiveTexture)
         XCTAssertNil(style.frame)
     }
 
@@ -224,6 +236,16 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertThrowsError(try themed(WindowChromeStyle(
             titleBar: navyTitleBar(), frame: .init(width: 12)
         )), "a frame past the resize edges should be refused")
+
+        var packedTexture = navyTitleBar()
+        packedTexture.activeTexture = .init(kind: .pinstripes, spacing: 1)
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: packedTexture)),
+                             "texture strokes packed into a solid fill should be refused")
+
+        var sparseTexture = navyTitleBar()
+        sparseTexture.inactiveTexture = .init(kind: .pinstripes, spacing: 9)
+        XCTAssertThrowsError(try themed(WindowChromeStyle(titleBar: sparseTexture)),
+                             "a texture too sparse to read as title chrome should be refused")
 
         XCTAssertNoThrow(try themed(WindowChromeStyle(
             titleBar: navyTitleBar(), frame: .init(width: 4)

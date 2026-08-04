@@ -730,20 +730,52 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
   let inactiveGradient: AppThemeGradientArguments?
   let removeInactiveGradient: Bool?
   let ink: String?
+  let removeInk: Bool?
   let inactiveInk: String?
+  let removeInactiveInk: Bool?
   let titleAlignment: String?
   let height: Double?
+  let removeHeight: Bool?
   let buttonGlyphStyle: String?
+  let buttonPlacement: String?
+  let showsAppIcon: Bool?
+  let activeTexture: AppThemeChromeTextureArguments?
+  let removeActiveTexture: Bool?
+  let inactiveTexture: AppThemeChromeTextureArguments?
+  let removeInactiveTexture: Bool?
 
   private enum CodingKeys: String, CodingKey {
     case activeGradient = "active_gradient"
     case inactiveGradient = "inactive_gradient"
     case removeInactiveGradient = "remove_inactive_gradient"
     case ink
+    case removeInk = "remove_ink"
     case inactiveInk = "inactive_ink"
+    case removeInactiveInk = "remove_inactive_ink"
     case titleAlignment = "title_alignment"
     case height
+    case removeHeight = "remove_height"
     case buttonGlyphStyle = "button_glyph_style"
+    case buttonPlacement = "button_placement"
+    case showsAppIcon = "shows_app_icon"
+    case activeTexture = "active_texture"
+    case removeActiveTexture = "remove_active_texture"
+    case inactiveTexture = "inactive_texture"
+    case removeInactiveTexture = "remove_inactive_texture"
+  }
+}
+
+struct AppThemeChromeTextureArguments: Decodable, Sendable {
+  let kind: String?
+  let color: String?
+  let removeColor: Bool?
+  let spacing: Double?
+  let removeSpacing: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case kind, color, spacing
+    case removeColor = "remove_color"
+    case removeSpacing = "remove_spacing"
   }
 }
 
@@ -4437,6 +4469,32 @@ enum MCPTools {
         ]
       )
     }
+    let texture = MCPPropertySchema(
+      type: .object,
+      description: "A repeated, hard-edged treatment drawn over the title-band fill.",
+      properties: [
+        "kind": MCPPropertySchema(
+          type: .string,
+          description: "\"pinstripes\" draws horizontal one-point rules."
+        ),
+        "color": MCPPropertySchema(
+          type: .string,
+          description: "Stroke colour as #RRGGBB or #RRGGBBAA; absent derives from ink."
+        ),
+        "remove_color": MCPPropertySchema(
+          type: .boolean,
+          description: "True returns the texture stroke to its ink-derived colour."
+        ),
+        "spacing": MCPPropertySchema(
+          type: .number,
+          description: "Points between strokes, 2–8. Default 2."
+        ),
+        "remove_spacing": MCPPropertySchema(
+          type: .boolean,
+          description: "True returns spacing to the texture kind's default."
+        ),
+      ]
+    )
     return [
       "title_bar": MCPPropertySchema(
         type: .object,
@@ -4463,9 +4521,17 @@ enum MCPTools {
             type: .string,
             description: "Title and button colour as #RRGGBB. Default white."
           ),
+          "remove_ink": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns active ink to white."
+          ),
           "inactive_ink": MCPPropertySchema(
             type: .string,
             description: "Ink while inactive. Absent dims the active ink."
+          ),
+          "remove_inactive_ink": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns inactive ink to the active-ink derivation."
           ),
           "title_alignment": MCPPropertySchema(
             type: .string,
@@ -4473,13 +4539,37 @@ enum MCPTools {
           ),
           "height": MCPPropertySchema(
             type: .number,
-            description: "Band height, 22–44 points. Default 28."
+            description: "Band height, 18–44 points. Default 28."
+          ),
+          "remove_height": MCPPropertySchema(
+            type: .boolean,
+            description: "True returns the band to its default height."
           ),
           "button_glyph_style": MCPPropertySchema(
             type: .string,
             description: "How close/minimize/zoom draw: \"squares\" (plates in the "
               + "theme's control surface, bevelled under a bevel material — the "
-              + "Windows lineage) or \"plain\" (bare glyphs in the band's ink)."
+              + "Windows lineage), \"platinum\" (classic Macintosh boxes), or "
+              + "\"plain\" (bare glyphs in the band's ink)."
+          ),
+          "button_placement": MCPPropertySchema(
+            type: .string,
+            description: "\"trailing\" clusters all buttons at the end; \"split\" puts "
+              + "Close at the leading edge and minimize/zoom at the trailing edge."
+          ),
+          "shows_app_icon": MCPPropertySchema(
+            type: .boolean,
+            description: "Whether the application icon occupies the leading identity slot."
+          ),
+          "active_texture": texture,
+          "remove_active_texture": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the active title-band texture."
+          ),
+          "inactive_texture": texture,
+          "remove_inactive_texture": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the inactive title-band texture."
           ),
         ]
       ),

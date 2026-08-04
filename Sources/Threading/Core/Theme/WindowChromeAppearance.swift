@@ -23,6 +23,12 @@ enum WindowChromeAppearance {
     }
 
     struct Resolved: Equatable {
+        struct Texture: Equatable {
+            let kind: WindowChromeStyle.TitleBar.Texture.Kind
+            let color: NSColor
+            let spacing: CGFloat
+        }
+
         let activeGradient: Gradient
         let inactiveGradient: Gradient
         let ink: NSColor
@@ -30,6 +36,10 @@ enum WindowChromeAppearance {
         let bandHeight: CGFloat
         let titleAlignment: WindowChromeStyle.TitleBar.Alignment
         let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
+        let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
+        let showsAppIcon: Bool
+        let activeTexture: Texture?
+        let inactiveTexture: Texture?
         let frameWidth: CGFloat
     }
 
@@ -64,6 +74,13 @@ enum WindowChromeAppearance {
             ),
             titleAlignment: titleBar.titleAlignment,
             glyphStyle: titleBar.buttonGlyphStyle,
+            buttonPlacement: titleBar.buttonPlacement,
+            showsAppIcon: titleBar.showsAppIcon,
+            activeTexture: texture(from: titleBar.activeTexture, fallbackInk: ink),
+            inactiveTexture: texture(
+                from: titleBar.inactiveTexture,
+                fallbackInk: titleBar.inactiveInk ?? ink.withAlphaComponent(0.7)
+            ),
             frameWidth: CGFloat(
                 chrome.frame?.width ?? WindowChromeStyleLimits.defaultFrameWidth
             )
@@ -114,6 +131,18 @@ enum WindowChromeAppearance {
             colors: ordered.map(\.color),
             locations: ordered.map { CGFloat($0.position) },
             angleDegrees: CGFloat(stated.angleDegrees)
+        )
+    }
+
+    private static func texture(
+        from stated: WindowChromeStyle.TitleBar.Texture?,
+        fallbackInk: NSColor
+    ) -> Resolved.Texture? {
+        guard let stated else { return nil }
+        return Resolved.Texture(
+            kind: stated.kind,
+            color: stated.color ?? fallbackInk.withAlphaComponent(0.42),
+            spacing: CGFloat(stated.spacing ?? WindowChromeStyleLimits.defaultTextureSpacing)
         )
     }
 

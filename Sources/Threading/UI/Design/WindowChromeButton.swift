@@ -4,8 +4,8 @@ import AppKit
 ///
 /// Exists because a takeover window has no traffic lights — the theme asked for the entire
 /// frame, and these three are the frame's working parts. One component for all three roles and
-/// both glyph styles (`WindowChromeStyle.TitleBar.ButtonGlyphStyle`): a theme picks a style, it
-/// never draws its own buttons, and a fourth role or a third style arrives here rather than as
+/// every glyph style (`WindowChromeStyle.TitleBar.ButtonGlyphStyle`): a theme picks a style, it
+/// never draws its own buttons, and a fourth role or another style arrives here rather than as
 /// a sibling class — the tab strip's "every" lesson, applied before there are two.
 ///
 /// The action is the window's own (`performClose` / `performMiniaturize` / `performZoom`), so
@@ -13,7 +13,7 @@ import AppKit
 /// and accessibility activation, which `ThemedControl` routes through the same press.
 final class WindowChromeButton: ThemedControl {
 
-    enum Role {
+    enum Role: Equatable {
         case close
         case minimize
         case zoom
@@ -155,7 +155,7 @@ final class WindowChromeButton: ThemedControl {
         // against a real screenshot side by side, this is the single largest difference.
         NSGraphicsContext.current?.saveGraphicsState()
         defer { NSGraphicsContext.current?.restoreGraphicsState() }
-        if style == .squares {
+        if style != .plain {
             NSGraphicsContext.current?.shouldAntialias = false
         }
 
@@ -174,6 +174,17 @@ final class WindowChromeButton: ThemedControl {
                 border: Design.Surface.border
             )
             ink = Design.Text.label
+        case .platinum:
+            // Platinum's boxes are the same silver as the band and are separated by their
+            // inset edge, not by a coloured fill. Press reverses the edge through the ordinary
+            // surface interpreter, preserving the one lighting model used everywhere else.
+            ThemedSurface.draw(
+                bounds,
+                fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
+            )
+            ink = Design.Text.label
         case .plain:
             // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
             if isHovered || isPressed {
@@ -190,7 +201,11 @@ final class WindowChromeButton: ThemedControl {
                 : (resolved?.inactiveInk ?? Design.Text.secondary)
         }
 
-        drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
+        if style == .platinum {
+            drawPlatinumGlyph(in: bounds, ink: ink)
+        } else {
+            drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
+        }
         drawKeyboardFocus(around: ThemedSurface.Shape(
             rect: bounds,
             radius: Design.Radius.control(fitting: bounds.size)
@@ -303,6 +318,44 @@ final class WindowChromeButton: ThemedControl {
             } else {
                 // A window in miniature: a one-point frame under a two-point title bar.
                 frame(0, 0, side: size)
+            }
+        }
+    }
+
+    /// The three figures from the Platinum window frame. They are deliberately not the
+    /// Windows caption glyphs recoloured: Close is a small inset box, WindowShade is a pair of
+    /// rules, and Zoom is the offset-window figure. Whole-point rectangles keep the figures
+    /// crisp on the 1× displays the originals targeted.
+    private func drawPlatinumGlyph(in rect: NSRect, ink: NSColor) {
+        let size: CGFloat = 8
+        let originX = (rect.midX - size / 2).rounded()
+        let originY = (rect.midY - size / 2).rounded()
+        ink.setFill()
+
+        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
+            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        }
+
+        func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
+            dot(x, y, side, 1)
+            dot(x, y + side - 1, side, 1)
+            dot(x, y, 1, side)
+            dot(x + side - 1, y, 1, side)
+        }
+
+        switch role {
+        case .close:
+            frame(1, 1, side: 6)
+        case .minimize:
+            dot(1, 5, 6, 1)
+            dot(1, 7, 6, 1)
+        case .zoom:
+            if displaysRestore {
+                frame(2, 2, side: 5)
+                frame(0, 0, side: 5)
+            } else {
+                frame(0, 0, side: 8)
+                dot(1, 6, 6, 1)
             }
         }
     }

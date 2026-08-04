@@ -435,6 +435,33 @@ extension AgentToolCoordinator {
                         + "in the same patch."
                 )
             }
+            guard titleBar.ink == nil || titleBar.removeInk != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set ink and remove_ink in the same patch."
+                )
+            }
+            guard titleBar.inactiveInk == nil || titleBar.removeInactiveInk != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set inactive_ink and remove_inactive_ink in the same patch."
+                )
+            }
+            guard titleBar.height == nil || titleBar.removeHeight != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set height and remove_height in the same patch."
+                )
+            }
+            guard titleBar.activeTexture == nil || titleBar.removeActiveTexture != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set active_texture and remove_active_texture in the same patch."
+                )
+            }
+            guard titleBar.inactiveTexture == nil
+                || titleBar.removeInactiveTexture != true else {
+                throw AppThemeEditingError.invalid(
+                    "chrome cannot set inactive_texture and remove_inactive_texture "
+                        + "in the same patch."
+                )
+            }
             if let active = titleBar.activeGradient {
                 style.titleBar.activeGradient = try sidebarGradient(active)
             }
@@ -443,7 +470,9 @@ extension AgentToolCoordinator {
             } else if let inactive = titleBar.inactiveGradient {
                 style.titleBar.inactiveGradient = try sidebarGradient(inactive)
             }
-            if let rawInk = cleaned(titleBar.ink) {
+            if titleBar.removeInk == true {
+                style.titleBar.ink = nil
+            } else if let rawInk = cleaned(titleBar.ink) {
                 guard let color = NSColor(hex: rawInk) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.ink must be #RRGGBB or #RRGGBBAA."
@@ -451,7 +480,9 @@ extension AgentToolCoordinator {
                 }
                 style.titleBar.ink = color
             }
-            if let rawInk = cleaned(titleBar.inactiveInk) {
+            if titleBar.removeInactiveInk == true {
+                style.titleBar.inactiveInk = nil
+            } else if let rawInk = cleaned(titleBar.inactiveInk) {
                 guard let color = NSColor(hex: rawInk) else {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.inactive_ink must be #RRGGBB or #RRGGBBAA."
@@ -469,7 +500,9 @@ extension AgentToolCoordinator {
                 }
                 style.titleBar.titleAlignment = parsed
             }
-            if let height = titleBar.height {
+            if titleBar.removeHeight == true {
+                style.titleBar.height = nil
+            } else if let height = titleBar.height {
                 style.titleBar.height = height
             }
             if let rawGlyphs = cleaned(titleBar.buttonGlyphStyle) {
@@ -477,10 +510,42 @@ extension AgentToolCoordinator {
                     rawValue: rawGlyphs
                 ) else {
                     throw AppThemeEditingError.invalid(
-                        "chrome.title_bar.button_glyph_style must be \"squares\" or \"plain\"."
+                        "chrome.title_bar.button_glyph_style must be \"squares\", "
+                            + "\"platinum\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
+            }
+            if let rawPlacement = cleaned(titleBar.buttonPlacement) {
+                guard let parsed = WindowChromeStyle.TitleBar.ButtonPlacement(
+                    rawValue: rawPlacement
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.button_placement must be \"trailing\" or \"split\"."
+                    )
+                }
+                style.titleBar.buttonPlacement = parsed
+            }
+            if let showsAppIcon = titleBar.showsAppIcon {
+                style.titleBar.showsAppIcon = showsAppIcon
+            }
+            if titleBar.removeActiveTexture == true {
+                style.titleBar.activeTexture = nil
+            } else if let texture = titleBar.activeTexture {
+                style.titleBar.activeTexture = try appThemeChromeTexture(
+                    texture,
+                    base: style.titleBar.activeTexture,
+                    path: "chrome.title_bar.active_texture"
+                )
+            }
+            if titleBar.removeInactiveTexture == true {
+                style.titleBar.inactiveTexture = nil
+            } else if let texture = titleBar.inactiveTexture {
+                style.titleBar.inactiveTexture = try appThemeChromeTexture(
+                    texture,
+                    base: style.titleBar.inactiveTexture,
+                    path: "chrome.title_bar.inactive_texture"
+                )
             }
         }
 
@@ -499,6 +564,56 @@ extension AgentToolCoordinator {
         }
 
         return .set(style)
+    }
+
+    private func appThemeChromeTexture(
+        _ patch: AppThemeChromeTextureArguments,
+        base: WindowChromeStyle.TitleBar.Texture?,
+        path: String
+    ) throws -> WindowChromeStyle.TitleBar.Texture {
+        guard patch.color == nil || patch.removeColor != true else {
+            throw AppThemeEditingError.invalid(
+                "\(path) cannot set color and remove_color in the same patch."
+            )
+        }
+        guard patch.spacing == nil || patch.removeSpacing != true else {
+            throw AppThemeEditingError.invalid(
+                "\(path) cannot set spacing and remove_spacing in the same patch."
+            )
+        }
+
+        let kind: WindowChromeStyle.TitleBar.Texture.Kind
+        if let rawKind = cleaned(patch.kind) {
+            guard let parsed = WindowChromeStyle.TitleBar.Texture.Kind(rawValue: rawKind) else {
+                throw AppThemeEditingError.invalid("\(path).kind must be \"pinstripes\".")
+            }
+            kind = parsed
+        } else if let base {
+            kind = base.kind
+        } else {
+            throw AppThemeEditingError.invalid("\(path) needs a kind.")
+        }
+
+        let color: NSColor?
+        if patch.removeColor == true {
+            color = nil
+        } else if let rawColor = cleaned(patch.color) {
+            guard let parsed = NSColor(hex: rawColor) else {
+                throw AppThemeEditingError.invalid(
+                    "\(path).color must be #RRGGBB or #RRGGBBAA."
+                )
+            }
+            color = parsed
+        } else {
+            color = base?.color
+        }
+
+        let spacing = patch.removeSpacing == true ? nil : (patch.spacing ?? base?.spacing)
+        return WindowChromeStyle.TitleBar.Texture(
+            kind: kind,
+            color: color,
+            spacing: spacing
+        )
     }
 
     // MARK: Sidebar Parsing
@@ -956,7 +1071,9 @@ extension AgentToolCoordinator {
         var titleBar: [String: Any] = [
             "active_gradient": gradientDocument(chrome.titleBar.activeGradient),
             "title_alignment": chrome.titleBar.titleAlignment.rawValue,
-            "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue
+            "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue,
+            "button_placement": chrome.titleBar.buttonPlacement.rawValue,
+            "shows_app_icon": chrome.titleBar.showsAppIcon
         ]
         if let inactive = chrome.titleBar.inactiveGradient {
             titleBar["inactive_gradient"] = gradientDocument(inactive)
@@ -964,11 +1081,26 @@ extension AgentToolCoordinator {
         if let ink = chrome.titleBar.ink { titleBar["ink"] = ink.hexString }
         if let ink = chrome.titleBar.inactiveInk { titleBar["inactive_ink"] = ink.hexString }
         if let height = chrome.titleBar.height { titleBar["height"] = height }
+        if let texture = chrome.titleBar.activeTexture {
+            titleBar["active_texture"] = appThemeChromeTextureDocument(texture)
+        }
+        if let texture = chrome.titleBar.inactiveTexture {
+            titleBar["inactive_texture"] = appThemeChromeTextureDocument(texture)
+        }
 
         var document: [String: Any] = ["title_bar": titleBar]
         if let frame = chrome.frame {
             document["frame"] = ["width": frame.width]
         }
+        return document
+    }
+
+    private func appThemeChromeTextureDocument(
+        _ texture: WindowChromeStyle.TitleBar.Texture
+    ) -> [String: Any] {
+        var document: [String: Any] = ["kind": texture.kind.rawValue]
+        if let color = texture.color { document["color"] = color.hexString }
+        if let spacing = texture.spacing { document["spacing"] = spacing }
         return document
     }
 

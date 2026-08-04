@@ -3,7 +3,7 @@
 The toolbar, the pane headers, why the sidebar is a plain split item — and the takeover, where
 a theme draws the frame itself.
 
-In **native dress** (every theme that states no chrome, which is all of them but one) this
+In **native dress** (every theme that states no chrome) this
 boundary is app-owned exactly where it should be: the full-height sidebar ground, split rule,
 headers, and toolbar item views are themed; `NSWindow`, traffic lights, resizing, sheets, and
 full-screen integration remain AppKit's. This file long recorded "replacing the window frame
@@ -293,9 +293,10 @@ under the pointer.
 A theme stating a `WindowChromeStyle` (a `chrome:` block on its variant — the second and last
 regional block after `SidebarStyle`, following all of its rules) opts the main window out of its
 native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and observing
-`AppThemeDidChange`, performs the exchange in both directions, live. The stock **Windows 98**
-theme (`retro-98`) is the first user; the mechanism is the feature, the theme is its worked
-example.
+`AppThemeDidChange`, performs the exchange in both directions, live. **Windows 98**
+(`retro-98`) was the first user; **Mac OS 9 Platinum** (`platinum-9`) adds split window boxes,
+a hidden application icon, and striped centred-title texture through the same regional model.
+The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
 `[.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]`. Takeover keeps every
@@ -322,7 +323,9 @@ geometry (frameless `contentLayoutRect` covers the whole content) and the gestur
 band. `WindowTitleBandView` re-states the titlebar's obligations one for one: a press drags the
 window (`performDrag`), a double-click performs `TitlebarDoubleClick.preferredAction`, the band
 dims through its inactive gradient when the window resigns key, and the title follows
-`window.title` by observation. `WindowChromeButton` (close/minimize/zoom) calls the **semantic**
+`window.title` by observation. The band also interprets theme-stated button placement,
+application-icon visibility, and active/inactive texture; it contains no stock-theme ID
+branches. `WindowChromeButton` (close/minimize/zoom) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
 (measured; the buttons were dead until this). The zoom button follows `window.isZoomed` and

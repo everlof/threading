@@ -502,6 +502,20 @@ enum AppThemeEditing {
             }
         }
 
+        for (name, texture) in [
+            ("active_texture", titleBar.activeTexture),
+            ("inactive_texture", titleBar.inactiveTexture)
+        ] {
+            guard let spacing = texture?.spacing else { continue }
+            guard WindowChromeStyleLimits.textureSpacingRange.contains(spacing) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.title_bar.\(name).spacing must be between "
+                        + "\(Int(WindowChromeStyleLimits.textureSpacingRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.textureSpacingRange.upperBound)) points."
+                )
+            }
+        }
+
         if let frame = chrome.frame {
             guard WindowChromeStyleLimits.frameWidthRange.contains(frame.width) else {
                 throw AppThemeEditingError.invalid(

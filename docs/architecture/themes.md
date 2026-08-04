@@ -650,8 +650,8 @@ vocabulary rather than components: the theme states data, one interpreter draws 
 native frame — titled mask, traffic lights, rounded corners, toolbar — and wears an app-drawn
 title band, window buttons and border. The mechanics live in
 [`window-chrome.md`](window-chrome.md); the block itself carries the band's active and
-inactive gradients, its ink, alignment, height (22–44), the button glyph style
-(`squares`/`plain`), and a frame width (1–6). Gates: the active band's ink holds the label's
+inactive gradients, its ink, alignment, height (18–44), the button glyph style, and a frame
+width (1–6). Gates: the active band's ink holds the label's
 3:1 against every stop — the band carries the window's own close button — while the inactive
 band gets the softer 2:1 "tellable" floor, because inactive title text signals inactivity by
 carrying less ink (the authentic 1998 inactive pair sits at 2.6:1). An adaptive theme states
@@ -677,3 +677,19 @@ Both blocks have full MCP parity (`create_app_theme`/`update_app_theme`/`get_app
 round-trip them; `chrome.remove` hands the frame back live) and are deliberately **not**
 projected to iOS by `RemoteThemeBridge` — no window frame there, no bevel interpreter, and the
 two roles ride the resolved colour map anyway. `ThemeToolTests` holds the tool loop.
+
+## 2026-08-04 — title chrome becomes a reusable period vocabulary
+
+The stock **Mac OS 9 Platinum** theme (`platinum-9`) is the second frame-takeover user and the
+first proof that `WindowChromeStyle` is not a Windows-shaped switch. `TitleBar` now states
+button placement (`trailing` or `split`), whether the application icon appears, and optional
+active/inactive textures. The first texture kind, `pinstripes`, draws hard horizontal rules and
+interrupts them behind a centred title; the first non-Windows glyph family, `platinum`, draws
+the classic inset Close, WindowShade, and Zoom boxes. These are data read by the same
+`WindowTitleBandView` and `WindowChromeButton`, not checks for `platinum-9`.
+
+The full vocabulary is writable through `create_app_theme` and `update_app_theme`, including
+removal of optional ink, height, and texture choices and partial texture updates. This is a
+load-bearing custom-theme rule: a prompt discovered outside the stock catalogue can reproduce
+the same layout and material without adding Swift code. `get_app_theme` returns those choices
+in the same snake-case document.

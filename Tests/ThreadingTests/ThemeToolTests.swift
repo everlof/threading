@@ -674,6 +674,163 @@ final class ThemeToolTests: XCTestCase {
         }
     }
 
+    // MARK: - Window Chrome
+
+    /// The end-to-end customization contract for the first non-Windows takeover style: an
+    /// agent can author Platinum's layout and texture, read every choice back, then remove
+    /// the optional treatment without rebuilding the theme.
+    func testAgentCanAuthorReadAndRevisePlatinumChrome() throws {
+        let name = "Platinum Tool Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "swiss-minimalist",
+                "appearance": "light",
+                "variants": {
+                  "light": {
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {
+                          "stops": [
+                            {"color": "#DDDDDD", "position": 0},
+                            {"color": "#DDDDDD", "position": 1}
+                          ]
+                        },
+                        "inactive_gradient": {
+                          "stops": [
+                            {"color": "#DDDDDD", "position": 0},
+                            {"color": "#DDDDDD", "position": 1}
+                          ]
+                        },
+                        "ink": "#000000",
+                        "inactive_ink": "#666666",
+                        "title_alignment": "center",
+                        "height": 20,
+                        "button_glyph_style": "platinum",
+                        "button_placement": "split",
+                        "shows_app_icon": false,
+                        "active_texture": {
+                          "kind": "pinstripes",
+                          "color": "#888888",
+                          "spacing": 2
+                        }
+                      },
+                      "frame": {"width": 2}
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let decodedTitle = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
+        XCTAssertEqual(decodedTitle.buttonGlyphStyle, "platinum")
+        XCTAssertEqual(decodedTitle.buttonPlacement, "split")
+        XCTAssertEqual(decodedTitle.showsAppIcon, false)
+        XCTAssertEqual(decodedTitle.activeTexture?.kind, "pinstripes")
+        XCTAssertEqual(decodedTitle.activeTexture?.spacing, 2)
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light)?.chrome?.titleBar)
+        XCTAssertEqual(stored.buttonGlyphStyle, .platinum)
+        XCTAssertEqual(stored.buttonPlacement, .split)
+        XCTAssertFalse(stored.showsAppIcon)
+        XCTAssertEqual(stored.activeTexture?.kind, .pinstripes)
+        XCTAssertEqual(stored.activeTexture?.color?.hexString, "#888888")
+        XCTAssertEqual(stored.activeTexture?.spacing, 2)
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
+        let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
+        XCTAssertEqual(title["button_glyph_style"] as? String, "platinum")
+        XCTAssertEqual(title["button_placement"] as? String, "split")
+        XCTAssertEqual(title["shows_app_icon"] as? Bool, false)
+        let texture = try XCTUnwrap(title["active_texture"] as? [String: Any])
+        XCTAssertEqual(texture["kind"] as? String, "pinstripes")
+        XCTAssertEqual(texture["color"] as? String, "#888888")
+        XCTAssertEqual(texture["spacing"] as? Double, 2)
+
+        let updateCall = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "\(theme.id.rawValue)",
+                "variants": {
+                  "light": {
+                    "chrome": {
+                      "title_bar": {
+                        "remove_active_texture": true,
+                        "remove_inactive_ink": true,
+                        "remove_height": true
+                      }
+                    }
+                  }
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .updateAppTheme(let update) = updateCall else {
+            return XCTFail("decoded as \(updateCall.name)")
+        }
+        let revised = coordinator().updateAppTheme(update)
+        XCTAssertFalse(revised.isError, revised.text)
+        let updated = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
+        XCTAssertNil(updated.variant(.light)?.chrome?.titleBar.activeTexture)
+        XCTAssertNil(updated.variant(.light)?.chrome?.titleBar.inactiveInk)
+        XCTAssertNil(updated.variant(.light)?.chrome?.titleBar.height)
+    }
+
+    func testVariantSchemaDescribesTheCompleteChromeVocabulary() throws {
+        let schema = try schema(for: MCPTools.createAppTheme)
+        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
+        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
+        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
+        let light = try XCTUnwrap(variantProperties["light"] as? [String: Any])
+        let lightProperties = try XCTUnwrap(light["properties"] as? [String: Any])
+        let chrome = try XCTUnwrap(lightProperties["chrome"] as? [String: Any])
+        let chromeProperties = try XCTUnwrap(chrome["properties"] as? [String: Any])
+        let title = try XCTUnwrap(chromeProperties["title_bar"] as? [String: Any])
+        let titleProperties = try XCTUnwrap(title["properties"] as? [String: Any])
+
+        for field in [
+            "active_gradient", "inactive_gradient", "ink", "inactive_ink",
+            "title_alignment", "height", "button_glyph_style", "button_placement",
+            "shows_app_icon", "active_texture", "inactive_texture",
+            "remove_active_texture", "remove_inactive_texture"
+        ] {
+            XCTAssertNotNil(titleProperties[field], "chrome schema lost \(field)")
+        }
+        let texture = try XCTUnwrap(titleProperties["active_texture"] as? [String: Any])
+        let textureProperties = try XCTUnwrap(texture["properties"] as? [String: Any])
+        XCTAssertEqual(
+            Set(textureProperties.keys),
+            ["kind", "color", "remove_color", "spacing", "remove_spacing"]
+        )
+    }
+
     // MARK: - Schema
 
     private func authoredRoles(of theme: AppTheme) -> [String: String] {

@@ -47,6 +47,8 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let appIcon = NSImageView()
+    private let leftStack = NSStackView()
+    private let leadingButtonStack = NSStackView()
     private let leadingStack = NSStackView()
     private let buttonStack = NSStackView()
     private(set) lazy var minimizeButton = WindowChromeButton(role: .minimize)
@@ -81,6 +83,23 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     /// set without reaching into the label.
     var displayedTitle: String { titleLabel.stringValue }
 
+    /// The resolved regional layout, exposed semantically for component tests. The stacks
+    /// remain private implementation details; callers can only ask which window operations
+    /// the title band placed on either side and whether it retained the identity icon.
+    var leadingWindowButtonRoles: [WindowChromeButton.Role] {
+        leadingButtonStack.arrangedSubviews.compactMap {
+            ($0 as? WindowChromeButton)?.role
+        }
+    }
+
+    var trailingWindowButtonRoles: [WindowChromeButton.Role] {
+        buttonStack.arrangedSubviews.compactMap {
+            ($0 as? WindowChromeButton)?.role
+        }
+    }
+
+    var showsApplicationIcon: Bool { !appIcon.isHidden }
+
     /// The window controller pushes the title — it owns `updateWindowTitle` and is the one
     /// place the name is decided. Deliberately not KVO on `window.title`: the band lives in
     /// the window's own view tree, so on window dealloc an observation would unregister
@@ -107,13 +126,21 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         appIcon.imageScaling = .scaleProportionallyUpOrDown
         appIcon.translatesAutoresizingMaskIntoConstraints = false
         appIcon.setAccessibilityElement(false)
-        addSubview(appIcon)
+
+        leadingButtonStack.orientation = .horizontal
+        leadingButtonStack.alignment = .centerY
+        leadingButtonStack.spacing = Design.Spacing.hairline
 
         leadingStack.orientation = .horizontal
         leadingStack.alignment = .centerY
         leadingStack.spacing = Design.Spacing.tight
-        leadingStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(leadingStack)
+
+        leftStack.orientation = .horizontal
+        leftStack.alignment = .centerY
+        leftStack.spacing = Design.Spacing.hairline
+        leftStack.translatesAutoresizingMaskIntoConstraints = false
+        [leadingButtonStack, appIcon, leadingStack].forEach(leftStack.addArrangedSubview)
+        addSubview(leftStack)
 
         buttonStack.orientation = .horizontal
         buttonStack.alignment = .centerY
@@ -129,26 +156,22 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         addSubview(titleLabel)
 
         let leadingTitle = titleLabel.leadingAnchor.constraint(
-            equalTo: leadingStack.trailingAnchor,
+            equalTo: leftStack.trailingAnchor,
             constant: Design.Spacing.medium
         )
         leadingTitleConstraint = leadingTitle
         centeredTitleConstraint = titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor)
 
         NSLayoutConstraint.activate([
-            appIcon.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: Design.Spacing.tight
-            ),
             appIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
             appIcon.widthAnchor.constraint(equalToConstant: 14),
             appIcon.heightAnchor.constraint(equalToConstant: 14),
 
-            leadingStack.leadingAnchor.constraint(
-                equalTo: appIcon.trailingAnchor,
-                constant: Design.Spacing.hairline
+            leftStack.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Design.Spacing.tight
             ),
-            leadingStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            leftStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             buttonStack.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
@@ -158,6 +181,10 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             leadingTitle,
+            titleLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: leftStack.trailingAnchor,
+                constant: Design.Spacing.tight
+            ),
             titleLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: buttonStack.leadingAnchor,
                 constant: -Design.Spacing.medium
@@ -183,7 +210,36 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             leadingTitleConstraint?.isActive = true
         }
 
+        appIcon.isHidden = resolved?.showsAppIcon == false
+        applyButtonPlacement(resolved?.buttonPlacement ?? .trailing)
+
         needsDisplay = true
+    }
+
+    private func applyButtonPlacement(_ placement: WindowChromeStyle.TitleBar.ButtonPlacement) {
+        let leading: [WindowChromeButton]
+        let trailing: [WindowChromeButton]
+        switch placement {
+        case .trailing:
+            leading = []
+            trailing = [minimizeButton, zoomButton, closeButton]
+        case .split:
+            leading = [closeButton]
+            trailing = [minimizeButton, zoomButton]
+        }
+
+        let currentLeading = leadingButtonStack.arrangedSubviews.compactMap {
+            $0 as? WindowChromeButton
+        }
+        let currentTrailing = buttonStack.arrangedSubviews.compactMap {
+            $0 as? WindowChromeButton
+        }
+        guard currentLeading != leading || currentTrailing != trailing else { return }
+
+        leadingButtonStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        buttonStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        leading.forEach(leadingButtonStack.addArrangedSubview)
+        trailing.forEach(buttonStack.addArrangedSubview)
     }
 
     // MARK: - Window Following
@@ -246,12 +302,47 @@ final class WindowTitleBandView: NSView, ThemedComponent {
               ) else {
             (gradient.colors.first ?? Design.Surface.ground).setFill()
             bounds.fill()
+            drawTexture(drawsAsKey ? resolved.activeTexture : resolved.inactiveTexture,
+                        over: gradient)
             return
         }
 
         // The document's angle is CSS's — degrees clockwise from "toward the top" —
         // and `NSGradient` wants degrees counterclockwise from "toward the trailing edge".
         drawn.draw(in: bounds, angle: 90 - gradient.angleDegrees)
+        drawTexture(
+            drawsAsKey ? resolved.activeTexture : resolved.inactiveTexture,
+            over: gradient
+        )
+    }
+
+    private func drawTexture(
+        _ texture: WindowChromeAppearance.Resolved.Texture?,
+        over gradient: WindowChromeAppearance.Gradient
+    ) {
+        guard let texture else { return }
+
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+
+        switch texture.kind {
+        case .pinstripes:
+            texture.color.setFill()
+            var y = bounds.minY + 1
+            while y < bounds.maxY - 1 {
+                NSRect(x: bounds.minX, y: y.rounded(), width: bounds.width, height: 1).fill()
+                y += texture.spacing
+            }
+
+            // Platinum interrupts the rules behind the title instead of laying type over
+            // them. The fill is the band's own base, so the gap remains part of the bar.
+            if resolvedStyle?.titleAlignment == .center, !titleLabel.frame.isEmpty {
+                let backdrop = titleLabel.frame.insetBy(dx: -Design.Spacing.tight, dy: 0)
+                (gradient.colors.first ?? Design.Surface.ground).setFill()
+                backdrop.fill()
+            }
+        }
     }
 
     // MARK: - Accessibility

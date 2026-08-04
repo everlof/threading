@@ -731,8 +731,9 @@ enum MCPToolCatalog {
       titlebar, traffic lights and rounded corners while the theme is worn, live in \
       both directions. The band's ink must read on every active-gradient stop, and an \
       adaptive theme states chrome in both variants or neither. Pair it with the \
-      material's `bevel` (square corners required) for the full mid-nineties treatment; \
-      the stock Windows 98 theme is the worked example — read it with get_app_theme.
+      material's `bevel` (square corners required) for the full mid-nineties treatment. \
+      Windows 98 and Mac OS 9 Platinum are worked examples of different button placement, \
+      glyph and texture choices — read them with get_app_theme.
       """
   )
 
