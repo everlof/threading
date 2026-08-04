@@ -30,8 +30,12 @@ extension AgentToolCoordinator {
       return .failure("\(url.lastPathComponent) is not an image Threading can display.")
     }
 
+    // The recorded row *is* the presentation now, so what the store made of the file is the
+    // thing to point at — nil only when the session has no project to record against, or when
+    // the store could not take custody of the bytes.
+    var recorded: SessionAttachment?
     if let project = dependencies.projects.project(forSessionID: sessionID) {
-      dependencies.attachments.record(
+      recorded = dependencies.attachments.record(
         declared: url,
         sessionID: sessionID,
         projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true),
@@ -40,7 +44,18 @@ extension AgentToolCoordinator {
     }
 
     let dimensions = pixelDescription(of: image)
+    let description = "\(url.lastPathComponent) (\(dimensions))"
 
+    if let recorded,
+      let attachments = displayPaneController.activateAttachments(for: sessionID)
+    {
+      attachments.showAttachment(at: recorded.url)
+      return .success("Showing \(description) \(attachmentsLocation(for: sessionID)).")
+    }
+
+    // The fallback, and the only remaining route to an image tab: a session with no project
+    // cannot have an Attachments tab at all (`makeAttachments` needs a folder to belong to), so
+    // the picture is shown the old way rather than not at all.
     return present(
       DisplayContent(
         body: .image(image, url: url),
@@ -48,7 +63,7 @@ extension AgentToolCoordinator {
         subtitle: "\(url.lastPathComponent) · \(dimensions)"
       ),
       for: sessionID,
-      describedAs: "\(url.lastPathComponent) (\(dimensions))"
+      describedAs: description
     )
   }
 
@@ -246,8 +261,12 @@ extension AgentToolCoordinator {
     for sessionID: SessionID,
     describedAs description: String
   ) -> MCPToolResult {
-    // Each shown artefact is a new tab that coexists with what was there before, rather than
-    // replacing it — the display pane accumulates the session's images and documents.
+    // A new tab that coexists with what was there before rather than replacing it: a document,
+    // a scene, a browser capture, or the no-project image fallback. A `display_image` from a
+    // session that *has* a project no longer arrives here — it joins the Attachments list, which
+    // is the panel's one chronology of the files this session has shown (see
+    // `mcp-and-display.md`). A browser capture is evidence of a page rather than a file the
+    // session exchanged, and the store never recorded one, so it stays a tab.
     displayPaneController.addContentTab(content, for: sessionID)
 
     // Only the session the user is actually looking at opens the panel. A background
@@ -262,6 +281,17 @@ extension AgentToolCoordinator {
       : "in this session's display panel, which opens when the user selects it"
 
     return .success("Showing \(description) \(location).")
+  }
+
+  /// Where an image the list took landed, in the same two honest forms `present` reports.
+  ///
+  /// The Attachments tab is *in* the display panel, so the sentence stays true; it names the
+  /// list because that is where the agent should expect to find the picture again, and because
+  /// a second image no longer replaces the first anywhere the agent can see.
+  private func attachmentsLocation(for sessionID: SessionID) -> String {
+    revealDisplayPane(for: sessionID)
+      ? "in the display panel's Attachments list"
+      : "in this session's display panel, which opens when the user selects it"
   }
 
   // MARK: Helpers

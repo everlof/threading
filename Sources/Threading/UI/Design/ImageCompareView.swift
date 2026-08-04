@@ -16,7 +16,11 @@ enum ImageCompareDefaults {
     /// the bounds, so text flush against them sits on the ring; the band reserved for a caption
     /// is this margin plus the measured line plus `captionGap`, and sideways the text keeps
     /// this much clear of the bounds wherever the picture itself reaches them.
-    static let captionMargin: CGFloat = Design.Spacing.small
+    ///
+    /// A step above `captionGap` on purpose. Equal to it, the title sat as close to the border
+    /// as to the picture it names — and with the ring drawn the pair read as one crowded line
+    /// rather than as a label belonging to the image under it.
+    static let captionMargin: CGFloat = Design.Spacing.medium
     /// Past this many points per pixel the images are icons being inspected, and interpolation
     /// smears exactly the pixels the comparison is looking for.
     static let crispScaleThreshold: CGFloat = 4
@@ -45,9 +49,32 @@ final class ImageCompareView: NSView {
 
     private let canvas = ImageCompareCanvas()
     private let modeChip = ChipView()
+    private lazy var expandButton = ThemedIconButton(
+        symbolName: "arrow.up.left.and.arrow.down.right",
+        accessibility: L10n.string("Open comparison"),
+        target: .inline,
+        inkSource: .chrome
+    )
 
     /// Answered when the user picks a different mode, so a host can persist it.
     var onModeChange: ((ImageCompareMode) -> Void)?
+
+    /// Whether the surface offers to open itself in the window's own inspector.
+    ///
+    /// On by default: wherever a comparison is inline it is inside something else's height — a
+    /// review row, a pane the divider decides — and the expanded surface is the same comparison
+    /// with the room to actually scrub it. The inspector turns it off in the one place it would
+    /// offer to open what is already open.
+    var allowsExpansion = true {
+        didSet {
+            guard allowsExpansion != oldValue else { return }
+            updateControls()
+        }
+    }
+
+    /// The control inside the surface, for a host whose window *is* this comparison and so opens
+    /// with the scrub already in hand.
+    var preferredFirstResponder: NSView { canvas }
 
     var mode: ImageCompareMode {
         get { canvas.mode }
@@ -84,16 +111,39 @@ final class ImageCompareView: NSView {
     func configure(old: Side?, new: Side?) {
         canvas.old = old
         canvas.new = new
-        modeChip.isHidden = old == nil || new == nil
-        updateModeChip()
+        updateControls()
         canvas.needsDisplay = true
     }
 
     /// The height the surface wants at `width`: the fitted canvas (capped), the controls row,
     /// and the spacing between them. What a review row uses to size an expanded body.
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
-        let controls = modeChip.isHidden ? 0 : Design.Size.chipHeight + Design.Spacing.small
+        let controls = showsControls ? Design.Size.chipHeight + Design.Spacing.small : 0
         return canvas.preferredCanvasHeight(forWidth: width) + controls
+    }
+
+    /// Opens this comparison in the window's inspector, and answers whether it opened. A surface
+    /// with no window — a fixture, or a row already on its way out — has nowhere to open into.
+    @discardableResult
+    func expand() -> Bool {
+        CompareInspectorPresenter.present(
+            CompareInspectorContent(
+                old: canvas.old, new: canvas.new, mode: mode, fraction: fraction
+            ),
+            // The canvas, not the surface around it: it is what focus comes back to when the
+            // inspector closes, and a plain view would decline it.
+            from: canvas,
+            onClose: { [weak self] result in
+                guard let self else { return }
+                // The expanded surface is *this* comparison, so what the user settled on there
+                // is what stands here — otherwise closing it would throw their scrub away and
+                // snap the mode back to whichever one they opened.
+                self.fraction = result.fraction
+                guard result.mode != self.mode else { return }
+                self.mode = result.mode
+                self.onModeChange?(result.mode)
+            }
+        )
     }
 
     // MARK: - Private Methods
@@ -108,9 +158,14 @@ final class ImageCompareView: NSView {
             self.mode = mode
             self.onModeChange?(mode)
         }
+        expandButton.onPress = { [weak self] in
+            guard self?.expand() == false else { return }
+            NSSound.beep()
+        }
 
         addSubview(canvas)
         addSubview(modeChip)
+        addSubview(expandButton)
 
         NSLayoutConstraint.activate([
             canvas.topAnchor.constraint(equalTo: topAnchor),
@@ -120,9 +175,28 @@ final class ImageCompareView: NSView {
                 equalTo: canvas.bottomAnchor, constant: Design.Spacing.small
             ),
             modeChip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            modeChip.bottomAnchor.constraint(equalTo: bottomAnchor)
+            modeChip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // The row is the chip's height, so the shorter button centres on it rather than
+            // deciding a second baseline of its own.
+            expandButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            expandButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
+            expandButton.leadingAnchor.constraint(
+                greaterThanOrEqualTo: modeChip.trailingAnchor, constant: Design.Spacing.small
+            )
         ])
 
+        updateControls()
+    }
+
+    /// The controls row: the mode chip, and the way to open the comparison larger.
+    ///
+    /// Both need two sides. A single image is an added or deleted file — there is no comparison
+    /// to switch the mode of, and nothing an inspector would show that the row does not.
+    private var showsControls: Bool { canvas.old != nil && canvas.new != nil }
+
+    private func updateControls() {
+        modeChip.isHidden = !showsControls
+        expandButton.isHidden = !showsControls || !allowsExpansion
         updateModeChip()
     }
 
@@ -205,11 +279,43 @@ final class ImageCompareCanvas: ThemedControl {
 
     override var acceptsFirstResponder: Bool { isEnabled && isScrubbable }
 
+    private var focusOrigin = KeyboardFocusOrigin()
+
+    /// Whether the ring is being drawn — see `KeyboardFocusOrigin`. The expanded comparison hands
+    /// this canvas focus the moment it opens, and the ring follows the canvas's own bounds, so an
+    /// unconditional one outlined the whole surface before the user had done anything.
+    var showsKeyboardFocusRing: Bool { hasKeyboardFocus && focusOrigin.isFromKeyboard }
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setAccessibilityLabel(L10n.string("Image comparison"))
+    }
+
+    // MARK: - Focus
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusArrived(from: NSApp.currentEvent) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            focusOrigin.resigned()
+            needsDisplay = true
+        }
+        return resigned
+    }
+
+    /// Internal rather than private so a fixture can state the event that moved focus:
+    /// `NSApp.currentEvent` is whatever the run loop last pulled off the queue, and an unshown
+    /// test window pulls nothing.
+    func focusArrived(from event: NSEvent?) {
+        focusOrigin.arrived(from: event)
+        needsDisplay = true
     }
 
     // MARK: - Public Methods
@@ -338,8 +444,12 @@ final class ImageCompareCanvas: ThemedControl {
     /// Drawn by hand rather than through `drawKeyboardFocus`: the canvas has no applied
     /// surface, so its silhouette is its own bounds — inset by half the ring's width, since a
     /// stroke is centred on its path and the half outside the bounds is clipped to half weight.
+    ///
+    /// Shown only under keyboard traversal (`KeyboardFocusOrigin`), because the silhouette here is
+    /// the whole surface: the expanded comparison focuses this canvas as it opens, and a ring
+    /// around everything says nothing about where focus is.
     private func drawCanvasFocusRing() {
-        guard hasKeyboardFocus else { return }
+        guard showsKeyboardFocusRing else { return }
         let width = Design.Accessibility.focusRingWidth
         let rect = bounds.insetBy(dx: width / 2, dy: width / 2)
         let radius = max(0, Design.Radius.control - width / 2)

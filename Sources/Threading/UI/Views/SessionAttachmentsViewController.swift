@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 /// A session's visual deliverables: a compact list above an in-place image/PDF preview.
 ///
@@ -19,6 +20,15 @@ final class SessionAttachmentsViewController: NSViewController {
     private var filter: AttachmentFilter = .all
     private var selectedRelativePath: String?
 
+    /// The one row a caller has explicitly asked to be looking at, resolved on the next refresh.
+    ///
+    /// Held rather than acted on immediately for two reasons. A pane belonging to an unselected
+    /// session has no loaded view yet — `refresh()` returns early there — so the request has to
+    /// survive until `viewDidLoad` asks for the list; and the row may be one the *filter* is
+    /// hiding, which is a conflict only `refresh()` is in a position to settle. Cleared as soon
+    /// as it has been answered, so a later reload does not keep dragging the selection back.
+    private var revealPath: String?
+
     /// The preview's preferred height — its *content's* height, not the pane's slack.
     ///
     /// Without it the preview was the layout's flexible element between a top-pinned list and a
@@ -29,6 +39,17 @@ final class SessionAttachmentsViewController: NSViewController {
     /// rather than pushing the footer out of reach; deactivated for a PDF, which reads better
     /// the taller it is (`footerPull` is what stretches it then).
     private var previewHeightConstraint: NSLayoutConstraint?
+
+    /// The list's height — its *rows'* height, capped at its share of the pane.
+    ///
+    /// It used to be a constant three rows tall, so a session with eight attachments read
+    /// through a letterbox while the pane's slack sat below the footer doing nothing; and this
+    /// list is becoming the session's whole visual history, which a fixed three rows cannot be.
+    /// Stated *above* `previewHeightConstraint` (`listHeightPriority`) and below `required`, so
+    /// the order a pane too short for everything gives way in is: the preview first, then the
+    /// list, and never the footer — the cap is what makes that safe, since a list that can only
+    /// ever ask for half the pane cannot be what pushes the buttons out of reach.
+    private var listHeightConstraint: NSLayoutConstraint?
 
     private lazy var countLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -170,6 +191,38 @@ final class SessionAttachmentsViewController: NSViewController {
         return label
     }()
 
+    // MARK: - Properties (the scope band)
+
+    /// The caption half of the band: how many files the current scope is deciding about.
+    ///
+    /// Terse in the header's own voice, because it is the same fact from the other side — the
+    /// header counts what is listed, this counts what the rule is holding back, or letting in.
+    private lazy var scopeLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.textColor = Design.Text.quaternary
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    private lazy var scopeButton: ThemedButton = {
+        let button = ThemedButton(title: "", target: self, action: #selector(toggleScope))
+        // The quiet tier: this is an aside about a setting, not one of the pane's three actions.
+        button.emphasis = .tertiary
+        return button
+    }()
+    /// Shown only when the setting would change *this* pane, which is the whole rule for it:
+    /// a control that is present whatever it would do teaches nothing, and a session that never
+    /// names a file outside its project should never be asked about files outside its project.
+    private lazy var scopeBand = PaneFooterView(
+        leading: [scopeLabel],
+        trailing: [scopeButton],
+        margin: .paneEdge
+    )
+    private var scopeBandConstraints: [NSLayoutConstraint] = []
+    private var actionsToPaneBottom: [NSLayoutConstraint] = []
+    private var actionsToScopeBand: [NSLayoutConstraint] = []
+
     // MARK: - Initialization
 
     init(sessionID: SessionID) {
@@ -214,6 +267,7 @@ final class SessionAttachmentsViewController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         tableView.sizeLastColumnToFit()
+        updateListHeight()
         updatePreviewHeight()
     }
 
@@ -241,6 +295,8 @@ final class SessionAttachmentsViewController: NSViewController {
         }
         view.addSubview(fileLabel)
         view.addSubview(pathLabel)
+        view.addSubview(scopeBand)
+        scopeBand.isHidden = true
     }
 
     private func setupConstraints() {
@@ -260,7 +316,6 @@ final class SessionAttachmentsViewController: NSViewController {
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: SessionAttachmentsDefaults.listHeight),
 
             previewHost.topAnchor.constraint(
                 equalTo: scrollView.bottomAnchor,
@@ -325,13 +380,6 @@ final class SessionAttachmentsViewController: NSViewController {
                 constant: Design.Spacing.tight
             ),
             chatButton.trailingAnchor.constraint(lessThanOrEqualTo: fileLabel.trailingAnchor),
-            // The floor is a limit, not a home: the footer sits under the preview's content
-            // and the pane's slack falls *below* it, empty. Pinned `==` here, a tall pane
-            // stretched the preview to fill the difference — see `previewHeightConstraint`.
-            openButton.bottomAnchor.constraint(
-                lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor,
-                constant: -Design.Spacing.small
-            ),
 
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -339,19 +387,110 @@ final class SessionAttachmentsViewController: NSViewController {
             emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset)
         ])
 
-        // What stretches a PDF to the floor — and loses, deliberately, to an image's own
-        // height above. One gentle pull instead of a hard pin is the whole difference between
-        // "a document fills the room it has" and "a snapshot is stretched across it".
-        let footerPull = openButton.bottomAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-            constant: -Design.Spacing.small
+        // The floor is a limit, not a home: the footer sits under the preview's content and the
+        // pane's slack falls *below* it, empty. Pinned `==` here, a tall pane stretched the
+        // preview to fill the difference — see `previewHeightConstraint`. What stretches a PDF to
+        // that floor is the gentle pull beneath, which loses deliberately to an image's own
+        // height above: "a document fills the room it has", not "a snapshot stretched across it".
+        //
+        // Stated twice because the floor moves: with the scope band installed the actions stop
+        // above it, and one set is active at a time.
+        actionsToPaneBottom = Self.floorConstraints(
+            for: openButton,
+            above: view.safeAreaLayoutGuide.bottomAnchor,
+            inset: Design.Spacing.small
         )
-        footerPull.priority = SessionAttachmentsDefaults.footerPullPriority
-        footerPull.isActive = true
+        actionsToScopeBand = Self.floorConstraints(
+            for: openButton,
+            above: scopeBand.topAnchor,
+            inset: Design.Spacing.small
+        )
+        NSLayoutConstraint.activate(actionsToPaneBottom)
+
+        scopeBandConstraints = [
+            // Edge to edge, and to the frame rather than the safe area: the band draws the
+            // pane's own fold and states its content's inset from the corner-adapted region
+            // itself. See `PaneFooterView`.
+            scopeBand.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scopeBand.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scopeBand.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ]
+        NSLayoutConstraint.activate(scopeBandConstraints)
 
         let previewHeight = previewHost.heightAnchor.constraint(equalToConstant: 0)
         previewHeight.priority = .defaultHigh
         previewHeightConstraint = previewHeight
+
+        // Always active, unlike the preview's: a list with no rows asks for no height, which is
+        // the same sentence said with a zero.
+        let listHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        listHeight.priority = SessionAttachmentsDefaults.listHeightPriority
+        listHeight.isActive = true
+        listHeightConstraint = listHeight
+        updateListHeight()
+    }
+
+    /// A hard floor plus the gentle pull toward it — the pair that has to move together, so a
+    /// call site cannot activate one and leave the other pinning the actions to the wrong edge.
+    private static func floorConstraints(
+        for control: NSView,
+        above anchor: NSLayoutYAxisAnchor,
+        inset: CGFloat
+    ) -> [NSLayoutConstraint] {
+        let limit = control.bottomAnchor.constraint(lessThanOrEqualTo: anchor, constant: -inset)
+        let pull = control.bottomAnchor.constraint(equalTo: anchor, constant: -inset)
+        pull.priority = SessionAttachmentsDefaults.footerPullPriority
+        return [limit, pull]
+    }
+
+    /// Re-aims `listHeightConstraint` at the rows the list currently holds, capped at its share
+    /// of the pane. Called from `refresh()`, because the rows change, and from `viewDidLayout`,
+    /// because the cap is a function of the pane's *height* — the same pair of reasons
+    /// `updatePreviewHeight()` has for width.
+    ///
+    /// One row is a one-row-tall list; eight rows in a tall pane are eight visible rows; eight
+    /// rows in a short one are the cap, scrolled.
+    private func updateListHeight() {
+        guard let constraint = listHeightConstraint else { return }
+
+        let rows = tableView.numberOfRows
+        // The table's own row rects rather than rows × `rowHeight`: intercell spacing and the
+        // padding the inset style puts above the first row — and, mirrored, below the last — are
+        // the table's business, and a list measured as bare rows clips that padding off into a
+        // scroller a list showing everything it has has no reason to offer.
+        let padding = rows > 0 ? tableView.rect(ofRow: 0).minY : 0
+        let content = rows > 0
+            ? tableView.rect(ofRow: rows - 1).maxY + padding + listChromeHeight
+            : 0
+        let oneRow = rows > 0
+            ? tableView.rect(ofRow: 0).maxY + padding + listChromeHeight
+            : SessionAttachmentsDefaults.rowHeight + listChromeHeight
+        // Before the pane has a height there is nothing to take a share of, so the content
+        // stands in and `viewDidLayout` corrects it the moment the height is real.
+        let paneHeight = view.bounds.height
+        // Never below a single row: a list capped into a sliver is a scroller with nothing
+        // legible beside it, and the pane has already lost by then.
+        let cap = paneHeight > 0
+            ? max(paneHeight * SessionAttachmentsDefaults.listShareOfPane, oneRow)
+            : content
+        let target = min(content, cap)
+        if constraint.constant != target { constraint.constant = target }
+    }
+
+    /// What the scroll view costs above its document — a border, a themed inset. Zero in this
+    /// pane today, and asked for rather than assumed so a bordered scroll view does not silently
+    /// clip its last row.
+    private var listChromeHeight: CGFloat {
+        let insets = scrollView.contentInsets.top + scrollView.contentInsets.bottom
+        let border = NSScrollView.frameSize(
+            forContentSize: .zero,
+            horizontalScrollerClass: nil,
+            verticalScrollerClass: nil,
+            borderType: scrollView.borderType,
+            controlSize: .regular,
+            scrollerStyle: scrollView.scrollerStyle
+        ).height
+        return insets + border
     }
 
     /// Re-aims `previewHeightConstraint` at what the preview currently holds. Called when the
@@ -385,19 +524,52 @@ final class SessionAttachmentsViewController: NSViewController {
 
     // MARK: - Public Methods
 
+    /// Brings one file to the front of the pane: its row selected, scrolled to, and previewed.
+    ///
+    /// This is how a *shown* image arrives now — `display_image` records the file and points the
+    /// list at it rather than spending a tab on it (see `mcp-and-display.md`). The list is the
+    /// session's chronology, so the request is for a row in it, not for a new surface.
+    func showAttachment(at url: URL) {
+        revealPath = url.standardizedFileURL.resolvingSymlinksInPath().path
+        // An unloaded pane keeps the request: `viewDidLoad`'s own refresh answers it, which is
+        // what makes this work for a session the user has not selected yet.
+        guard isViewLoaded else { return }
+        refresh()
+    }
+
     func refresh() {
         guard isViewLoaded else { return }
 
         let previous = selectedAttachment?.relativePath ?? selectedRelativePath
+        // Before the list is read: widening the scope elsewhere — the Settings page, another
+        // window — leaves this session's refused paths in hand, and they are admitted here so
+        // the answer the user gave is the answer the pane shows, not the answer it shows next
+        // time an agent happens to print the path again.
+        if AppSettings.shared.includesAttachmentsOutsideProject,
+           !SessionAttachmentStore.shared.withheldReferences(for: sessionID).isEmpty {
+            SessionAttachmentStore.shared.admitWithheldFilesOutsideProject(for: sessionID)
+        }
         allAttachments = SessionAttachmentStore.shared.attachments(for: sessionID)
+        // A file someone explicitly asked to be shown outranks the filter. The alternative is
+        // the pane answering "show me this picture" with the list it was already showing, which
+        // reads as the request having been dropped — and the filter is a convenience, while this
+        // is an instruction.
+        if let revealPath,
+           filter != .all,
+           let revealed = allAttachments.first(where: { matches($0, path: revealPath) }),
+           !filter.admits(revealed) {
+            filter = .all
+        }
         attachments = allAttachments.filter(filter.admits)
         countLabel.stringValue = L10n.format(
             "ATTACHMENTS  %lld",
             Int64(attachments.count)
         )
         tableView.reloadData()
+        updateListHeight()
         emptyLabel.stringValue = emptyStateMessage()
         updateFilterControl()
+        updateScopeBand()
 
         let hasAttachments = !attachments.isEmpty
         headerRow.isHidden = allAttachments.isEmpty
@@ -413,17 +585,36 @@ final class SessionAttachmentsViewController: NSViewController {
         emptyLabel.isHidden = hasAttachments
 
         guard hasAttachments else {
+            revealPath = nil
             selectedRelativePath = nil
             clearPreview()
             return
         }
 
-        let index = previous.flatMap { path in
-            attachments.firstIndex { $0.relativePath == path }
-        } ?? 0
+        let revealed = revealPath.flatMap { path in
+            attachments.firstIndex { matches($0, path: path) }
+        }
+        revealPath = nil
+        let index = revealed
+            ?? previous.flatMap { path in
+                attachments.firstIndex { $0.relativePath == path }
+            }
+            ?? 0
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
         showSelected()
+    }
+
+    /// Whether a row names `path`, which has already been standardized and resolved.
+    ///
+    /// Three answers because a row has three paths that can all be the one asked about: the file
+    /// it is, the file it was declared from — a declared file from outside the checkout is
+    /// *copied*, so those differ — and the same file spelled through a symlinked parent, which is
+    /// what `/var` against `/private/var` is on every Mac.
+    private func matches(_ attachment: SessionAttachment, path: String) -> Bool {
+        attachment.sourcePath == path
+            || attachment.url.path == path
+            || attachment.url.standardizedFileURL.resolvingSymlinksInPath().path == path
     }
 
     /// Hidden while the whole list is one side's, which is the app's rule for a control that is
@@ -439,6 +630,59 @@ final class SessionAttachmentsViewController: NSViewController {
         if let index = AttachmentFilter.allCases.firstIndex(of: filter) {
             filterControl.selectedIndex = index
         }
+    }
+
+    /// The band appears only when the scope setting would change *this* session's list.
+    ///
+    /// The count is the same fact read from either side — files this session named outside its
+    /// project — so the sentence never changes, only what the button would do with them. A
+    /// session that never names one is never asked about them, which is the point: the setting
+    /// is a real safety rule, and a rule advertised where it costs nothing teaches people to
+    /// turn it off before they have ever needed it.
+    private func updateScopeBand() {
+        let count = SessionAttachmentStore.shared.countOfFilesOutsideProject(for: sessionID)
+        let isShowing = AppSettings.shared.includesAttachmentsOutsideProject
+        let wasHidden = scopeBand.isHidden
+
+        scopeBand.isHidden = count == 0
+        if scopeBand.isHidden != wasHidden {
+            NSLayoutConstraint.deactivate(scopeBand.isHidden ? actionsToScopeBand : actionsToPaneBottom)
+            NSLayoutConstraint.activate(scopeBand.isHidden ? actionsToPaneBottom : actionsToScopeBand)
+        }
+        guard !scopeBand.isHidden else { return }
+
+        scopeLabel.stringValue = L10n.format("OUTSIDE THIS PROJECT  %lld", Int64(count))
+        scopeButton.title = isShowing ? L10n.string("Hide") : L10n.string("Show")
+        let explanation = isShowing
+            ? L10n.string(
+                """
+                Files this session named outside the project are listed, and a paired phone can \
+                fetch them. Hiding them leaves the list to files inside the project.
+                """
+            )
+            : L10n.string(
+                """
+                Files this session named outside the project are not listed, so nothing outside \
+                it can be fetched by a paired phone. Showing them copies them into Threading.
+                """
+            )
+        scopeBand.toolTip = explanation
+        scopeButton.toolTip = explanation
+        scopeButton.setAccessibilityLabel(
+            isShowing
+                ? L10n.string("Hide files outside this project")
+                : L10n.string("Show files outside this project")
+        )
+    }
+
+    /// Flips the app-wide scope, then takes custody of what this session already refused.
+    @objc private func toggleScope() {
+        let next = !AppSettings.shared.includesAttachmentsOutsideProject
+        AppSettings.shared.includesAttachmentsOutsideProject = next
+        if next {
+            SessionAttachmentStore.shared.admitWithheldFilesOutsideProject(for: sessionID)
+        }
+        refresh()
     }
 
     /// Three different silences, and saying the wrong one is worse than saying nothing: an empty
@@ -643,7 +887,12 @@ private final class SessionAttachmentRowView: NSView {
         super.init(frame: .zero)
 
         let icon = NSImageView()
-        icon.image = NSWorkspace.shared.icon(forFile: attachment.url.path)
+        // The picture itself where there is one to show. This list is the panel's visual
+        // history now, and a history of identical file-type glyphs is what it replaced — the
+        // tab strip's row of `photo` marks under titles that truncated to nothing. A PDF, and
+        // anything that will not decode, keeps the file icon rather than showing a blank well.
+        icon.image = SessionAttachmentThumbnails.thumbnail(for: attachment)
+            ?? NSWorkspace.shared.icon(forFile: attachment.url.path)
         icon.imageScaling = .scaleProportionallyDown
         icon.translatesAutoresizingMaskIntoConstraints = false
 
@@ -668,24 +917,39 @@ private final class SessionAttachmentRowView: NSView {
         origin.setContentHuggingPriority(.required, for: .horizontal)
         origin.translatesAutoresizingMaskIntoConstraints = false
 
+        // When it arrived, in the same quiet voice as the mark it sits above. A chronology whose
+        // rows carry no time is a list whose order the reader has to take on trust — and the
+        // order is the whole reason the images stopped being tabs.
+        let moment = NSTextField(
+            labelWithString: SessionAttachmentRowView.description(of: attachment.referencedAt)
+        )
+        moment.applyFont(.caption)
+        moment.textColor = Design.Text.quaternary
+        moment.setContentCompressionResistancePriority(.required, for: .horizontal)
+        moment.setContentHuggingPriority(.required, for: .horizontal)
+        moment.translatesAutoresizingMaskIntoConstraints = false
+
         addSubview(icon)
         addSubview(name)
         addSubview(path)
         addSubview(origin)
+        addSubview(moment)
 
-        // One element, read as one sentence: three separate labels would be announced as three
-        // unrelated strings with no hint that the last one is the provenance of the first.
+        // One element, read as one sentence: four separate labels would be announced as four
+        // unrelated strings with no hint that the last two are the provenance and the moment of
+        // the first.
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(
             L10n.format(
-                "%@, from %@, %@",
+                "%@, from %@, %@, %@",
                 attachment.name,
                 attachment.origin.title,
-                attachment.relativePath
+                attachment.relativePath,
+                moment.stringValue
             )
         )
-        for child in [icon, name, path, origin] {
+        for child in [icon, name, path, origin, moment] {
             child.setAccessibilityElement(false)
         }
 
@@ -700,6 +964,9 @@ private final class SessionAttachmentRowView: NSView {
                 constant: Design.Spacing.small
             ),
 
+            moment.trailingAnchor.constraint(equalTo: origin.trailingAnchor),
+            moment.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
+
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SessionAttachmentsDefaults.iconSize),
@@ -710,7 +977,7 @@ private final class SessionAttachmentRowView: NSView {
                 constant: Design.Spacing.small
             ),
             name.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor,
+                lessThanOrEqualTo: moment.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
             name.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
@@ -720,9 +987,110 @@ private final class SessionAttachmentRowView: NSView {
         ])
     }
 
+    /// Terse on purpose: a column of full timestamps is a column of the same date said 32 times.
+    /// Today's rows say the time, everything older says the day — which is the distinction the
+    /// reader is actually making when they scan for the picture from this morning.
+    private static func description(of date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? timeFormatter.string(from: date)
+            : dateFormatter.string(from: date)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("dMMM")
+        return formatter
+    }()
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+}
+
+// MARK: - Thumbnails
+
+/// The small pictures the rows are made of.
+///
+/// Two rules make a list of real thumbnails affordable, and both are the point of using ImageIO
+/// rather than `NSImage(contentsOf:)`:
+///
+/// - **The decode is bounded by the row, not by the file.** `CGImageSourceCreateThumbnailAtIndex`
+///   with a `MaxPixelSize` reads what it needs for that size, so a 12-megapixel screenshot costs
+///   a thumbnail rather than 48 MB of bitmap on the main thread. The same reasoning as
+///   `CompareFileClassifier`, which asks `CGImageSource` what a file *is* without loading it.
+/// - **A reload re-decodes nothing.** The list reloads on every store change, and a session may
+///   hold `SessionAttachmentDefaults.maximumPerSession` files; keyed by path *and* modification
+///   date, a regenerated chart still refreshes while the other rows are answered from memory.
+///
+/// `NSCache` rather than a dictionary because these are reconstructible: the budget is named
+/// (`thumbnailCacheCount`) and the system may take them back under pressure.
+@MainActor
+enum SessionAttachmentThumbnails {
+
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = SessionAttachmentsDefaults.thumbnailCacheCount
+        return cache
+    }()
+
+    /// The row's picture, or nil for anything that is not an image Threading can decode — a PDF,
+    /// a file that has gone, bytes that are not really a picture. The caller falls back to the
+    /// file icon rather than showing an empty well.
+    static func thumbnail(for attachment: SessionAttachment) -> NSImage? {
+        guard attachment.kind == .image else { return nil }
+        return thumbnail(
+            for: attachment.url,
+            size: SessionAttachmentsDefaults.iconSize
+        )
+    }
+
+    static func thumbnail(for url: URL, size: CGFloat) -> NSImage? {
+        let pixels = Int((size * SessionAttachmentsDefaults.thumbnailScale).rounded())
+        // Read through `FileManager` rather than `URL.resourceValues`, which answers from
+        // `NSURL`'s own cache: the same `URL` value asked twice reports the date it had the
+        // first time, so a chart regenerated in place would keep its old thumbnail forever.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = (attributes?[.modificationDate] as? Date)?
+            .timeIntervalSinceReferenceDate ?? 0
+        // The modification date is in the key rather than checked against a stored one: an
+        // overwritten file is a different picture at the same path, and this list exists to show
+        // the newest of exactly that.
+        let key = "\(url.path)|\(modified)|\(pixels)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+
+        guard let source = CGImageSourceCreateWithURL(
+            url as CFURL,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ) else { return nil }
+
+        let options: [CFString: Any] = [
+            // Always: a file's own embedded thumbnail may be absent, stale or a different crop.
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: pixels
+        ]
+        guard let decoded = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else { return nil }
+
+        // Sized in pixels and scaled down into the row's well, so the picture stays crisp on a
+        // Retina display without the row having to know what scale it is drawn at.
+        let image = NSImage(
+            cgImage: decoded,
+            size: NSSize(width: decoded.width, height: decoded.height)
+        )
+        cache.setObject(image, forKey: key)
+        return image
     }
 }
 
@@ -772,10 +1140,16 @@ extension SessionAttachment.Origin {
 
 enum SessionAttachmentsDefaults {
     static let columnIdentifier = NSUserInterfaceItemIdentifier("SessionAttachmentsColumn")
-    static let listHeight: CGFloat = 136
     static let rowHeight: CGFloat = 42
     static let iconSize: CGFloat = 26
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
+
+    /// How many pixels a row's thumbnail is decoded to, as a multiple of the well it sits in:
+    /// enough for a Retina row, and nowhere near a full decode of the file behind it.
+    static let thumbnailScale: CGFloat = 2
+    /// The budget on decoded thumbnails held in memory. Twice a session's own cap, so moving
+    /// between two conversations re-decodes neither of them.
+    static let thumbnailCacheCount = SessionAttachmentDefaults.maximumPerSession * 2
 
     /// A floor for the image well, so a small mark still gets a quiet panel rather than a
     /// sliver whose corner radius outweighs its height.
@@ -785,4 +1159,13 @@ enum SessionAttachmentsDefaults {
     /// Gentle on purpose: it loses to an image's own height (`.defaultHigh`) and wins only
     /// when nothing states one — a PDF, which fills whatever room the pane has.
     static let footerPullPriority = NSLayoutConstraint.Priority(300)
+
+    /// How much of the pane the list may take before it starts scrolling. Half: the rows and
+    /// what they are describing are two halves of the same pane, and neither may swallow the
+    /// other on the way to the footer.
+    static let listShareOfPane: CGFloat = 0.5
+    /// Above the preview's `.defaultHigh`, below `required`. A pane too short for everything
+    /// therefore compresses the preview first and the list only after it — and the footer's
+    /// floor, which is `required`, never.
+    static let listHeightPriority = NSLayoutConstraint.Priority(760)
 }

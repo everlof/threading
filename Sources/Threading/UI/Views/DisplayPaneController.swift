@@ -325,6 +325,12 @@ final class DisplayPaneController: NSViewController {
         }
       ),
       (
+        L10n.string("Execution audit"), "checklist.checked", canAddBrowser,
+        {
+          [weak self] in _ = self?.addAuditTab(for: sessionID)
+        }
+      ),
+      (
         "Browser", "globe", canAddBrowser,
         {
           [weak self] in _ = self?.addBrowserTab(for: sessionID)
@@ -733,6 +739,33 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  /// Adds the factual execution ledger. It owns one live browser so its alternate mode can put
+  /// browser actions and the page they affected beside each other without rebuilding either.
+  @discardableResult
+  func addAuditTab(for sessionID: SessionID) -> ExecutionAuditViewController? {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+    if let existing = tabs.first(where: { $0.audit != nil }), let audit = existing.audit {
+      activeTabIDBySession[sessionID] = existing.id
+      activeBrowserTabIDBySession[sessionID] = existing.id
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+      return audit
+    }
+    guard tabs.lazy.filter({ $0.browser != nil }).count < DisplayPaneDefaults.maximumBrowserTabs
+    else { return nil }
+
+    let controller = makeAudit(for: sessionID)
+    let tab = DisplayTab(body: .audit(controller))
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
+    activeBrowserTabIDBySession[sessionID] = tab.id
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
   /// Builds a browser view controller wired to persist and re-render when its page changes, so a
   /// navigation — the agent's or the user's — is saved and reflected in the tab strip.
   private func makeBrowser(
@@ -745,6 +778,28 @@ final class DisplayPaneController: NSViewController {
       guard let self else { return }
       self.persist(sessionID)
       if sessionID == self.currentSessionID { self.render() }
+    }
+    return controller
+  }
+
+  private func makeAudit(
+    for sessionID: SessionID,
+    mode: ExecutionAuditViewController.Mode = .audit
+  ) -> ExecutionAuditViewController {
+    let browser = browserFactory(.shared)
+    let controller = ExecutionAuditViewController(
+      sessionID: sessionID,
+      browser: browser,
+      initialMode: mode
+    )
+    addChild(controller)
+    browser.onPageChange = { [weak self] in
+      guard let self else { return }
+      self.persist(sessionID)
+      if sessionID == self.currentSessionID { self.render() }
+    }
+    controller.onModeChange = { [weak self] _ in
+      self?.persist(sessionID)
     }
     return controller
   }
@@ -1630,6 +1685,18 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(browser)
 
+    case .audit(let audit):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(audit)
+      if audit.browser.currentURL == nil, let url = audit.browser.restoredURL {
+        audit.browser.restoredURL = nil
+        audit.browser.navigate(to: url)
+      }
+
     case .review(let review):
       imageView.image = nil
       imageView.isHidden = true
@@ -1789,6 +1856,7 @@ final class DisplayPaneController: NSViewController {
       case .semanticScene: return "semantic-scene"
       }
     case .browser: return "browser"
+    case .audit: return "audit"
     case .review: return "review"
     case .info: return "info"
     case .terminal: return "terminal"
@@ -1815,6 +1883,13 @@ final class DisplayPaneController: NSViewController {
     }
 
     var tabs: [DisplayTab] = []
+    // Image tabs written before a shown image became a row in the Attachments list. They are
+    // converted rather than reopened, and the conversion is deferred to *after* the session's
+    // tabs are in place: recording announces synchronously, this controller answers that
+    // announcement with `ensureAttachmentsTab`, and that call re-enters `restoreIfNeeded` — which
+    // is only a no-op once `tabsBySession` holds something. Recording inside this loop restores
+    // the same layout again on every file, which recurses until the stack is gone.
+    var imagesToConvert: [(source: URL?, cacheFile: String?, wasActive: Bool)] = []
     for persisted in panel.panelTabs {
       let id = UUID(uuidString: persisted.id) ?? UUID()
       switch persisted.kind {
@@ -1823,6 +1898,13 @@ final class DisplayPaneController: NSViewController {
         controller.restoredURL = persisted.url
         tabs.append(DisplayTab(id: id, body: .browser(controller)))
 
+      case .audit:
+        let mode = persisted.mode.flatMap(ExecutionAuditViewController.Mode.init(rawValue:))
+          ?? .audit
+        let controller = makeAudit(for: sessionID, mode: mode)
+        controller.restoredURL = persisted.url
+        tabs.append(DisplayTab(id: id, body: .audit(controller)))
+
       case .html:
         guard let html = persisted.html else { continue }
         let content = DisplayContent(
@@ -1830,6 +1912,18 @@ final class DisplayPaneController: NSViewController {
         tabs.append(DisplayTab(id: id, body: .content(content)))
 
       case .image:
+        // A session with a project has an Attachments list, and that list is where a shown
+        // image belongs — so the tab converts into a row and the PNG copy beside the layout is
+        // dropped. A session without one has nowhere to convert *to*: it is the same fallback
+        // `display_image` takes, so its tab is restored exactly as it was written.
+        if ProjectStore.shared.project(forSessionID: sessionID) != nil {
+          imagesToConvert.append((
+            source: persisted.url.flatMap(URL.init(string:)),
+            cacheFile: persisted.cacheFile,
+            wasActive: persisted.id == panel.activeTabID
+          ))
+          continue
+        }
         guard let cacheFile = persisted.cacheFile,
           let image = DisplayPaneStore.shared.loadImage(cacheFile, for: sessionID)
         else { continue }
@@ -1920,6 +2014,53 @@ final class DisplayPaneController: NSViewController {
       tabs.first {
         $0.id == activeID && $0.browser != nil
       }?.id ?? tabs.first(where: { $0.browser != nil })?.id
+
+    convertPersistedImages(imagesToConvert, for: sessionID)
+  }
+
+  /// Files a relaunch's image tabs into the session's Attachments list and forgets the tabs.
+  ///
+  /// Safe to announce from here only because the session's tabs are already in place: the
+  /// recorder posts synchronously, this controller answers with `ensureAttachmentsTab`, and that
+  /// is what puts the list in the strip — so the pane keeps a surface for what it just took off
+  /// it. A source that has since been deleted files nothing; the cached PNG goes either way,
+  /// since the tab that owned it is gone.
+  private func convertPersistedImages(
+    _ images: [(source: URL?, cacheFile: String?, wasActive: Bool)],
+    for sessionID: SessionID
+  ) {
+    guard !images.isEmpty,
+      let project = ProjectStore.shared.project(forSessionID: sessionID)
+    else { return }
+
+    var wasShowingOne = false
+    for image in images {
+      if let source = image.source,
+        source.isFileURL,
+        FileManager.default.fileExists(atPath: source.path)
+      {
+        SessionAttachmentStore.shared.record(
+          declared: source,
+          sessionID: sessionID,
+          projectRoot: project.folderURL,
+          origin: .agent
+        )
+      }
+      if let cacheFile = image.cacheFile {
+        DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID)
+      }
+      wasShowingOne = wasShowingOne || image.wasActive
+    }
+
+    // The panel may not point at a tab that is no longer there. The list is where that image
+    // went, so it is what the user who left the app looking at it comes back to.
+    if wasShowingOne,
+      let attachments = tabsBySession[sessionID]?.first(where: { $0.attachments != nil })
+    {
+      activeTabIDBySession[sessionID] = attachments.id
+    }
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
   }
 
   /// Writes the session's current tabs and selection to disk.
@@ -1938,6 +2079,19 @@ final class DisplayPaneController: NSViewController {
   }
 
   private func persisted(_ tab: DisplayTab) -> PersistedTab? {
+    if let audit = tab.audit {
+      return PersistedTab(
+        id: tab.id.uuidString,
+        kind: .audit,
+        title: tab.title,
+        subtitle: "",
+        url: audit.browser.contextKind == .shared ? audit.restoredURL : nil,
+        html: nil,
+        cacheFile: nil,
+        mode: audit.mode.rawValue
+      )
+    }
+
     if let browser = tab.browser {
       // Private contexts are runtime-only by definition. Persisting their URL would both
       // misrepresent the missing ephemeral state and leave a browsing-history trace.

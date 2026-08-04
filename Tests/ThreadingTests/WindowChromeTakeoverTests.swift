@@ -273,4 +273,61 @@ final class WindowChromeTakeoverTests: XCTestCase {
         XCTAssertFalse(window.isInTitlebarStrip(nearTop),
                        "a frameless window has no strip; the band owns the double-click")
     }
+
+    // MARK: - Covering Surfaces
+
+    /// A surface that covers the window — the media inspector, an expanded comparison — must not
+    /// cover the way out of it.
+    ///
+    /// In native dress the content is drawn full-size and the traffic lights float over its top,
+    /// so a surface pinned to `contentView.topAnchor` opens beneath them: that shipped, and the
+    /// inspector's title sat under the three buttons. In a takeover the chrome is the app's own
+    /// title and command bands, so the surface starts under both and stays inside the drawn
+    /// frame. One installed surface is asserted across the
+    /// exchange, because the area is stated as constraints and has to follow a live theme flip.
+    func testACoveringSurfaceClearsTheWindowsChromeInBothDresses() throws {
+        AppThemePalette.set(.system)
+        let controller = MainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        let coordinator = try XCTUnwrap(controller.chromeCoordinator)
+        let root = try XCTUnwrap(window.contentView)
+        let host = try XCTUnwrap(window.contentViewController as? WindowChromeHostViewController)
+
+        let probe = NSView()
+        let presentation = try XCTUnwrap(
+            InWindowOverlay.install(probe, in: window, onDismiss: {})
+        )
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(root.safeAreaInsets.top, 0,
+                             "a full-size content view has a titlebar strip to clear")
+        XCTAssertEqual(probe.frame.maxY, root.bounds.maxY - root.safeAreaInsets.top, accuracy: 1,
+                       "the surface opened under the traffic lights")
+        XCTAssertEqual(probe.frame.minX, 0, accuracy: 1, "native dress draws no frame to inset")
+
+        // The wash reaches further than the surface, on purpose: in native dress the window's own
+        // buttons are AppKit's, above the content view entirely, so the strip the surface has to
+        // clear is app-drawn chrome that must dim with everything else.
+        XCTAssertEqual(presentation.scrim.frame, root.bounds,
+                       "the strip above the surface stayed lit")
+
+        AppThemePalette.set(try makeTakeoverTheme())
+        coordinator.applyCurrentTheme()
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(host.bandView.frame.height, 0, "the takeover band has no height")
+        XCTAssertGreaterThan(host.commandBandView.frame.height, 0,
+                             "the takeover command band has no height")
+        XCTAssertEqual(probe.frame.maxY, host.commandBandView.frame.minY, accuracy: 1,
+                       "the surface covered the app-drawn window chrome")
+        XCTAssertGreaterThan(probe.frame.minX, 0, "the surface covered the theme's own frame")
+
+        // In a takeover the band *is* this window's titlebar, so the wash stops under it: dimming
+        // the way out of the window is allowed, swallowing the click that takes it is not.
+        XCTAssertEqual(presentation.scrim.frame.maxY, host.bandView.frame.minY, accuracy: 1,
+                       "the wash covered the takeover window's own close, minimize and zoom")
+        XCTAssertEqual(presentation.scrim.frame.minY, probe.frame.minY, accuracy: 1,
+                       "the wash and the surface disagree about the bottom of the window")
+    }
 }

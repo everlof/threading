@@ -39,6 +39,33 @@ turned it off, where a window that zoomed anyway would be the worse bug. `Titleb
 pins the platform behaviour beside the fix, in the way `PaneHeaderTests` pins its own: if AppKit
 ever hit-tests that strip to the titlebar again, the test says so and the class can go.
 
+### A pane cannot be taller than its window
+
+**A pane's content states a *required* minimum on the window itself.** A window with a content
+view controller takes its minimum content size from that view's fit, so a column taller than the
+pane does not overflow, scroll, or clip — it makes the **window** taller, and it does so with the
+top edge held, which is to say downwards, off the bottom of the screen.
+
+That is not a theoretical hazard, and the composer is where it was found. Its usage panel drew
+one bar per rate-limit window plus one per metered model, and both lists are the provider's to
+lengthen: measured on an unshown 420pt-tall window, five bars grew it to 561pt and twelve grew it
+to 932. Past the screen's height the second half of the bug arrives from AppKit rather than from
+here — `constrainFrameRect(_:to:)` pins an over-tall window's top edge back to the top of the
+visible frame **every time it is moved**, so the window snaps to the top of the screen and resists
+being dragged down. It was reported as two bugs ("the window grows off the bottom", "it jumps to
+the top when I drag it") and was one.
+
+The fix was a fitting pass that handed the panel whatever height the rest of the column had left.
+**The panel is gone now** and so is the pass: the account's reading is one line inside the prompt
+box's own footer, with the detail on its tooltip, so nothing in the composer grows with what a
+provider reports. What is left is bounded by construction — a chip row, a box capped at
+`Design.Size.inputMaxHeight`, and a one-line import offer under it — which is the stronger
+version of the same rule: a pane that *cannot* grow without bound needs nothing to yield.
+
+`ComposerWindowFitTests` keeps both halves: that the composer leaves the window the height it was
+given, down to `WindowDefaults.minHeight`, and AppKit's `constrainFrameRect` behaviour, so if the
+platform ever stops yanking the window the reason for the rule is gone with it.
+
 **The toolbar holds only controls that act on the window itself, and everything else belongs
 to the pane it describes.** `NSToolbar` positions its items relative to the *window*, which is
 what makes it right for exactly two things: the sidebar toggle, which acts on the split rather
@@ -135,6 +162,31 @@ project has already had once, where it hid the terminal's first rows. The sideba
 `safeAreaLayoutGuide`; everything in the content pane pins to
 `TerminalContainerViewController.contentTopAnchor`, which is the header's bottom, so the header
 is the only place that knows how tall it is.
+
+**A surface that covers the window has the same rule, and learned it the same way.** The media
+inspector and the expanded comparison pinned themselves to `contentView`'s own top, which under
+a full-size content view is the top of the *window*: their headers opened beneath the traffic
+lights, title and controls both, and a picture said so where no assertion did. `InWindowOverlay`
+is now the one place that decides where "over the window" starts, and the answer is per dress:
+in native dress the safe area, toolbar included; in a takeover the app's own band, which carries
+that window's close, minimize and zoom, plus the frame the theme draws around it. A modal that
+covers the way out of the window is not a modal. `WindowChromeHostViewController` states the area
+as a layout guide (`InWindowOverlayHosting`) rather than a number, written as two `>=` and a
+low-priority pull upward so it answers `max` of the two edges *live* — a theme flipped while a
+surface is open moves it instead of leaving it pinned to the dress it opened in.
+`WindowChromeTakeoverTests` asserts one installed surface across the exchange.
+
+**What the surface cannot cover, the scrim under it dims.** The strip it clears is not empty: in
+native dress it holds the app's own header band, and left fully lit that band stacked directly on
+the inspector's header with a hairline between them — a picture of the running app showed two rows
+of chrome that read as one window rather than as something opened in front of it. So
+`InWindowOverlay` installs a wash beneath the surface, over a *second* guide
+(`overlayScrimArea`): everything below whatever draws this window's own buttons. In native dress
+those are AppKit's, above the content view entirely, so the wash takes the whole of it, band
+included; in a takeover they are the app's title band, so it starts under it and dims the command
+row and workspace below. Dimming a way out of the window is fine. Swallowing the click that takes
+it is the same bug as covering it, one step subtler — the wash eats every click it lies over, and
+that click is the dismissal.
 
 **A collapsed pane's divider is hidden, because at the window's edge it is not a seam but a bar.**
 `NSSplitViewController` keeps a collapsed item's divider so it can be dragged back open — right
@@ -280,8 +332,14 @@ accessibility action for a press that does nothing.
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table
 restyle the label on selection, which tints an unemphasized source-list row with the accent
 colour; the filled selection shape is the only cue wanted. Each row view's `applyTextColors`
-owns the colours instead, inverting only for `.emphasized` (selected while the sidebar has
-focus).
+owns the colours instead, inverting only for `.emphasized`.
+
+**`.emphasized` means "the window is in front", not "the sidebar has focus"** — AppKit's own
+answer is the second one, and this window takes focus away on every click, which is what made the
+sidebar's selection need a second click to look like one. The rule is not the sidebar's: every
+list in the app holds its rows to its window's key state through `ListSelectionStrength`, and the
+rows read `isEmphasized` and draw. See [`design-system.md`](design-system.md), *a list's selection
+follows its window*.
 
 A session row's trailing edge is one fixed-size slot holding the status indicator and the
 `⋯` actions button overlaid, crossfaded on hover via `alphaValue` rather than `isHidden` —

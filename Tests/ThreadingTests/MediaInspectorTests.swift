@@ -168,17 +168,184 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertTrue(source.performPrimaryAction())
         XCTAssertTrue(MediaInspectorPresenter.isPresenting(in: window))
         XCTAssertEqual(root.subviews.compactMap { $0 as? MediaInspectorView }.count, 1)
+        XCTAssertEqual(scrims(in: root).count, 1)
         XCTAssertTrue(source.performPrimaryAction())
         XCTAssertEqual(
             root.subviews.compactMap { $0 as? MediaInspectorView }.count,
             1,
             "a second activation should replace, not stack, the inspector"
         )
+        XCTAssertEqual(
+            scrims(in: root).count,
+            1,
+            "a second activation left the first presentation's wash behind"
+        )
         XCTAssertTrue(ThemeBoundaryAudit.violations(in: root).isEmpty)
 
         MediaInspectorPresenter.dismiss(in: window)
         XCTAssertFalse(MediaInspectorPresenter.isPresenting(in: window))
         XCTAssertTrue(window.firstResponder === source)
+        XCTAssertEqual(
+            root.subviews.compactMap { $0 as? MediaInspectorView }.count,
+            0,
+            "closing left the surface in the window"
+        )
+        XCTAssertEqual(scrims(in: root).count, 0, "closing left the window dimmed")
+    }
+
+    /// The window behind a covering surface has to *be* behind it.
+    ///
+    /// The app's own header band — session tabs, panel toggles, the sidebar's top corner — is the
+    /// one part of the window a full-height inspector does not cover, because the surface stops
+    /// below the strip the traffic lights float over. Left lit it stacked directly on the
+    /// inspector's own header with a hairline between them, and a picture of the running app read
+    /// as two rows of one window's chrome rather than as something opened in front of it. The wash
+    /// therefore takes the *whole* content view while the surface keeps its own, smaller, area.
+    func testTheDimmingWashCoversTheWholeContentViewUnderTheSurface() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let source = NSView(frame: NSRect(x: 20, y: 20, width: 120, height: 90))
+        root.addSubview(source)
+        let window = fullSizeContentWindow(hosting: root)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+
+        XCTAssertTrue(MediaInspectorPresenter.present(fixture.items[0], from: source))
+        root.layoutSubtreeIfNeeded()
+
+        let scrim = try XCTUnwrap(
+            scrims(in: root).first, "the inspector opened with nothing behind it"
+        )
+        let inspector = try XCTUnwrap(root.subviews.compactMap { $0 as? MediaInspectorView }.first)
+
+        XCTAssertEqual(scrim.frame, root.bounds, "the wash left part of the window lit")
+        XCTAssertGreaterThan(
+            scrim.frame.maxY,
+            inspector.frame.maxY,
+            "the wash stopped where the surface does, which leaves the band above it lit"
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(root.subviews.firstIndex(of: scrim)),
+            try XCTUnwrap(root.subviews.firstIndex(of: inspector)),
+            "the wash was ordered over the surface it is meant to be under"
+        )
+        XCTAssertTrue(ThemeBoundaryAudit.violations(in: root).isEmpty)
+    }
+
+    /// The dimmed ground is a way out, the way it is in every other app: the same dismissal the
+    /// close button and Escape run, focus included.
+    func testClickingTheDimmedGroundClosesTheInspectorAndRestoresFocus() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let root = ThemedSurfaceView()
+        root.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
+        root.translatesAutoresizingMaskIntoConstraints = true
+        let source = ThemedImagePreview(frame: NSRect(x: 20, y: 20, width: 200, height: 160))
+        source.translatesAutoresizingMaskIntoConstraints = true
+        source.image = fixture.items[0].image
+        source.fileURL = fixture.items[0].url
+        root.addSubview(source)
+
+        let window = fullSizeContentWindow(hosting: root)
+        window.makeFirstResponder(source)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+
+        XCTAssertTrue(source.performPrimaryAction())
+        let scrim = try XCTUnwrap(scrims(in: root).first)
+
+        scrim.mouseDown(with: try clickEvent())
+
+        XCTAssertFalse(MediaInspectorPresenter.isPresenting(in: window))
+        XCTAssertTrue(
+            window.firstResponder === source,
+            "closing from the ground did not hand focus back to the source"
+        )
+        XCTAssertTrue(scrims(in: root).isEmpty, "the wash outlived the surface it dimmed for")
+    }
+
+    /// The canvas is made first responder the instant the inspector opens — the arrow keys, the
+    /// zoom keys and Escape all belong there — and it fills the surface, so an unconditional focus
+    /// ring drew an accent rectangle around the whole window before the user had done anything.
+    /// Keyboard traversal still shows it, because that is the one case it says something.
+    func testTheCanvasDrawsNoFocusRingUntilFocusArrivesFromTheKeyboard() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let source = NSView(frame: NSRect(x: 20, y: 20, width: 120, height: 90))
+        root.addSubview(source)
+        let window = fullSizeContentWindow(hosting: root)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+
+        XCTAssertTrue(MediaInspectorPresenter.present(fixture.items[0], from: source))
+        root.layoutSubtreeIfNeeded()
+
+        let inspector = try XCTUnwrap(root.subviews.compactMap { $0 as? MediaInspectorView }.first)
+        let canvas = try XCTUnwrap(
+            descendants(of: inspector).compactMap { $0 as? MediaInspectorCanvas }.first
+        )
+
+        XCTAssertTrue(
+            window.firstResponder === canvas, "the inspector did not open holding the picture"
+        )
+        XCTAssertFalse(
+            canvas.showsKeyboardFocusRing, "opening the inspector outlined the entire picture"
+        )
+        let quiet = try XCTUnwrap(render(canvas))
+
+        canvas.focusArrived(from: try keyEvent("\t", keyCode: 48))
+        XCTAssertTrue(
+            canvas.showsKeyboardFocusRing, "keyboard traversal left focus with nothing to see"
+        )
+        XCTAssertNotEqual(
+            quiet, try XCTUnwrap(render(canvas)), "the ring never reached the pixels"
+        )
+
+        // Every key the canvas owns keeps working either way — the ring is a decision about
+        // drawing, not about who is handling the keys.
+        canvas.keyDown(with: try keyEvent("z", keyCode: 6))
+        XCTAssertEqual(canvas.zoomMode, .actualSize)
+        canvas.keyDown(with: try keyEvent("z", keyCode: 6))
+        XCTAssertEqual(canvas.zoomMode, .fit)
+    }
+
+    /// The header opened *under* the traffic lights: the window draws its content full-size
+    /// beneath a transparent titlebar, and the inspector pinned itself to that view's own top.
+    /// The strip is the platform's, so the surface clears it by the safe area rather than by a
+    /// measurement anyone here would have to keep.
+    func testTheInspectorOpensBelowTheWindowsTitlebarStrip() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let source = NSView(frame: NSRect(x: 20, y: 20, width: 120, height: 90))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.contentView = root
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+
+        XCTAssertTrue(MediaInspectorPresenter.present(fixture.items[0], from: source))
+        root.layoutSubtreeIfNeeded()
+
+        let inspector = try XCTUnwrap(root.subviews.compactMap { $0 as? MediaInspectorView }.first)
+        XCTAssertGreaterThan(
+            root.safeAreaInsets.top, 0, "the fixture window has no titlebar strip to clear"
+        )
+        XCTAssertEqual(
+            inspector.frame.maxY,
+            root.bounds.maxY - root.safeAreaInsets.top,
+            accuracy: 1,
+            "the inspector's header opened under the window's own buttons"
+        )
     }
 
     func testDocumentRendererNamesAndContainsItsSystemChrome() {
@@ -228,12 +395,7 @@ final class MediaInspectorTests: XCTestCase {
             AppThemePalette.set(.system)
             try? FileManager.default.removeItem(at: fixture.directory)
         }
-        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-            URL(fileURLWithPath: $0)
-        } ?? FileManager.default.temporaryDirectory.appendingPathComponent(
-            "ThreadingRenders",
-            isDirectory: true
-        )
+        let directory = renderDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let themes: [(String, AppTheme)] = [
@@ -266,7 +428,58 @@ final class MediaInspectorTests: XCTestCase {
         print("Rendered media inspector storybook to \(directory.path)")
     }
 
+    /// The picture the wash exists for: the strip of window a full-height surface cannot cover,
+    /// with the app's own lit chrome in it. A tonal claim is reviewed by looking at it — this one
+    /// shipped as two rows of chrome separated by a hairline, and no assertion anybody would have
+    /// written said so.
+    func testRendersTheDimmedWindowBehindTheInspector() throws {
+        let fixture = try imageFiles(count: 2)
+        defer {
+            AppThemePalette.set(.system)
+            try? FileManager.default.removeItem(at: fixture.directory)
+        }
+        let directory = renderDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        AppThemePalette.set(.system)
+        for (name, appearanceID) in [
+            ("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)
+        ] {
+            let root = ThemedSurfaceView()
+            root.frame = NSRect(x: 0, y: 0, width: 960, height: 640)
+            root.translatesAutoresizingMaskIntoConstraints = true
+            root.appearance = NSAppearance(named: appearanceID)
+            root.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+            let source = NSView(frame: NSRect(x: 20, y: 20, width: 120, height: 90))
+            root.addSubview(source)
+
+            let window = fullSizeContentWindow(hosting: root)
+            window.appearance = NSAppearance(named: appearanceID)
+            defer { MediaInspectorPresenter.dismiss(in: window) }
+
+            XCTAssertTrue(MediaInspectorPresenter.present(
+                MediaInspectorSelection(items: fixture.items, selectedIndex: 0),
+                from: source
+            ))
+            AppThemeRefresh.repaint(root)
+            let data = try XCTUnwrap(render(root))
+            try data.write(
+                to: directory.appendingPathComponent("media-inspector-scrim-\(name).png")
+            )
+        }
+        print("Rendered the dimmed window behind the inspector to \(directory.path)")
+    }
+
     // MARK: - Fixtures
+
+    private func renderDirectory() -> URL {
+        ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+            URL(fileURLWithPath: $0)
+        } ?? FileManager.default.temporaryDirectory.appendingPathComponent(
+            "ThreadingRenders",
+            isDirectory: true
+        )
+    }
 
     private func imageFiles(count: Int) throws
         -> (directory: URL, items: [MediaInspectorItem]) {
@@ -321,6 +534,28 @@ final class MediaInspectorTests: XCTestCase {
         view.subviews + view.subviews.flatMap(descendants)
     }
 
+    /// The wash `InWindowOverlay` puts under a covering surface. Found by the name the installer
+    /// gives it, because the view itself is private to that file — which is the point: nothing
+    /// outside it may build one, and nothing may remove one without the surface.
+    private func scrims(in root: NSView) -> [NSView] {
+        root.subviews.filter { $0.identifier == InWindowOverlay.scrimIdentifier }
+    }
+
+    /// An unshown window dressed like the app's: content drawn full-size under a transparent
+    /// titlebar, so the strip the traffic lights float over is real and the surface has something
+    /// to clear.
+    private func fullSizeContentWindow(hosting root: NSView) -> NSWindow {
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.contentView = root
+        return window
+    }
+
     private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown,
@@ -333,6 +568,20 @@ final class MediaInspectorTests: XCTestCase {
             charactersIgnoringModifiers: characters,
             isARepeat: false,
             keyCode: keyCode
+        ))
+    }
+
+    private func clickEvent() throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
         ))
     }
 

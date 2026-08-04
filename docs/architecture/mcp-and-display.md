@@ -19,6 +19,13 @@ one-run `mcp_servers` overrides, so a tool call arrives already attributed — t
 identity. `AgentSession.id` is the key, not
 `agentSessionID`, which is nil for Codex until discovery.
 
+Grok native Chat receives the same private endpoint through ACP's `mcpServers` member on
+`session/new` and `session/load`. This is per-process and per-session, so no `.mcp.json` or user
+configuration is rewritten. Grok and OpenCode terminal sessions do not receive this registration
+yet: Grok's TUI exposes only persistent MCP configuration, while OpenCode has a future path through
+its local server once Threading owns and measures that lifecycle. Until those contracts exist, the
+tools stay absent rather than appearing configured while calls cannot route.
+
 One tool uses that routing as a data boundary rather than merely a destination.
 `conversation_history` exists for a session created by **Continue with Claude/Codex** and reads
 only the frozen handoff named by that destination session's id. Its argument is just an opaque
@@ -130,6 +137,38 @@ discussed without pretending an app-wide document belongs to that conversation.
 native semantic scene and the `⋯` menu offers only the actions that fit — an image and a document
 share almost nothing worth acting on.
 
+**A shown image is a row in the Attachments list, not a tab of its own.** Every `display_image`
+used to open a tab that coexisted with the ones before it, so an afternoon of charts left a strip
+of identical `photo` glyphs whose titles truncated to nothing in a 300pt pane — and the same call
+had *already* recorded the file into `SessionAttachmentStore` before opening the tab. The panel was
+stating one fact twice: once as a strip that could not be read, and once as a list that could. The
+list is the chronology — newest first, dated, capped, persisted, pruned when a file goes; the
+pane's preview and `MediaInspectorView` are the closeup. `display_html`, `display_scene` and
+`display_compare_files` are unchanged, each being a document with nowhere else to live, and so is
+a **browser capture** (`browser_screenshot`, an isolated run's final frame): those are evidence of
+a page rather than a file this session exchanged, the store never recorded one, and their caption
+is the page's own title — which a list identifying rows by file name would drop.
+
+Three consequences worth keeping:
+
+- **The tool points at the row it just made.** `record(declared:)` returns the `SessionAttachment`,
+  and `SessionAttachmentsViewController.showAttachment(at:)` selects and scrolls to it — the
+  identity comes from the store rather than from re-finding the file in the list, which matters
+  because a declared file from outside the checkout is *copied* and so is listed under a path the
+  caller never saw. Being asked to show a picture is an instruction, so it also resets the
+  All/Agent/You filter when that filter would hide the row; the filter is a convenience.
+- **A session with no project keeps the old tab.** `makeAttachments` needs a folder to belong to,
+  so there is no list to route to. `DisplayContent.Body.image` and the image branch of
+  `addContentTab` remain for exactly that fallback and for nothing else.
+- **A persisted image tab converts on restore.** Its source is recorded through the declared door
+  and the tab is dropped with its cached PNG; a source that has since been deleted drops the tab
+  anyway, since the list prunes dead files regardless. The conversion is deferred until
+  `tabsBySession` holds the session's tabs, and that ordering is load-bearing for the same reason
+  it is in the store: recording announces synchronously, this controller answers by ensuring its
+  Attachments tab, and that call re-enters `restoreIfNeeded` — which is a no-op only once the tabs
+  are in place. Converting inside the restore loop re-restores the same layout per image until the
+  stack is gone.
+
 `display_scene` is the generic non-HTML visualization bridge. Its value is the same bounded
 `ExtensionScene` used by safe extension panels: normalized rectangles, host-owned shapes,
 semantic colour roles, labels, detail, selection, and accessibility. `SemanticSceneView` renders
@@ -148,10 +187,23 @@ owns a continuing panel session.
 to inspect, so a click, Space/Return, the trackpad's preview gesture, VoiceOver's press, and the
 `⋯` menu's first item all open `MediaInspectorView` inside the current window. The app-owned
 inspector begins fitted, toggles Fit/100% on double-click or Z, magnifies around the pointer,
-pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space or Escape
-closes and restores the source's focus. The same route serves prompt thumbnails and the session
+pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space, Escape, or
+a click on the dimmed window around it closes and restores the source's focus — the surface opens
+on a scrim over the whole content view, because the app's own header band is the one strip a
+full-height inspector cannot cover and lit it read as the same chrome (see
+[`window-chrome.md`](window-chrome.md)). The same route serves prompt thumbnails and the session
 Attachments pane, so the interaction does not depend on first finding a row and invoking a
 separate system panel.
+
+**The hover a picture takes is the one fill in the app drawn over its content rather than under
+it**, so it reads `Design.Surface.imageHoverWash` and not `controlHover`. That role is opaque
+under System and under three stock themes — `unemphasizedSelectedContentBackgroundColor`,
+Windows 98's `#D0D0D0`, Claymorphism's `#D8B4FE` — which is correct everywhere it is a control's
+own ground and a lid here: pointing at an attachment replaced the whole image with a flat
+rectangle. The wash keeps the theme's hue and states its own alpha (`Opacity.imageHoverWash`,
+raised under Increase Contrast), leaving the accent outline and the pointer to say the picture is
+a control. `DisplayPaneLayoutTests` asserts it off the drawn pixels across every stock theme,
+because under a theme that happens to ship a translucent hover the wrong role looks right.
 
 System Quick Look remains an explicit last-resort action, not the primary interaction.
 `MediaInspectorDocumentView` uses PDFKit for PDF and embeds `QLPreviewView` for unfamiliar file
@@ -273,6 +325,15 @@ because a repeat almost always means the agent just rewrote one side; a turn end
 visible compare tab for the same reason. The user's own route in is the `+` menu's "Compare
 Files…", which is an open panel asked for exactly two files.
 
+**The tab is not the only size the comparison has.** The surface's controls row carries a button
+that opens the same pair in `CompareInspectorView` over the whole window (see
+[`design-system.md`](design-system.md)), because a pane the divider decides is a poor place to
+drag a seam across a screenshot. Nothing about the tab changes: the expanded view is handed the
+mode and the scrub the tab is holding, and hands back whatever the user settled on, which arrives
+at `CompareViewController` through the same `onModeChange` that persists the mode on
+`PersistedTab`. The affordance belongs to `ImageCompareView` rather than to the tab, so a Git
+Review image row got it in the same change without knowing it had.
+
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.
 
@@ -318,6 +379,24 @@ pointerless twin, per the design system's rule.
 The Attachments tab is the session's visual history: everything that passed between the two
 parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
 
+**It is also where the panel's per-image tabs went** — see the Display Panel section above for the
+merge and its no-project fallback. The list had to become two things it was not to take them:
+
+- **A row shows its own picture.** A column of file-type glyphs is precisely what the tab strip
+  was, so a row that repeated it would have moved the problem one pane to the left.
+  `SessionAttachmentThumbnails` decodes through `CGImageSourceCreateThumbnailAtIndex` at
+  `thumbnailScale`× the row's well, which is bounded by the *row* rather than by the file — a list
+  of full-screen screenshots is not 32 full decodes on the main thread — and caches by path **and
+  modification date**, so a reload re-decodes nothing while a chart regenerated in place still
+  refreshes. That date is read through `FileManager`, not `URL.resourceValues`: `NSURL` caches
+  resource values, so the same `URL` value answers with the date it had the first time and the
+  regenerated chart would keep its old thumbnail for the life of the process. A PDF and anything
+  that will not decode keep the system's file icon rather than showing a blank well.
+- **A row says when.** `referencedAt` in the caption voice beside the origin mark — the time of day
+  for today, the day otherwise — and inside the row's single spoken sentence. A chronology whose
+  rows carry no time is a list whose order has to be taken on trust, and the order is the whole
+  reason the images stopped being tabs.
+
 **The pane leads with its content; the slack falls below the footer, empty.** The preview used
 to be the layout's one flexible element between a top-pinned list and a *bottom-pinned* footer,
 so a tall panel stretched it to hundreds of points around a small picture and put the file's
@@ -328,6 +407,20 @@ states the preview's height (its fitted height at the pane's width, floored at
 (`SessionAttachmentsDefaults.footerPullPriority`) below the image's priority is what lets the
 one kind that *should* fill the room — a PDF — still do so. A pane shorter than the picture
 compresses the preview, never the footer. `SessionAttachmentsLayoutTests` pins all three.
+
+**The list is as tall as its rows, up to half the pane.** It used to be a constant 136pt —
+three rows — whatever the session had exchanged, so eight attachments were read through a
+letterbox while the pane's slack sat below the footer doing nothing; and this list is where the
+panel's per-image tabs are going, which a fixed three rows cannot be. It now asks the table what
+its rows measure (its row rects, so the padding the inset style puts above the first row and
+below the last is not clipped off into a scroller a complete list has no reason to offer),
+capped at `SessionAttachmentsDefaults.listShareOfPane` of the pane and scrolled past that. It is
+re-asked from `refresh()` because the rows change and from `viewDidLayout` because the cap is a
+fraction of the pane's *height* — the pair of reasons `updatePreviewHeight()` already had for
+width. The cap is also what makes the height safe at `listHeightPriority`, *above* the preview's
+`.defaultHigh`: a list that can never ask for more than half the pane cannot be what pushes the
+buttons out of reach, so a pane too short for everything gives way in one order — the preview
+first, the list after it, and the footer, whose floor is `required`, never.
 
 **There are two doors into the list, and conflating them was the bug.**
 
@@ -343,6 +436,33 @@ length-and-NUL check — so without containment a single `find ~ -name '*.png'` 
 terminal would enumerate the user's pictures into a remotely fetchable list. That is why *scanned*
 paths still may not leave the checkout: text is not a handoff, and a build log, a `cat`, or a
 repository's own fixtures can name any path on disk.
+
+**The scanned rule is a default, and the user may answer it — `includesAttachmentsOutsideProject`,
+off.** It is the safety measure that has to survive being configurable, so widening it does not
+relax what the endpoint stands on: an outside path admitted under the wide scope is *copied in*
+like a declared file and marked `isOutsideProject`, so every listed file still sits somewhere the
+app controls. Narrowing again is enforced at **read** — `attachments(for:)` is the one door the
+pane, the MCP tools and the phone all pass through, so the gate closes for all three at once
+whether or not anything was open to notice. The bytes stay in custody until the row leaves for an
+ordinary reason, so the answer can be changed back without destroying what it already took.
+
+Refused paths are remembered per session as `WithheldAttachmentReference` — a path and a kind, in
+memory, never persisted and never served. That is what lets the pane's band say *how many* files
+the rule is costing this session without the app taking custody of one byte, and what the widening
+admits immediately: nothing re-reads a terminal's buffer on a settings change, so without it "show
+me those" would be answered by an unchanged list until an agent happened to print the path again.
+
+**The band appears only when the setting would change this pane.** A session whose files are all
+inside its project is never asked about files outside it: a rule advertised where it costs nothing
+teaches people to turn it off before they have ever needed it. It is a `PaneFooterView` at the
+pane's floor — the actions row stops above it while it is there — with the count in the header's
+own terse voice and a tertiary button saying what pressing it would do. `SessionAttachmentsLayoutTests`
+pins the silence, the appearance and the effect.
+
+**A listener may only ever see a finished store.** `admit` announces synchronously and the pane
+answers by refreshing, which admits whatever is still withheld — so the withheld list is cleared
+*before* the announcement, not after. The other order handed the listener the same work again and
+the two recursed until the stack ran out: a segmentation fault, from turning a setting on.
 
 A *declared* file is a different act, and applying the same rule to it protected nothing while
 costing everything. `display_image` resolves the file, decodes it, size-checks it and draws it in
@@ -370,6 +490,14 @@ Two consequences worth keeping:
 - **Custody ends where the row does.** A row evicted by the cap, and every row of a session that
   `retainOnly` forgets, takes its copied bytes with it. A *referenced* file is never deleted:
   it belongs to the checkout, and losing a row is not a reason to touch the user's file.
+
+**The opening prompt's images are a handoff too, and were the one that filed nothing.** The
+session-start composer shows an attached picture, appends its path to the text it sends — a CLI
+takes a path, never pixels — and used to stop there, so the only surface that can show a picture
+before a session exists was also the only one whose pictures no session could show back. The
+paths now travel beside the prompt (`SessionComposerViewControllerDelegate`) rather than being
+parsed back out of the sentence, and `SessionCoordinator` files them through `PromptAttachment.record`
+the moment the session id exists. A path recovered from prose would be a guess; this is a fact.
 
 **Provenance is `SessionAttachment.Origin`, and it is coarser than it looks.** A terminal scan
 reads the whole buffer and cannot tell a path the agent printed from one the user typed, so

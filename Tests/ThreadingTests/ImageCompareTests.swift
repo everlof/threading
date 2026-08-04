@@ -299,7 +299,298 @@ final class ImageCompareTests: XCTestCase {
         )
     }
 
+    // MARK: - Expanding into the inspector
+
+    @MainActor
+    func testExpandingOpensTheInspectorAndClosingHandsBackWhereItWasLeft() throws {
+        let view = Self.pair()
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+
+        var persisted: [ImageCompareMode] = []
+        view.onModeChange = { persisted.append($0) }
+
+        let expand = try XCTUnwrap(
+            Self.descendants(of: view).first { $0.accessibilityTitle() == "Open comparison" },
+            "the surface offers no way to open itself"
+        )
+        XCTAssertTrue(expand.accessibilityPerformPress())
+        XCTAssertTrue(CompareInspectorPresenter.isPresenting(in: window))
+
+        let inspector = try XCTUnwrap(Self.inspector(in: window))
+        XCTAssertEqual(
+            inspector.accessibilityLabel(), "Comparison, baseline.png → current.png"
+        )
+
+        // The expanded surface is the same component, opened where the inline one stood — and
+        // it does not offer to open what is already open.
+        let expanded = try XCTUnwrap(
+            Self.descendants(of: inspector).compactMap { $0 as? ImageCompareView }.first
+        )
+        XCTAssertFalse(expanded.allowsExpansion)
+        XCTAssertEqual(expanded.mode, .wipeVertical)
+        XCTAssertEqual(expanded.fraction, 0.25)
+        let expandedButton = Self.descendants(of: inspector).first {
+            $0.accessibilityTitle() == "Open comparison"
+        }
+        XCTAssertEqual(
+            expandedButton?.isHidden, true, "the expanded surface offers to expand again"
+        )
+
+        expanded.mode = .difference
+        expanded.fraction = 0.8
+        CompareInspectorPresenter.dismiss(in: window)
+
+        XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
+        XCTAssertEqual(view.mode, .difference, "the mode the user settled on was thrown away")
+        XCTAssertEqual(view.fraction, 0.8, "the scrub was thrown away")
+        XCTAssertEqual(persisted, [.difference], "the host was never told to persist the mode")
+    }
+
+    @MainActor
+    func testEscapeClosesTheExpandedComparisonFromInsideIt() throws {
+        let view = Self.pair()
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(view.expand())
+
+        // Offered the way AppKit offers one: from the window's content view down, so this is
+        // also the route from the canvas, the chip and the close button inside it.
+        let root = try XCTUnwrap(window.contentView)
+        XCTAssertTrue(root.performKeyEquivalent(with: try Self.escapeEvent()))
+        XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
+    }
+
+    @MainActor
+    func testTheCloseButtonDismissesAndFocusReturnsToTheSurfaceBehind() throws {
+        let view = Self.pair()
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(view.expand())
+
+        let inspector = try XCTUnwrap(Self.inspector(in: window))
+        let close = try XCTUnwrap(
+            Self.descendants(of: inspector).first {
+                $0.accessibilityTitle() == "Close comparison"
+            }
+        )
+        XCTAssertTrue(close.accessibilityPerformPress())
+        XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
+        XCTAssertTrue(
+            window.firstResponder === view.preferredFirstResponder,
+            "focus did not come back to the comparison that opened it"
+        )
+    }
+
+    /// The expanded comparison takes the same wash the media inspector does, for the same reason:
+    /// the app's own header band is the one part of the window it does not cover, and left lit it
+    /// stacked on the comparison's header as though the two were one strip of chrome. The ground
+    /// around it closes it, exactly as the button does.
+    @MainActor
+    func testTheExpandedComparisonDimsTheWindowAndTheGroundClosesIt() throws {
+        let view = Self.pair()
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(view.expand())
+
+        let root = try XCTUnwrap(window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let inspector = try XCTUnwrap(Self.inspector(in: window))
+        let scrim = try XCTUnwrap(
+            Self.scrims(in: root).first, "the comparison opened with nothing behind it"
+        )
+
+        XCTAssertEqual(scrim.frame, root.bounds, "the wash left part of the window lit")
+        XCTAssertLessThan(
+            try XCTUnwrap(root.subviews.firstIndex(of: scrim)),
+            try XCTUnwrap(root.subviews.firstIndex(of: inspector)),
+            "the wash was ordered over the surface it is meant to be under"
+        )
+
+        // The scrub takes focus as the surface opens, so its ring is suppressed until a key
+        // press asks for it — the ring follows the canvas's bounds, which here is the window.
+        let canvas = try XCTUnwrap(
+            Self.descendants(of: inspector).compactMap { $0 as? ImageCompareCanvas }.first
+        )
+        XCTAssertTrue(window.firstResponder === canvas)
+        XCTAssertFalse(
+            canvas.showsKeyboardFocusRing, "opening the comparison outlined the whole surface"
+        )
+
+        scrim.mouseDown(with: try Self.clickEvent())
+
+        XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
+        XCTAssertNil(Self.inspector(in: window), "closing left the surface in the window")
+        XCTAssertTrue(
+            Self.scrims(in: root).isEmpty, "the wash outlived the surface it dimmed for"
+        )
+        XCTAssertTrue(
+            window.firstResponder === view.preferredFirstResponder,
+            "closing from the ground did not hand focus back"
+        )
+    }
+
+    @MainActor
+    func testTheExpandedComparisonOpensBelowTheWindowsTitlebarStrip() throws {
+        let view = Self.pair()
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(view.expand())
+
+        let root = try XCTUnwrap(window.contentView)
+        root.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            root.safeAreaInsets.top, 0, "the fixture window has no titlebar strip to clear"
+        )
+
+        // The window draws its content full-size, so pinning to the content view's own top
+        // opens the header under the traffic lights.
+        let inspector = try XCTUnwrap(Self.inspector(in: window))
+        XCTAssertEqual(
+            inspector.frame.maxY,
+            root.bounds.maxY - root.safeAreaInsets.top,
+            accuracy: 1,
+            "the expanded comparison opened under the window's own buttons"
+        )
+    }
+
+    @MainActor
+    func testASingleSideOffersNoExpansionAndOpensNothing() throws {
+        let view = ImageCompareView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        view.configure(old: nil, new: .init(image: Self.solidImage(.systemBlue), title: "added"))
+        let window = Self.window(hosting: view)
+        defer { CompareInspectorPresenter.dismiss(in: window) }
+
+        // An added or deleted file is one picture. There is no comparison to open, so the
+        // controls row stays out of the way entirely rather than offering a dead button.
+        let expand = Self.descendants(of: view).first {
+            $0.accessibilityTitle() == "Open comparison"
+        }
+        XCTAssertEqual(expand?.isHidden, true)
+        XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
+    }
+
+    @MainActor
+    func testTheInspectorRepaintsWhenTheThemeChangesUnderIt() throws {
+        defer { AppThemePalette.set(.system) }
+        let inspector = CompareInspectorView(
+            content: CompareInspectorContent(
+                old: .init(image: Self.solidImage(.systemRed), title: "baseline.png"),
+                new: .init(image: Self.solidImage(.systemBlue), title: "current.png")
+            )
+        )
+        inspector.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
+        inspector.appearance = NSAppearance(named: .aqua)
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let cyber = try XCTUnwrap(Self.corner(of: inspector))
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        let swiss = try XCTUnwrap(Self.corner(of: inspector))
+
+        // The same instance redrawn: a ground frozen into a layer colour would survive this.
+        XCTAssertNotEqual(cyber, swiss, "the inspector's ground did not follow the theme")
+    }
+
     // MARK: - Fixtures
+
+    /// A two-sided comparison, scrubbed somewhere nobody would land on by accident.
+    @MainActor
+    private static func pair() -> ImageCompareView {
+        let view = ImageCompareView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        view.configure(
+            old: .init(image: solidImage(.systemRed), title: "baseline.png"),
+            new: .init(image: solidImage(.systemBlue), title: "current.png")
+        )
+        view.mode = .wipeVertical
+        view.fraction = 0.25
+        return view
+    }
+
+    /// An unshown window dressed like the app's: content drawn full-size under a transparent
+    /// titlebar, so the strip the traffic lights float over is real and the surface has
+    /// something to clear. Unshown is everything else these assertions need — the inspector is
+    /// presented into the content view, and first responder does not require a key window.
+    @MainActor
+    private static func window(hosting content: NSView) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        let host = NSView(frame: window.contentLayoutRect)
+        window.contentView = host
+        content.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            content.topAnchor.constraint(equalTo: host.topAnchor),
+            content.heightAnchor.constraint(equalToConstant: 300)
+        ])
+        host.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    @MainActor
+    private static func inspector(in window: NSWindow) -> CompareInspectorView? {
+        guard let root = window.contentView else { return nil }
+        return descendants(of: root).compactMap { $0 as? CompareInspectorView }.first
+    }
+
+    @MainActor
+    private static func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap(descendants(of:))
+    }
+
+    /// The wash `InWindowOverlay` puts under a covering surface, found by the name the installer
+    /// gives it: the view itself stays private to that file, so nothing else can build or drop one.
+    @MainActor
+    private static func scrims(in root: NSView) -> [NSView] {
+        root.subviews.filter { $0.identifier == InWindowOverlay.scrimIdentifier }
+    }
+
+    @MainActor
+    private static func clickEvent() throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+    }
+
+    @MainActor
+    private static func escapeEvent() throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1B}",
+            charactersIgnoringModifiers: "\u{1B}",
+            isARepeat: false,
+            keyCode: CompareInspectorDefaults.escapeKeyCode
+        ))
+    }
+
+    /// The inspector's own ground, sampled where nothing else draws.
+    @MainActor
+    private static func corner(of view: NSView) -> NSColor? {
+        AppThemeRefresh.repaint(view)
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return rep.colorAt(x: 4, y: 4)
+    }
 
     @MainActor
     private static func solidImage(

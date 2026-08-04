@@ -197,6 +197,11 @@ final class ImageCompareRenderTests: XCTestCase {
                 window.contentView = host
                 defer { window.close() }
                 focused = window.makeFirstResponder(canvas)
+                // The ring is shown for keyboard traversal only — a canvas the size of its
+                // surface is focused programmatically the moment an inspector opens, and an
+                // accent rectangle around everything says nothing. State the arrival the picture
+                // is about.
+                canvas.focusArrived(from: Self.tabEvent())
 
                 data = Self.png(of: host)
             }
@@ -204,6 +209,44 @@ final class ImageCompareRenderTests: XCTestCase {
             let url = Render.directory
                 .appendingPathComponent("image-compare-focused-\(suffix).png")
             try XCTUnwrap(data, "no focused render for \(suffix)").write(to: url)
+        }
+        print("Image compare renders: \(Render.directory.path)")
+    }
+
+    /// The expanded comparison, which is the same surface with the window's room: the pair named
+    /// once at the top, and the picture given everything under it. Worth a picture of its own
+    /// because the header band is the only part of it this component draws itself.
+    func testRendersTheExpandedComparisonLightAndDark() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+
+        for (appearanceName, suffix) in [
+            (NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")
+        ] {
+            guard let appearance = NSAppearance(named: appearanceName) else { continue }
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                let inspector = CompareInspectorView(
+                    content: CompareInspectorContent(
+                        old: .init(
+                            image: Self.patternImage(base: .systemRed), title: "baseline.png"
+                        ),
+                        new: .init(
+                            image: Self.patternImage(base: .systemBlue), title: "current.png"
+                        ),
+                        mode: .wipeHorizontal,
+                        fraction: 0.6
+                    )
+                )
+                inspector.appearance = appearance
+                inspector.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
+                inspector.layoutSubtreeIfNeeded()
+                data = Self.png(of: inspector)
+            }
+            let url = Render.directory
+                .appendingPathComponent("compare-inspector-\(suffix).png")
+            try XCTUnwrap(data, "no expanded render for \(suffix)").write(to: url)
         }
         print("Image compare renders: \(Render.directory.path)")
     }
@@ -246,6 +289,22 @@ final class ImageCompareRenderTests: XCTestCase {
             x: Int(CGFloat(x) * bitmap.scale),
             y: Int(CGFloat(y) * bitmap.scale)
         )!.usingColorSpace(.sRGB)!
+    }
+
+    /// A Tab press, which is what "the user traversed here" looks like to a focus origin.
+    private static func tabEvent() -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\t",
+            charactersIgnoringModifiers: "\t",
+            isARepeat: false,
+            keyCode: 48
+        )
     }
 
     private static func solidImage(_ color: NSColor, size: NSSize) -> NSImage {

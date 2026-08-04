@@ -4,9 +4,10 @@ import XCTest
 
 /// What the display panel lets the window do, and how the picture inside it is reached.
 ///
-/// Both halves of this file are the same bug seen twice: the panel is a *panel*, and it had
-/// been quietly deciding things that belong to the window and to the user — how small the
-/// window may be, and whether the image in it can be opened properly.
+/// The first two parts of this file are the same bug seen twice: the panel is a *panel*, and it
+/// had been quietly deciding things that belong to the window and to the user — how small the
+/// window may be, and whether the image in it can be opened properly. The last part is where a
+/// shown picture now *arrives*: the Attachments list rather than a tab of its own.
 @MainActor
 final class DisplayPaneLayoutTests: XCTestCase {
 
@@ -32,6 +33,55 @@ final class DisplayPaneLayoutTests: XCTestCase {
         return (
             DisplayContent(body: .image(image, url: url), title: nil, subtitle: name),
             url
+        )
+    }
+
+    private func filledImage(size: NSSize, color: NSColor) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    /// What the view actually paints, away from its own edges — the hover's accent stroke and the
+    /// focus ring both live there, and neither is what these assertions are about.
+    private func centrePixel(of view: NSView) throws -> NSColor {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let pixel = try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2))
+        return try XCTUnwrap(pixel.usingColorSpace(.sRGB))
+    }
+
+    /// How far apart two colours are across their channels. A wash that only shifts a hue and one
+    /// that replaces the pixel outright are the same "different colour" until the size of the
+    /// move is the thing being measured.
+    private func distance(from: NSColor, to: NSColor) -> CGFloat {
+        let red = from.redComponent - to.redComponent
+        let green = from.greenComponent - to.greenComponent
+        let blue = from.blueComponent - to.blueComponent
+        return sqrt(red * red + green * green + blue * blue)
+    }
+
+    /// A role at full strength — what the pixel would have become had the fill covered it.
+    private func opaque(_ color: NSColor) throws -> NSColor {
+        try XCTUnwrap(color.usingColorSpace(.sRGB)).withAlphaComponent(1)
+    }
+
+    private func crossingEvent(_ type: NSEvent.EventType) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.enterExitEvent(
+                with: type,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                trackingNumber: 0,
+                userData: nil
+            )
         )
     }
 
@@ -548,6 +598,75 @@ final class DisplayPaneLayoutTests: XCTestCase {
         XCTAssertFalse(preview.performPrimaryAction())
     }
 
+    /// **The wash a hover brings must not be a lid.** This one fill is drawn *over* its content
+    /// rather than under it, and `Design.Surface.controlHover` — the role every other hover in the
+    /// app reaches for — is opaque under System and under half the stock themes. Pointing at an
+    /// attachment replaced the whole picture with a flat rectangle.
+    ///
+    /// Read off the drawn pixels and over every stock theme, because what broke is one theme's
+    /// alpha: the same code is correct under a theme that happens to ship a translucent hover, so
+    /// no single-theme assertion would have seen it.
+    func testHoveringAPictureTintsItRatherThanCoveringIt() throws {
+        let original = AppThemePalette.current
+        defer { AppThemePalette.set(original) }
+
+        let preview = ThemedImagePreview(frame: NSRect(x: 0, y: 0, width: 80, height: 60))
+        preview.image = filledImage(size: NSSize(width: 80, height: 60), color: .systemTeal)
+
+        for theme in AppThemeLibrary.stock {
+            AppThemePalette.set(theme)
+
+            let resting = try centrePixel(of: preview)
+            preview.mouseEntered(with: try crossingEvent(.mouseEntered))
+            let hovered = try centrePixel(of: preview)
+            preview.mouseExited(with: try crossingEvent(.mouseExited))
+
+            // The alpha itself is pinned by the test below. What is asserted here is what the
+            // *eye* gets: the pixel under the pointer still belongs to the picture. Stated as a
+            // comparison rather than as a bound on how far it moved, because the move is not
+            // linear in the alpha — the blend happens in the bitmap's own space and comes back
+            // through sRGB's gamma, so "shifted by at most 0.16" is true of neither channel.
+            let lid = try opaque(Design.Surface.controlHover)
+            XCTAssertLessThan(
+                distance(from: hovered, to: resting),
+                distance(from: hovered, to: lid) / 2,
+                "\(theme.name) covered the picture instead of tinting it"
+            )
+        }
+    }
+
+    /// The other half of the same rule, stated where the decision lives: the wash is translucent
+    /// under *every* theme, including ones whose `controlHover` is not. Asserted against the role
+    /// it is derived from, because "most themes ship an opaque hover" is exactly the fact that
+    /// made drawing `controlHover` over a picture look fine on the theme it was written under.
+    func testTheImageHoverWashIsTranslucentUnderEveryThemeWhoseHoverIsNot() throws {
+        let original = AppThemePalette.current
+        defer { AppThemePalette.set(original) }
+
+        var opaqueHovers = 0
+        for theme in AppThemeLibrary.stock {
+            AppThemePalette.set(theme)
+
+            let wash = try XCTUnwrap(Design.Surface.imageHoverWash.usingColorSpace(.sRGB))
+            XCTAssertEqual(
+                wash.alphaComponent,
+                Design.Opacity.imageHoverWash,
+                accuracy: 0.001,
+                "\(theme.name) let a theme's own alpha decide how much of the picture is covered"
+            )
+
+            let hover = try XCTUnwrap(Design.Surface.controlHover.usingColorSpace(.sRGB))
+            if hover.alphaComponent > 0.99 { opaqueHovers += 1 }
+        }
+
+        XCTAssertGreaterThan(
+            opaqueHovers,
+            0,
+            "the wash is only worth deriving because some themes hover opaquely — if none do, "
+                + "this test has stopped covering anything"
+        )
+    }
+
     func testCanPreviewOnlyAcceptsAFileThatExists() throws {
         let (_, url) = try imageOnDisk(size: NSSize(width: 10, height: 10))
 
@@ -557,6 +676,297 @@ final class DisplayPaneLayoutTests: XCTestCase {
 
         try FileManager.default.removeItem(at: url)
         XCTAssertFalse(QuickLookPresenter.canPreview(url), "a deleted file is not previewable")
+    }
+
+    // MARK: - A Shown Image Is a Row, Not a Tab
+
+    /// `display_image` used to spend a tab per picture, so a session that showed six charts grew
+    /// six `photo` chips whose titles truncated to nothing — while the store had already recorded
+    /// every one of them into the Attachments list. The panel was stating one fact twice. The
+    /// list is the chronology now; the tab is gone.
+    func testAShownImageJoinsTheListInsteadOfSpendingATab() throws {
+        let fixture = try projectSession()
+        defer { fixture.tearDown() }
+        let png = try writePNG(in: fixture.folder, named: "chart.png", color: .systemRed)
+
+        let result = fixture.coordinator.handle(
+            .displayImage(.init(path: png.path, title: nil)), for: fixture.sessionID
+        )
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Attachments"), result.text)
+
+        let tabs = fixture.pane.tabs(for: fixture.sessionID)
+        XCTAssertEqual(tabs.count, 1, "a shown image opened a tab of its own")
+        XCTAssertNil(tabs.first?.content, "the picture is still a content tab")
+        let attachments = try XCTUnwrap(tabs.first?.attachments, "no Attachments tab was opened")
+        XCTAssertEqual(
+            fixture.pane.activeTabID(for: fixture.sessionID),
+            tabs.first?.id,
+            "the list was opened without being brought to the front"
+        )
+
+        // The row it asked for, selected — and previewed, since the preview follows selection.
+        let table = try attachmentsTable(in: attachments.view)
+        XCTAssertEqual(table.numberOfRows, 1)
+        XCTAssertEqual(table.selectedRow, 0, "the shown image is not the selected row")
+        XCTAssertEqual(try preview(in: attachments.view).fileURL?.lastPathComponent, "chart.png")
+    }
+
+    /// A regenerated chart is the same row, not a second one — the store dedupes by source path,
+    /// and the pane has to land on that row again rather than on whatever it was showing.
+    func testShowingTheSameImageTwiceKeepsOneRowAndReselectsIt() throws {
+        let fixture = try projectSession()
+        defer { fixture.tearDown() }
+        let first = try writePNG(in: fixture.folder, named: "one.png", color: .systemRed)
+        let second = try writePNG(in: fixture.folder, named: "two.png", color: .systemBlue)
+
+        _ = fixture.coordinator.handle(
+            .displayImage(.init(path: first.path, title: nil)), for: fixture.sessionID
+        )
+        _ = fixture.coordinator.handle(
+            .displayImage(.init(path: second.path, title: nil)), for: fixture.sessionID
+        )
+        _ = fixture.coordinator.handle(
+            .displayImage(.init(path: first.path, title: nil)), for: fixture.sessionID
+        )
+
+        let tabs = fixture.pane.tabs(for: fixture.sessionID)
+        XCTAssertEqual(tabs.count, 1, "three images grew more than the one list")
+        let attachments = try XCTUnwrap(tabs.first?.attachments)
+        let table = try attachmentsTable(in: attachments.view)
+        XCTAssertEqual(table.numberOfRows, 2, "the same file was filed twice")
+        XCTAssertEqual(
+            try preview(in: attachments.view).fileURL?.lastPathComponent,
+            "one.png",
+            "the image shown again is not the one being previewed"
+        )
+    }
+
+    /// The filter is a convenience; being asked to show a picture is an instruction. A pane
+    /// filtered to *You* would otherwise answer `display_image` with the list it already had.
+    func testShowingAnImageTheFilterWouldHideResetsTheFilter() throws {
+        let fixture = try projectSession()
+        defer { fixture.tearDown() }
+
+        // One of each side, so the filter control is offered at all.
+        let mine = try writePNG(in: fixture.folder, named: "mine.png", color: .systemGreen)
+        SessionAttachmentStore.shared.record(
+            declared: mine,
+            sessionID: fixture.sessionID,
+            projectRoot: fixture.folder,
+            origin: .user
+        )
+        let theirs = try writePNG(in: fixture.folder, named: "theirs.png", color: .systemRed)
+        SessionAttachmentStore.shared.record(
+            declared: theirs,
+            sessionID: fixture.sessionID,
+            projectRoot: fixture.folder,
+            origin: .agent
+        )
+
+        let attachments = try XCTUnwrap(
+            fixture.pane.activateAttachments(for: fixture.sessionID)
+        )
+        fixture.pane.view.layoutSubtreeIfNeeded()
+        let filter = try XCTUnwrap(
+            descendants(of: attachments.view).compactMap { $0 as? ThemedSegmentedControl }.first,
+            "the pane offered no filter for a list with both sides in it"
+        )
+        let user = try XCTUnwrap(AttachmentFilter.allCases.firstIndex(of: .user))
+        filter.selectedIndex = user
+        filter.onSelect?(user)
+        XCTAssertEqual(try attachmentsTable(in: attachments.view).numberOfRows, 1)
+
+        let shown = try writePNG(in: fixture.folder, named: "shown.png", color: .systemBlue)
+        _ = fixture.coordinator.handle(
+            .displayImage(.init(path: shown.path, title: nil)), for: fixture.sessionID
+        )
+
+        XCTAssertEqual(filter.selectedIndex, 0, "the filter kept hiding the picture just shown")
+        XCTAssertEqual(try attachmentsTable(in: attachments.view).numberOfRows, 3)
+        XCTAssertEqual(
+            try preview(in: attachments.view).fileURL?.lastPathComponent,
+            "shown.png"
+        )
+    }
+
+    /// A session with no project has nowhere to keep a list — `makeAttachments` needs a folder to
+    /// belong to — so the picture is shown the old way rather than not at all.
+    func testASessionWithoutAProjectStillOpensAnImageTab() throws {
+        let sessionID = SessionID()
+        let pane = DisplayPaneController()
+        let coordinator = AgentToolCoordinator(
+            displayPaneController: pane,
+            visibleSessionID: { sessionID },
+            setPaneVisible: { _ in },
+            windowProvider: { nil }
+        )
+        defer {
+            for tab in pane.tabs(for: sessionID) { _ = pane.closeTab(id: tab.id, for: sessionID) }
+        }
+        let (_, url) = try imageOnDisk(size: NSSize(width: 12, height: 12))
+
+        let result = coordinator.handle(.displayImage(.init(path: url.path, title: nil)), for: sessionID)
+        XCTAssertFalse(result.isError, result.text)
+
+        let tabs = pane.tabs(for: sessionID)
+        XCTAssertEqual(tabs.count, 1)
+        XCTAssertNotNil(tabs.first?.content, "the fallback stopped opening a tab for the image")
+    }
+
+    /// A relaunch converts what the old panel wrote: the tab becomes a row, its cached PNG goes
+    /// with it, and the panel does not come back pointing at a tab it no longer has.
+    func testARestoredImageTabBecomesARowAndTakesItsCacheWithIt() throws {
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+        let png = try writePNG(in: fixture.folder, named: "restored.png", color: .systemOrange)
+
+        let tabID = UUID()
+        let cacheFile = try XCTUnwrap(
+            DisplayPaneStore.shared.cacheImage(
+                NSImage(contentsOf: png) ?? NSImage(),
+                tabID: tabID,
+                for: fixture.sessionID
+            )
+        )
+        DisplayPaneStore.shared.saveLayout(
+            tabs: [PersistedTab(
+                id: tabID.uuidString, kind: .image, title: "Restored",
+                subtitle: "", url: png.absoluteString, html: nil, cacheFile: cacheFile
+            )],
+            activeID: tabID.uuidString,
+            for: fixture.sessionID
+        )
+
+        let pane = DisplayPaneController()
+        let tabs = pane.tabs(for: fixture.sessionID)
+
+        XCTAssertTrue(tabs.allSatisfy { $0.content == nil }, "the image tab came back as a tab")
+        let attachments = try XCTUnwrap(
+            tabs.first(where: { $0.attachments != nil }),
+            "the converted image left no list to find it in"
+        )
+        XCTAssertEqual(
+            pane.activeTabID(for: fixture.sessionID),
+            attachments.id,
+            "the panel came back pointing at a tab that is not there"
+        )
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: fixture.sessionID).map(\.name),
+            ["restored.png"]
+        )
+        XCTAssertNil(
+            DisplayPaneStore.shared.loadImage(cacheFile, for: fixture.sessionID),
+            "the tab's cached copy outlived the tab"
+        )
+        XCTAssertFalse(
+            DisplayPaneStore.shared.loadLayout(for: fixture.sessionID)?.panelTabs
+                .contains { $0.kind == .image } ?? false,
+            "the converted tab is still in the stored layout, so the next launch converts again"
+        )
+    }
+
+    // MARK: - Fixtures for the list
+
+    /// A real project and session — `makeAttachments` asks `ProjectStore` for a folder — with a
+    /// pane and a coordinator wired to them.
+    private struct ProjectSessionFixture {
+        let sessionID: SessionID
+        let folder: URL
+        let pane: DisplayPaneController
+        let coordinator: AgentToolCoordinator
+        let tearDown: () -> Void
+    }
+
+    private struct ProjectFixture {
+        let sessionID: SessionID
+        let folder: URL
+        let tearDown: () -> Void
+    }
+
+    /// The project is added to the shared store and removed again, the way every other test that
+    /// needs one does: its own folder, since `addProject` returns the existing project for a
+    /// folder it already knows and the teardown deletes whatever it was handed.
+    ///
+    /// Deliberately without a pane. A `DisplayPaneController` listens for attachment changes for
+    /// *every* session, so a second live pane would convert a restored layout in parallel with
+    /// the one under test — the restore case builds its own and nothing else.
+    private func projectAndSession() throws -> ProjectFixture {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("threading-shown-image-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: folder)
+        let session = try XCTUnwrap(
+            store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Shown")
+        )
+        return ProjectFixture(
+            sessionID: session.id,
+            folder: folder,
+            tearDown: {
+                store.removeProject(id: project.id)
+                try? FileManager.default.removeItem(at: folder)
+            }
+        )
+    }
+
+    private func projectSession() throws -> ProjectSessionFixture {
+        let fixture = try projectAndSession()
+        let sessionID = fixture.sessionID
+        let pane = DisplayPaneController()
+        let coordinator = AgentToolCoordinator(
+            displayPaneController: pane,
+            visibleSessionID: { sessionID },
+            setPaneVisible: { _ in },
+            windowProvider: { nil }
+        )
+        // Loaded before anything is shown, so the list's own view exists to be asserted on.
+        pane.showSession(sessionID)
+        pane.view.frame = NSRect(x: 0, y: 0, width: 360, height: 720)
+        pane.view.layoutSubtreeIfNeeded()
+
+        return ProjectSessionFixture(
+            sessionID: sessionID,
+            folder: fixture.folder,
+            pane: pane,
+            coordinator: coordinator,
+            tearDown: fixture.tearDown
+        )
+    }
+
+    /// A flat 12×12 picture, written where the session's project will find it.
+    private func writePNG(in folder: URL, named name: String, color: NSColor) throws -> URL {
+        let url = folder.appendingPathComponent(name)
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 12, pixelsHigh: 12, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let converted = try XCTUnwrap(color.usingColorSpace(.deviceRGB))
+        for x in 0..<12 {
+            for y in 0..<12 { rep.setColor(converted, atX: x, y: y) }
+        }
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
+        return url
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func attachmentsTable(in view: NSView) throws -> NSTableView {
+        try XCTUnwrap(
+            descendants(of: view).compactMap { $0 as? ThemedTableView }.first,
+            "the pane grew no list"
+        )
+    }
+
+    private func preview(in view: NSView) throws -> ThemedImagePreview {
+        try XCTUnwrap(
+            descendants(of: view).compactMap { $0 as? ThemedImagePreview }.first,
+            "the pane grew no preview"
+        )
     }
 }
 

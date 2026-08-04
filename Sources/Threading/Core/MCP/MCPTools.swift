@@ -259,6 +259,35 @@ struct BrowserIsolatedRunArguments: Codable, Sendable {
   }
 }
 
+/// One run against the signed-in Chrome automation profile.
+///
+/// A separate type from `BrowserIsolatedRunArguments`, and not a mode on it. The two backends
+/// promise opposite things — one imports no authenticated state at all, the other exists
+/// *because* it has some — and sharing an argument type is how two promises come to share a code
+/// path. The emulation properties are absent for the same reason: a real Chrome the user signed
+/// into is not a place to fake a locale or a location.
+///
+/// The step vocabulary is deliberately the same, because it belongs to the bridge rather than to
+/// either backend: an agent that can script one can script the other.
+struct BrowserAttachRunArguments: Codable, Sendable {
+  /// The origins this run may reach, each `scheme://host[:port]`. Every one is prompted for
+  /// before the browser launches, because a one-shot batch cannot come back and ask.
+  let allowedOrigins: [String]?
+  let timeoutMS: Int?
+  let screenshot: Bool?
+  let fullPage: Bool?
+  let includeImage: Bool?
+  let steps: [BrowserIsolatedStep]?
+
+  private enum CodingKeys: String, CodingKey {
+    case screenshot, steps
+    case allowedOrigins = "allowed_origins"
+    case timeoutMS = "timeout_ms"
+    case fullPage = "full_page"
+    case includeImage = "include_image"
+  }
+}
+
 struct BrowserSnapshotArguments: Decodable, Sendable {
   let maximumNodes: Int?
   let ref: String?
@@ -570,6 +599,23 @@ struct AppThemeGlowArguments: Decodable, Sendable {
   let opacity: Double?
   let offsetX: Double?
   let offsetY: Double?
+  let highlight: AppThemeGlowHighlightArguments?
+  let removeHighlight: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case role, radius, opacity, highlight
+    case offsetX = "offset_x"
+    case offsetY = "offset_y"
+    case removeHighlight = "remove_highlight"
+  }
+}
+
+struct AppThemeGlowHighlightArguments: Decodable, Sendable {
+  let role: String?
+  let radius: Double?
+  let opacity: Double?
+  let offsetX: Double?
+  let offsetY: Double?
 
   private enum CodingKeys: String, CodingKey {
     case role, radius, opacity
@@ -585,6 +631,8 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let textScale: Double?
   let glow: AppThemeGlowArguments?
   let removeGlow: Bool?
+  let controlGlow: AppThemeGlowArguments?
+  let removeControlGlow: Bool?
   let bevel: AppThemeBevelArguments?
   let removeBevel: Bool?
   let typeface: String?
@@ -600,6 +648,8 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case textScale = "text_scale"
     case glow
     case removeGlow = "remove_glow"
+    case controlGlow = "control_glow"
+    case removeControlGlow = "remove_control_glow"
     case bevel
     case removeBevel = "remove_bevel"
     case typeface
@@ -612,6 +662,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
 
 struct AppThemeBevelArguments: Decodable, Sendable {
   let width: Double?
+  let style: String?
 }
 
 /// An image handed to a theme tool: a file path the host reads, or the bytes inline.
@@ -1061,6 +1112,7 @@ enum AgentCommand: Sendable {
   case browserEmulate(BrowserEmulateArguments)
   case browserCapabilities(EmptyToolArguments)
   case browserRunIsolated(BrowserIsolatedRunArguments)
+  case browserAttachChrome(BrowserAttachRunArguments)
   case browserSnapshot(BrowserSnapshotArguments)
   case browserAnnotations(EmptyToolArguments)
   case browserScreenshot(BrowserScreenshotArguments)
@@ -1127,6 +1179,7 @@ enum AgentCommand: Sendable {
     case .browserEmulate: return .browserEmulate
     case .browserCapabilities: return .browserCapabilities
     case .browserRunIsolated: return .browserRunIsolated
+    case .browserAttachChrome: return .browserAttachChrome
     case .browserSnapshot: return .browserSnapshot
     case .browserAnnotations: return .browserAnnotations
     case .browserScreenshot: return .browserScreenshot
@@ -1293,6 +1346,10 @@ struct MCPToolCallParameters: Decodable, Sendable {
     case .browserRunIsolated:
       call = .browserRunIsolated(
         try container.decode(BrowserIsolatedRunArguments.self, forKey: .arguments)
+      )
+    case .browserAttachChrome:
+      call = .browserAttachChrome(
+        try container.decode(BrowserAttachRunArguments.self, forKey: .arguments)
       )
     case .browserSnapshot:
       call = .browserSnapshot(
@@ -1835,6 +1892,99 @@ struct MCPPropertySchema: Encodable, Sendable {
   var items: MCPArrayItemSchema?
 }
 
+/// The bridge's step vocabulary, shared by both Playwright-backed tools.
+///
+/// Shared because it belongs to the *bridge* rather than to either backend: the two runs differ
+/// in what they can reach, not in how a step is spelled. Their argument types stay separate;
+/// this one description does not.
+enum MCPBrowserStepSchema {
+  static let stepsDescription = """
+    One to fifty ordered actions. Targeted actions accept exactly one of \
+    role, label, placeholder, test_id, text, or css. role may add name. \
+    Supported actions: goto, wait_for, snapshot, click, hover, fill, press, \
+    select, check, uncheck, and expect.
+    """
+
+  static let item = MCPArrayItemSchema(
+    type: .object,
+    properties: [
+      "action": MCPPropertySchema(
+        type: .string,
+        description: "Required action name."
+      ),
+      "url": MCPPropertySchema(
+        type: .string,
+        description: "HTTP(S) URL for goto."
+      ),
+      "wait_until": MCPPropertySchema(
+        type: .string,
+        description: "commit, domcontentloaded, load, or networkidle."
+      ),
+      "role": MCPPropertySchema(
+        type: .string,
+        description: "Accessible role locator."
+      ),
+      "name": MCPPropertySchema(
+        type: .string,
+        description: "Accessible name used only with role."
+      ),
+      "label": MCPPropertySchema(
+        type: .string,
+        description: "Associated-label locator."
+      ),
+      "placeholder": MCPPropertySchema(
+        type: .string,
+        description: "Placeholder locator."
+      ),
+      "test_id": MCPPropertySchema(
+        type: .string,
+        description: "data-testid locator."
+      ),
+      "text": MCPPropertySchema(
+        type: .string,
+        description: "Visible-text locator."
+      ),
+      "css": MCPPropertySchema(
+        type: .string,
+        description: "Strict CSS locator fallback."
+      ),
+      "exact": MCPPropertySchema(
+        type: .boolean,
+        description: "Exact semantic match; defaults to true."
+      ),
+      "nth": MCPPropertySchema(
+        type: .number,
+        description: "Explicit zero-based match from 0 through 100."
+      ),
+      "value": MCPPropertySchema(
+        type: .string,
+        description: "Value for fill or select; never echoed."
+      ),
+      "option_label": MCPPropertySchema(
+        type: .string,
+        description: "Exact option label for select; never echoed."
+      ),
+      "key": MCPPropertySchema(
+        type: .string,
+        description: "Playwright key chord for press."
+      ),
+      "state": MCPPropertySchema(
+        type: .string,
+        description: "Requested wait or expectation state."
+      ),
+      "expected_text": MCPPropertySchema(
+        type: .string,
+        description: "Contained text for expect; never echoed."
+      ),
+      "timeout_ms": MCPPropertySchema(
+        type: .number,
+        description: "Step timeout from 100 through 60000 milliseconds."
+      ),
+    ],
+    required: ["action"]
+  )
+}
+
 struct MCPArrayItemSchema: Encodable, Sendable {
   let type: MCPPropertyType
   var description: String?
@@ -1898,6 +2048,7 @@ enum MCPTools {
   static let browserEmulate = MCPBuiltInTool.browserEmulate.rawValue
   static let browserCapabilities = MCPBuiltInTool.browserCapabilities.rawValue
   static let browserRunIsolated = MCPBuiltInTool.browserRunIsolated.rawValue
+  static let browserAttachChrome = MCPBuiltInTool.browserAttachChrome.rawValue
   static let browserSnapshot = MCPBuiltInTool.browserSnapshot.rawValue
   static let browserAnnotations = MCPBuiltInTool.browserAnnotations.rawValue
   static let browserScreenshot = MCPBuiltInTool.browserScreenshot.rawValue
@@ -2033,7 +2184,10 @@ enum MCPTools {
         Display an image to the user in Threading's side panel, beside this terminal. \
         Use this for screenshots, generated charts and diagrams, or any image file \
         worth looking at — the terminal cannot render images, so this is the only way \
-        the user can actually see one. Supports PNG, JPEG, GIF, HEIC, PDF, and SVG.
+        the user can actually see one. Supports PNG, JPEG, GIF, HEIC, PDF, and SVG. \
+        The image appears in the panel's Attachments list, selected and previewed, \
+        alongside everything else shown in this session; showing the same file again \
+        refreshes that entry rather than adding a second one.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -2047,8 +2201,9 @@ enum MCPTools {
           "title": MCPPropertySchema(
             type: .string,
             description: """
-              Optional caption shown above the image, describing what the user \
-              is looking at.
+              Optional caption, describing what the user is looking at. The list \
+              identifies an image by its file name, so a caption is only shown for \
+              a session with no project folder.
               """
           ),
         ],
@@ -2701,93 +2856,65 @@ enum MCPTools {
           ),
           "steps": MCPPropertySchema(
             type: .array,
-            description: """
-              One to fifty ordered actions. Targeted actions accept exactly one of \
-              role, label, placeholder, test_id, text, or css. role may add name. \
-              Supported actions: goto, wait_for, snapshot, click, hover, fill, press, \
-              select, check, uncheck, and expect.
-              """,
-            items: MCPArrayItemSchema(
-              type: .object,
-              properties: [
-                "action": MCPPropertySchema(
-                  type: .string,
-                  description: "Required action name."
-                ),
-                "url": MCPPropertySchema(
-                  type: .string,
-                  description: "HTTP(S) URL for goto."
-                ),
-                "wait_until": MCPPropertySchema(
-                  type: .string,
-                  description: "commit, domcontentloaded, load, or networkidle."
-                ),
-                "role": MCPPropertySchema(
-                  type: .string,
-                  description: "Accessible role locator."
-                ),
-                "name": MCPPropertySchema(
-                  type: .string,
-                  description: "Accessible name used only with role."
-                ),
-                "label": MCPPropertySchema(
-                  type: .string,
-                  description: "Associated-label locator."
-                ),
-                "placeholder": MCPPropertySchema(
-                  type: .string,
-                  description: "Placeholder locator."
-                ),
-                "test_id": MCPPropertySchema(
-                  type: .string,
-                  description: "data-testid locator."
-                ),
-                "text": MCPPropertySchema(
-                  type: .string,
-                  description: "Visible-text locator."
-                ),
-                "css": MCPPropertySchema(
-                  type: .string,
-                  description: "Strict CSS locator fallback."
-                ),
-                "exact": MCPPropertySchema(
-                  type: .boolean,
-                  description: "Exact semantic match; defaults to true."
-                ),
-                "nth": MCPPropertySchema(
-                  type: .number,
-                  description: "Explicit zero-based match from 0 through 100."
-                ),
-                "value": MCPPropertySchema(
-                  type: .string,
-                  description: "Value for fill or select; never echoed."
-                ),
-                "option_label": MCPPropertySchema(
-                  type: .string,
-                  description: "Exact option label for select; never echoed."
-                ),
-                "key": MCPPropertySchema(
-                  type: .string,
-                  description: "Playwright key chord for press."
-                ),
-                "state": MCPPropertySchema(
-                  type: .string,
-                  description: "Requested wait or expectation state."
-                ),
-                "expected_text": MCPPropertySchema(
-                  type: .string,
-                  description: "Contained text for expect; never echoed."
-                ),
-                "timeout_ms": MCPPropertySchema(
-                  type: .number,
-                  description: "Step timeout from 100 through 60000 milliseconds."
-                ),
-              ],
-              required: ["action"]
-            )
+            description: MCPBrowserStepSchema.stepsDescription,
+            items: MCPBrowserStepSchema.item
           ),
         ],
         required: ["steps"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .browserAttachChrome,
+      description: """
+        Run one bounded scenario in real Google Chrome, against the automation profile the \
+        user set up in Settings and signed into. This is a third backend, distinct from both \
+        the in-app browser and browser_run_isolated: it is headful, it is persistent, and it \
+        carries the user's own sessions, extensions, and passkeys for the origins listed in \
+        allowed_origins. Every one of those origins is authorized by the user before Chrome \
+        launches, because this backend runs the whole scenario in one batch and cannot come \
+        back to ask; the run stops the moment a step, a redirect, or a pop-up reaches any \
+        other origin, and nothing about that page is read or returned. Signing in remains the \
+        user's own action: password fields are refused here exactly as everywhere else, so \
+        the pattern is to navigate to the sign-in page and then use a wait_for step for a \
+        post-sign-in element while the user fills it with their password manager. Downloads \
+        and arbitrary JavaScript are disabled, fill values and expected text are omitted from \
+        results, and each step waits at most 60 seconds. Prefer browser_run_isolated whenever \
+        a task does not actually need the user's signed-in state.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "allowed_origins": MCPPropertySchema(
+            type: .array,
+            description: """
+              One to ten origins this run may reach, each exactly scheme://host or \
+              scheme://host:port with no path. The user is asked about every one before \
+              Chrome opens.
+              """,
+            items: MCPArrayItemSchema(type: .string)
+          ),
+          "timeout_ms": MCPPropertySchema(
+            type: .number,
+            description: "Default action timeout from 100 through 60000 milliseconds."
+          ),
+          "screenshot": MCPPropertySchema(
+            type: .boolean,
+            description: "Capture the final page, including a cached PNG path."
+          ),
+          "full_page": MCPPropertySchema(
+            type: .boolean,
+            description: "Capture the full page when screenshot is true."
+          ),
+          "include_image": MCPPropertySchema(
+            type: .boolean,
+            description: "Include the final screenshot as an MCP image block."
+          ),
+          "steps": MCPPropertySchema(
+            type: .array,
+            description: MCPBrowserStepSchema.stepsDescription,
+            items: MCPBrowserStepSchema.item
+          ),
+        ],
+        required: ["allowed_origins", "steps"]
       )
     ),
     MCPToolDefinition(
@@ -3882,8 +4009,9 @@ enum MCPTools {
         theme stating chrome draws the entire window frame itself — an app-drawn title \
         band, window buttons and border replace the native macOS titlebar, traffic \
         lights and rounded corners while the theme is worn. The material's optional \
-        `bevel` turns flat borders into raised/sunken two-tone edges (square corners \
-        required) — state bevel_highlight and bevel_shadow roles alongside it.
+        `bevel` turns flat borders into raised/sunken two-tone edges — hard for square \
+        period chrome, soft for rounded clay relief — using the bevel_highlight and \
+        bevel_shadow roles.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4407,7 +4535,7 @@ enum MCPTools {
     [
       "panel_radius": MCPPropertySchema(
         type: .number,
-        description: "Panel corner radius, 0–24 points."
+        description: "Panel corner radius, 0–40 points."
       ),
       "control_radius": MCPPropertySchema(
         type: .number,
@@ -4426,8 +4554,9 @@ enum MCPTools {
         type: .object,
         description: """
           Optional panel shadow. Zero offsets make a centred glow; non-zero offsets \
-          make a directional soft or hard shadow. Twice the radius plus the absolute \
-          offset on either axis must fit the 20-point shadow gutter.
+          make a directional soft or hard shadow. An optional highlight adds the opposing \
+          outer light used by raised clay and neumorphic materials. Each shadow's twice-radius \
+          plus absolute offset on either axis must fit the 48-point shadow gutter.
           """,
         properties: [
           "role": MCPPropertySchema(
@@ -4436,7 +4565,7 @@ enum MCPTools {
           ),
           "radius": MCPPropertySchema(
             type: .number,
-            description: "Shadow blur radius, 0–10 points; 0 makes a hard shadow."
+            description: "Shadow blur radius, 0–24 points; 0 makes a hard shadow."
           ),
           "opacity": MCPPropertySchema(
             type: .number,
@@ -4444,17 +4573,111 @@ enum MCPTools {
           ),
           "offset_x": MCPPropertySchema(
             type: .number,
-            description: "Horizontal shadow offset, -10–10 points; 0 makes a centred glow."
+            description: "Horizontal shadow offset, -24–24 points; 0 makes a centred glow."
           ),
           "offset_y": MCPPropertySchema(
             type: .number,
-            description: "Vertical shadow offset, -10–10 points; 0 makes a centred glow."
+            description: "Vertical shadow offset, -24–24 points; 0 makes a centred glow."
+          ),
+          "highlight": MCPPropertySchema(
+            type: .object,
+            description: "Optional opposing outer highlight shadow for raised soft materials.",
+            properties: [
+              "role": MCPPropertySchema(
+                type: .string,
+                description: "Theme role whose colour supplies the outer highlight."
+              ),
+              "radius": MCPPropertySchema(
+                type: .number,
+                description: "Highlight blur radius, 0–24 points."
+              ),
+              "opacity": MCPPropertySchema(
+                type: .number,
+                description: "Highlight opacity, 0–1."
+              ),
+              "offset_x": MCPPropertySchema(
+                type: .number,
+                description: "Horizontal highlight offset, -24–24 points."
+              ),
+              "offset_y": MCPPropertySchema(
+                type: .number,
+                description: "Vertical highlight offset, -24–24 points."
+              ),
+            ]
+          ),
+          "remove_highlight": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the base glow's opposing highlight shadow."
           ),
         ]
       ),
       "remove_glow": MCPPropertySchema(
         type: .boolean,
         description: "True removes the base theme's glow."
+      ),
+      "control_glow": MCPPropertySchema(
+        type: .object,
+        description: """
+          Optional shadow for compact raised controls, independent from the broader panel \
+          glow. An optional highlight supplies the opposing outer light. Each shadow's \
+          twice-radius plus absolute offset on either axis must fit the 48-point gutter.
+          """,
+        properties: [
+          "role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role whose colour supplies the control shadow."
+          ),
+          "radius": MCPPropertySchema(
+            type: .number,
+            description: "Control shadow blur radius, 0–24 points; 0 makes a hard shadow."
+          ),
+          "opacity": MCPPropertySchema(
+            type: .number,
+            description: "Control shadow opacity, 0–1."
+          ),
+          "offset_x": MCPPropertySchema(
+            type: .number,
+            description: "Horizontal control-shadow offset, -24–24 points."
+          ),
+          "offset_y": MCPPropertySchema(
+            type: .number,
+            description: "Vertical control-shadow offset, -24–24 points."
+          ),
+          "highlight": MCPPropertySchema(
+            type: .object,
+            description: "Optional opposing outer highlight for raised controls.",
+            properties: [
+              "role": MCPPropertySchema(
+                type: .string,
+                description: "Theme role whose colour supplies the control highlight."
+              ),
+              "radius": MCPPropertySchema(
+                type: .number,
+                description: "Control-highlight blur radius, 0–24 points."
+              ),
+              "opacity": MCPPropertySchema(
+                type: .number,
+                description: "Control-highlight opacity, 0–1."
+              ),
+              "offset_x": MCPPropertySchema(
+                type: .number,
+                description: "Horizontal control-highlight offset, -24–24 points."
+              ),
+              "offset_y": MCPPropertySchema(
+                type: .number,
+                description: "Vertical control-highlight offset, -24–24 points."
+              ),
+            ]
+          ),
+          "remove_highlight": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the base control glow's opposing highlight."
+          ),
+        ]
+      ),
+      "remove_control_glow": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the base theme's compact-control shadow."
       ),
       "typeface": MCPPropertySchema(
         type: .string,
@@ -4494,15 +4717,20 @@ enum MCPTools {
       "bevel": MCPPropertySchema(
         type: .object,
         description: """
-          A raised-and-sunken edge treatment on every square-cornered surface, drawn \
-          in the bevel_highlight/bevel_shadow roles — the mid-nineties material. \
-          Requires panel_radius 0 and control_radius 0: bevels draw only on square \
-          corners. Buttons and panels read raised; text wells read sunken.
+          A raised-and-sunken edge treatment drawn in the bevel_highlight and \
+          bevel_shadow roles. "hard" is the crisp mid-nineties construction and \
+          requires panel_radius 0 and control_radius 0. "soft" follows rounded \
+          silhouettes for clay or neumorphic relief. Buttons and panels read raised; \
+          text wells read sunken.
           """,
         properties: [
           "width": MCPPropertySchema(
             type: .number,
             description: "Points per edge, 1–3. 2 is the classic. Default 2."
+          ),
+          "style": MCPPropertySchema(
+            type: .string,
+            description: "\"hard\" (default) or \"soft\"."
           )
         ]
       ),

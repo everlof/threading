@@ -60,7 +60,7 @@ enum MediaInspectorPresenter {
         _ selection: MediaInspectorSelection,
         from source: NSView
     ) -> Bool {
-        guard let window = source.window, let root = window.contentView else { return false }
+        guard let window = source.window, window.contentView != nil else { return false }
 
         let available = selection.items.enumerated().filter { $0.element.isAvailable }
         guard !available.isEmpty else { return false }
@@ -79,7 +79,6 @@ enum MediaInspectorPresenter {
             items: items,
             selectedIndex: selectedIndex,
             source: source,
-            root: root,
             window: window,
             onClose: { sessions.removeValue(forKey: key) }
         )
@@ -112,12 +111,13 @@ private final class MediaInspectorSession {
     private let inspector: MediaInspectorView
     private let onClose: () -> Void
     private var isClosed = false
+    /// The surface and its scrim, held as the one thing so neither can be taken away alone.
+    private var presentation: InWindowOverlay.Presentation?
 
     init(
         items: [MediaInspectorItem],
         selectedIndex: Int,
         source: NSView,
-        root: NSView,
         window: NSWindow,
         onClose: @escaping () -> Void
     ) {
@@ -128,14 +128,15 @@ private final class MediaInspectorSession {
         inspector = MediaInspectorView(items: items, selectedIndex: selectedIndex)
 
         inspector.onDismiss = { [weak self] in self?.close() }
-        root.addSubview(inspector, positioned: .above, relativeTo: nil)
-        NSLayoutConstraint.activate([
-            inspector.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            inspector.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            inspector.topAnchor.constraint(equalTo: root.topAnchor),
-            inspector.bottomAnchor.constraint(equalTo: root.bottomAnchor)
-        ])
-        root.layoutSubtreeIfNeeded()
+        // Below the window's own chrome, never over it — see `InWindowOverlay`. Pinned to the
+        // content view's top, this header opened *under* the traffic lights. The scrim under it
+        // dims what stays visible above, and clicking it is the same dismissal the close button
+        // and Escape run.
+        presentation = InWindowOverlay.install(
+            inspector,
+            in: window,
+            onDismiss: { [weak self] in self?.close() }
+        )
         window.makeFirstResponder(inspector.preferredFirstResponder)
         NSAccessibility.post(element: inspector, notification: .layoutChanged)
     }
@@ -144,7 +145,8 @@ private final class MediaInspectorSession {
         guard !isClosed else { return }
         isClosed = true
         inspector.prepareForRemoval()
-        inspector.removeFromSuperview()
+        presentation?.remove()
+        presentation = nil
 
         if let window {
             if let source, source.window === window {
@@ -339,7 +341,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
             closeButton.centerYAnchor.constraint(
                 equalTo: topAnchor,
-                constant: Design.Size.mediaInspectorHeaderHeight / 2
+                constant: Design.Size.inspectorHeaderHeight / 2
             ),
             actionsButton.trailingAnchor.constraint(
                 equalTo: closeButton.leadingAnchor,
@@ -359,7 +361,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
             headerSeparator.topAnchor.constraint(
                 equalTo: topAnchor,
-                constant: Design.Size.mediaInspectorHeaderHeight
+                constant: Design.Size.inspectorHeaderHeight
             ),
             headerSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -391,8 +393,13 @@ final class MediaInspectorView: NSView, ThemedComponent {
         applyTheme()
     }
 
+    /// `elevated`, not `ground`: the ground is by definition what the window behind this surface
+    /// is already filled with, so in a dark palette there was no tonal boundary at all between the
+    /// two — the inspector's header simply continued the window's own. The role vocabulary already
+    /// has the word for a container standing above a panel, and the scrim under this view supplies
+    /// the rest of the separation.
     override func draw(_ dirtyRect: NSRect) {
-        Design.Surface.ground.setFill()
+        Design.Surface.elevated.setFill()
         bounds.fill()
     }
 
@@ -653,6 +660,7 @@ final class MediaInspectorCanvas: ThemedControl {
     private var dragOrigin: NSPoint?
     private var dragStartingOffset = NSPoint.zero
     private var horizontalGesture: CGFloat = 0
+    private var focusOrigin = KeyboardFocusOrigin()
 
     var onDismiss: (() -> Void)?
     var onPrevious: (() -> Void)?
@@ -671,6 +679,33 @@ final class MediaInspectorCanvas: ThemedControl {
     }
 
     override var isFlipped: Bool { true }
+
+    /// Whether the ring is being drawn — see `KeyboardFocusOrigin`. Readable so the suppression
+    /// can be asserted as itself rather than only inferred from two renders.
+    var showsKeyboardFocusRing: Bool { hasKeyboardFocus && focusOrigin.isFromKeyboard }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusArrived(from: NSApp.currentEvent) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            focusOrigin.resigned()
+            needsDisplay = true
+        }
+        return resigned
+    }
+
+    /// Internal rather than private so a fixture can state the event that moved focus:
+    /// `NSApp.currentEvent` is whatever the run loop last pulled off the queue, and an unshown
+    /// test window pulls nothing.
+    func focusArrived(from event: NSEvent?) {
+        focusOrigin.arrived(from: event)
+        needsDisplay = true
+    }
 
     var viewportRect: NSRect {
         bounds.insetBy(dx: Design.Spacing.large, dy: Design.Spacing.large)
@@ -794,6 +829,9 @@ final class MediaInspectorCanvas: ThemedControl {
             respectFlipped: true,
             hints: [.interpolation: NSImageInterpolation.high]
         )
+        // Only under keyboard traversal: this control fills the inspector, so the ring is an
+        // accent rectangle around the whole window rather than a hint about where focus is.
+        guard showsKeyboardFocusRing else { return }
         drawKeyboardFocus(
             around: ThemedSurface.Shape(rect: bounds, radius: Design.Radius.panel)
         )

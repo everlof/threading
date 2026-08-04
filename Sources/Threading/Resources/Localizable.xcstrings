@@ -1,6 +1,171 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "#%lld · %@ · %@ · SHA-256 linked": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "#%lld · %@ · %@ · SHA-256-länkad" } } }
+    },
+    "%lld explicit redactions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld uttryckliga maskeringar" } } }
+    },
+    "%lld retained events": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld sparade händelser" } } }
+    },
+    "1 explicit redaction": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 uttrycklig maskering" } } }
+    },
+    "1 retained event": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 sparad händelse" } } }
+    },
+    "All categories": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alla kategorier" } } }
+    },
+    "All sources": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alla källor" } } }
+    },
+    "Audit": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Granskning" } } }
+    },
+    "Browser only": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Endast webbläsare" } } }
+    },
+    "Browser split": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delad webbläsarvy" } } }
+    },
+    "Canonicalized": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kanoniserad" } } }
+    },
+    "Completed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slutförd" } } }
+    },
+    "Denied": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nekad" } } }
+    },
+    "EVENTS": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HÄNDELSER" } } }
+    },
+    "Exact": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exakt" } } }
+    },
+    "Exact execution record": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exakt körningspost" } } }
+    },
+    "Exact payloads appear here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exakta nyttolaster visas här." } } }
+    },
+    "Exact · redacted": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exakt · maskerad" } } }
+    },
+    "Execution audit": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Körningsgranskning" } } }
+    },
+    "Execution events": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Körningshändelser" } } }
+    },
+    "Filesystem": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filsystem" } } }
+    },
+    "Integrity failure": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Integritetsfel" } } }
+    },
+    "Integrity failure · %lld malformed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Integritetsfel · %lld felformaterade" } } }
+    },
+    "Lifecycle": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Livscykel" } } }
+    },
+    "Network": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nätverk" } } }
+    },
+    "No execution events match these filters.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga körningshändelser matchar filtren." } } }
+    },
+    "Permission": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behörighet" } } }
+    },
+    "Provider": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantör" } } }
+    },
+    "Record could not be encoded.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Posten kunde inte kodas." } } }
+    },
+    "Requested": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Begärd" } } }
+    },
+    "Updated": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad" } } }
+    },
+    "Search exact records": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök i exakta poster" } } }
+    },
+    "Search execution audit": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök i körningsgranskningen" } } }
+    },
+    "Select an event": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj en händelse" } } }
+    },
+    "Subagent": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Underagent" } } }
+    },
+    "Threading MCP": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading MCP" } } }
+    },
+    "Tool": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Verktyg" } } }
+    },
+    "Verified chain": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Verifierad kedja" } } }
+    },
+    "Verified retained suffix": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Verifierat sparat suffix" } } }
+    },
+    "no redactions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "inga maskeringar" } } }
+    },
+    "A receipt for something already done, with the way back on it. Press Show to send one into the pane below: it slides in above the footer, holds while the pointer is on it, and leaves by itself otherwise. Press it again before that one leaves and the second waits its turn behind the first, as a card edge above it. Agent sends the same receipt for an archive nobody clicked — it names who did it, carries their reason, and holds more than twice as long.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett kvitto på något som redan har gjorts, med vägen tillbaka angiven. Tryck på Visa för att skicka ett till panelen nedanför: det glider in ovanför sidfoten, stannar medan pekaren är över det och försvinner annars av sig självt. Tryck igen innan det lämnar så väntar nästa bakom det första, som kanten på ett kort ovanför. Agenten skickar samma kvitto för ett arkiv som ingen klickade på — det anger vem som gjorde det, innehåller deras anledning och stannar mer än dubbelt så länge." } } }
+    },
+    "Agents can still use Threading's own browser and the isolated test browser. A signed-in automation profile needs real Chrome.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenter kan fortfarande använda Threadings egen webbläsare och den isolerade testwebbläsaren. En inloggad automatiseringsprofil kräver riktiga Chrome." } } }
+    },
+    "Agents may use this profile only for websites you allow, one run at a time, and it opens visibly so you can see what it does. Sign in to another site by opening it again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenter får bara använda profilen för webbplatser du tillåter, en körning i taget, och den öppnas synligt så att du kan se vad den gör. Logga in på en annan webbplats genom att öppna den igen." } } }
+    },
+    "Chrome automation profile": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chrome-automatiseringsprofil" } } }
+    },
+    "Drive the user's Chrome automation profile inside an allowed origin list.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Styr användarens Chrome-automatiseringsprofil inom en lista över tillåtna ursprung." } } }
+    },
+    "Fill with 1Password or system AutoFill": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fyll i med 1Password eller systemets autofyll" } } }
+    },
+    "Google Chrome is not installed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Google Chrome är inte installerat" } } }
+    },
+    "Not set up": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte konfigurerad" } } }
+    },
+    "One plate, two halves: hover each in turn — the raise stays inside the shared silhouette.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En platta, två halvor: håll pekaren över dem i tur och ordning — upphöjningen stannar inom den gemensamma silhuetten." } } }
+    },
+    "Open Automation Profile": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna automatiseringsprofil" } } }
+    },
+    "Opens a separate Chrome on a profile of Threading's own. Sign in to the sites you want agents to reach and install your password manager's extension there. Threading never reads a password, a cookie, or a Keychain item.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar ett separat Chrome med en profil som tillhör Threading. Logga in på webbplatserna som agenter ska kunna nå och installera lösenordshanterarens tillägg där. Threading läser aldrig ett lösenord, en cookie eller ett objekt i Nyckelhanteraren." } } }
+    },
+    "Set Up Automation Profile": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konfigurera automatiseringsprofil" } } }
+    },
+    "Signed-in Chrome": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inloggad Chrome" } } }
+    },
+    "SplitIconButtonView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "SplitIconButtonView" } } }
+    },
+    "Use signed-in Chrome": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd inloggad Chrome" } } }
+    },
     "%lld comments": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld kommentarer" } } }
     },
@@ -700,9 +865,9 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Börja en ny rad" } }
       }
     },
-    "The brief for a new session takes a line break; a reply in a conversation sends.": {
+    "A box with a send control in it sends; a note attached to a report takes a line break.": {
       "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Uppdraget för en ny session får en radbrytning; ett svar i en konversation skickas." } }
+        "sv": { "stringUnit": { "state": "translated", "value": "En ruta med en skicka-kontroll skickar; en anteckning i en rapport får en radbrytning." } }
       }
     },
     "When writing a prompt, press Return to": {
@@ -1129,6 +1294,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@, från %2$@, %3$@"
+          }
+        }
+      }
+    },
+    "%@, from %@, %@, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, från %2$@, %3$@, %4$@"
           }
         }
       }
@@ -2660,6 +2835,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tillämpade %@-temat app-omfattande."
+          }
+        }
+      }
+    },
+    "Applies the next time this chat starts.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gäller nästa gång den här konversationen startar."
           }
         }
       }
@@ -6790,13 +6975,13 @@
         }
       }
     },
-    "Expand, collapse, select, and scroll a hierarchy.": {
+    "Expand, collapse, select, and scroll a hierarchy — selected rows themed by the same row view the table above uses.": {
       "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Utöka, kollapsa, markera och rulla en hierarki."
+            "value": "Utöka, kollapsa, markera och rulla en hierarki — markerade rader tematiseras av samma radvy som tabellen ovan använder."
           }
         }
       }
@@ -10077,17 +10262,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inga arkiverade konversationer."
-          }
-        }
-      }
-    },
-    "No branch": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ingen gren"
           }
         }
       }
@@ -13974,13 +14148,13 @@
         }
       }
     },
-    "Select rows and resize the themed header columns.": {
+    "Select rows and resize the themed header columns. The selected row is the theme's, not AppKit's: switch the theme above and the fill follows it, except under System, where the row hands the highlight back.": {
       "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Välj rader och ändra storlek på de tematiska rubrikkolumnerna."
+            "value": "Välj rader och ändra storlek på de tematiska rubrikkolumnerna. Den markerade raden är temats, inte AppKits: byt tema ovan så följer fyllningen med — utom under System, där raden lämnar tillbaka markeringen."
           }
         }
       }
@@ -17030,13 +17204,13 @@
         }
       }
     },
-    "ThemedTableView & ThemedTableHeaderView": {
+    "ThemedTableView, ThemedTableRowView & ThemedTableHeaderView": {
       "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "ThemedTableView & ThemedTableHeaderView"
+            "value": "ThemedTableView, ThemedTableRowView & ThemedTableHeaderView"
           }
         }
       }
@@ -17211,6 +17385,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chatten har delats. Ingen tittar på den just nu."
+          }
+        }
+      }
+    },
+    "This chat keeps the permission mode it is running with. The agent's own setting applies the next time it starts.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här konversationen behåller behörighetsläget den kör med. Agentens egen inställning gäller nästa gång den startar."
           }
         }
       }
@@ -20897,17 +21081,6 @@
         }
       }
     },
-    "this checkout": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "den här utcheckningen"
-          }
-        }
-      }
-    },
     "this page": {
       "extractionState": "stale",
       "localizations": {
@@ -21537,6 +21710,26 @@
         }
       }
     },
+    "Choose a project first": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj ett projekt först"
+          }
+        }
+      }
+    },
+    "Send · ⌘Return": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka · ⌘Return"
+          }
+        }
+      }
+    },
     "Add Existing Folder…": {
       "localizations": {
         "sv": {
@@ -21947,12 +22140,12 @@
         }
       }
     },
-    "New chat or terminal": {
+    "New chat": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ny chatt eller terminal"
+            "value": "Ny chatt"
           }
         }
       }
@@ -22630,6 +22823,76 @@
     },
     "Data": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Data" } } }
+    },
+    "  (in use)": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "  (används)"
+          }
+        }
+      }
+    },
+    "37% context": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "37 % kontext" } } }
+    },
+    "Opus · 1M": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Opus · 1M" } } }
+    },
+    "PromptView · control row": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "PromptView · kontrollrad" } } }
+    },
+    "Reply to the agent": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Svara agenten" } } }
+    },
+    "The chat reply's shape: what the message is sent with sits inside the box, and the send finishes the row.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chattsvarets form: det meddelandet skickas med ligger inuti rutan, och skicka avslutar raden." } } }
+    },
+    "  (last used)": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "  (senast använd)"
+          }
+        }
+      }
+    },
+    "Agent's choice": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agentens val"
+          }
+        }
+      }
+    },
+    "  (this checkout)": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "  (den här utcheckningen)"
+          }
+        }
+      }
+    },
+    "Switch Project": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt projekt"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

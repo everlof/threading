@@ -118,6 +118,14 @@ enum Design {
         static let toolbarButtonWidth: CGFloat = 30
         static let toolbarButtonHeight: CGFloat = 28
 
+        /// The chevron half of a split control — narrower than the press it is welded to.
+        ///
+        /// The two halves are not equals: one takes the action, the other offers the exceptions,
+        /// and a chevron given the same 30 points as the icon reads as a second button that
+        /// happens to be touching the first. Still comfortably above the pointer target the rest
+        /// of the chrome uses, because it is full toolbar height. See `SplitIconButtonView`.
+        static let splitMenuWidth: CGFloat = 24
+
         /// A chrome-takeover window's own buttons — close, minimize, zoom — in the app-drawn
         /// title band. Wider than tall, the proportion every windowing system's buttons share,
         /// and sized to sit inside the band's default 28 points with air above and below.
@@ -144,8 +152,9 @@ enum Design {
         /// enough for several to read as attachments rather than as the prompt's main content.
         static let promptAttachmentThumbnail: CGFloat = 80
 
-        /// The app-owned media inspector's title-and-controls band.
-        static let mediaInspectorHeaderHeight: CGFloat = 52
+        /// The title-and-controls band of an app-owned in-window inspector — the media one and
+        /// the expanded comparison alike, so the two transient surfaces open at one height.
+        static let inspectorHeaderHeight: CGFloat = 52
 
         /// A recognisable member of the inspector's collection rail.
         static let mediaInspectorThumbnail: CGFloat = 56
@@ -173,8 +182,10 @@ enum Design {
         /// that clips and holds glowing panels budgets this much space between the panel and
         /// the clip edge. The gutter is constant across themes — layout never changes with
         /// the theme — and is sized to the widest glow any stock style states (twice its
-        /// radius, the visible extent of the blur), pinned to that by `AppThemeTests`.
-        static let glowGutter: CGFloat = 20
+        /// radius, the visible extent of the blur, plus its travel), pinned to that by
+        /// `AppThemeTests`. Forty-eight is the measured Clay card shadow: a 16-point travel
+        /// followed by a 16-point Core Animation radius (the 32px CSS blur it mirrors).
+        static let glowGutter: CGFloat = 48
     }
 
     // MARK: - Typography
@@ -571,6 +582,10 @@ enum Design {
         /// Draws attention to the one control that is ready to act.
         static var accent: NSColor { AppThemePalette.color(.accent) }
 
+        /// A quiet accent ground: tracks and washes that belong to the accent but must sit
+        /// behind full-strength accent ink.
+        static var accentMuted: NSColor { AppThemePalette.color(.accentMuted) }
+
         /// A selected row inside app-owned chrome.
         static var selection: NSColor { AppThemePalette.color(.selection) }
 
@@ -578,9 +593,9 @@ enum Design {
         /// *inside* a selected row has to read against.
         ///
         /// Not `selection` above, which is the theme's role for a selected row at rest:
-        /// `SidebarHoverRowView` paints the accent while the list has focus, and under **System**
-        /// hands the fill back to AppKit entirely. Stated once here so a control sitting in the
-        /// row need know neither fact. See `Design.Ink.selection`.
+        /// `SidebarHoverRowView` paints the accent while its window is in front, and under
+        /// **System** hands the fill back to AppKit entirely. Stated once here so a control
+        /// sitting in the row need know neither fact. See `Design.Ink.selection`.
         static var selectionFill: NSColor {
             AppThemePalette.current.isSystem ? .selectedContentBackgroundColor : accent
         }
@@ -617,6 +632,53 @@ enum Design {
                     ? Opacity.annotationTargetGroundIncreasedContrast
                     : Opacity.annotationTargetGround
                 return (accent.usingColorSpace(.sRGB) ?? accent).withAlphaComponent(alpha)
+            }
+        }
+
+        /// The hover the pointer earns over a *picture* — the display panel's image, an
+        /// attachment's thumbnail.
+        ///
+        /// `controlHover` is the theme's hover hue and cannot be used here directly, which is the
+        /// one place in the app that distinction matters. Every other hover fill is drawn *under*
+        /// its content, so an opaque role is right there and is what most themes ship:
+        /// `unemphasizedSelectedContentBackgroundColor` under System, `#D0D0D0` under Windows 98,
+        /// `#D8B4FE` under Lavender — all alpha 1. Laid over a picture the same fill is not a wash
+        /// but a lid, and hovering an attachment replaced the image with a flat rectangle.
+        ///
+        /// So the hue stays the theme's and the alpha becomes ours, stated rather than inherited.
+        /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
+        /// Increase Contrast each get to answer again.
+        static var imageHoverWash: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.imageHoverWash")) { _ in
+                let hover = AppThemePalette.current.resolved(.controlHover)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.imageHoverWashIncreasedContrast
+                    : Opacity.imageHoverWash
+                return (hover.usingColorSpace(.sRGB) ?? hover).withAlphaComponent(alpha)
+            }
+        }
+
+        /// The wash a covering surface lays over the window it opened in — see `InWindowOverlay`.
+        ///
+        /// Deliberately *not* derived from a theme role, and the only fill here that says so.
+        /// Every authored shade in this app is a bevel's edge — Windows 98 states `#808080`,
+        /// Platinum `#777777`, BeOS `#747474` — and a mid-grey wash barely dims a light window
+        /// while it visibly *lifts* a dark one. A scrim is not a colour a palette picks; it is
+        /// light taken away, which is black at a stated alpha under every theme and both
+        /// appearances. What the theme keeps is the thing standing in front of it: a covering
+        /// surface fills with `elevated`, so the tonal step between the two moves with the palette
+        /// while the wash behind it stays a wash.
+        ///
+        /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
+        /// Increase Contrast each get to answer again.
+        static var overlayScrim: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.overlayScrim")) { _ in
+                NSColor(
+                    white: 0,
+                    alpha: Accessibility.increasesContrast
+                        ? Opacity.overlayScrimIncreasedContrast
+                        : Opacity.overlayScrim
+                )
             }
         }
     }
@@ -967,6 +1029,16 @@ enum Design {
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
 
+        /// One surface handing an element over to the next — the composer's box travelling to
+        /// where the conversation replies from.
+        ///
+        /// The longest transition here, and deliberately: `appear` and `vanish` are a surface
+        /// materialising or leaving in one place, while this carries an object across the whole
+        /// pane and has to stay readable as *the same box* for the length of the trip. Below
+        /// about a third of a second the move reads as a jump cut, which is the swap it
+        /// replaced; much beyond it the pane feels held while nothing is being decided.
+        static var handoff: TimeInterval { reducesMotion ? 0 : 0.35 }
+
         /// How long a scrollbar that fades itself stays up after the scrolling that revealed
         /// it — macOS's own beat, long enough to reach the thumb that just appeared.
         ///
@@ -1045,6 +1117,29 @@ enum Design {
         /// The same wash under Increase Contrast, where the outline alone would be doing all
         /// the work over an arbitrary page.
         static let annotationTargetGroundIncreasedContrast: CGFloat = 0.34
+
+        /// How much of the theme's hover colour lies over a picture the pointer is on.
+        ///
+        /// Near the annotation ground, and for the same reason: this covers content the app did
+        /// not draw and whose whole purpose is to be looked at. The pointer cursor and the accent
+        /// outline say the picture is a control; the wash only warms what they surround.
+        static let imageHoverWash: CGFloat = 0.16
+
+        /// The same wash under Increase Contrast, where a faint tint is the first thing to go.
+        static let imageHoverWashIncreasedContrast: CGFloat = 0.34
+
+        /// How much of the window a covering surface takes away behind it.
+        ///
+        /// Measured against the strip that stays visible beside an open inspector — the app's own
+        /// header band above it, which is the only part of the window a full-height surface does
+        /// not cover. Below this the band and the inspector's own header still read as two rows
+        /// of one window's chrome, which is the bug the scrim exists for; far above it the strip
+        /// goes to a black bar and the window reads as broken rather than as busy behind a modal.
+        static let overlayScrim: CGFloat = 0.4
+
+        /// The same wash under Increase Contrast, where the separation it draws is exactly what
+        /// was asked for.
+        static let overlayScrimIncreasedContrast: CGFloat = 0.6
     }
 
     // MARK: - Accessibility
@@ -1188,6 +1283,44 @@ enum SurfaceBevel: Equatable {
     case none
 }
 
+/// A shadow-only companion layer for the pale half of a paired material shadow.
+///
+/// The layer is transparent: its explicit path supplies the casting silhouette, so it cannot
+/// cover view-drawn content merely to make Core Animation produce a second shadow. Keeping the
+/// path here also makes it follow autoresizing; a path frozen in `applySurface` would retain the
+/// panel's construction-time width after its constraints laid it out.
+private final class ThemeHighlightShadowLayer: CALayer {
+    var surfaceRadius: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
+
+    override init() {
+        super.init()
+        masksToBounds = false
+    }
+
+    override init(layer: Any) {
+        let copiedRadius = (layer as? ThemeHighlightShadowLayer)?.surfaceRadius
+        super.init(layer: layer)
+        if let copiedRadius { surfaceRadius = copiedRadius }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func layoutSublayers() {
+        super.layoutSublayers()
+        let radius = min(max(0, surfaceRadius), min(bounds.width, bounds.height) / 2)
+        shadowPath = CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius,
+            cornerHeight: radius,
+            transform: nil
+        )
+    }
+}
+
 extension NSView {
 
     /// Applies a rounded, filled surface using the design tokens.
@@ -1209,6 +1342,7 @@ extension NSView {
         border: NSColor? = nil,
         borderWidth: CGFloat? = nil,
         glow: Bool = false,
+        controlGlow: Bool = false,
         bevel: SurfaceBevel = .automatic
     ) {
         wantsLayer = true
@@ -1216,9 +1350,11 @@ extension NSView {
         layer?.cornerRadius = radius.current
 
         // A bevel replaces the flat border outright — two edge colours and a hairline would
-        // be three lines around one surface — and only on a square corner (see SurfaceBevel).
-        let bevelWidth = AppThemePalette.current.material.bevel?.width
-        let bevelActive = bevelWidth != nil && bevel != .none && radius.current == 0
+        // be three lines around one surface. The hard construction is square; soft relief
+        // follows a rounded silhouette instead (see `AppTheme.Bevel.Style`).
+        let bevelSpec = AppThemePalette.current.material.bevel
+        let bevelSupportsCorner = bevelSpec?.style == .soft || radius.current == 0
+        let bevelActive = bevelSpec != nil && bevel != .none && bevelSupportsCorner
 
         // Frozen in the view's **own** effective appearance rather than the thread's ambient
         // drawing appearance, which from setup code and notification handlers is whatever
@@ -1229,8 +1365,9 @@ extension NSView {
 
             applyThemeBevel(
                 bevelActive ? bevel : nil,
-                width: bevelWidth ?? 0,
-                soft: { if case .panel = radius { return true } else { return false } }()
+                spec: bevelSpec,
+                radius: radius.current,
+                isPanel: { if case .panel = radius { return true } else { return false } }()
             )
 
             if let border, !bevelActive {
@@ -1244,7 +1381,11 @@ extension NSView {
                 layer?.borderColor = nil
             }
 
-            applyThemeGlow(glow)
+            if controlGlow {
+                applyThemeControlGlow(true, radius: radius.current)
+            } else {
+                applyThemeGlow(glow)
+            }
         }
         recordSurface(
             fill: fill,
@@ -1252,6 +1393,7 @@ extension NSView {
             borderWidth: borderWidth,
             radius: radius,
             glow: glow,
+            controlGlow: controlGlow,
             bevel: bevel
         )
     }
@@ -1267,24 +1409,68 @@ extension NSView {
     /// per-resize hook `applySurface` does not have. The bitmap's colours are frozen like any
     /// recorded layer colour and re-frozen by the theme sweep, which re-runs the whole
     /// application.
-    private func applyThemeBevel(_ participation: SurfaceBevel?, width: CGFloat, soft: Bool) {
+    private func applyThemeBevel(
+        _ participation: SurfaceBevel?,
+        spec: AppTheme.Bevel?,
+        radius: CGFloat,
+        isPanel: Bool
+    ) {
         let name = "threading.bevel"
         let existing = layer?.sublayers?.first { $0.name == name }
-        guard let participation, width > 0, let layer else {
+        guard let participation, let spec, spec.width > 0, let layer else {
             existing?.removeFromSuperlayer()
             return
         }
 
-        // Panels wear the soft one-point edge whatever the material says buttons wear —
-        // see `BevelArtwork.edgeColors`.
-        let effectiveWidth = soft ? BevelArtwork.softEdgeWidth : width
-        guard let image = BevelArtwork.ninePatch(
-            edgeWidth: width,
-            highlight: Design.Surface.bevelHighlight,
-            shadow: Design.Surface.bevelShadow,
-            sunken: participation == .sunken,
-            soft: soft
-        ) else {
+        let image: CGImage?
+        let contentsScale: CGFloat
+        let contentsCenter: CGRect
+        switch spec.style {
+        case .hard:
+            // Large period panels wear the quiet one-point construction whatever their
+            // nested controls use. `soft` here is the historical hard-bevel panel variant,
+            // not the rounded material style.
+            let quietPanelEdge = isPanel
+            let effectiveWidth = quietPanelEdge ? BevelArtwork.softEdgeWidth : spec.width
+            image = BevelArtwork.ninePatch(
+                edgeWidth: spec.width,
+                highlight: Design.Surface.bevelHighlight,
+                shadow: Design.Surface.bevelShadow,
+                sunken: participation == .sunken,
+                soft: quietPanelEdge
+            )
+            contentsScale = BevelArtwork.scale
+            let side = effectiveWidth * 2 + BevelArtwork.stretchableCore
+            contentsCenter = CGRect(
+                x: effectiveWidth / side,
+                y: effectiveWidth / side,
+                width: BevelArtwork.stretchableCore / side,
+                height: BevelArtwork.stretchableCore / side
+            )
+        case .soft:
+            // The live clay reference mixes its inner relief: broad cards carry a recessed,
+            // blurred edge inside an otherwise raised outer shadow, while compact controls
+            // carry the opposite (lit top-leading, shaded bottom-trailing) puff. `sunken`
+            // already names the first construction for wells; panels opt into the same inner
+            // direction without changing what their outer shadow says.
+            let softSunken = participation == .sunken || isPanel
+            image = SoftBevelArtwork.ninePatch(
+                radius: radius,
+                edgeWidth: spec.width,
+                highlight: Design.Surface.bevelHighlight,
+                shadow: Design.Surface.bevelShadow,
+                sunken: softSunken,
+                broad: softSunken
+            )
+            contentsScale = SoftBevelArtwork.scale
+            contentsCenter = SoftBevelArtwork.contentsCenter(
+                radius: radius,
+                edgeWidth: spec.width,
+                broad: softSunken
+            )
+        }
+
+        guard let image else {
             existing?.removeFromSuperlayer()
             return
         }
@@ -1294,16 +1480,8 @@ extension NSView {
         bevelLayer.frame = layer.bounds
         bevelLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         bevelLayer.contentsGravity = .resize
-        bevelLayer.contentsScale = BevelArtwork.scale
-        // The stretchable middle, in the image's own unit space: everything but the fixed
-        // edge ring.
-        let side = effectiveWidth * 2 + BevelArtwork.stretchableCore
-        bevelLayer.contentsCenter = CGRect(
-            x: effectiveWidth / side,
-            y: effectiveWidth / side,
-            width: BevelArtwork.stretchableCore / side,
-            height: BevelArtwork.stretchableCore / side
-        )
+        bevelLayer.contentsScale = contentsScale
+        bevelLayer.contentsCenter = contentsCenter
         bevelLayer.contents = image
         if existing == nil {
             layer.addSublayer(bevelLayer)
@@ -1311,10 +1489,39 @@ extension NSView {
     }
 
     private func applyThemeGlow(_ wantsGlow: Bool) {
-        guard wantsGlow, let spec = AppThemePalette.current.material.glow else {
+        applyThemeShadow(
+            wantsGlow ? AppThemePalette.current.material.glow : nil,
+            radius: layer?.cornerRadius ?? 0,
+            highlightName: "threading.glow.highlight",
+            explicitPrimaryPath: false
+        )
+    }
+
+    /// Gives a drawn control the tighter shadow its material states. Drawn controls cannot use
+    /// `applySurface` without freezing their live state, so they call this from `draw(_:)`; the
+    /// explicit path keeps the title and glyph from becoming shadow casters themselves.
+    func applyThemeControlGlow(_ wantsGlow: Bool, radius: CGFloat) {
+        applyThemeShadow(
+            wantsGlow ? AppThemePalette.current.material.controlGlow : nil,
+            radius: radius,
+            highlightName: "threading.controlGlow.highlight",
+            explicitPrimaryPath: true
+        )
+    }
+
+    private func applyThemeShadow(
+        _ spec: AppTheme.Glow?,
+        radius: CGFloat,
+        highlightName: String,
+        explicitPrimaryPath: Bool
+    ) {
+        let existingHighlight = layer?.sublayers?.first { $0.name == highlightName }
+        guard let spec else {
             // Cleared rather than skipped: switching *away* from a glowing theme has to take
             // the halo with it, and a layer keeps its shadow until told otherwise.
             layer?.shadowOpacity = 0
+            layer?.shadowPath = nil
+            existingHighlight?.removeFromSuperlayer()
             return
         }
 
@@ -1323,6 +1530,41 @@ extension NSView {
         layer?.shadowRadius = spec.radius
         layer?.shadowOpacity = Float(spec.opacity)
         layer?.shadowOffset = CGSize(width: spec.offsetX, height: spec.offsetY)
+        if explicitPrimaryPath, let layer {
+            let fittedRadius = min(max(0, radius), min(layer.bounds.width, layer.bounds.height) / 2)
+            layer.shadowPath = CGPath(
+                roundedRect: layer.bounds,
+                cornerWidth: fittedRadius,
+                cornerHeight: fittedRadius,
+                transform: nil
+            )
+        } else {
+            layer?.shadowPath = nil
+        }
+
+        guard let highlight = spec.highlight, let layer else {
+            existingHighlight?.removeFromSuperlayer()
+            return
+        }
+
+        let highlightLayer: ThemeHighlightShadowLayer
+        if let existing = existingHighlight as? ThemeHighlightShadowLayer {
+            highlightLayer = existing
+        } else {
+            existingHighlight?.removeFromSuperlayer()
+            highlightLayer = ThemeHighlightShadowLayer()
+            highlightLayer.name = highlightName
+            highlightLayer.frame = layer.bounds
+            highlightLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            layer.insertSublayer(highlightLayer, at: 0)
+        }
+        highlightLayer.surfaceRadius = radius
+        highlightLayer.shadowColor = AppThemePalette.current.resolved(highlight.role).cgColor
+        highlightLayer.shadowRadius = highlight.radius
+        highlightLayer.shadowOpacity = Float(highlight.opacity)
+        highlightLayer.shadowOffset = CGSize(width: highlight.offsetX, height: highlight.offsetY)
+        highlightLayer.setNeedsLayout()
+        highlightLayer.layoutIfNeeded()
     }
 }
 
@@ -1448,5 +1690,175 @@ enum BevelArtwork {
              topLeft: colors.topLeftInner, bottomRight: colors.bottomRightInner)
 
         return context.makeImage()
+    }
+}
+
+// MARK: - Soft Bevel Artwork
+
+/// The rounded counterpart to `BevelArtwork`: two blurred inset shadows rather than a painted
+/// border. One enters from the top-leading edge and the other from the bottom-trailing edge;
+/// raised controls put light first, while wells and broad cards reverse them. That mixed inner
+/// relief is what the live clay reference actually uses. A narrow ring made the same recipe read
+/// as a lavender outline, especially around a large corner. The middle stays transparent so
+/// layer-backed panels and live-drawn controls keep their own fill and content untouched.
+@MainActor
+enum SoftBevelArtwork {
+
+    static let scale: CGFloat = 2
+    private static let stretchableCore: CGFloat = 2
+
+    private static func metrics(edgeWidth: CGFloat, broad: Bool) -> (travel: CGFloat, blur: CGFloat) {
+        // The source's compact controls use 4/8 and its cards use 6/12. Core Graphics' shadow
+        // blur is the Gaussian radius, approximately half CSS's box-shadow blur value.
+        let travel = edgeWidth * (broad ? 2 : 4 / 3)
+        return (travel, travel)
+    }
+
+    private static func geometry(
+        radius: CGFloat,
+        edgeWidth: CGFloat,
+        broad: Bool
+    ) -> (fixed: CGFloat, side: CGFloat) {
+        let metric = metrics(edgeWidth: edgeWidth, broad: broad)
+        // Keep every blurred pixel in a fixed cap. Stretching through an inset fade would make
+        // the long edges softer than the corners that join them.
+        let fadeExtent = metric.travel + metric.blur * 2
+        let fixed = max(fadeExtent, radius)
+        return (fixed, fixed * 2 + stretchableCore)
+    }
+
+    static func contentsCenter(radius: CGFloat, edgeWidth: CGFloat, broad: Bool) -> CGRect {
+        let geometry = geometry(radius: radius, edgeWidth: edgeWidth, broad: broad)
+        return CGRect(
+            x: geometry.fixed / geometry.side,
+            y: geometry.fixed / geometry.side,
+            width: stretchableCore / geometry.side,
+            height: stretchableCore / geometry.side
+        )
+    }
+
+    static func ninePatch(
+        radius: CGFloat,
+        edgeWidth: CGFloat,
+        highlight: NSColor,
+        shadow: NSColor,
+        sunken: Bool,
+        broad: Bool
+    ) -> CGImage? {
+        let geometry = geometry(radius: radius, edgeWidth: edgeWidth, broad: broad)
+        let pixels = Int((geometry.side * scale).rounded(.up))
+        guard pixels > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: pixels,
+                  height: pixels,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+
+        context.scaleBy(x: scale, y: scale)
+        let bounds = CGRect(x: 0, y: 0, width: geometry.side, height: geometry.side)
+        drawInsetRelief(
+            in: context,
+            bounds: bounds,
+            visualTopY: bounds.maxY,
+            visualBottomY: bounds.minY,
+            radius: radius,
+            edgeWidth: edgeWidth,
+            highlight: highlight,
+            shadow: shadow,
+            sunken: sunken,
+            broad: broad
+        )
+        return context.makeImage()
+    }
+
+    static func draw(
+        shape: ThemedSurface.Shape,
+        edgeWidth: CGFloat,
+        highlight: NSColor,
+        shadow: NSColor,
+        sunken: Bool
+    ) {
+        guard let graphics = NSGraphicsContext.current else { return }
+        let context = graphics.cgContext
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        let visualTopY = graphics.isFlipped ? shape.rect.minY : shape.rect.maxY
+        let visualBottomY = graphics.isFlipped ? shape.rect.maxY : shape.rect.minY
+        drawInsetRelief(
+            in: context,
+            bounds: shape.rect,
+            visualTopY: visualTopY,
+            visualBottomY: visualBottomY,
+            radius: shape.radius,
+            edgeWidth: edgeWidth,
+            highlight: highlight,
+            shadow: shadow,
+            sunken: sunken,
+            broad: sunken
+        )
+    }
+
+    private static func drawInsetRelief(
+        in context: CGContext,
+        bounds: CGRect,
+        visualTopY: CGFloat,
+        visualBottomY: CGFloat,
+        radius: CGFloat,
+        edgeWidth: CGFloat,
+        highlight: NSColor,
+        shadow: NSColor,
+        sunken: Bool,
+        broad: Bool
+    ) {
+        let outerRadius = min(max(0, radius), min(bounds.width, bounds.height) / 2)
+        let metric = metrics(edgeWidth: edgeWidth, broad: broad)
+        let visualDown: CGFloat = visualBottomY > visualTopY ? 1 : -1
+        let topLeading = sunken ? shadow : highlight
+        let bottomTrailing = sunken ? highlight : shadow
+
+        // An inset shadow is the shadow of the *outside* of the rounded rectangle falling into
+        // its clipped interior. This gives the corner a true blurred offset curve: no coloured
+        // ring to run around the whole corner, and no hard inner boundary where a fade ends.
+        func inset(_ color: NSColor, offset: CGSize) {
+            guard color.alphaComponent > 0 else { return }
+            context.saveGState()
+            defer { context.restoreGState() }
+
+            let silhouette = CGPath(
+                roundedRect: bounds,
+                cornerWidth: outerRadius,
+                cornerHeight: outerRadius,
+                transform: nil
+            )
+            context.addPath(silhouette)
+            context.clip()
+            context.setShadow(offset: offset, blur: metric.blur, color: color.cgColor)
+
+            let reach = max(bounds.width, bounds.height) + metric.travel + metric.blur * 4
+            let outside = bounds.insetBy(dx: -reach, dy: -reach)
+            let caster = CGMutablePath()
+            caster.addRect(outside)
+            caster.addPath(silhouette)
+            context.addPath(caster)
+            // The opaque caster is outside the silhouette and therefore outside the clip; only
+            // its soft shadow enters the surface. The even-odd hole is the rounded surface.
+            context.setFillColor(NSColor.black.cgColor)
+            context.drawPath(using: .eoFill)
+        }
+
+        inset(
+            topLeading,
+            offset: CGSize(width: metric.travel, height: visualDown * metric.travel)
+        )
+        inset(
+            bottomTrailing,
+            offset: CGSize(width: -metric.travel, height: -visualDown * metric.travel)
+        )
     }
 }

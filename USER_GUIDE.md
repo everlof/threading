@@ -13,7 +13,7 @@ optional beyond the first click:
    **Settings ▸ Themes**.
 2. **Accounts** — the Claude Code and Codex logins found on this Mac, each with a switch that
    takes it out of use on the spot (the same switch as **Settings ▸ Accounts**), and whether
-   the `claude`/`codex` commands are actually reachable from your shell; a missing one shows
+   the `claude`/`codex`/`grok`/`opencode` commands are actually reachable from your shell; a missing one shows
    the install command instead of failing later inside a terminal.
 3. **Conversations** — chats you already have on disk, one list newest first, with the last
    two days pre-checked. Importing creates a project for each checked conversation's folder
@@ -49,7 +49,7 @@ the width you leave it at is the width it opens at next launch.
 **Project** — a folder you've added. Named after its git repository when there is one, with
 the current branch shown beneath.
 
-**Session** — one Claude Code or Codex conversation running inside a project. A session
+**Session** — one Claude Code, Codex, Grok, or OpenCode conversation running inside a project. A session
 outlives its terminal: when the agent exits, the terminal closes but the session stays in the
 sidebar so you can resume the same conversation later.
 
@@ -157,6 +157,11 @@ app's name — and two quiet controls at its right: **+** to add a project, and 
 arrangement control described below. Both the brand and **Settings**, at the sidebar's
 bottom-left, sit on the same left margin as the rows between them, icon and word.
 
+A build that is not a release names itself beside Settings: a quiet **NIGHTLY**, **BETA**
+or **DEV** mark, so a screenshot or a bug report always says which kind of build produced
+it. Hovering it spells the name out; a release build shows nothing there. The exact version
+stays out of the chrome — it lives in the About box.
+
 The mark answers the pointer: it lifts while the pointer is anywhere over the brand row, and
 a click turns it one sixth of a turn — the mark has six strands, so it lands back on itself.
 Nothing is opened by the click; the brand names the window rather than pointing anywhere.
@@ -252,9 +257,10 @@ minute old. A count honours `.gitignore`, skips minified and generated files, an
 while a session in the project is working.
 
 ### Managing
-**Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** asks for
-**New Chat…** or **New Terminal**; clicking the project row itself still opens the chat
-composer. The **⋯** opens the project's actions, also available on **right-click**:
+**Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** opens the
+chat composer straight away; **right-click it** for **New Chat…** or **New Terminal**. Clicking
+the project row itself also opens the chat composer. The **⋯** opens the project's actions, also
+available on **right-click**:
 - Rename Project…
 - Reveal in Finder
 - Project Icon — see [Project icons](#project-icons)
@@ -280,27 +286,52 @@ The composer sits at the **bottom of the pane**, the way a chat input does, and 
 it holds the Threading mark over a greeting that changes as you move between projects — it
 knows the time of day and the calendar, and only sometimes says so.
 
-**The first chip is the project itself.** Its menu lists every project (with its folder), so a
-conversation can change its mind about where it runs before it starts — and at the bottom sit
-**Add Existing Folder…** and **Create New Folder…**, the same actions the sidebar's + offers.
+**Two chips sit above the box: where the session runs, and who it runs as.** The first reads
+**AnotherTerminal ▸ master** — the project, then the checkout inside it — or just the project
+name for a folder that is not a git repository. The second reads **Claude Code · work** — the
+agent, then the login it will run as, where that agent has more than one to choose between.
+Point at either for the detail: the location chip's tooltip names the folder the session will
+actually run in.
+
+**The location chip's menu answers two different questions, and keeps them apart.** At the top
+are the places this session can run: this checkout, any other checkout of the same repository
+you have added, then **New Worktree…**. Picking one of those routes the session and leaves
+everything else exactly as you left it, half-written prompt included. Under the line,
+**Switch Project** opens every project (with its folder), plus **Add Existing Folder…** and
+**Create New Folder…** — the same actions the sidebar's + offers. That one *moves* the
+composer, which starts its choices over, so it lives one layer in rather than in the same list
+as the checkouts.
+
 With no projects at all, the empty pane shows this composer directly with the chip reading
-**Choose a project…**: type your task first if you like, pick the folder second — the words
-follow the composer into the project you choose. Start stays disabled until there is somewhere
-to run.
+**Choose a project…** and its menu skipping straight to the projects, since choosing one is the
+only question there is. Type your task first if you like and pick the folder second — the words
+follow the composer into the project you choose. The send stays disabled until there is somewhere
+to run, and says so when you point at it.
+
+**The identity chip's menu is the same shape.** Your logins for the current agent come first,
+each with what is left of it (see
+[Usage when picking an account](#usage-when-picking-an-account)); under the line are the other
+agents. Picking a login keeps the agent; picking an agent moves to that agent's preferred
+login. The agent you are already on has no row of its own — the chip is showing it.
 
 **The prompt is focused the moment the composer appears**, however you got there, so the
 first message can be typed straight away without clicking the field. If a draft is waiting,
 the caret lands at the end of it — typing continues the sentence rather than cutting in front
 of it.
 
-There is no shortcut that starts a session for you. A session carries four decisions — agent,
-account, model, and which checkout it runs in — and the menu items that used to create one
-outright answered all four with defaults you never saw. The composer asks, and it is replaced
+There is no shortcut that starts a session for you. A session carries up to four decisions —
+agent, account, model, and which checkout it runs in — and the menu items that used to create one
+outright answered them with defaults you never saw. The composer asks, and it is replaced
 by the conversation the moment you send the first message, so it costs nothing to pass through.
+Where the session is drawn by Threading rather than shown as a terminal, the box you typed in
+travels to where the conversation replies from instead of being swapped out, so the thread you
+land in is visibly the one you were writing in. Reduce Motion lands it there at once.
 
-The remaining chips choose the agent, account, model and, in a git repository, **which
-checkout it runs in**. Beneath them, the chosen account's rate limits are drawn in full — see
-[Usage when picking an account](#usage-when-picking-an-account).
+Everything the session *runs with* sits on the row along the bottom of the prompt box, rather
+than above it with the two chips: the model, how much it may do before it asks, the surface it
+is shown on, and the account's usage reading beside the send — see
+[Usage when picking an account](#usage-when-picking-an-account). Above the box is who and
+where; inside it is what with.
 
 Every chip's dropdown is Threading's own menu, and it tracks like a menu should: click to open
 and browse, or **press, drag onto a row, and release** to choose in one motion. Arrow keys
@@ -319,9 +350,27 @@ choice anywhere in the chain answers the whole menu. Only the menu bar at the to
 screen remains the system's own.
 
 The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
-"Default" — read from whatever the selected account is configured to use. Its menu marks that
-one *(account default)*, so choosing it explicitly and leaving it alone are the same thing. It
-only says "Default model" when the account states no model at all.
+"Default". Its menu's first row means "leave the choice to the agent", and names what that
+resolves to, marked with where the name came from:
+
+- *(account default)* — the model your account is configured to use, in its `settings.json`
+  (Claude) or `config.toml` (Codex), or the default set by your organisation. A setting you can
+  go and change; choosing this row explicitly and leaving it alone are the same thing.
+- *(in use)* — what the agent picked for **this** conversation, reported when it started. Shown
+  when your account configures no model, so the running session can still name what it is on.
+- *(last used)* — what this account ran the last time nothing was chosen, either watched by
+  Threading or read back from the account's own transcripts. This covers sessions you ran in a
+  plain terminal too, so an account that has never been used in Threading still names its model.
+
+It falls back to "Agent's choice" only when none of those can answer — a login that has never run
+this agent anywhere at all. That wording is literal: nothing has chosen yet, and the agent will
+decide at launch. Threading does not guess what it would pick, because that is negotiated with
+the service and is not recorded on your machine.
+
+The menu also offers any model your login has beyond the standard ones (`Opus`, `Sonnet`,
+`Fable`), read from the agent's own cache — `Fable 5 · 1M`, for instance, which no plain alias
+names. Those three aliases always mean *the latest* of each family, so they stay current on their
+own as new versions ship.
 
 For **OpenCode**, provider login and model selection stay in its own TUI. Run `/connect`, choose
 **OpenRouter**, and enter the key there; use `/models` to choose any OpenRouter model, including
@@ -329,21 +378,21 @@ xAI/Grok. Threading neither reads nor stores the OpenRouter key. OpenCode's acco
 permission, and Chat-surface chips are hidden because those choices are not equivalent to the
 Claude/Codex host controls.
 
-For the standalone **Grok** runtime, the first TUI launch opens xAI's browser login. Model
-selection remains in Grok's live/custom catalog (`/model`), while Threading can set the opening
+For the standalone **Grok** runtime, the first launch uses xAI's own login. Model selection remains
+in Grok's live/custom catalog (`/model` in Terminal), while Threading can set the opening Terminal
 permission posture because Grok exposes the same six modes. Threading does not read Grok's login.
 
-The branch chip lists places, not branch names: this checkout (the default, always first),
-any other checkout of the same repository you have added, and **New Worktree…** at the
-bottom, which creates one on a new branch and adds it as its own project. A branch nothing is
+The location chip lists places, not branch names: this checkout (the default, always first),
+any other checkout of the same repository you have added, and **New Worktree…** under them,
+which creates one on a new branch and adds it as its own project. A branch nothing is
 checked out on is not offered — there would be nowhere to run — so making a worktree is how
 you get one.
 
-The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return breaks
-the line** here, like it does in any other editor — a first message is usually a paragraph, not
-a sentence. **Start session** below the box sends it, and so does **⌘Return**, which the button
-names on its face. Beside it sits **Import _n_ conversations** when this project has
-conversations it could adopt; it is the quieter of the two on purpose.
+The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return sends
+it**, and so does **⌘Return**; **Shift+Return** or **Option+Return** breaks the line. This is
+the same box, and the same key, as a reply inside a running conversation — see the Keyboard
+setting below if you would rather Return always broke the line. Under the box sits
+**Import _n_ conversations** when this project has conversations it could adopt.
 
 To give every new chat the same standing instruction, enter an **Opening Message** under
 **Settings ▸ General**. Threading appends it after the task you write and sends both as the
@@ -356,15 +405,13 @@ continuations. Reopening or resuming an existing chat does not send it again, an
 conversations receive nothing. The sidebar's initial name still comes from the task you typed,
 not from this reusable message.
 
-(A reply inside a running conversation is the other way round: Return sends it and
-Shift+Return breaks the line, because a reply is usually one line and the box says so.)
-
-**If you want one answer everywhere, say so** under **Settings ▸ Keyboard ▸ Composer**, at
-*When writing a prompt, press Return to*. The default — **Do What the Composer Expects** — is
-the split just described. **Send** makes Return send in the session brief too, and **Start a New
-Line** stops it sending in replies. Whichever you pick, three keys never change: **⌘Return**
-always sends, **Shift+Return** and **Option+Return** always break the line, and Return while
-an input method is still converting a word belongs to the input method rather than to the send.
+**If you write long briefs, say so** under **Settings ▸ Keyboard ▸ Composer**, at *When writing
+a prompt, press Return to*. The default — **Do What the Composer Expects** — sends from any box
+with a send control in it, which is every prompt you write to an agent. **Start a New Line**
+gives Return back to the text everywhere, leaving ⌘Return as the send; **Send** makes Return
+send in the report fields too. Whichever you pick, three keys never change: **⌘Return** always
+sends, **Shift+Return** and **Option+Return** always break the line, and Return while an input
+method is still converting a word belongs to the input method rather than to the send.
 
 **Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
 agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
@@ -452,8 +499,10 @@ lost — the session is in **Settings ▸ Archived**, which is what the band's s
 
 **Archive several in a row and the bands wait their turn.** Each one carries its own Undo, so
 none of them is thrown away to make room for the next: the second band appears when the first
-leaves, and so on. Only the last few are kept if you archive faster than you can read — the
-sessions themselves are all in **Settings ▸ Archived** either way.
+leaves, and so on. You can see that one is waiting — the band gains a card edge above it, one per
+receipt still to come, so a band with more behind it never looks like the last thing that
+happened. Only the last few are kept if you archive faster than you can read — the sessions
+themselves are all in **Settings ▸ Archived** either way.
 
 **A session can also file itself away when you ask it to.** "Commit this and then close the
 session" is one instruction, and the agent can now carry out both halves: it finishes the work,
@@ -536,9 +585,15 @@ Resuming works by session id:
 |-------|--------------|--------|
 | Claude Code | `claude --session-id <uuid> --name <title>` | `claude --resume <uuid>` |
 | Codex | `codex` (id discovered after launch) | `codex resume <uuid>` |
+| Grok | `grok --session-id <uuid> -- <opening>` | `grok --resume <uuid>` |
+| OpenCode | `opencode` (id discovered after the first prompt) | `opencode --session <ses_…>` |
 
-Claude Code accepts an id chosen up front, so Threading assigns one. Codex assigns its own,
-which Threading reads back from the rollout file Codex writes on launch.
+Claude Code and Grok accept ids chosen up front, so Threading assigns them. Grok is marked
+resumable only after its supported session listing confirms the conversation exists; quitting
+the first browser-login screen therefore leaves it safe to launch fresh again. Codex assigns its
+own id, which Threading reads back from the rollout file Codex writes on launch. OpenCode also
+assigns its own id; Threading reads the supported JSON session listing for the newest conversation
+in that checkout.
 
 ### Standalone terminals
 
@@ -586,8 +641,8 @@ shell of its own in exchange.
 Conversations you started outside Threading — in a plain terminal, say — can be adopted into a
 project and then resumed like any other session.
 
-Select a project and the composer shows an **Import _n_ conversations** chip once it has
-finished looking. Opening it lists what was found, newest first. Picking one adds it to the
+Select a project and the composer shows an **Import _n_ conversations** offer under its prompt
+box once it has finished looking. Opening it lists what was found, newest first. Picking one adds it to the
 project already resumable; it is not launched, so selecting it in the sidebar is what reopens
 the conversation.
 
@@ -661,7 +716,7 @@ prompts have their own narrower memory instead — "Always Allow This Host" is o
 
 ### Names
 A session is named after its conversation, never after its agent or account — the row's icon
-and account chip already say which agent and login it runs on.
+and account mark already say which agent and login it runs on.
 
 By default the sidebar follows the agent's own name for the conversation, which it updates as
 the work develops: the terminal title for terminal sessions, and the title Claude records in
@@ -699,7 +754,7 @@ that group off there is nothing to ask. A name you typed yourself still wins: th
 is stored underneath it and shows through if you ever clear your own.
 
 ### Permission mode
-How much a chat may do before it stops to ask. Both agents support it, in one set of names:
+How much a chat may do before it stops to ask. Claude Code and Codex support it, in one set of names:
 
 | Mode | What it does |
 |---|---|
@@ -715,7 +770,8 @@ no, Bypass keeps quiet by saying yes.
 
 Set it in three places:
 
-- The **mode chip** in the composer, beside agent, account and model, when starting a chat.
+- The **mode chip** in the composer, on the row inside the prompt box beside the model, when
+  starting a chat.
 - A single chat's **⋯** menu has a **Permission Mode** submenu, including an inherit item that
   follows the setting below.
 - **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
@@ -725,6 +781,10 @@ Set it in three places:
 Codex has no plan mode of its own, so Plan there stops it writing but does not ask it to plan;
 the menu says so. Changing a running chat's mode applies the next time it launches — Claude's
 own Shift+Tab moves it in the meantime, and Threading cannot see that.
+
+OpenCode keeps its richer per-tool policy in `opencode.json`; its `--auto` option is not one of
+these six postures. OpenCode sessions therefore show no Threading Permission Mode control.
+Grok accepts all six postures directly; Manual is sent using Grok's spelling, `default`.
 
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
@@ -843,7 +903,7 @@ new one from the terminal, e.g. `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude`.
 
 ### Switching an account off
 Each row carries a **switch**. Turning it off withdraws that login from everywhere an account
-is offered — the composer's account chip, the new-session menus, the usage readings and the
+is offered — the composer's identity chip, the new-session menus, the usage readings and the
 import list — without deleting anything. The config directory, its conversations and the
 sessions already running on that account are untouched, and those sessions still resume on it.
 A switched-off account stays listed here, dimmed, so you can switch it back on; **Reset**
@@ -897,22 +957,24 @@ pill never eats into the limits it reports.
 Choosing a login is when the number actually changes a decision — an account at 90% of its
 week is a poor place to start a long task — so the composer shows it twice over:
 
-- **In the account chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
+- **In the identity chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
   accounts are compared before one is picked.
 - **In the model chip's menu**, every model carries what a session on it would be measured
   against — the account's windows, plus that model's own where the plan meters one separately.
   This is the menu where a spent limit is escaped, since switching model is the way out of it.
   The same menu on a **running session's header** carries the same readings.
-- **Under the chips**, the chosen account's windows are drawn in full: a bar per window, its
-  percentage, and its reset countdown.
+- **Inside the prompt box**, beside the send: the same short reading the toolbar's pill carries
+  once the session is running, so the number you start on is the number you keep watching.
+  Point at it for the detail — which account it belongs to, when each window comes back, and
+  how old the reading is. It stays out of the way when the account has nothing to report.
 
 A window is named by its length, and one that meters a single model adds that model: `5h`, `7d`,
 `7d Fable` in a line; `5-hour`, `Weekly`, `Weekly · Fable` on a bar. So the same window is
 recognisable wherever it is quoted.
 
-Each bar carries a **time mark** — a thin line at the point the clock has reached in that
-window. Fill short of the mark means you are spending slower than the window refills; fill
-past it means faster. That comparison is the thing a bare percentage cannot tell you: 60%
+Wherever a window is drawn as a bar — the pill's popover, **Settings ▸ Usage** — the bar carries
+a **time mark**: a thin line at the point the clock has reached in that window. Fill short of the
+mark means you are spending slower than the window refills; fill past it means faster. That comparison is the thing a bare percentage cannot tell you: 60%
 spent is comfortable an hour before a reset and alarming four hours before one.
 
 Values are the last ones fetched: the composer shows what is known and asks for a fresh
@@ -937,11 +999,11 @@ Normally a session shows the agent's own terminal. A **Chat** session instead le
 draw the conversation itself — messages, tool calls and replies as native views rather than
 text painted by the CLI.
 
-Chat is available for **Codex and Claude Code sessions** — not for shells. Choose
-**Chat (experimental)** from the surface chip when creating one. For Codex, Threading runs
-`codex exec --json` for each turn and resumes the same thread for the next. For Claude, it
-keeps one `claude --print` process open for the whole conversation. Either way it uses the
-account and model selected for the session, running the same CLI you already signed into.
+Chat is available for **Codex, Claude Code, and Grok sessions** — not yet for OpenCode. Choose
+**Chat (experimental)** from the surface chip when creating one. Codex keeps its app-server open,
+Claude keeps one `claude --print` process open, and Grok uses its supported ACP stdio transport.
+Each uses the same official CLI and login as its Terminal surface; Threading never reads a Grok
+credential.
 
 Chat runs the agent headlessly, so it draws on your subscription the same way the terminal
 does. Claude Chat was previously withheld while Anthropic's terms were read as excluding
@@ -958,6 +1020,44 @@ removable thumbnail above your text. Click the thumbnail to open the media inspe
 right-click menu has the same file and clipboard actions, with System Quick Look as a fallback.
 This follow-up composer belongs to Chat sessions; a
 terminal session continues to use the agent CLI's own image input.
+
+**What the next message will be sent with lives inside the reply box**, on a row along its
+bottom: the **model**, the **permission mode**, the **reasoning effort** where the provider
+offers one, and **Fast** or **Standard**. The context meter and the send sit at the other end of
+that same row. Changing the model, the effort or the speed applies from your next message onward:
+Claude takes it without restarting, Codex takes it with the next turn.
+
+The **permission mode** chip is the same choice as Permission Mode in a session's **…** menu, and
+it shows the mode that will actually apply: the one this chat has chosen, or the app-wide default
+from Settings, or **Agent's Setting** when neither has. A running Claude chat changes mode there
+and then. Everywhere else the choice is recorded and the menu says so, with **Applies the next
+time this chat starts.** under the modes. If a mode is one the agent will not accept, such as
+Bypass Permissions on a chat that was not started with permissions skipped, the chat says why
+instead of pretending the change landed.
+
+The line **above** the box is the session talking rather than something you set: the working orb
+and a word for the turn in flight while the agent runs, and after it what the last turn cost —
+`Ready · last turn 47s · ↓ 1.2k tokens`.
+
+### Referencing and commenting
+
+Use the **…** beside one of your messages or an agent response to **Add … to chat** or
+**Comment…** on it. The reference lands above the reply box as a small receipt instead of pasting
+a long quote into your text. You can type an accompanying message, send the receipt by itself, or
+open its menu to add a comment or remove it. After sending, the same receipt stays with your message
+so it is clear what the agent was answering.
+
+The same pattern reaches beyond messages:
+
+- secondary-click a code line in Git Review or an edit tool's diff to add or comment on that line;
+- secondary-click a changed-file row to reference/comment on the whole file, including an image;
+- in **Attachments**, select an item and use **Chat…** to add it or comment on it;
+- secondary-click an image already waiting in the reply box and choose **Comment…**.
+
+Several references and comments can be staged together. The reply box keeps them as compact count
+receipts; opening a receipt lists the individual messages, lines, and files. This works the same in
+Claude, Codex, and Grok Chat. OpenCode currently uses its terminal surface, so it has no Threading
+Chat reply box to receive these receipts.
 
 Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
 returned — `$ Bash · ls -la · 42 lines`. Click to expand. A directory listing is usually
@@ -986,11 +1086,11 @@ A long message of your own — a pasted log, a briefing past a screenful — col
 first eight lines behind a fade. **Show full message** opens it in place, and **Copy**
 always copies the whole thing, collapsed or not.
 
-Beside the model chip, a quiet **context meter** says how full the conversation's context
-window is: a percentage for Codex, which states its window, and a token count for Claude,
-which does not. It turns amber past 90% — the point where compaction or a fresh session is
-worth considering. This is the conversation's own weight, distinct from the account usage
-pill's rate limits.
+At the trailing end of the reply box's control row, beside the send, a quiet **context meter**
+says how full the conversation's context window is: a percentage for Codex, which states its
+window, and a token count for Claude, which does not. It turns amber past 90% — the point where
+compaction or a fresh session is worth considering. This is the conversation's own weight,
+distinct from the account usage pill's rate limits.
 
 When a turn changed files, a **changed-files card** closes it out: the files as an indented
 tree, `+/−` counts beside every file and rolled up per directory, with single-child folders
@@ -1118,18 +1218,50 @@ agent id, never the transcript's filesystem path; use its folder button to revea
 Finder. Provider response envelopes such as Claude's `<analysis>` are presented as **Reasoning**
 rather than exposed as protocol markup.
 
+### Commands and skills
+
+Type **/** at the start of the Chat composer to see the commands available in that live
+session. Type **$** for Codex skills; Claude skills use Claude's own slash syntax and therefore
+appear with the other `/` entries. Continue typing to filter by name, alias, or description.
+Use Up/Down to move, Tab or Return to insert the selected entry, and Escape to close the list.
+Insertion does not run it: add any arguments you want, then submit normally. **/skills** opens
+the same list filtered to skills.
+
+Claude supplies and updates its own catalog, including project/plugin skills and command
+metadata. Commands that would replace or detach the underlying Claude conversation, plus
+internal or sensitive interactive workflows, remain visible but disabled in Chat until
+Threading can keep its transcript and process state synchronized; use Terminal for those rows.
+
+Codex Chat enables the operations it can execute through app-server — **/compact** and
+**/review [instructions]** — plus the skills available in the current checkout. Familiar Codex
+TUI commands are still identified: unsupported ones are shown disabled with a Terminal
+explanation instead of being sent accidentally as prompts. **/status** is handled locally for a
+provider/model/run-state/context summary, and **/skills** is the shared skill browser. Running a
+skill keeps its instructions and local path inside Codex on the Mac.
+
+The iPhone conversation composer receives the same live catalog. Its plus button browses all
+entries, and typing `/`, `$`, or `/skills` works as on the Mac. The phone receives presentation
+metadata only; the Mac resolves and executes the selected action against the still-current
+session. An unknown leading Claude slash command remains at the start of the provider message —
+shared-chat attribution never moves it out of command position.
+
 ### What is missing
 
-It is early. Compared to the terminal you lose slash commands, plan mode, interrupting a turn
-mid-flight, and some of the agent's richer rendering. Use it where you want the conversation to
-read like a conversation; use the terminal when you need the complete agent interface.
+It is early. Compared to the terminal you still lose plan-mode controls, interrupting a turn
+mid-flight, shell shortcuts, and some of the agent's richer rendering. Use it where you want the
+conversation to read like a conversation; use the terminal when you need the complete agent
+interface.
 
 ## Remote Access (beta)
 
-Open **Settings > Remote Access**, choose **Relay**, **Tailscale**, or **Both**, and turn on
+Open **Settings > Remote Access**, choose **Relay**, **Tailscale**, or **Private + Sharing**, and turn on
 **Remote Access** to mirror Threading from a browser or the Threading iPhone app. Relay supports
-ordinary public share links; Tailscale keeps the connection inside your tailnet; Both uses
-Tailscale for owner pairing and the relay for one-chat sharing. **Open in Browser** tests the
+ordinary public share links; Tailscale keeps the connection inside your tailnet; Private +
+Sharing uses Tailscale for owner pairing and starts the relay when you create a one-chat link.
+**Owner Relay Fallback** separately lets your own devices use that relay if Tailscale is
+unreachable; **Keep Sharing Relay Ready** starts it immediately. Both are off by default. The
+Tailscale readiness card tells you whether installation, sign-in/running, or private HTTPS Serve
+needs attention. **Open in Browser** tests the
 client on the Mac, and the page shows an owner-device QR code for the native app. Pairing is for
 your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
@@ -1141,9 +1273,75 @@ choose an invitation for that chat alone. The sheet names each grant and what it
 change files without asking you. View only needs the chat to be running — watching alone never
 starts an agent — so its button waits, and says why. The invitation works once and expires after
 24 hours only if unused. Acceptance creates a device-bound membership that lasts until
-**Stop Sharing**, Remote Access is disabled, or the Mac app exits. Permission approval is an
-explicit right for that member and chat; it never grants another chat, Mac settings, or the
-ability to create shares.
+**Stop Sharing** or explicit member revocation. Unused invitations and accepted memberships are
+kept in the Mac login Keychain, so disabling Remote Access or restarting the app suspends them
+without silently making collaborators rejoin. Permission approval is an explicit right for that
+member and chat; it never grants another chat, Mac settings, or the ability to create shares.
+
+You can pair several phones and tablets with the same Mac. Each receives a separate Keychain
+credential and can control sessions concurrently; Settings lists and revokes them independently.
+The iPhone still shows that Mac once even when it knows both a Tailscale and relay address. It
+follows the connection policy chosen on the Mac, shows the active route beside its connection
+status, and can fail over or adopt an advertised stable relay address without being paired again.
+
+You can also pair one iPhone with several Macs. **Devices** shows the current Mac and compact
+switch targets for the others; choosing one swaps the session list without re-pairing. The app
+remembers the selected Mac and the last open session. Because continuity uses the paired host
+identity rather than its current URL, switching between Tailscale and relay keeps the same saved
+state, while two different Macs that happen to expose the same provider session id remain
+separate.
+
+For a shared session, choose its live input mode in the Mac's **Sharing** pane (or from the
+control menu on iPhone/browser):
+
+- **Collaborative** — everyone with reply access can send; completed terminal lines and Native
+  prompts are still submitted atomically.
+- **Focused** — one person controls the Claude Code/Codex terminal or Native composer while the
+  others watch and keep their private drafts. The controller or owner can hand off at any time,
+  and the owner can always reclaim control or switch back to Collaborative.
+
+This can be changed while the session is running; it is not decided permanently at startup.
+Set the starting choice for newly shared chats under **Settings > Remote Access > New shared
+chats**. Control belongs to a person across their connected devices, not to the most recent tab.
+If a guest controller drops offline, a 30-second grace period preserves the turn across a normal
+Tailscale/relay reconnect before it returns to the owner. Revoking the controller returns it
+immediately. A watcher can use **Request control**, which reaches the current controller through
+the existing human-only **@** attention path. It never sends anything to Claude/Codex, and push
+delivery follows that recipient's separate **Requests for my input** notification setting.
+
+Each open device or browser tab has its own live presence row. In Native chats, every device keeps
+its own draft; sending waits for the Mac's acknowledgement before clearing the exact submitted
+text. If another composer wins the current turn, the session changes, or reconnect cannot safely
+retry, your draft stays in place with an explanation.
+
+Unsent Native drafts are saved as you type on macOS, iPhone, and the browser. Independent iPhone
+terminal drafts are saved the same way. iPhone and browser also reopen the last session and restore
+the reading position for Native conversations and agent-UI terminals; the Mac restores each Native
+conversation's draft and reading position. This state is device-local rather than collaborative:
+another person or one of your other devices does not inherit half-written text or pull your view
+away from where you left it. Drafts are retained until sent or cleared; older position-only records
+may be pruned.
+
+Agent-UI terminals use **Independent terminal drafts** on iPhone by default. Type in the composer
+below the terminal and send when the line is ready; the entire line and Return reach Claude Code
+or Codex as one PTY write, so another phone cannot mix its keystrokes into yours. Escape, Ctrl-C,
+Tab, and arrow controls remain immediate. In the iPhone notification settings, **In-app
+collaboration** lets you independently hide people presence, hide typing indicators, or turn off
+independent drafts to restore raw direct terminal typing. These in-app indicators never create a
+push notification.
+
+Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
+draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
+reporting, atomic terminal sends and Native prompt sends are refused. Only the controller's
+devices influence the shared terminal grid. Switching between Tailscale and relay does not
+change who holds control; a reconnect receives the current host-authoritative state.
+
+Use the separate **@** button beside a Native composer—or above an agent-UI terminal—to ask a
+specific chat member for input. The sheet includes accepted members who are away and allows a
+short optional note. This is a human-only attention request: it sends no prompt to Claude or
+Codex and no bytes to the terminal. A successful request appears as a quiet collaboration event
+in open views and can notify the selected person's phone. **Requests for my input** is its own
+notification setting. Repeated pokes to the same person are briefly collapsed.
 
 ### Who is watching
 
@@ -1152,7 +1350,8 @@ outside this Mac: **2 following** while somebody has it open, **Shared** while a
 nobody is on it. Click the row — or use the **Sharing** tab in the side pane — to see the whole
 picture:
 
-- **Watching now** — every live view, including your own paired devices, which are marked as
+- **Watching now** — every live view, including multiple devices or tabs belonging to the same
+  person and your own paired devices, which are marked as
   yours. Each row says what they may do, which surface they are on, and the terminal grid they
   are holding it at. Somebody composing a reply shows as typing.
 - **With access** — people who accepted an invitation and are not looking right now, with when
@@ -1189,14 +1388,18 @@ guest links. Attachment files are still fetched only when you choose one, and on
 remains inside that session's checkout.
 
 The iPhone explains notifications in the dashboard before asking iOS for permission. They cover
-accepted shared chats, Native permission cards, and updates you explicitly ask an agent to send
-when it finishes. Opening one goes directly to its chat; permission details and Allow/Deny stay
-behind the authenticated chat rather than appearing on the lock screen. Terminal UI prompts are
-not parsed. With APNs provider credentials the notification reaches a suspended phone; otherwise
-the settings page marks the connection **Live only**. For `notify_user`, “me” follows whoever
-wrote the current turn; an explicit request can instead target the owner, everyone in this chat,
-or a named member. Open Native chats also show live **Name is typing…** presence without locking
-anyone out of the composer.
+accepted shared chats, Native permission cards, a session that changes into waiting for your
+response, explicit human input requests, and updates you explicitly ask an agent to send when it
+finishes. Every category can be disabled independently, with a master sound switch and separate
+sound switches for each category. Opening one goes directly to its chat;
+permission details and Allow/Deny stay behind the authenticated chat rather than appearing on the
+lock screen. Terminal UI prompts are not parsed, so use the app's **@** control when a person
+needs attention. With APNs provider credentials the notification reaches a suspended phone;
+otherwise the settings page marks the connection **Live only**. For `notify_user`, “me” follows
+whoever wrote the current turn; an explicit request can instead target the owner, everyone in
+this chat, or a named member. Open sessions show the device-aware live roster and **Name is
+typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
+both indicators.
 
 The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
 the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a
@@ -1207,11 +1410,15 @@ credentials are never sent, and one-chat guest links do not get this control.
 
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
 link. It is a one-time bootstrap exchanged for a unique device credential kept in Keychain on
-both Mac and iPhone. Turning Remote Access off or quitting closes every connection and revokes
-guest shares, but explicitly paired owner devices remain paired; revoke a named device on the
-Remote Access settings page. A Tailscale pairing has a stable private origin and reconnects after
-restart. The current Cloudflare Quick Tunnel changes origin at restart, so it still needs a new
-scan until the planned stable relay URL lands. Without `cloudflared`, Relay is unavailable;
+both Mac and iPhone. Turning Remote Access off or quitting closes every connection and suspends
+both paired-owner and one-chat guest credentials. They are restored from the Mac login Keychain
+when Remote Access starts again; use **Stop Sharing** or revoke a named member/device to remove one
+permanently. A Tailscale pairing has a stable private origin and reconnects after restart.
+Threading refuses to replace an unrelated Tailscale Serve handler already using its HTTPS 8443
+endpoint. The current Cloudflare Quick Tunnel changes origin at restart. A phone that can still
+reach the Mac through Tailscale can learn the new route; a relay-only pairing still needs a new
+scan. The client now prefers a stable relay endpoint whenever the Mac advertises one, but this
+phase does not provision the planned named Cloudflare Tunnel. Without `cloudflared`, Relay is unavailable;
 without a signed-in Tailscale installation, Tailscale is unavailable. **Open in Browser** still
 works locally. See [Remote access](docs/REMOTE_ACCESS.md) for
 pairing, notifications, the complete security model, and beta limitations.
@@ -1280,11 +1487,13 @@ Go Forward through your selection history (**⌃⌘←** / **⌃⌘→**), the w
 editors. Sessions, composers and settings pages all count as places; deleted sessions fall
 out of the history.
 
-**Open in** sits just before those, as a pair: the icon of the app you last opened something in
-— VS Code, Xcode, Zed, a terminal, Finder — and a chevron beside it. Press the icon (or **⌘O**)
-and this session's checkout opens there; take the chevron to pick a different app, which then
-becomes what the press does. Only apps you actually have installed are listed, and a terminal
-is only ever offered a folder. The pair hides on a Settings page, which has no checkout.
+**Open in** sits just before those, as one split control: the icon of the app you last opened
+something in — VS Code, Xcode, Zed, a terminal, Finder — and a chevron welded to it, sharing a
+single surface. Press the icon (or **⌘O**) and this session's checkout opens there; take the
+chevron to pick a different app, which then becomes what the press does. Hovering lights only
+the half under the pointer, so the two presses stay tellable apart. Only apps you actually have
+installed are listed, and a terminal is only ever offered a folder. The control hides on a
+Settings page, which has no checkout.
 
 The same **Open in ▸** submenu appears wherever a folder or a file is named: on a project row
 and a session row in the sidebar, on a row of the **Files** tab, and — the useful one — on a
@@ -1304,7 +1513,11 @@ Four buttons sit at the header's right edge:
 Five kinds of content:
 
 - **Images** — screenshots, generated charts, design assets. Anything `NSImage` reads: PNG,
-  JPEG, GIF, HEIC, PDF, SVG. Scaled to fit the panel's width.
+  JPEG, GIF, HEIC, PDF, SVG. A picture the agent shows lands as a row in **Attachments**, selected
+  and previewed, rather than as a tab of its own: the pictures a session shows are a history, and
+  a strip of near-identical tabs was a poor one. Showing the same file again refreshes that row
+  instead of adding a second. (A session that has no project folder — nothing to keep a list
+  against — still gets a tab per image.)
 - **HTML** — wide tables, charts, Mermaid diagrams, side-by-side diffs, rendered reports.
   It is a real browser engine, so scripts run and libraries load from a CDN; an agent can
   pull in Chart.js or Mermaid rather than hand-rolling SVG.
@@ -1315,7 +1528,10 @@ Five kinds of content:
   out), or **Side by Side**. Each side is named in the margin beside the picture rather than
   on top of it — old where the wipe starts, new where it ends, above and below for the vertical
   wipe — so no title ever sits on the pixels you are comparing. Mismatched pixel sizes are
-  flagged rather than silently normalised. Two text files render as a native diff instead.
+  flagged rather than silently normalised. The button beside the mode chip **opens the same
+  comparison at the window's size**, where the seam has room to be dragged and the modes are
+  the same chip; Escape or the × closes it, and the mode and the position you left it at are
+  the ones the panel comes back to. Two text files render as a native diff instead.
   Agents open comparisons with a before and an after; you can open your own with the panel's
   **+ ▸ Compare Files…**, which asks for exactly two files (first chosen is the old side).
 - **Native scenes** — bounded semantic maps supplied by an agent or another MCP server. Treemaps,
@@ -1335,16 +1551,27 @@ direction, newest first. Two things land there:
 - **What the agent surfaces.** A path it prints to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF,
   BMP or PDF, in the terminal or in a native Chat reply, and any image it shows deliberately
   through the display tool. Code files are ignored because Git Review already covers them.
-- **What you send.** An image you paste or drop into a composer, or drop onto a terminal. These
-  are marked **You** so the picture you just sent is findable next to whatever the agent made of
-  it, rather than disappearing into the conversation.
+- **What you send.** An image you paste or drop into a composer, or drop onto a terminal —
+  including the ones attached to the prompt that *starts* a session. These are marked **You** so
+  the picture you just sent is findable next to whatever the agent made of it, rather than
+  disappearing into the conversation.
 
-Every row is marked **Agent** or **You**, and when a session has both a small **All / Agent / You**
-filter appears beside the count. It stays hidden while everything came from one side.
+Every row shows the picture itself and when it arrived — the time for today, the date before
+that — and is marked **Agent** or **You**; when a session has both, a small **All / Agent / You**
+filter appears beside the count. It stays hidden while everything came from one side. A picture the
+agent shows opens this tab and selects its row, and resets that filter if it would have hidden it:
+being asked to show something outranks a filter you left set.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
 sits above an inline image/PDF preview; click an image to enter the same collection-aware media
 inspector. **Open**, **Finder**, and **Copy Path** act on the selected file.
+
+Images shown by earlier versions came back as one panel tab each. On the first launch after
+updating, those tabs become rows in this list — same pictures, same order, one place.
+
+When the session uses native Chat, **Chat…** adds the selected attachment to the reply box or opens
+a comment prompt for it. The attachment becomes a compact context receipt; the original file stays
+in this list and is not copied into the message text.
 
 A file already inside the checkout is *referenced*: a new mention of the same path moves it to the
 top and refreshes the preview, so the project file stays the source of truth. A file from anywhere
@@ -1353,10 +1580,21 @@ into Threading, because nothing else is keeping it: temporary files are cleaned 
 list pointing at one would empty itself. Those copies are removed when the row falls off the end
 of the list or the session is deleted, and **Copy Path** gives you Threading's copy.
 
-Paths merely *printed* are still restricted to the session's checkout: any text can name any file,
-and the list is what a paired phone can fetch. Missing paths, unsupported file types, directories,
+Paths merely *printed* are restricted to the session's checkout by default: any text can name any
+file, and the list is what a paired phone can fetch, so one `find ~ -name '*.png'` in a terminal
+would otherwise enumerate your pictures into it. Missing paths, unsupported file types, directories,
 and symlinks escaping the checkout are ignored. Terminal discovery happens after an output burst
 settles, so it does not need native rendering or an explicit MCP tool call.
+
+You can change that answer. When a session has named files outside its project, a quiet band
+appears at the bottom of the Attachments tab — the count, and **Show**. It is there only when the
+setting would change *this* list, so a session that never names one never mentions it. Showing
+them lists them and copies each into Threading, so a paired phone still only fetches files
+Threading itself holds; **Hide** puts the list back to the project's own files without deleting
+the copies, so the choice is reversible. The same switch is
+**Settings ▸ General ▸ Attachments ▸ Include files outside the project**, and it applies to every
+session. Images you attach and ones the agent shows are unaffected either way — those were handed
+over on purpose.
 
 Automatic detection is an opt-out feature and is enabled separately for both agents by default.
 Use **Settings > General > Attachments** to turn **Detect attachments from Claude Code** or
@@ -1407,14 +1645,72 @@ or decisions through the conversation. Console, network, CSS-query, and page-sna
 explicitly marked as untrusted page data; request bodies, response bodies, headers, and cookies
 are never captured for the agent.
 
-When an agent reaches a password field, Threading reveals the browser and focuses that exact field.
-A key-shaped **Private Input** control remains visible while it has focus; click it to return
-keyboard focus to the page after using the browser chrome. If WebKit/macOS offers an AutoFill
-suggestion for the site, select it; otherwise use your password manager's macOS integration,
-copy from Apple Passwords, or type privately. Threading never asks a vault for the credential, and
-the field's value is unavailable to the agent, snapshots, waits, traces, and diagnostic logs.
-Passkey and WebAuthentication prompts remain WebKit/macOS system UI. Filling a password does not
-approve submission — the usual confirmation still applies.
+When an agent reaches a password field, Threading comes forward, selects the session that asked,
+opens its browser, and focuses that exact field — so your password manager's own shortcut, which
+fills the focused field of whichever app is frontmost, lands where you meant it to even when the
+request came from a session you were not looking at. A key-shaped **Private Input** control remains
+visible while the field has focus; click it to return keyboard focus to the page after using the
+browser chrome. Beside it, when the browser is wide enough, a quiet line names the one-touch ways
+in: **Fill with 1Password or system AutoFill**. If WebKit/macOS offers an AutoFill suggestion for
+the site, select it; otherwise use your password manager's macOS integration, copy from Apple
+Passwords, or type privately. Threading never asks a vault for the credential, and the field's
+value is unavailable to the agent, snapshots, waits, traces, and diagnostic logs. Passkey and
+WebAuthentication prompts remain WebKit/macOS system UI. Filling a password does not approve
+submission — the usual confirmation still applies.
+
+### Execution audit
+
+Open **Execution Audit** from the display panel's **+** menu to review what an agent actually asked
+tools to do. It is a factual event ledger, not an AI-generated explanation: tool names, call ids,
+inputs, results, phases, timings, sources and provider are shown from their structured execution
+feeds. Prompts, reasoning and assistant prose are never copied into it.
+
+Use the category chips for Browser, Shell, Files, Network, Permissions, Subagents, Lifecycle or
+other Tool activity. Source chips separate what the provider reported from what Threading's MCP
+server actually received and executed; seeing both for one call is expected and exposes the handoff.
+Search narrows the visible records. Select one to inspect its complete JSON, including its fidelity,
+redaction paths and the ledger's integrity status.
+
+Choose **Browser split** for a vertical workspace with Browser events on the left and the session's
+live browser on the right. The Browser filter is locked while split mode is active, and new agent
+browser actions appear beside the page they affect. It is the same browser tab, with the same page,
+cookies and agent routing—not a replay or a screenshot.
+
+**Exact** means Threading retained the provider's decoded native JSON value. **Exact · redacted**
+means the same structure was retained but sensitive values were visibly replaced and listed:
+credential-shaped fields, typed/form values and image bytes are redacted. Tool output may still
+contain source code, terminal output, URLs or page data, so treat the ledger as local project data.
+
+Claude, Codex and Grok Chat expose structured execution events and receive provider-native capture.
+Grok Terminal and OpenCode currently expose no equivalent structured feed through Threading's
+terminal integration, so Threading does not infer actions from terminal text; their audit may be
+empty rather than speculative.
+
+### Letting an agent use a signed-in Chrome
+
+The in-app browser cannot load browser extensions, which is what makes a one-shortcut 1Password
+sign-in possible. For work that genuinely needs your own signed-in session — or an extension, or a
+passkey — **Settings ▸ Tools ▸ Signed-in Chrome** sets up a Google Chrome profile that belongs to
+Threading, separate from the Chrome you use every day. Choose **Set Up Automation Profile** and a
+normal Chrome window opens on it: sign in to the sites you want agents to reach, install your
+password manager's extension, and close it. Open it again whenever you want to add a site.
+
+Afterwards an agent can drive that profile with `browser_attach_chrome`. It has to list every
+website the run may reach *before* Chrome opens, and you are asked about each one with the same
+Allow Once / Always Allow / Deny choice the in-app browser uses; denying any of them cancels the
+whole run. Chrome opens visibly so you can watch it, and if a step, a redirect, or a pop-up reaches
+a site you did not allow, the run stops there and the agent is told nothing about that page.
+
+Password fields are refused there exactly as they are in the in-app browser, so signing in is still
+yours: the agent navigates to the sign-in page and waits, you press your shortcut once, and it
+carries on. Threading reads no cookie, no keychain item and no password in any of this — the
+credential goes from your password manager into Chrome without passing through the app.
+
+It is a separate profile because Chrome itself refuses to be automated against your default one, a
+restriction added in Chrome 136 to stop exactly the kind of session theft this design refuses to
+attempt. One Chrome can hold the profile at a time, so close the setup window before an agent uses
+it. **Settings ▸ Advanced ▸ Reset Everything** moves the profile aside with the rest of Threading's
+data, which signs it out.
 
 Clicking a link in an HTML document opens it in your real browser rather than navigating the
 panel, which has no back button or address bar to get you home again.
@@ -1440,6 +1736,11 @@ panel exists so it reaches for them instead of printing a file path or an ASCII 
 They are pre-approved, so displaying something does not raise a permission prompt every time.
 This does not affect any other tool: your normal permission rules and your own MCP servers
 are untouched.
+
+Grok Chat registers the same tools through ACP for that process only, without changing Grok's
+configuration. Grok Terminal and OpenCode currently leave their own MCP configuration untouched.
+OpenCode has a future path through its local TUI server; neither runtime's persistent configuration
+is rewritten for those terminal integrations.
 
 HTML runs with network access, so CDN libraries work. That is a deliberate choice rather than
 an oversight — the agent already has a shell, so a locked-down web view would stop nothing it
@@ -1538,11 +1839,17 @@ a row to open or close it. Untracked files appear as all-added diffs, binary fil
 highlighted** for the languages Threading recognises by file extension; a file it does not
 recognise renders plain rather than guessed at.
 
+Secondary-click a rendered line to **Add line to chat** or **Comment on line…**. The staged receipt
+keeps the file path, line number, and line text together. The file row's own secondary-click menu
+offers the same pair for the complete file.
+
 **A changed image opens too.** A row whose binary file is a raster image (PNG, JPEG, GIF,
 WebP, HEIC, TIFF, BMP, ICNS) says `image` instead of `binary` and expands into the same
 interactive comparison the display panel's Compare tab uses — wipe, fade, difference, side by
-side — with each side titled for the mode's endpoints (`HEAD` against `Working Tree`, a
-commit against its parent, and so on). An added or deleted image shows its one existing side.
+side, and the button that opens it at the window's size — with each side titled for the mode's
+endpoints (`HEAD` against `Working Tree`, a commit against its parent, and so on). An added or
+deleted image shows its one existing side, which is a picture rather than a comparison: no mode
+chip, and nothing to open larger.
 Image rows never open automatically; the pictures are read only when you expand them.
 
 ### Staging and committing
@@ -1906,6 +2213,22 @@ for example, leaves **General** as the matching destination. The page already op
 pane stays put until you choose one of those filtered destinations. Clearing the field restores
 the complete page list.
 
+The page list is grouped under six quiet captions — **App** (General, Keyboard), **Appearance**
+(Themes, Profiles, Motion), **Agents** (Accounts, Tools, Usage), **Access** (Remote Access,
+GitHub, Privacy), **Data** (Storage, Archived, Advanced), and **Extensions**, which also holds
+any page an extension contributes. Filtering keeps only the sections that still have matching
+pages.
+
+Every page keeps its title, a one-line summary and its page-wide actions in a **fixed header**
+above the scroll, so where you are — and, on Storage, how much is reclaimable — stays on screen
+however far the page scrolls. Pages that list things rather than settings fold those lists into
+**collapsible cards**: each MCP tool group on **Tools**, each installed package on
+**Extensions**, each checkout on **Storage**, and each command group on **Keyboard** shows one
+header row — its name, its size ("31 tools", "12.4 GB"), and its one control (the group's
+switch, the checkout's **Remove All…**) — and clicking the header (or pressing Space/Return on
+it) unfolds the detail. The fold is remembered for the session, not saved. **Archived** shows
+the ten most recent conversations and folds the rest behind an "older conversations" row.
+
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string
 catalog. Extensions carry their own translations and choose the closest language the app
@@ -2034,7 +2357,7 @@ is missing, the pill quietly falls back to the caches instead. Switching it off 
 immediately; the keychain approval itself persists until you revoke it in Keychain Access.
 
 **The part worth knowing: agents inherit what you grant Threading.** macOS attributes a directly
-launched child process to the app that launched it, and Claude and Codex are launched by
+launched child process to the app that launched it, and every agent TUI is launched by
 Threading. So the files an agent reads are approved against *Threading's* grant, and the prompt you
 answer says "Threading" whichever agent actually asked. Allowing the Documents folder once is
 allowing it for every agent you subsequently run in a project there. This is how a terminal has
@@ -2126,9 +2449,8 @@ Reads report which credential answered, so a private repository that fails names
 ask about at all is part of that extension's install approval.
 
 ### Will it last?
-The usage panel above the composer, and the header's pill popover, say how much of each
-window is spent. When Threading has watched a window long enough to see a *rate*, it also says
-where that rate leads:
+The header pill's popover, and **Settings ▸ Usage**, say how much of each window is spent. When
+Threading has watched a window long enough to see a *rate*, it also says where that rate leads:
 
 ```
 5h  ████████████░░░░░░  62%
@@ -2310,7 +2632,7 @@ sharing control.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
-| Start the session being composed (Return breaks the line instead, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
+| Start the session being composed (Return sends it too, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
@@ -2386,9 +2708,9 @@ At the top of the same page, **Composer** holds the one key that is not a comman
 a prompt, press Return to*. It is here because "what is this key already doing" is most of why a
 shortcuts page gets opened, and Return is the key people most often mean.
 
-| Choice | Return in a new session's brief | Return in a conversation reply |
-|--------|--------------------------------|--------------------------------|
-| **Do What the Composer Expects** (default) | breaks the line | sends |
+| Choice | Return in a prompt to an agent | Return in a note attached to a report |
+|--------|-------------------------------|--------------------------------------|
+| **Do What the Composer Expects** (default) | sends | breaks the line |
 | **Send** | sends | sends |
 | **Start a New Line** | breaks the line | breaks the line |
 
@@ -2400,9 +2722,10 @@ the word you are typing, not how you send it.
 ## Data Storage
 
 Stored in `~/Library/Application Support/Threading/`:
-- `projects.json` — projects, sessions, and their resumable agent session ids
+- `threading.db` — projects, sessions, panel layouts, and resumable agent session ids
 - `history/` — per-session command history
 - `mcp/` — one file per session pointing Claude at that session's display panel
+- `ExecutionAudit/` — bounded, hash-linked JSONL execution ledgers, one chain per session
 
 Displayed images are held in memory only. The panel shows the file on disk; it does not copy
 it, and nothing about what was displayed survives a restart.
@@ -2415,3 +2738,4 @@ directory of the account that created them:
 - Codex: `<codex-home>/sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl`
 
 Removing a project or deleting a session in Threading never deletes these files.
+It does delete that session's Threading-owned execution ledger, including its rotated segments.

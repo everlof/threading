@@ -155,10 +155,23 @@ class ThemedControl: NSControl, ThemedComponent {
     /// a disc — cut a rounded-rect ring down to four 1pt dashes at the edge midpoints, which is
     /// what a broken circle looks like. Insetting by half the width, on the shape that actually
     /// clips, is what makes one ring appear at full weight on every control.
-    func drawKeyboardFocus(around shape: ThemedSurface.Shape, color: NSColor = Design.Surface.accent) {
+    ///
+    /// `edge` holds that much of the silhouette's own outline clear of the ring, and a **filled**
+    /// control has to ask for it. A ring lands on whatever the shape drew at its edge, and on a
+    /// fill that is the fill: the ring then reads as the shape being smaller rather than as a ring
+    /// around it. That is not a subtlety — a quit dialog's accent-filled default came out 4pt
+    /// shorter and 4pt narrower than the bordered Cancel beside it, on every theme, and it was
+    /// reported as two buttons of different sizes rather than as a focus ring at all. A bordered
+    /// control needs nothing here: its edge is a hairline the ring can stand in for, so the
+    /// silhouette still ends where it always did.
+    func drawKeyboardFocus(
+        around shape: ThemedSurface.Shape,
+        color: NSColor = Design.Surface.accent,
+        keepingEdge edge: CGFloat = 0
+    ) {
         guard hasKeyboardFocus else { return }
         let width = Design.Accessibility.focusRingWidth
-        strokeFocusRing((clippingSilhouette ?? shape).inset(by: width / 2), color)
+        strokeFocusRing((clippingSilhouette ?? shape).inset(by: edge + width / 2), color)
     }
 
     /// Strokes the ring *outside* the silhouette, holding `gap` clear between the two.
@@ -203,6 +216,36 @@ class ThemedControl: NSControl, ThemedComponent {
     /// reporting no pop-up buttons on a page that visibly has one.
     override func isAccessibilityElement() -> Bool { true }
     override func isAccessibilityEnabled() -> Bool { isEnabled }
+}
+
+// MARK: - Keyboard Focus Origin
+
+/// Whether the focus a control holds arrived from the keyboard — opt-in, for the few controls the
+/// size of the surface they are in.
+///
+/// `ThemedControl` shows its ring whenever it is first responder, which is right for a control the
+/// size of a button: the ring is how a keyboard user finds it again, and drawing one costs a few
+/// points of accent nobody has to look at. It is wrong for a control that *is* the surface. The
+/// media inspector and the expanded comparison both hand focus to their canvas the instant they
+/// open, because the arrow keys, the zoom keys and Escape all belong there — so an unconditional
+/// ring drew an accent rectangle around the entire window every time a user clicked a thumbnail,
+/// on a control the pointer had just landed on and could not lose.
+///
+/// The honest signal is the event the app is dispatching while the responder changes: AppKit runs
+/// `makeFirstResponder` inside it, so a key press means the user traversed here and a click — or
+/// nothing at all, which is a surface placing focus itself — means they did not. Deliberately not
+/// in `ThemedControl`: every ordinary control should keep answering focus the way it does.
+struct KeyboardFocusOrigin {
+
+    private(set) var isFromKeyboard = false
+
+    mutating func arrived(from event: NSEvent?) {
+        isFromKeyboard = event?.type == .keyDown
+    }
+
+    mutating func resigned() {
+        isFromKeyboard = false
+    }
 }
 
 // MARK: - Surface
@@ -263,20 +306,33 @@ enum ThemedSurface {
     ) -> Shape {
         // A bevel material bevels the drawn controls too — this is the draw-time half of
         // `applySurface`'s interpretation, under the same rules: participation stated by the
-        // call site, square corners only, and the bevel replaces the flat border. A surface
-        // that draws *nothing* — a resting icon button's clear fill, no border — stays
-        // nothing: the period toolbar button is flat until the pointer arrives, and a bevel
-        // ring around empty air read as a plate nobody drew.
+        // call site, hard bevels on square corners and soft relief around rounded ones. Either
+        // replaces the flat border. A surface that draws *nothing* — a resting icon button's
+        // clear fill, no border — stays nothing: the period toolbar button is flat until the
+        // pointer arrives, and an edge around empty air reads as a plate nobody drew.
         if let spec = AppThemePalette.current.material.bevel,
            bevel != .none,
-           fill.alphaComponent > 0 || border != nil,
-           (radius ?? Design.Radius.control(fitting: bounds.size)) == 0 {
-            return drawBevelled(
-                bounds,
-                fill: fill,
-                edgeWidth: spec.width,
-                sunken: bevel == .sunken
-            )
+           fill.alphaComponent > 0 || border != nil {
+            let corner = radius ?? Design.Radius.control(fitting: bounds.size)
+            switch spec.style {
+            case .hard where corner == 0:
+                return drawBevelled(
+                    bounds,
+                    fill: fill,
+                    edgeWidth: spec.width,
+                    sunken: bevel == .sunken
+                )
+            case .soft:
+                return drawSoftBevelled(
+                    bounds,
+                    fill: fill,
+                    radius: corner,
+                    edgeWidth: spec.width,
+                    sunken: bevel == .sunken
+                )
+            case .hard:
+                break
+            }
         }
 
         let width = Design.Radius.border
@@ -297,6 +353,29 @@ enum ThemedSurface {
             path.lineWidth = width
             path.stroke()
         }
+        return shape
+    }
+
+    /// Rounded relief at draw time: the same diagonal inner light/shade as the layer-backed
+    /// nine-patch, clipped to a ring inside the control's silhouette. The middle remains the
+    /// caller's fill, so content is never washed by the edge treatment.
+    private static func drawSoftBevelled(
+        _ bounds: NSRect,
+        fill: NSColor,
+        radius: CGFloat,
+        edgeWidth: CGFloat,
+        sunken: Bool
+    ) -> Shape {
+        let shape = Shape(rect: bounds, radius: radius)
+        fill.setFill()
+        shape.path.fill()
+        SoftBevelArtwork.draw(
+            shape: shape,
+            edgeWidth: edgeWidth,
+            highlight: Design.Surface.bevelHighlight,
+            shadow: Design.Surface.bevelShadow,
+            sunken: sunken
+        )
         return shape
     }
 
