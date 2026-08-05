@@ -221,6 +221,9 @@ final class AdvancedPreferencesViewController: NSViewController {
                 // so moving the app's directories aside would leave every one of them behind
                 // while telling the user their state had been removed.
                 try BrowserCredentialStore().deleteAll()
+                // References, not secrets — but they name the user's 1Password items, and a
+                // reset that left them behind would repopulate the page after a restart.
+                OnePasswordItemStore.removeAll()
             }
             let outcome = try AppDataReset.perform(scope, at: Date())
             ThreadingLogger.agent.info(

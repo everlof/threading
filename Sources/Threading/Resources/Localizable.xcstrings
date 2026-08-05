@@ -24321,6 +24321,196 @@
           }
         }
       }
+    },
+    "no password could be read for that item": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "inget lösenord kunde läsas för den posten"
+          }
+        }
+      }
+    },
+    "1Password": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password"
+          }
+        }
+      }
+    },
+    "1Password could not read the item: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password kunde inte läsa objektet: %@"
+          }
+        }
+      }
+    },
+    "1Password did not answer in time.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password svarade inte i tid."
+          }
+        }
+      }
+    },
+    "The 1Password command line (op) is not installed.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Passwords kommandorad (op) är inte installerad."
+          }
+        }
+      }
+    },
+    "The 1Password item has no password field.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password-objektet har inget lösenordsfält."
+          }
+        }
+      }
+    },
+    "Agents may fill the 1Password items you point at below, on the exact origin each is stored for. 1Password still authorizes every read, so it may ask you to unlock. Threading stores only the item reference, never the value.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter får fylla i de 1Password-objekt du pekar ut nedan, på exakt det ursprung vart och ett sparats för. 1Password godkänner fortfarande varje läsning och kan be dig låsa upp. Threading sparar bara objektreferensen, aldrig värdet."
+          }
+        }
+      }
+    },
+    "The 1Password command line (op) is not installed, so sign-in falls back to revealing the field for you. Install it from 1Password's developer settings.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Passwords kommandorad (op) är inte installerad, så inloggning återgår till att visa fältet för dig. Installera den från 1Passwords utvecklarinställningar."
+          }
+        }
+      }
+    },
+    "No 1Password items linked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga 1Password-objekt länkade"
+          }
+        }
+      }
+    },
+    "Point an origin at a 1Password item and agents can sign in to it without you typing anything.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peka ut ett 1Password-objekt för ett ursprung så kan agenter logga in där utan att du skriver något."
+          }
+        }
+      }
+    },
+    "Link…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länka…"
+          }
+        }
+      }
+    },
+    "Link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länka"
+          }
+        }
+      }
+    },
+    "Another 1Password item": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ytterligare ett 1Password-objekt"
+          }
+        }
+      }
+    },
+    "Threading stores the reference only. 1Password holds the value.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading sparar bara referensen. 1Password har värdet."
+          }
+        }
+      }
+    },
+    "Link a 1Password Item": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länka ett 1Password-objekt"
+          }
+        }
+      }
+    },
+    "Agents may sign in with this item on this exact origin. Threading stores only the reference — 1Password keeps the value and authorizes every read, so it may ask you to unlock.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter får logga in med det här objektet på exakt det här ursprunget. Threading sparar bara referensen — 1Password har värdet och godkänner varje läsning, så det kan be dig låsa upp."
+          }
+        }
+      }
+    },
+    "op://Private/staging-admin": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "op://Private/staging-admin"
+          }
+        }
+      }
+    },
+    "The 1Password item was not linked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password-objektet länkades inte"
+          }
+        }
+      }
+    },
+    "A 1Password reference names a vault and an item, like op://Private/staging-admin. Do not include a field.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En 1Password-referens anger ett valv och ett objekt, som op://Private/staging-admin. Ta inte med något fält."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

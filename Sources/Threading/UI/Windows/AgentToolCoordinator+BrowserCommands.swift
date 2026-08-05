@@ -789,9 +789,15 @@ extension AgentToolCoordinator {
             // Only the vault fills unattended today. Reported as a capability rather than left
             // for the agent to infer from the provider name, so adding 1Password later changes
             // one answer instead of every caller's assumption.
-            fillsWithoutUser: provider == .threadingVault,
-            hasStoredCredentials: provider == .threadingVault
-                && !BrowserCredentialStore().identities().isEmpty,
+            fillsWithoutUser: provider == .threadingVault
+                || (provider == .onePassword && OnePasswordCLI.isInstalled),
+            hasStoredCredentials: {
+                switch provider {
+                case .systemAutoFill: return false
+                case .threadingVault: return !BrowserCredentialStore().identities().isEmpty
+                case .onePassword: return !OnePasswordItemStore.identities().isEmpty
+                }
+            }(),
             // Reported because it is the difference between two real guarantees, and an agent
             // reading its own environment should not have to guess which build it is in.
             vaultReachableFromShell: BrowserCredentialStore.isShellReachable

@@ -1762,7 +1762,9 @@ tedious for a throwaway one you re-type all day.
   sees a password.
 - **Threading test credentials** — accounts you store here, which agents may fill without asking,
   on the exact origin each was stored for.
-- **1Password** — planned; today it falls back to revealing the field for you.
+- **1Password** — agents sign in with items you point at, read through the `op` command line.
+  Threading stores only the reference; 1Password keeps the value and authorizes every read, so it
+  may ask you to unlock.
 
 Choose **Add…** to store one. Give it the origin as a full URL (`http://localhost:3000`), a name
 you can recognise (`admin`), an optional username, and the password. Agents ask for it by that

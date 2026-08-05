@@ -480,16 +480,23 @@ extension AgentToolCoordinator {
                     )
                     return
                 case .onePassword:
-                    await handOverToUser(
-                        "The 1Password provider is selected but not yet available in this build."
-                    )
-                    return
+                    guard OnePasswordCLI.isInstalled else {
+                        await handOverToUser(
+                            "1Password is the selected sign-in source, but its command line (op) "
+                                + "is not installed."
+                        )
+                        return
+                    }
                 case .threadingVault:
                     break
                 }
 
+                // Both providers key their entries the same way, so choosing between two accounts
+                // on one origin is one piece of logic rather than one per provider.
                 let store = BrowserCredentialStore()
-                let matches = store.identities(for: origin)
+                let matches = provider == .onePassword
+                    ? OnePasswordItemStore.identities(for: origin)
+                    : store.identities(for: origin)
                 guard !matches.isEmpty else {
                     await handOverToUser(
                         "No test credential is stored for \(origin.displayName). Add one in "
@@ -524,7 +531,20 @@ extension AgentToolCoordinator {
 
                 let secret: BrowserCredentialSecret
                 do {
-                    secret = try store.secret(for: identity)
+                    if provider == .onePassword {
+                        guard let reference = OnePasswordItemStore.reference(for: identity) else {
+                            await handOverToUser("That 1Password item is no longer stored.")
+                            return
+                        }
+                        // Off the main actor: `op` shells out and can sit on a Touch ID prompt
+                        // the user has to physically answer, and the whole window would otherwise
+                        // be frozen while it waits.
+                        secret = try await Task.detached {
+                            try OnePasswordCLI.secret(forItem: reference)
+                        }.value
+                    } else {
+                        secret = try store.secret(for: identity)
+                    }
                 } catch {
                     await handOverToUser(
                         "The stored test credential could not be read: "

@@ -27,6 +27,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private var persistentOriginKeys: [String] = []
     private let credentialStore: BrowserCredentialStore
     private var storedCredentials: [BrowserCredentialIdentity] = []
+    private var onePasswordItems: [BrowserCredentialIdentity] = []
 
     /// Hosts whose accounts are worth more than a vault without a biometric gate protects.
     ///
@@ -292,6 +293,48 @@ final class ToolsPreferencesViewController: NSViewController {
             )
         ]
 
+        if BrowserCredentialPreference.provider == .onePassword, OnePasswordCLI.isInstalled {
+            onePasswordItems = OnePasswordItemStore.identities()
+            if onePasswordItems.isEmpty {
+                rows.append(SettingsUI.row(
+                    title: "No 1Password items linked",
+                    subtitle: """
+                        Point an origin at a 1Password item and agents can sign in to it without \
+                        you typing anything.
+                        """,
+                    control: SettingsUI.button(
+                        "Link…",
+                        target: self,
+                        action: #selector(addOnePasswordItem)
+                    )
+                ))
+            } else {
+                rows.append(contentsOf: onePasswordItems.enumerated().map { index, identity in
+                    let remove = SettingsUI.button(
+                        "Remove",
+                        target: self,
+                        action: #selector(removeOnePasswordItem(_:))
+                    )
+                    remove.tag = index
+                    return SettingsUI.row(
+                        title: "\(identity.label) — \(identity.originKey)",
+                        subtitle: OnePasswordItemStore.reference(for: identity) ?? "",
+                        control: remove,
+                        localizes: false
+                    )
+                })
+                rows.append(SettingsUI.row(
+                    title: "Another 1Password item",
+                    subtitle: "Threading stores the reference only. 1Password holds the value.",
+                    control: SettingsUI.button(
+                        "Link…",
+                        target: self,
+                        action: #selector(addOnePasswordItem)
+                    )
+                ))
+            }
+        }
+
         if BrowserCredentialPreference.provider == .threadingVault {
             storedCredentials = credentialStore.identities()
             if storedCredentials.isEmpty {
@@ -350,7 +393,7 @@ final class ToolsPreferencesViewController: NSViewController {
         switch provider {
         case .systemAutoFill: return L10n.string("macOS AutoFill and password managers")
         case .threadingVault: return L10n.string("Threading test credentials")
-        case .onePassword: return L10n.string("1Password (not yet available)")
+        case .onePassword: return L10n.string("1Password")
         }
     }
 
@@ -368,9 +411,16 @@ final class ToolsPreferencesViewController: NSViewController {
                 store only throwaway accounts. Everything else still asks.
                 """)
         case .onePassword:
-            return L10n.string("""
-                Not available in this build. Sign-in falls back to revealing the field for you.
-                """)
+            return OnePasswordCLI.isInstalled
+                ? L10n.string("""
+                    Agents may fill the 1Password items you point at below, on the exact origin \
+                    each is stored for. 1Password still authorizes every read, so it may ask you \
+                    to unlock. Threading stores only the item reference, never the value.
+                    """)
+                : L10n.string("""
+                    The 1Password command line (op) is not installed, so sign-in falls back to \
+                    revealing the field for you. Install it from 1Password's developer settings.
+                    """)
         }
     }
 
@@ -569,6 +619,96 @@ final class ToolsPreferencesViewController: NSViewController {
         } catch {
             refuse(error.localizedDescription)
         }
+    }
+
+    /// Links one origin to a 1Password item.
+    ///
+    /// The reference is validated before it is stored, so a typo is a settings error now rather
+    /// than a sign-in that quietly hands back to the user weeks later.
+    @objc private func addOnePasswordItem() {
+        guard let window = view.window else { return }
+
+        let originField = ThemedTextField()
+        originField.placeholderString = L10n.string("http://localhost:3000")
+        let labelField = ThemedTextField()
+        labelField.placeholderString = L10n.string("admin")
+        let referenceField = ThemedTextField()
+        referenceField.placeholderString = L10n.string("op://Private/staging-admin")
+
+        let fields = NSStackView(views: [originField, labelField, referenceField] as [NSView])
+        fields.orientation = .vertical
+        fields.alignment = .leading
+        fields.spacing = Design.Spacing.small
+        for field in [originField, labelField, referenceField] {
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: ToolsPreferencesDefaults.sheetFieldWidth)
+                .isActive = true
+        }
+
+        let request = ConfirmationRequest(
+            prompt: .storeTestCredential,
+            title: L10n.string("Link a 1Password Item"),
+            message: L10n.string("""
+                Agents may sign in with this item on this exact origin. Threading stores only the \
+                reference — 1Password keeps the value and authorizes every read, so it may ask \
+                you to unlock.
+                """),
+            confirmTitle: L10n.string("Link"),
+            accessory: fields
+        )
+
+        ConfirmationAlert.ask(request, in: window) { [weak self] confirmed in
+            guard let self, confirmed else { return }
+            self.saveOnePasswordItem(
+                origin: originField.stringValue,
+                label: labelField.stringValue,
+                reference: referenceField.stringValue
+            )
+        }
+    }
+
+    private func saveOnePasswordItem(origin rawOrigin: String, label rawLabel: String, reference: String) {
+        let label = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        func refuse(_ reason: String) {
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("The 1Password item was not linked")
+            alert.informativeText = reason
+            alert.addButton(withTitle: L10n.string("OK"))
+            if let window = view.window { alert.beginSheetModal(for: window) }
+        }
+
+        guard let url = URL(string: rawOrigin.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let origin = BrowserOrigin(url: url), !origin.host.isEmpty else {
+            refuse(L10n.string("""
+                Enter the origin as a full URL, for example http://localhost:3000 or \
+                https://staging.example.com.
+                """))
+            return
+        }
+        guard !label.isEmpty else {
+            refuse(L10n.string("Give the account a name so an agent can ask for it by name."))
+            return
+        }
+        guard OnePasswordCLI.isValidItemReference(reference) else {
+            refuse(L10n.string("""
+                A 1Password reference names a vault and an item, like op://Private/staging-admin. \
+                Do not include a field.
+                """))
+            return
+        }
+
+        OnePasswordItemStore.setReference(
+            reference,
+            for: BrowserCredentialIdentity(originKey: origin.key, label: label)
+        )
+        render()
+    }
+
+    @objc private func removeOnePasswordItem(_ sender: ThemedButton) {
+        guard onePasswordItems.indices.contains(sender.tag) else { return }
+        OnePasswordItemStore.remove(onePasswordItems[sender.tag])
+        render()
     }
 
     @objc private func removeTestCredential(_ sender: ThemedButton) {

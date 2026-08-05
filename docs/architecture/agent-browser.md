@@ -404,7 +404,7 @@ Sign-In offers three sources, and `browser_fill_credentials` behaves according t
 |---|---|---|
 | **macOS AutoFill and password managers** (default) | never | yes — the takeover above |
 | **Threading test credentials** | transiently, per fill | no |
-| **1Password** | transiently, per fill | no (planned; falls back to the takeover today) |
+| **1Password** | transiently, per fill | no — 1Password authorizes the read |
 
 The tool takes **no origin, username, or password**. The origin comes from the live authorized
 page, the values from the user's own vault. It may name an `account` when one origin holds several
@@ -464,6 +464,29 @@ that asks for Touch ID per fill is the takeover flow with extra steps. That is t
 this feature is named for, which is also why the UI calls it *test credentials* and never a
 password manager, warns on well-known identity providers, and requires an explicit throwaway
 acknowledgement for any origin that is not loopback.
+
+### The 1Password provider
+
+`OnePasswordCLI` reads the item through `op read`, under the user's login shell for the reason
+`AgentLauncher.loginShellPath` gives — a GUI app does not inherit the interactive `PATH`. Worth
+stating plainly so nobody later mistakes the indirection for a boundary: **`op read` is exactly as
+available from the agent's own shell as it is from Threading**, so this provider buys convenience
+and a no-plaintext-at-rest story, not a new fence. The fence is 1Password's own per-process
+authorization. The login shell also puts the user's rc files and any `op` alias on the value's path,
+which is inherent to needing their `PATH`.
+
+Threading stores only the `op://vault/item` reference, in `PreferenceStore` beside the provider
+choice rather than in the Keychain, because a reference is a name and not a credential. The field
+names are appended by Threading, and a reference that already names a field is refused at the point
+it is typed — otherwise one entry could read `.../password` for its username. Two `op read` calls
+rather than one `op item get --format json`: the JSON form returns every field on the item, and this
+wants exactly two.
+
+Availability is probed with `op --version` and deliberately **not** `op account list`, which can
+raise 1Password's own authorization prompt — a settings page the user is merely looking at must not
+make a window appear. An unauthorized `op` fails at fill time instead, which is the moment the user
+expects to be asked. The read runs off the main actor, because it can sit on a Touch ID prompt that
+a person has to physically answer.
 
 **One known limit, written down rather than claimed away.** The provider choice and
 `BrowserAccessStore`'s persistent grants live in `UserDefaults`, so an agent with shell access can
