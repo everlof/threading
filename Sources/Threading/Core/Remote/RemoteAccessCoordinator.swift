@@ -6,9 +6,9 @@ import ThreadingRemoteKit
 /// the coordinator (main) mints and revokes into it, so it guards its own state with a lock
 /// rather than borrowing the coordinator's main-actor isolation.
 ///
-/// Durable owner devices and launch-scoped guest links are loaded into the same runtime map.
-/// Stopping remote access empties this map immediately; starting it rehydrates only the owner
-/// records whose per-device credentials survived in Keychain.
+/// Durable owner devices and accepted guest memberships are loaded into the same runtime map.
+/// Stopping remote access empties this map immediately; starting it rehydrates every credential
+/// whose source record survived in Keychain.
 final class RemoteAuthorityStore: RemoteAuthorizing, @unchecked Sendable {
     private let lock = NSLock()
     private var byToken: [String: RemoteAuthorization] = [:]
@@ -21,6 +21,15 @@ final class RemoteAuthorityStore: RemoteAuthorizing, @unchecked Sendable {
             return nil
         }
         return authorization
+    }
+
+    func isCurrent(_ authorization: RemoteAuthorization) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !authorization.isExpired else { return false }
+        // A single share can have several accepted members. Validate the exact authorization
+        // against the active token map rather than letting one member replace another in a
+        // share-ID index.
+        return byToken.values.contains(authorization)
     }
 
     func set(_ authorization: RemoteAuthorization?, forToken token: String) {
@@ -92,9 +101,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     private let tailscale = TailscaleRemoteTransport()
     private let authority = RemoteAuthorityStore()
     private let ownerDevices: RemoteOwnerDeviceRegistry
+    private let guestShareStore: RemoteGuestSharePersisting
+    private(set) var guestSharePersistenceError: String?
     private var pairingBootstrapToken: String?
     private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
+    private var pendingPublicShares: [UUID: PendingPublicShare] = [:]
     /// Invalidates a listener completion that was already enqueued on main when the user
     /// switched the feature off. Without it, a fast off-after-on could put the UI back into
     /// `listening` after `stop()` had already closed the listener and revoked its token.
@@ -103,10 +115,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// the listener and all current authorizations alive.
     private var transportGeneration = 0
 
-    private init(ownerDeviceStore: RemoteOwnerDevicePersisting) {
+    init(
+        ownerDeviceStore: RemoteOwnerDevicePersisting,
+        guestShareStore: RemoteGuestSharePersisting? = nil
+    ) {
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
+        self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         server.authorizer = authority
         server.invitationRedeemer = self
+        restoreGuestShares()
     }
 
     private static func defaultOwnerDeviceStore() -> RemoteOwnerDevicePersisting {
@@ -114,6 +131,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             return InMemoryRemoteOwnerDeviceStore()
         }
         return RemoteOwnerDeviceKeychainStore()
+    }
+
+    private static func defaultGuestShareStore() -> RemoteGuestSharePersisting {
+        if NSClassFromString("XCTestCase") != nil {
+            return InMemoryRemoteGuestShareStore()
+        }
+        return RemoteGuestShareKeychainStore()
     }
 
     private struct PairingRedemption {
@@ -139,6 +163,78 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         let createdAt: Date
         let expiresAt: Date
         var members: [String: MemberRecord]
+    }
+
+    private struct PendingPublicShare {
+        let sessionID: SessionID
+        let capability: RemoteCapability
+        let canApprovePermissions: Bool
+        let completion: @MainActor (Result<CreatedShare, RemoteSharePreparationError>) -> Void
+    }
+
+    enum RemoteSharePreparationError: LocalizedError {
+        case remoteAccessUnavailable
+        case relayUnavailable(String)
+        case tooManyRequests
+
+        var errorDescription: String? {
+            switch self {
+            case .remoteAccessUnavailable:
+                return L10n.string("Remote Access is not ready.")
+            case .relayUnavailable(let reason):
+                return reason
+            case .tooManyRequests:
+                return L10n.string("Too many share links are being prepared. Try again shortly.")
+            }
+        }
+    }
+
+    var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
+
+    /// The stable host plus the routes an owner is allowed to consider. Guest payloads omit the
+    /// list so a public one-chat invitation never reveals the owner's private tailnet hostname.
+    func hostIdentity(for authorization: RemoteAuthorization) -> RemoteHostDTO {
+        let identity = RemoteHostIdentity.current
+        guard authorization.canManageHost else { return identity }
+
+        let mode = AppSettings.shared.remoteAccessConnectionMode
+        var endpoints: [RemoteHostEndpointDTO] = []
+        if mode.usesTailscale, case .connected(let origin) = tailscaleStatus {
+            endpoints.append(RemoteHostEndpointDTO(
+                kind: RemoteTransportKind.tailscale.rawValue,
+                baseURL: origin,
+                isStable: true
+            ))
+        }
+        let allowsRelay = mode == .relay
+            || (mode == .tailscaleAndRelay
+                && AppSettings.shared.remoteAccessAllowsOwnerRelayFallback)
+        if allowsRelay, case .connected(let origin) = relayStatus {
+            endpoints.append(RemoteHostEndpointDTO(
+                kind: RemoteTransportKind.relay.rawValue,
+                baseURL: origin,
+                isStable: !Self.isQuickRelay(origin)
+            ))
+        }
+
+        let policy: RemoteHostConnectionPolicy
+        switch mode {
+        case .relay:
+            policy = .relayOnly
+        case .tailscale:
+            policy = .privateOnly
+        case .tailscaleAndRelay:
+            policy = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
+                ? .preferPrivate
+                : .privateOnly
+        }
+        return RemoteHostDTO(
+            id: identity.id,
+            name: identity.name,
+            platform: identity.platform,
+            endpoints: endpoints,
+            connectionPolicy: policy
+        )
     }
 
     struct CreatedShare {
@@ -273,28 +369,66 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// Accepting it exchanges the invitation bearer for a device-bound membership bearer that
     /// remains valid until sharing is stopped. Copying the invite can therefore never leak the
     /// dashboard or another session.
-    func shareURL(
-        for sessionID: SessionID,
-        capability: RemoteCapability = .view,
-        canApprovePermissions: Bool = false
-    ) -> URL? {
-        createSessionShare(
-            for: sessionID,
-            capability: capability,
-            canApprovePermissions: canApprovePermissions
-        )?.url
-    }
-
     func createSessionShare(
         for sessionID: SessionID,
         capability: RemoteCapability,
-        canApprovePermissions requestedPermissionApproval: Bool = false
-    ) -> CreatedShare? {
-        guard invitationOrigin != nil,
-              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
-        else {
-            return nil
+        canApprovePermissions requestedPermissionApproval: Bool = false,
+        completion: @escaping @MainActor (
+            Result<CreatedShare, RemoteSharePreparationError>
+        ) -> Void
+    ) {
+        guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+              case .listening = status else {
+            completion(.failure(.remoteAccessUnavailable))
+            return
         }
+
+        if invitationOrigin != nil {
+            guard let created = createSessionShareNow(
+                for: sessionID,
+                capability: capability,
+                canApprovePermissions: requestedPermissionApproval
+            ) else {
+                completion(.failure(.remoteAccessUnavailable))
+                return
+            }
+            completion(.success(created))
+            return
+        }
+
+        guard pendingPublicShares.count < RemoteAccessDefaults.maximumPendingSharePreparations
+        else {
+            completion(.failure(.tooManyRequests))
+            return
+        }
+
+        let requestID = UUID()
+        pendingPublicShares[requestID] = PendingPublicShare(
+            sessionID: sessionID,
+            capability: capability,
+            canApprovePermissions: requestedPermissionApproval,
+            completion: completion
+        )
+        startInvitationTransportIfNeeded()
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + RemoteAccessDefaults.sharePreparationTimeout
+        ) { [weak self] in
+            guard let self, let pending = self.pendingPublicShares.removeValue(
+                forKey: requestID
+            ) else { return }
+            self.reconcileRelayIfNeeded()
+            pending.completion(.failure(.relayUnavailable(
+                L10n.string("The sharing connection timed out. Try again.")
+            )))
+        }
+    }
+
+    private func createSessionShareNow(
+        for sessionID: SessionID,
+        capability: RemoteCapability,
+        canApprovePermissions requestedPermissionApproval: Bool
+    ) -> CreatedShare? {
+        guard invitationOrigin != nil else { return nil }
 
         let invitationToken = Self.randomToken()
         let id = UUID().uuidString.lowercased()
@@ -311,7 +445,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             expiresAt: expiresAt,
             members: [:]
         )
-        sessionShares[sessionID, default: []].append(share)
+        guard let url = invitationURL(token: invitationToken) else { return nil }
+        var candidate = sessionShares
+        candidate[sessionID, default: []].append(share)
+        guard persistGuestShares(candidate) else { return nil }
+        sessionShares = candidate
         DispatchQueue.main.asyncAfter(
             deadline: .now() + RemoteAccessDefaults.defaultShareExpiry
         ) { [weak self] in
@@ -319,10 +457,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
 
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        guard let url = invitationURL(token: invitationToken) else {
-            sessionShares[sessionID]?.removeAll { $0.id == id }
-            return nil
-        }
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
         return CreatedShare(
             url: url,
@@ -417,7 +551,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 joinedAt: Date()
             )
             shares[index] = share
-            sessionShares[sessionID] = shares
+            var candidate = sessionShares
+            candidate[sessionID] = shares
+            guard persistGuestShares(candidate) else { return nil }
+            sessionShares = candidate
             authority.set(authorization, forToken: accessToken)
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
@@ -533,7 +670,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
         for (sessionID, shares) in sessionShares {
             for (shareIndex, share) in shares.enumerated() where share.members[shareID] != nil {
-                sessionShares[sessionID]?[shareIndex].members[shareID]?.lastSeenAt = Date()
+                var candidate = sessionShares
+                candidate[sessionID]?[shareIndex].members[shareID]?.lastSeenAt = Date()
+                if persistGuestShares(candidate) { sessionShares = candidate }
                 return
             }
         }
@@ -558,6 +697,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     func deleteOwnerDevicesForAppReset() throws {
         stop()
         try ownerDevices.deleteAllForAppReset()
+        try guestShareStore.deleteAll()
+        sessionShares.removeAll()
+        guestSharePersistenceError = nil
     }
 
     /// Ends one person's access to one chat, closing whatever they have open.
@@ -569,12 +711,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         guard var shares = sessionShares[sessionID] else { return false }
         for (index, share) in shares.enumerated() {
             guard let record = share.members[memberID] else { continue }
-            revoke(record)
             shares[index].members[memberID] = nil
             if shares[index].members.isEmpty, shares[index].invitationToken == nil {
                 shares.remove(at: index)
             }
-            sessionShares[sessionID] = shares.isEmpty ? nil : shares
+            var candidate = sessionShares
+            candidate[sessionID] = shares.isEmpty ? nil : shares
+            guard persistGuestShares(candidate) else { return false }
+            sessionShares = candidate
+            revoke(record)
             sharingChanged()
             return true
         }
@@ -594,13 +739,21 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         if shares[index].members.isEmpty {
             shares.remove(at: index)
         }
-        sessionShares[sessionID] = shares.isEmpty ? nil : shares
+        var candidate = sessionShares
+        candidate[sessionID] = shares.isEmpty ? nil : shares
+        guard persistGuestShares(candidate) else { return false }
+        sessionShares = candidate
         sharingChanged()
         return true
     }
 
     func revokeSessionShares(_ sessionID: SessionID) {
-        for share in sessionShares.removeValue(forKey: sessionID) ?? [] {
+        let removed = sessionShares[sessionID] ?? []
+        var candidate = sessionShares
+        candidate[sessionID] = nil
+        guard persistGuestShares(candidate) else { return }
+        sessionShares = candidate
+        for share in removed {
             for member in share.members.values { revoke(member) }
         }
         sharingChanged()
@@ -615,6 +768,98 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     private func sharingChanged() {
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        reconcileRelayIfNeeded()
+    }
+
+    private func restoreGuestShares() {
+        do {
+            let now = Date()
+            var restored: [SessionID: [SessionShare]] = [:]
+            for record in try guestShareStore.load() {
+                guard let sessionID = SessionID(uuidString: record.sessionID) else { continue }
+                let members = record.members.reduce(into: [String: MemberRecord]()) {
+                    result, stored in
+                    let member = RemoteMember(
+                        id: stored.id,
+                        displayName: stored.displayName,
+                        deviceID: stored.deviceID
+                    )
+                    let authorization = RemoteAuthorization(
+                        shareID: stored.id,
+                        capability: record.capability,
+                        scope: .session(sessionID),
+                        principal: .guest,
+                        member: member,
+                        canApprovePermissions: record.canApprovePermissions
+                    )
+                    result[stored.id] = MemberRecord(
+                        token: stored.token,
+                        authorization: authorization,
+                        joinedAt: stored.joinedAt,
+                        lastSeenAt: stored.lastSeenAt
+                    )
+                }
+                let invitation = record.expiresAt > now ? record.invitationToken : nil
+                guard invitation != nil || !members.isEmpty else { continue }
+                restored[sessionID, default: []].append(SessionShare(
+                    id: record.id,
+                    invitationToken: invitation,
+                    capability: record.capability,
+                    canApprovePermissions: record.canApprovePermissions,
+                    createdAt: record.createdAt,
+                    expiresAt: record.expiresAt,
+                    members: members
+                ))
+                if let invitation {
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now() + max(0, record.expiresAt.timeIntervalSince(now))
+                    ) { [weak self] in
+                        self?.expireInvitation(token: invitation, sessionID: sessionID)
+                    }
+                }
+            }
+            sessionShares = restored
+        } catch {
+            guestSharePersistenceError = error.localizedDescription
+            sessionShares = [:]
+        }
+    }
+
+    private func persistGuestShares(
+        _ candidate: [SessionID: [SessionShare]]
+    ) -> Bool {
+        guard guestSharePersistenceError == nil else { return false }
+        let records = candidate.flatMap { sessionID, shares in
+            shares.map { share in
+                RemoteGuestShareRecord(
+                    id: share.id,
+                    sessionID: sessionID.uuidString,
+                    invitationToken: share.invitationToken,
+                    capability: share.capability,
+                    canApprovePermissions: share.canApprovePermissions,
+                    createdAt: share.createdAt,
+                    expiresAt: share.expiresAt,
+                    members: share.members.values.map { member in
+                        RemoteGuestShareRecord.Member(
+                            id: member.authorization.shareID,
+                            token: member.token,
+                            displayName: member.authorization.member?.displayName ?? "Guest",
+                            deviceID: member.authorization.member?.deviceID ?? "unknown",
+                            joinedAt: member.joinedAt,
+                            lastSeenAt: member.lastSeenAt
+                        )
+                    }
+                )
+            }
+        }
+        do {
+            try guestShareStore.save(records)
+            return true
+        } catch {
+            guestSharePersistenceError = error.localizedDescription
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return false
+        }
     }
 
     private func invitationURL(token: String) -> URL? {
@@ -634,7 +879,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         // A consumed invitation has already been cleared and its membership intentionally
         // survives the invitation timer.
         let share = shares.remove(at: index)
-        sessionShares[sessionID] = shares.isEmpty ? nil : shares
+        var candidate = sessionShares
+        candidate[sessionID] = shares.isEmpty ? nil : shares
+        guard persistGuestShares(candidate) else { return }
+        sessionShares = candidate
         for member in share.members.values {
             authority.set(nil, forToken: member.token)
             RemoteNotificationService.shared.revoke(
@@ -644,6 +892,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        reconcileRelayIfNeeded()
     }
 
     // MARK: - Master switch
@@ -661,6 +910,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
     func setConnectionMode(_ mode: RemoteAccessConnectionMode) {
         guard AppSettings.shared.remoteAccessConnectionMode != mode else { return }
+        failPendingShares(.remoteAccessUnavailable)
         AppSettings.shared.remoteAccessConnectionMode = mode
         guard case .listening(let port) = status else {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
@@ -669,16 +919,30 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         startTransports(port: port)
     }
 
+    func setAllowsOwnerRelayFallback(_ enabled: Bool) {
+        guard AppSettings.shared.remoteAccessAllowsOwnerRelayFallback != enabled else { return }
+        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = enabled
+        reconcileRelayIfNeeded()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    func setKeepsRelayReady(_ enabled: Bool) {
+        guard AppSettings.shared.remoteAccessKeepsRelayReady != enabled else { return }
+        AppSettings.shared.remoteAccessKeepsRelayReady = enabled
+        reconcileRelayIfNeeded()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
     func retryTransports() {
         guard case .listening(let port) = status else { return }
         startTransports(port: port)
     }
 
-    /// Stops every network door and clears runtime capabilities. Durable owner-device records
-    /// remain in Keychain and are rehydrated on the next start; guest shares stay deliberately
-    /// launch-scoped and are revoked here.
+    /// Stops every network door and clears runtime capabilities. Durable owner-device and
+    /// accepted one-chat records remain in Keychain and are rehydrated on the next start.
     func stop() {
         lifecycleGeneration += 1
+        failPendingShares(.remoteAccessUnavailable)
         stopTransports()
         server.stop()
         RemoteSessionMirrorRegistry.shared.remoteAccessStopped()
@@ -686,7 +950,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         authority.removeAll()
         pairingBootstrapToken = nil
         pairingRedemptions.removeAll()
-        sessionShares.removeAll()
         status = .disabled
     }
 
@@ -719,6 +982,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         for record in ownerDevices.devices {
             authority.set(record.authorization, forToken: record.token)
         }
+        for shares in sessionShares.values {
+            for share in shares {
+                for member in share.members.values {
+                    authority.set(member.authorization, forToken: member.token)
+                }
+            }
+        }
 
         server.start { [weak self] port in
             guard let self else { return }
@@ -742,7 +1012,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 self.authority.removeAll()
                 self.pairingBootstrapToken = nil
                 self.pairingRedemptions.removeAll()
-                self.sessionShares.removeAll()
                 self.status = .failed(reason: "listener")
                 EventLog.shared.record(.remote, "Remote access failed to start")
                 MacRemoteDiagnostics.record(
@@ -765,26 +1034,118 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         tailscaleStatus = .stopped
 
         let mode = AppSettings.shared.remoteAccessConnectionMode
-        if mode.usesRelay {
-            relayStatus = .starting
-            tunnel.start(port: port) { [weak self] state in
-                self?.transportChanged(
-                    .relay,
-                    state: state,
-                    generation: generation
-                )
-            }
-        }
         if mode.usesTailscale {
-            tailscaleStatus = .starting
-            tailscale.start(port: port) { [weak self] state in
-                self?.transportChanged(
-                    .tailscale,
-                    state: state,
-                    generation: generation
-                )
+            startTailscale(port: port, generation: generation)
+        }
+        if shouldRunRelay {
+            startRelay(port: port, generation: generation)
+        }
+    }
+
+    private var shouldRunRelay: Bool {
+        Self.relayRequired(
+            mode: AppSettings.shared.remoteAccessConnectionMode,
+            allowsOwnerFallback: AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
+            keepsRelayReady: AppSettings.shared.remoteAccessKeepsRelayReady,
+            hasActiveShares: !sessionShares.isEmpty,
+            hasPendingShares: !pendingPublicShares.isEmpty
+        )
+    }
+
+    nonisolated static func relayRequired(
+        mode: RemoteAccessConnectionMode,
+        allowsOwnerFallback: Bool,
+        keepsRelayReady: Bool,
+        hasActiveShares: Bool,
+        hasPendingShares: Bool
+    ) -> Bool {
+        switch mode {
+        case .relay:
+            return true
+        case .tailscale:
+            return false
+        case .tailscaleAndRelay:
+            return allowsOwnerFallback || keepsRelayReady || hasActiveShares || hasPendingShares
+        }
+    }
+
+    private func startRelay(port: UInt16, generation: Int) {
+        relayStatus = .starting
+        tunnel.start(port: port) { [weak self] state in
+            self?.transportChanged(.relay, state: state, generation: generation)
+        }
+    }
+
+    private func startTailscale(port: UInt16, generation: Int) {
+        tailscaleStatus = .starting
+        tailscale.start(port: port) { [weak self] state in
+            self?.transportChanged(.tailscale, state: state, generation: generation)
+        }
+    }
+
+    private func reconcileRelayIfNeeded() {
+        guard case .listening(let port) = status else { return }
+        if shouldRunRelay {
+            switch relayStatus {
+            case .connected, .starting:
+                return
+            case .stopped, .unavailable:
+                startRelay(port: port, generation: transportGeneration)
+            }
+        } else if relayStatus != .stopped {
+            tunnel.stop()
+            relayStatus = .stopped
+        }
+    }
+
+    private func startInvitationTransportIfNeeded() {
+        guard case .listening(let port) = status else {
+            failPendingShares(.remoteAccessUnavailable)
+            return
+        }
+        switch AppSettings.shared.remoteAccessConnectionMode {
+        case .relay, .tailscaleAndRelay:
+            switch relayStatus {
+            case .connected:
+                drainPendingSharesIfPossible()
+            case .starting:
+                break
+            case .stopped, .unavailable:
+                startRelay(port: port, generation: transportGeneration)
+            }
+        case .tailscale:
+            switch tailscaleStatus {
+            case .connected:
+                drainPendingSharesIfPossible()
+            case .starting:
+                break
+            case .stopped, .unavailable:
+                startTailscale(port: port, generation: transportGeneration)
             }
         }
+    }
+
+    private func drainPendingSharesIfPossible() {
+        guard invitationOrigin != nil, !pendingPublicShares.isEmpty else { return }
+        let pending = Array(pendingPublicShares.values)
+        pendingPublicShares.removeAll()
+        for request in pending {
+            guard let created = createSessionShareNow(
+                for: request.sessionID,
+                capability: request.capability,
+                canApprovePermissions: request.canApprovePermissions
+            ) else {
+                request.completion(.failure(.remoteAccessUnavailable))
+                continue
+            }
+            request.completion(.success(created))
+        }
+    }
+
+    private func failPendingShares(_ error: RemoteSharePreparationError) {
+        let pending = Array(pendingPublicShares.values)
+        pendingPublicShares.removeAll()
+        for request in pending { request.completion(.failure(error)) }
     }
 
     private func stopTransports() {
@@ -816,19 +1177,32 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             EventLog.shared.record(.remote, "Remote transport connected", [
                 "transport": kind.rawValue,
             ])
+            drainPendingSharesIfPossible()
         case .unavailable(let reason):
+            var fields: [RemoteDiagnosticField: String] = [
+                .transport: kind.rawValue,
+                .reason: Self.diagnosticReason(reason),
+            ]
+            if kind == .tailscale,
+               case .actionRequired(let issue) = tailscale.readiness {
+                fields[.code] = issue.rawValue
+            }
             MacRemoteDiagnostics.record(
                 .relayFailed,
                 level: .warning,
-                fields: [
-                    .transport: kind.rawValue,
-                    .reason: Self.diagnosticReason(reason),
-                ]
+                fields: fields
             )
             EventLog.shared.record(.remote, "Remote transport unavailable", [
                 "transport": kind.rawValue,
                 "reason": Self.diagnosticReason(reason),
             ])
+            let mode = AppSettings.shared.remoteAccessConnectionMode
+            let isInvitationTransport = kind == .relay
+                ? mode != .tailscale
+                : mode == .tailscale
+            if isInvitationTransport {
+                failPendingShares(.relayUnavailable(reason))
+            }
         case .stopped, .starting:
             break
         }
@@ -840,6 +1214,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         if lowered.contains("network") { return "network" }
         if lowered.contains("exited") { return "process-exited" }
         return "unavailable"
+    }
+
+    private static func isQuickRelay(_ origin: URL) -> Bool {
+        origin.host?.lowercased().hasSuffix(".trycloudflare.com") == true
     }
 
     // MARK: - Tokens

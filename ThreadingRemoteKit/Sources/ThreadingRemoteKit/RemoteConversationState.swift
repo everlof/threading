@@ -16,6 +16,7 @@ public struct RemoteConversationState: Equatable, Sendable {
     public private(set) var rows: [RemoteConversationRowDTO]
     public private(set) var streamingText: String
     public private(set) var canSend: Bool
+    public private(set) var composerCapabilities: [RemoteComposerCapabilityDTO]
     public private(set) var permission: RemotePermissionRequestDTO?
     public private(set) var revision: Int
     public private(set) var hasEarlier: Bool
@@ -24,6 +25,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         rows: [RemoteConversationRowDTO] = [],
         streamingText: String = "",
         canSend: Bool = false,
+        composerCapabilities: [RemoteComposerCapabilityDTO] = [],
         permission: RemotePermissionRequestDTO? = nil,
         revision: Int = 0,
         hasEarlier: Bool = false
@@ -31,6 +33,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         self.rows = rows
         self.streamingText = streamingText
         self.canSend = canSend
+        self.composerCapabilities = composerCapabilities
         self.permission = permission
         self.revision = revision
         self.hasEarlier = hasEarlier
@@ -41,6 +44,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         rows = Self.unique(snapshot.rows)
         streamingText = snapshot.streamingText
         canSend = snapshot.canSend
+        composerCapabilities = snapshot.composerCapabilities
         permission = snapshot.permission
         revision = snapshot.revision
         hasEarlier = snapshot.hasEarlier
@@ -75,10 +79,14 @@ public struct RemoteConversationState: Equatable, Sendable {
 
         let metadataChanged = streamingText != delta.streamingText
             || canSend != delta.canSend
+            || delta.composerCapabilities.map { composerCapabilities != $0 } == true
             || permission != delta.permission
             || delta.hasEarlier.map { hasEarlier != $0 } == true
         streamingText = delta.streamingText
         canSend = delta.canSend
+        if let capabilities = delta.composerCapabilities {
+            composerCapabilities = capabilities
+        }
         permission = delta.permission
         if let hasEarlier = delta.hasEarlier {
             self.hasEarlier = hasEarlier

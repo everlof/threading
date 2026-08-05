@@ -80,7 +80,12 @@ enum RemoteThemeBridge {
                 glow: glow,
                 textScale: Double(material.textScale),
                 typeface: material.typeface.rawValue,
-                fontFamily: material.fontFamily
+                // This bridge promises resolved, portable state. Send the first named family the
+                // host can actually use rather than an unavailable historical preference; a
+                // remote client cannot reproduce this Mac's fallback search for itself.
+                fontFamily: material.fontFamilies.first {
+                    Design.Typography.availableFamilies.contains($0)
+                }
             )
         )
     }

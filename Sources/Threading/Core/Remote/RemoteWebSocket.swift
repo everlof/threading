@@ -15,6 +15,10 @@ enum RemoteWebSocket {
     /// The magic GUID from RFC 6455 §1.3, concatenated with the client key before hashing.
     static let acceptGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+    /// The most a control frame may carry (RFC 6455 §5.5). Enforced on the way in by
+    /// `decodeFrame` and on the way out by `closeFrame`, so the two cannot disagree.
+    static let maximumControlPayload = 125
+
     // MARK: - Opcodes
 
     enum Opcode: UInt8 {
@@ -161,7 +165,7 @@ enum RemoteWebSocket {
             guard fin else {
                 return .protocolError(closeCode: CloseCode.protocolError, reason: "Fragmented control frame")
             }
-            guard payloadLength <= 125 else {
+            guard payloadLength <= maximumControlPayload else {
                 return .protocolError(closeCode: CloseCode.protocolError, reason: "Control frame too large")
             }
         }
@@ -218,12 +222,35 @@ enum RemoteWebSocket {
     static func pingFrame(_ data: Data = Data()) -> Data { encodeFrame(opcode: .ping, payload: data) }
     static func pongFrame(_ data: Data = Data()) -> Data { encodeFrame(opcode: .pong, payload: data) }
 
+    /// A close frame, with `reason` trimmed to what a control frame is allowed to carry.
+    ///
+    /// The trim is not decoration. `decodeFrame` refuses an inbound control frame over
+    /// `maximumControlPayload`, and without this the encoder would happily emit one — Threading
+    /// sending a frame its own decoder would close the connection over. Every reason passed here
+    /// today is a short literal, so this bounds a public entry point before a longer one reaches
+    /// it rather than fixing a live break.
     static func closeFrame(code: UInt16, reason: String = "") -> Data {
         var payload = Data()
         payload.append(UInt8((code >> 8) & 0xFF))
         payload.append(UInt8(code & 0xFF))
-        payload.append(Data(reason.utf8))
+        payload.append(reasonFitting(reason, within: maximumControlPayload - 2))
         return encodeFrame(opcode: .close, payload: payload)
+    }
+
+    /// `reason` in UTF-8, cut to `budget` bytes on a character boundary.
+    ///
+    /// Counted per `Character` rather than per byte because a close reason must still be valid
+    /// UTF-8 (`Reassembler.closePayloadError` checks exactly that on the way in) — slicing the
+    /// bytes at 123 would leave a split scalar and produce the malformed payload this is meant
+    /// to avoid.
+    private static func reasonFitting(_ reason: String, within budget: Int) -> Data {
+        var bytes = Data()
+        for character in reason {
+            let encoded = Data(String(character).utf8)
+            guard bytes.count + encoded.count <= budget else { break }
+            bytes.append(encoded)
+        }
+        return bytes
     }
 
     /// Echoes a validated peer close payload, as RFC 6455 recommends for the close handshake.

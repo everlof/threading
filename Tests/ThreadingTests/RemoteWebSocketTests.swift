@@ -284,6 +284,163 @@ final class RemoteWebSocketTests: XCTestCase {
         )
     }
 
+    // MARK: - Malformed framing
+
+    /// RSV1/2/3 signal an extension. This codec negotiates none, so a frame that sets any of
+    /// them means the peer is speaking something we did not agree to.
+    func testReservedBitsAreRefused() {
+        for reserved: UInt8 in [0x40, 0x20, 0x10, 0x70] {
+            guard case .protocolError(let code, _) = decode([0x80 | reserved | 0x01, 0x80, 0, 0, 0, 0]) else {
+                return XCTFail("RSV bits \(reserved) should be a protocol error")
+            }
+            XCTAssertEqual(code, RemoteWebSocket.CloseCode.protocolError)
+        }
+    }
+
+    /// 0x3–0x7 are reserved data opcodes and 0xB–0xF reserved control opcodes. None may be
+    /// guessed at — an unknown opcode is a framing error, not a frame to skip.
+    func testReservedOpcodesAreRefused() {
+        for opcode: UInt8 in [0x3, 0x4, 0x5, 0x6, 0x7, 0xB, 0xC, 0xD, 0xE, 0xF] {
+            guard case .protocolError(let code, _) = decode([0x80 | opcode, 0x80, 0, 0, 0, 0]) else {
+                return XCTFail("opcode \(opcode) should be a protocol error")
+            }
+            XCTAssertEqual(code, RemoteWebSocket.CloseCode.protocolError)
+        }
+    }
+
+    /// RFC 6455 §5.5: a control frame may not be fragmented, and may not exceed 125 bytes.
+    /// Both are checked before the payload is waited on.
+    func testControlFramesMayNotBeFragmentedOrOversized() {
+        for control: UInt8 in [0x8, 0x9, 0xA] {
+            // FIN clear on a control frame.
+            guard case .protocolError(let fragmented, _) = decode([control, 0x80, 0, 0, 0, 0]) else {
+                return XCTFail("a fragmented control frame should be refused")
+            }
+            XCTAssertEqual(fragmented, RemoteWebSocket.CloseCode.protocolError)
+
+            // 126 bytes declared through the 16-bit form — one past the control limit.
+            guard case .protocolError(let oversized, _) =
+                decode([0x80 | control, 0x80 | 126, 0x00, 0x7E]) else {
+                return XCTFail("an oversized control frame should be refused")
+            }
+            XCTAssertEqual(oversized, RemoteWebSocket.CloseCode.protocolError)
+        }
+
+        // Exactly 125 is legal, and is the boundary the two checks meet at.
+        var atLimit: [UInt8] = [0x89, 0x80 | 125, 0, 0, 0, 0]
+        atLimit.append(contentsOf: [UInt8](repeating: 0, count: 125))
+        guard case .frame(let frame, _) = decode(atLimit) else {
+            return XCTFail("a 125-byte ping is within the control limit")
+        }
+        XCTAssertEqual(frame.opcode, .ping)
+        XCTAssertEqual(frame.payload.count, 125)
+    }
+
+    /// RFC 6455 §5.2: the high bit of a 64-bit length must be 0. Read as signed it would be a
+    /// negative count, which is the shape of every length-field bug worth having a test for.
+    func testSixtyFourBitLengthWithTheHighBitSetIsRefused() {
+        let bytes: [UInt8] = [0x82, 0xFF, 0x80, 0, 0, 0, 0, 0, 0, 0x01]
+        guard case .protocolError(let code, _) = decode(bytes) else {
+            return XCTFail("expected a protocol error")
+        }
+        XCTAssertEqual(code, RemoteWebSocket.CloseCode.protocolError)
+    }
+
+    /// A declared length that is merely enormous, rather than malformed, is refused as too big
+    /// rather than buffered towards.
+    func testAnEnormousDeclaredLengthIsRefusedAsTooBig() {
+        let bytes: [UInt8] = [0x82, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        guard case .protocolError(let code, _) =
+            RemoteWebSocket.decodeFrame(from: Data(bytes), maximumPayload: 1024) else {
+            return XCTFail("expected a protocol error")
+        }
+        XCTAssertEqual(code, RemoteWebSocket.CloseCode.messageTooBig)
+    }
+
+    /// A zero-length masked frame is still a frame: the mask key is present and consumed, and
+    /// the payload is empty rather than the decode being reported incomplete forever.
+    func testAnEmptyMaskedFrameDecodesAndConsumesItsMaskKey() {
+        guard case .frame(let frame, let consumed) = decode([0x81, 0x80, 0xAA, 0xBB, 0xCC, 0xDD]) else {
+            return XCTFail("expected a decoded frame")
+        }
+        XCTAssertEqual(consumed, 6)
+        XCTAssertTrue(frame.payload.isEmpty)
+        XCTAssertEqual(frame.opcode, .text)
+    }
+
+    /// An all-zero mask key is legal and leaves the payload as-is — which is the one key that
+    /// makes a "masked twice" or "never unmasked" bug invisible, so it is pinned deliberately
+    /// alongside the non-trivial key the §5.7 vector uses.
+    func testAnAllZeroMaskKeyLeavesThePayloadUnchanged() {
+        var bytes: [UInt8] = [0x81, 0x80 | 5, 0, 0, 0, 0]
+        bytes.append(contentsOf: Array("Hello".utf8))
+        guard case .frame(let frame, _) = decode(bytes) else {
+            return XCTFail("expected a decoded frame")
+        }
+        XCTAssertEqual(String(decoding: frame.payload, as: UTF8.self), "Hello")
+    }
+
+    // MARK: - Close codes at their boundaries
+
+    /// The close-code validator is a range test, and every one of these sits one step either
+    /// side of an edge of it. 1015 is the one that matters most: it is assigned (TLS handshake
+    /// failure) but must never appear on the wire, and it is adjacent to the top of the
+    /// allowed 1000–1014 band.
+    func testCloseCodeRangeEdges() {
+        func outcome(_ code: UInt16) -> RemoteWebSocket.Reassembler.Outcome {
+            var reassembler = RemoteWebSocket.Reassembler(maximumBytes: 1024)
+            let payload = Data([UInt8(code >> 8), UInt8(code & 0xFF)])
+            return reassembler.accept(.init(fin: true, opcode: .close, payload: payload))
+        }
+
+        for accepted: UInt16 in [1000, 1001, 1014, 3000, 4999] {
+            guard case .message(.close) = outcome(accepted) else {
+                return XCTFail("\(accepted) is a close code a peer may send")
+            }
+        }
+
+        for refused: UInt16 in [0, 999, 1004, 1005, 1006, 1015, 1016, 2999, 5000, 65535] {
+            guard case .protocolError(let code, _) = outcome(refused) else {
+                return XCTFail("\(refused) must never be accepted from the wire")
+            }
+            XCTAssertEqual(code, RemoteWebSocket.CloseCode.protocolError)
+        }
+    }
+
+    /// The encoder must not emit a control frame its own decoder would refuse. A long reason is
+    /// cut to fit, on a character boundary so the payload stays valid UTF-8 — a byte-wise cut
+    /// would split a scalar and produce exactly the malformed close this guards against.
+    func testALongCloseReasonIsTrimmedToALegalControlFrame() {
+        let data = RemoteWebSocket.closeFrame(
+            code: RemoteWebSocket.CloseCode.policyViolation,
+            reason: String(repeating: "é", count: 400)
+        )
+
+        let payloadLength = Int(data[data.startIndex + 1])
+        XCTAssertLessThanOrEqual(payloadLength, RemoteWebSocket.maximumControlPayload)
+        XCTAssertEqual(data.count, 2 + payloadLength)
+
+        let payload = data.dropFirst(2)
+        XCTAssertNotNil(
+            String(data: payload.dropFirst(2), encoding: .utf8),
+            "the reason was cut through a UTF-8 scalar"
+        )
+
+        // And the codec accepts what it produced, which is the property that actually matters.
+        var reassembler = RemoteWebSocket.Reassembler(maximumBytes: 1024)
+        guard case .message(.close) = reassembler.accept(
+            .init(fin: true, opcode: .close, payload: Data(payload))
+        ) else {
+            return XCTFail("the codec emitted a close frame it will not accept")
+        }
+    }
+
+    /// A short reason is passed through untouched, so the trim cannot quietly cost detail.
+    func testAShortCloseReasonSurvivesIntact() {
+        let data = RemoteWebSocket.closeFrame(code: RemoteWebSocket.CloseCode.protocolError, reason: "Unknown opcode")
+        XCTAssertEqual(String(decoding: data.dropFirst(4), as: UTF8.self), "Unknown opcode")
+    }
+
     // MARK: - Helpers
 
     private func decode(_ bytes: [UInt8]) -> RemoteWebSocket.DecodeOutcome {

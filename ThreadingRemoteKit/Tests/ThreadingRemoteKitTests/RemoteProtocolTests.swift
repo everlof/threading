@@ -24,7 +24,10 @@ final class RemoteProtocolTests: XCTestCase {
         let registration = RemoteNotificationRegistrationDTO(
             deviceToken: "abcd",
             environment: "sandbox",
-            enabledKinds: [.sharedSession, .permissionRequest]
+            enabledKinds: [
+                .sharedSession, .permissionRequest, .agentQuestion, .attentionRequest,
+            ],
+            soundEnabledKinds: [.permissionRequest, .agentQuestion]
         )
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -32,6 +35,76 @@ final class RemoteProtocolTests: XCTestCase {
                 from: JSONEncoder().encode(registration)
             ),
             registration
+        )
+
+        let legacy = try JSONDecoder().decode(
+            RemoteNotificationRegistrationDTO.self,
+            from: Data(#"{"deviceToken":"abcd","environment":"sandbox","enabledKinds":["permissionRequest"]}"#.utf8)
+        )
+        XCTAssertNil(legacy.soundEnabledKinds)
+    }
+
+    func testHumanAttentionProtocolStaysSeparateFromPromptAndTerminalInput() throws {
+        let participants = RemoteCollaborationParticipantsDTO(participants: [
+            .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: false),
+            .init(
+                id: RemoteCollaborationParticipantDTO.ownerID,
+                displayName: "David’s Mac",
+                role: "owner",
+                isOnline: true
+            ),
+        ])
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteCollaborationParticipantsDTO.self,
+                from: JSONEncoder().encode(participants)
+            ),
+            participants
+        )
+
+        let request = RemoteClientMessage(
+            type: "attentionRequest",
+            text: "Could you check the domain wording?",
+            recipientID: "member-anna",
+            requestID: "attention-request-1"
+        )
+        XCTAssertNil(request.data, "attention is never raw terminal input")
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(request)
+            ),
+            request
+        )
+
+        let event = RemoteAttentionEventDTO(
+            id: "attention-1",
+            requestID: "attention-request-1",
+            senderID: "owner:phone",
+            senderDisplayName: "David",
+            recipientID: "member-anna",
+            recipientDisplayName: "Anna",
+            note: "Could you check the domain wording?",
+            createdAt: 123
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteAttentionEventDTO.self,
+                from: JSONEncoder().encode(event)
+            ),
+            event
+        )
+
+        let result = RemoteAttentionRequestResultDTO(
+            requestID: "attention-request-1",
+            status: .delivered
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteAttentionRequestResultDTO.self,
+                from: JSONEncoder().encode(result)
+            ),
+            result
         )
     }
 
@@ -84,8 +157,11 @@ final class RemoteProtocolTests: XCTestCase {
         )
 
         let presence = RemotePresenceDTO(
+            presenceID: "socket-1",
             memberID: "member-1",
             displayName: "Kalle",
+            deviceName: "Kalle’s iPhone",
+            surface: "conversation",
             state: "typing",
             updatedAt: 123
         )
@@ -262,6 +338,7 @@ final class RemoteProtocolTests: XCTestCase {
         let hello = try JSONDecoder().decode(RemoteHelloDTO.self, from: Data(helloJSON.utf8))
         XCTAssertNil(hello.theme)
         XCTAssertNil(hello.terminalTheme)
+        XCTAssertNil(hello.features)
 
         let meJSON = """
             {
@@ -344,6 +421,111 @@ final class RemoteProtocolTests: XCTestCase {
                 from: JSONEncoder().encode(release)
             ),
             release
+        )
+    }
+
+    func testPromptSubmissionAcknowledgementRoundTrips() throws {
+        let submit = RemoteClientMessage(
+            type: "submit",
+            text: "Review the current diff",
+            requestID: "prompt-request-1"
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(submit)
+            ),
+            submit
+        )
+
+        let terminalSubmit = RemoteClientMessage(
+            type: "terminalSubmit",
+            text: "Run the focused tests",
+            requestID: "terminal-request-1"
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(terminalSubmit)
+            ),
+            terminalSubmit
+        )
+
+        let result = RemotePromptSubmissionResultDTO(
+            requestID: "prompt-request-1",
+            status: .accepted
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemotePromptSubmissionResultDTO.self,
+                from: JSONEncoder().encode(result)
+            ),
+            result
+        )
+
+        let hello = RemoteHelloDTO(
+            surface: "conversation",
+            capability: "interact",
+            cols: 0,
+            rows: 0,
+            title: "Review",
+            features: RemoteWebSocketFeature.allCases.map(\.rawValue)
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteHelloDTO.self,
+                from: JSONEncoder().encode(hello)
+            ),
+            hello
+        )
+        XCTAssertTrue(hello.features?.contains("atomicTerminalSubmission") == true)
+    }
+
+    func testConversationContextAttachmentsRoundTripAndRemainAdditive() throws {
+        let attachment = RemoteConversationContextAttachmentDTO(
+            id: "a9143d6f-b539-468d-8cd7-b244cfc50e26",
+            kind: "comment",
+            source: "attachment",
+            title: "layout.png",
+            excerpt: "Image attachment",
+            comment: "The spacing above the toolbar feels too large.",
+            locator: "attachments/layout.png"
+        )
+        let row = RemoteConversationRowDTO(
+            id: "7",
+            kind: "user",
+            text: "Please address the comment above.",
+            contextAttachments: [attachment]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteConversationRowDTO.self,
+                from: JSONEncoder().encode(row)
+            ),
+            row
+        )
+
+        let submit = RemoteClientMessage(
+            type: "submit",
+            text: "",
+            requestID: "context-request-1",
+            contextAttachments: [attachment]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(submit)
+            ),
+            submit
+        )
+
+        let legacyRow = try JSONDecoder().decode(
+            RemoteConversationRowDTO.self,
+            from: Data(#"{"id":"legacy","kind":"user","text":"Hello","isError":false}"#.utf8)
+        )
+        XCTAssertNil(legacyRow.contextAttachments)
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.conversationContextAttachments)
         )
     }
 
@@ -563,6 +745,10 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, snapshot)
         XCTAssertEqual(decoded.added, 1)
         XCTAssertEqual(decoded.removed, 1)
+        XCTAssertEqual(
+            RemoteGitReviewMode.allCases,
+            [.uncommitted, .unstaged, .staged, .lastTurn, .branch]
+        )
     }
 
     func testConnectionLinkSeparatesFragmentBearerFromRequests() throws {
@@ -616,6 +802,10 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(
             link.gitReviewURL(sessionID: "abc", mode: .lastTurn).absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/git-review/lastTurn"
+        )
+        XCTAssertEqual(
+            link.gitReviewURL(sessionID: "abc", mode: .uncommitted).absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/git-review/uncommitted"
         )
         XCTAssertEqual(
             link.repositoryFilesURL(sessionID: "abc").absoluteString,
@@ -770,5 +960,153 @@ final class RemoteProtocolTests: XCTestCase {
 
         XCTAssertTrue(link.scannablePayload.hasSuffix("#\(token)"))
         XCTAssertEqual(RemoteConnectionLink(string: link.scannablePayload)?.token, token)
+    }
+
+    func testLogicalHostEndpointsRoundTripAndOlderHostsStillDecode() throws {
+        let privateURL = try XCTUnwrap(URL(string: "https://mac.example.ts.net:8443/"))
+        let relayURL = try XCTUnwrap(URL(string: "https://threading.example.com/"))
+        let host = RemoteHostDTO(
+            id: "mac-1",
+            name: "Studio Mac",
+            endpoints: [
+                .init(kind: "tailscale", baseURL: privateURL, isStable: true),
+                .init(kind: "relay", baseURL: relayURL, isStable: true),
+            ],
+            connectionPolicy: .preferPrivate
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteHostDTO.self, from: JSONEncoder().encode(host)),
+            host
+        )
+
+        let older = try JSONDecoder().decode(
+            RemoteHostDTO.self,
+            from: Data(#"{"id":"mac-1","name":"Studio Mac","platform":"macOS"}"#.utf8)
+        )
+        XCTAssertNil(older.endpoints)
+        XCTAssertNil(older.connectionPolicy)
+    }
+
+    func testEndpointSelectionPrefersPrivateAndMigratesToAStableRelay() throws {
+        let privateEndpoint = RemoteHostEndpointDTO(
+            kind: "tailscale",
+            baseURL: try XCTUnwrap(URL(string: "https://mac.example.ts.net:8443/")),
+            isStable: true
+        )
+        let quickRelay = RemoteHostEndpointDTO(
+            kind: "relay",
+            baseURL: try XCTUnwrap(URL(string: "https://quick.trycloudflare.com/")),
+            isStable: false
+        )
+        let stableRelay = RemoteHostEndpointDTO(
+            kind: "relay",
+            baseURL: try XCTUnwrap(URL(string: "https://threading.example.com/")),
+            isStable: true
+        )
+
+        XCTAssertEqual(
+            RemoteHostEndpointSelection.ordered(
+                [quickRelay, stableRelay, privateEndpoint],
+                policy: .preferPrivate,
+                currentBaseURL: quickRelay.baseURL
+            ),
+            [privateEndpoint, stableRelay, quickRelay]
+        )
+        XCTAssertEqual(
+            RemoteHostEndpointSelection.ordered(
+                [quickRelay, stableRelay, privateEndpoint],
+                policy: .relayOnly,
+                currentBaseURL: quickRelay.baseURL
+            ),
+            [stableRelay, quickRelay]
+        )
+    }
+
+    func testEndpointPolicyFailsClosedForUnknownValuesAndUnsafeURLs() throws {
+        let decoded = try JSONDecoder().decode(
+            RemoteHostConnectionPolicy.self,
+            from: Data(#""future-policy""#.utf8)
+        )
+        XCTAssertEqual(decoded, .privateOnly)
+
+        let unsafe = RemoteHostEndpointDTO(
+            kind: "tailscale",
+            baseURL: try XCTUnwrap(URL(string: "http://mac.example.ts.net:8443/")),
+            isStable: true
+        )
+        let relay = RemoteHostEndpointDTO(
+            kind: "relay",
+            baseURL: try XCTUnwrap(URL(string: "https://relay.example.com/")),
+            isStable: true
+        )
+        XCTAssertTrue(RemoteHostEndpointSelection.ordered(
+            [unsafe, relay],
+            policy: .privateOnly
+        ).isEmpty)
+    }
+
+    func testFocusedInputControlProtocolIsTypedAndSeparateFromAgentInput() throws {
+        let participants = [
+            RemoteCollaborationParticipantDTO(
+                id: "owner",
+                displayName: "David",
+                role: "owner",
+                isOnline: true
+            ),
+            RemoteCollaborationParticipantDTO(
+                id: "member-anna",
+                displayName: "Anna",
+                role: "member",
+                isOnline: true
+            ),
+        ]
+        let state = RemoteInputControlStateDTO(
+            mode: .focused,
+            controllerID: "member-anna",
+            controllerDisplayName: "Anna",
+            currentParticipantID: "owner",
+            canWrite: false,
+            canManage: true,
+            canHandOff: true,
+            participants: participants,
+            revision: 4
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteInputControlStateDTO.self,
+                from: JSONEncoder().encode(state)
+            ),
+            state
+        )
+
+        let handoff = RemoteClientMessage(
+            type: "inputControl",
+            state: "handoff",
+            recipientID: "member-anna",
+            requestID: "control-1"
+        )
+        let encoded = try JSONEncoder().encode(handoff)
+        let decoded = try JSONDecoder().decode(RemoteClientMessage.self, from: encoded)
+        XCTAssertEqual(decoded.type, "inputControl")
+        XCTAssertEqual(decoded.state, "handoff")
+        XCTAssertEqual(decoded.recipientID, "member-anna")
+        XCTAssertNil(decoded.text)
+        XCTAssertNil(decoded.data)
+
+        let event = RemoteInputControlEventDTO(
+            action: "requested",
+            actorID: "member-anna",
+            actorDisplayName: "Anna",
+            targetID: "owner",
+            targetDisplayName: "David"
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteInputControlEventDTO.self,
+                from: JSONEncoder().encode(event)
+            ),
+            event
+        )
+        XCTAssertTrue(RemoteWebSocketFeature.allCases.contains(.focusedInputControl))
     }
 }

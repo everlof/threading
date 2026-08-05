@@ -200,6 +200,7 @@ struct RemoteRouter {
 
     static let deviceHeader = "x-threading-device"
     static let clientHeader = "x-threading-client"
+    static let requestIDHeader = "x-threading-request-id"
 
     /// Headers a client uses to declare the protocol version pair it speaks, so the server can
     /// answer a mismatch with a clear "please update" rather than a broken response.

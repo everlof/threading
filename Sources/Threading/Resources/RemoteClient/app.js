@@ -17,6 +17,58 @@
       "composer.placeholder": "Add feedback…",
       "composer.message": "Message",
       "composer.send": "Send",
+      "composer.sendingOnce": "Sending once…",
+      "composer.busy": "Another composer sent first. Your draft is still here.",
+      "composer.rejected": "The Mac rejected this prompt. Your draft is still here.",
+      "composer.unavailable": "The session changed before this prompt could be sent. Your draft is still here.",
+      "composer.conflict": "This prompt could not be retried safely. Your draft is still here.",
+      "terminal.compose": "Compose a complete line",
+      "terminal.input": "Terminal input",
+      "terminal.line": "Terminal line",
+      "terminal.send": "Send terminal line",
+      "terminal.composePlaceholder": "Compose on this device…",
+      "terminal.direct": "Use direct typing",
+      "terminal.directActive": "Direct typing is on",
+      "terminal.useComposer": "Use line composer",
+      "terminal.sendingOnce": "Sending this line once…",
+      "terminal.rejected": "The Mac rejected this line. Your draft is still here.",
+      "terminal.unavailable": "The session changed before this line could be sent. Your draft is still here.",
+      "terminal.conflict": "This line could not be retried safely. Your draft is still here.",
+      "terminal.recovery": "An unreadable saved draft was preserved for recovery.",
+      "presence.typingOne": "{name} is typing…",
+      "presence.typingMany": "{count} people are typing…",
+      "presence.hereOne": "{name} is here",
+      "presence.hereMany": "{count} people are here",
+      "presence.onDevice": "{name} on {device}",
+      "attention.title": "Ask for input",
+      "attention.explainer": "This is a human-only notification. Nothing here is sent to Claude, Codex, or the terminal.",
+      "attention.person": "Person",
+      "attention.need": "What do you need?",
+      "attention.note": "Optional note…",
+      "attention.cancel": "Cancel",
+      "attention.ask": "Ask",
+      "attention.here": "Here now",
+      "attention.away": "Away",
+      "attention.activity": "{sender} asked {recipient} for input",
+      "attention.sending": "Sending attention request…",
+      "attention.unavailable": "That person is away and has input-request notifications turned off.",
+      "attention.rateLimited": "They were just asked. Try again in a moment.",
+      "attention.rejected": "The attention request could not be sent.",
+      "control.collaborative": "Collaborative · everyone can send",
+      "control.label": "Input control",
+      "control.you": "You are controlling · others are watching",
+      "control.other": "{name} is controlling · your draft stays here",
+      "control.focus": "Focus on me",
+      "control.reclaim": "Reclaim",
+      "control.request": "Request control",
+      "control.open": "Open to everyone",
+      "control.otherParticipant": "Another participant",
+      "control.awaySuffix": " · away",
+      "control.pending": "Sending control request…",
+      "control.applied": "Input control updated.",
+      "control.delivered": "Control request sent.",
+      "control.unavailable": "That person is not available.",
+      "control.rejected": "The control request was not accepted.",
       "link.missingToken": "This link is missing its access token.",
       "invitation.accepting": "Accepting private invitation…",
       "invitation.invalid": "This invitation is invalid, expired, or has already been accepted.",
@@ -49,6 +101,7 @@
       "badge.disconnected": "Disconnected",
       "badge.ended": "Ended",
       "badge.interactive": "Interactive",
+      "badge.watching": "Watching",
       "badge.viewOnly": "View only",
       "error.viewOnly": "This link is view only.",
       "error.inputTooLarge": "That input is too large to send in one action.",
@@ -56,6 +109,10 @@
       "conversation.tool": "Tool",
       "conversation.working": "Working…",
       "conversation.reasoning": "Reasoning",
+      "conversation.referenceOne": "1 reference",
+      "conversation.referenceMany": "{count} references",
+      "conversation.commentOne": "1 comment",
+      "conversation.commentMany": "{count} comments",
       "code.defaultLanguage": "code",
       "code.copy": "Copy",
       "code.copied": "Copied",
@@ -83,6 +140,58 @@
       "composer.placeholder": "Lägg till feedback…",
       "composer.message": "Meddelande",
       "composer.send": "Skicka",
+      "composer.sendingOnce": "Skickar en gång…",
+      "composer.busy": "En annan skrivyta skickade först. Ditt utkast finns kvar.",
+      "composer.rejected": "Mac-datorn avvisade prompten. Ditt utkast finns kvar.",
+      "composer.unavailable": "Sessionen ändrades innan prompten kunde skickas. Ditt utkast finns kvar.",
+      "composer.conflict": "Prompten kunde inte skickas igen säkert. Ditt utkast finns kvar.",
+      "terminal.compose": "Skriv en hel rad",
+      "terminal.input": "Terminalinmatning",
+      "terminal.line": "Terminalrad",
+      "terminal.send": "Skicka terminalrad",
+      "terminal.composePlaceholder": "Skriv på den här enheten…",
+      "terminal.direct": "Använd direktskrivning",
+      "terminal.directActive": "Direktskrivning är på",
+      "terminal.useComposer": "Använd radskrivaren",
+      "terminal.sendingOnce": "Skickar raden en gång…",
+      "terminal.rejected": "Mac-datorn avvisade raden. Ditt utkast finns kvar.",
+      "terminal.unavailable": "Sessionen ändrades innan raden kunde skickas. Ditt utkast finns kvar.",
+      "terminal.conflict": "Raden kunde inte skickas igen säkert. Ditt utkast finns kvar.",
+      "terminal.recovery": "Ett oläsbart sparat utkast har bevarats för återställning.",
+      "presence.typingOne": "{name} skriver…",
+      "presence.typingMany": "{count} personer skriver…",
+      "presence.hereOne": "{name} är här",
+      "presence.hereMany": "{count} personer är här",
+      "presence.onDevice": "{name} på {device}",
+      "attention.title": "Be om synpunkter",
+      "attention.explainer": "Detta är en notis endast till en person. Inget här skickas till Claude, Codex eller terminalen.",
+      "attention.person": "Person",
+      "attention.need": "Vad behöver du?",
+      "attention.note": "Valfri kommentar…",
+      "attention.cancel": "Avbryt",
+      "attention.ask": "Fråga",
+      "attention.here": "Här nu",
+      "attention.away": "Inte här",
+      "attention.activity": "{sender} bad {recipient} om synpunkter",
+      "attention.sending": "Skickar förfrågan…",
+      "attention.unavailable": "Personen är inte här och har stängt av notiser om synpunkter.",
+      "attention.rateLimited": "Personen tillfrågades nyss. Försök igen om en stund.",
+      "attention.rejected": "Det gick inte att skicka förfrågan.",
+      "control.collaborative": "Samarbete · alla kan skicka",
+      "control.label": "Inmatningskontroll",
+      "control.you": "Du styr · andra tittar",
+      "control.other": "{name} styr · ditt utkast finns kvar",
+      "control.focus": "Fokusera på mig",
+      "control.reclaim": "Ta tillbaka",
+      "control.request": "Be om kontroll",
+      "control.open": "Öppna för alla",
+      "control.otherParticipant": "En annan deltagare",
+      "control.awaySuffix": " · inte här",
+      "control.pending": "Skickar kontrollbegäran…",
+      "control.applied": "Indatakontrollen har uppdaterats.",
+      "control.delivered": "Kontrollbegäran har skickats.",
+      "control.unavailable": "Personen är inte tillgänglig.",
+      "control.rejected": "Kontrollbegäran godkändes inte.",
       "link.missingToken": "Länken saknar sin åtkomsttoken.",
       "invitation.accepting": "Godkänner privat inbjudan…",
       "invitation.invalid": "Inbjudan är ogiltig, har gått ut eller har redan godkänts.",
@@ -115,6 +224,7 @@
       "badge.disconnected": "Frånkopplad",
       "badge.ended": "Avslutad",
       "badge.interactive": "Interaktiv",
+      "badge.watching": "Tittar",
       "badge.viewOnly": "Endast visning",
       "error.viewOnly": "Länken ger endast visningsåtkomst.",
       "error.inputTooLarge": "Indatan är för stor för att skickas i en åtgärd.",
@@ -122,6 +232,10 @@
       "conversation.tool": "Verktyg",
       "conversation.working": "Arbetar…",
       "conversation.reasoning": "Resonemang",
+      "conversation.referenceOne": "1 referens",
+      "conversation.referenceMany": "{count} referenser",
+      "conversation.commentOne": "1 kommentar",
+      "conversation.commentMany": "{count} kommentarer",
       "code.defaultLanguage": "kod",
       "code.copy": "Kopiera",
       "code.copied": "Kopierat",
@@ -243,11 +357,32 @@
     status: document.getElementById("status"),
     sessions: document.getElementById("sessions"),
     terminal: document.getElementById("terminal"),
+    terminalComposer: document.getElementById("terminalComposer"),
+    terminalComposerForm: document.getElementById("terminalComposerForm"),
+    terminalComposerStatus: document.getElementById("terminalComposerStatus"),
+    terminalPrompt: document.getElementById("terminalPrompt"),
+    terminalSend: document.getElementById("terminalSend"),
+    terminalMode: document.getElementById("terminalMode"),
+    terminalModeLabel: document.getElementById("terminalModeLabel"),
     conversation: document.getElementById("conversation"),
     conversationRows: document.getElementById("conversationRows"),
     composer: document.getElementById("composer"),
     prompt: document.getElementById("prompt"),
     send: document.getElementById("send"),
+    presence: document.getElementById("presence"),
+    composerStatus: document.getElementById("composerStatus"),
+    attentionButton: document.getElementById("attentionButton"),
+    attentionActivity: document.getElementById("attentionActivity"),
+    inputControl: document.getElementById("inputControl"),
+    inputControlStatus: document.getElementById("inputControlStatus"),
+    attentionDialog: document.getElementById("attentionDialog"),
+    attentionForm: document.getElementById("attentionForm"),
+    attentionRecipients: document.getElementById("attentionRecipients"),
+    attentionNote: document.getElementById("attentionNote"),
+    attentionStatus: document.getElementById("attentionStatus"),
+    attentionCancel: document.getElementById("attentionCancel"),
+    attentionCancelIcon: document.getElementById("attentionCancelIcon"),
+    attentionSend: document.getElementById("attentionSend"),
     title: document.getElementById("title"),
     badge: document.getElementById("badge"),
     back: document.getElementById("back"),
@@ -258,6 +393,7 @@
   var themeReconnectTimer = null;
   var term = null;
   var inputSubscription = null;
+  var terminalScrollSubscription = null;
   var pollTimer = null;
   var sessionListGeneration = 0;
   var activeSurface = null;
@@ -265,6 +401,14 @@
   var conversationCanSend = false;
   var presenceTimer = null;
   var isReportingTyping = false;
+  var serverFeatures = {};
+  var presenceByID = {};
+  var pendingPrompt = null;
+  var pendingInputControl = null;
+  var attentionParticipants = [];
+  var pendingAttention = null;
+  var attentionActivityTimer = null;
+  var inputControlState = null;
   var hostTheme = null;
   var activeTerminalTheme = null;
   var leasedGrid = null;
@@ -277,6 +421,155 @@
   var diagnosticButton = null;
   var diagnosticStatus = null;
   var lastRefreshDiagnostic = null;
+  var continuityHostKey = null;
+  var activeSessionID = null;
+  var hasConsideredContinuityRoute = false;
+  var hasRestoredConversationViewport = false;
+  var hasRestoredTerminalViewport = false;
+  var continuityScrollTimer = null;
+  var sessionReconnectTimer = null;
+  var sessionReconnectAttempt = 0;
+  var activeSession = null;
+  var directTerminalInput = false;
+  var continuityWritesAllowed = true;
+  var continuityRecoveryNotice = false;
+  var invitationRequestID = null;
+
+  var CONTINUITY = {
+    storageKey: "threading.sessionContinuity.v1",
+    recoveryKey: "threading.sessionContinuity.unreadable",
+    version: 1,
+    positionLimit: 250,
+    scrollDebounceMS: 250,
+    acknowledgedSubmissionRetryMS: 300000,
+  };
+
+  try {
+    directTerminalInput = localStorage.getItem("threading.directTerminalInput") === "true";
+  } catch (error) {}
+
+  function loadContinuityArchive() {
+    var raw = null;
+    try {
+      raw = localStorage.getItem(CONTINUITY.storageKey);
+      if (!raw) { return { version: CONTINUITY.version, states: {} }; }
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("invalid continuity archive");
+      }
+      if (parsed.version && parsed.version > CONTINUITY.version) {
+        continuityWritesAllowed = false;
+        return { version: CONTINUITY.version, states: {} };
+      }
+      if (!parsed.states || typeof parsed.states !== "object" || Array.isArray(parsed.states)) {
+        throw new Error("invalid continuity states");
+      }
+      parsed.version = CONTINUITY.version;
+      return parsed;
+    } catch (error) {
+      if (raw) {
+        try {
+          localStorage.setItem(CONTINUITY.recoveryKey + "." + Date.now(), raw);
+          localStorage.removeItem(CONTINUITY.storageKey);
+          continuityRecoveryNotice = true;
+          continuityWritesAllowed = true;
+        } catch (recoveryError) {
+          continuityWritesAllowed = false;
+        }
+      }
+      return { version: CONTINUITY.version, states: {} };
+    }
+  }
+
+  function continuitySessionKey(sessionID) {
+    if (!continuityHostKey || !sessionID) { return null; }
+    return continuityHostKey.length + ":" + continuityHostKey + sessionID;
+  }
+
+  function continuityState(sessionID) {
+    var key = continuitySessionKey(sessionID);
+    if (!key) { return {}; }
+    return loadContinuityArchive().states[key] || {};
+  }
+
+  function saveContinuityArchive(archive) {
+    if (!continuityWritesAllowed) { return; }
+    archive.version = CONTINUITY.version;
+    var positionOnly = Object.keys(archive.states).filter(function (key) {
+      return !archive.states[key].conversationDraft &&
+        !archive.states[key].terminalDraft && !archive.states[key].pendingSubmission;
+    }).sort(function (left, right) {
+      return (archive.states[right].updatedAt || 0) - (archive.states[left].updatedAt || 0);
+    });
+    positionOnly.slice(CONTINUITY.positionLimit).forEach(function (key) {
+      delete archive.states[key];
+    });
+    try { localStorage.setItem(CONTINUITY.storageKey, JSON.stringify(archive)); } catch (error) {}
+  }
+
+  function updateContinuity(sessionID, mutation) {
+    if (!continuityWritesAllowed) { return; }
+    var key = continuitySessionKey(sessionID);
+    if (!key) { return; }
+    var archive = loadContinuityArchive();
+    var state = archive.states[key] || {};
+    mutation(state);
+    state.updatedAt = Date.now();
+    archive.states[key] = state;
+    saveContinuityArchive(archive);
+  }
+
+  function setContinuityHost(me) {
+    var hostID = me.host && me.host.id ? me.host.id : location.host;
+    var shareID = me.share && me.share.label ? me.share.label : "all";
+    continuityHostKey = hostID + ":" + shareID;
+  }
+
+  function saveConversationDraft() {
+    if (!activeSessionID) { return; }
+    updateContinuity(activeSessionID, function (state) {
+      state.conversationDraft = els.prompt.value.trim() ? els.prompt.value : "";
+    });
+  }
+
+  function saveTerminalDraft() {
+    if (!activeSessionID) { return; }
+    updateContinuity(activeSessionID, function (state) {
+      state.terminalDraft = els.terminalPrompt.value.trim()
+        ? els.terminalPrompt.value : "";
+    });
+  }
+
+  function savePendingSubmission(value) {
+    if (!activeSessionID) { return; }
+    updateContinuity(activeSessionID, function (state) {
+      state.pendingSubmission = value || null;
+    });
+  }
+
+  function restorePendingSubmission(sessionID) {
+    var saved = continuityState(sessionID).pendingSubmission;
+    if (!saved || !saved.requestID || !saved.text || !saved.messageType ||
+        Date.now() - Number(saved.createdAt || 0) >= CONTINUITY.acknowledgedSubmissionRetryMS) {
+      if (saved) { savePendingSubmission(null); }
+      return null;
+    }
+    return {
+      requestID: saved.requestID,
+      text: saved.text,
+      messageType: saved.messageType,
+      createdAt: Number(saved.createdAt),
+      lastSentSocket: null,
+    };
+  }
+
+  function scheduleContinuityScrollSave(callback) {
+    if (continuityScrollTimer !== null) { clearTimeout(continuityScrollTimer); }
+    continuityScrollTimer = setTimeout(function () {
+      continuityScrollTimer = null;
+      callback();
+    }, CONTINUITY.scrollDebounceMS);
+  }
   var diagnosticMemoryRecords = [];
 
   // The Mac owns the character grid and pushes it here, so a browser narrower than that grid
@@ -372,6 +665,7 @@
     els.status.hidden = view !== "status";
     els.sessions.hidden = view !== "sessions";
     els.terminal.hidden = view !== "terminal";
+    els.terminalComposer.hidden = view !== "terminal";
     els.conversation.hidden = view !== "conversation";
     els.back.hidden = view !== "terminal" && view !== "conversation";
   }
@@ -672,6 +966,392 @@
     }
   }
 
+  function setComposerStatus(key, warning) {
+    if (!key) {
+      els.composerStatus.hidden = true;
+      els.composerStatus.textContent = "";
+      els.composerStatus.className = "";
+      return;
+    }
+    els.composerStatus.hidden = false;
+    els.composerStatus.textContent = t(key);
+    els.composerStatus.className = warning ? "warning" : "";
+  }
+
+  function setTerminalComposerStatus(key, warning) {
+    if (!key) {
+      els.terminalComposerStatus.hidden = true;
+      els.terminalComposerStatus.textContent = "";
+      els.terminalComposerStatus.className = "";
+      return;
+    }
+    els.terminalComposerStatus.hidden = false;
+    els.terminalComposerStatus.textContent = t(key);
+    els.terminalComposerStatus.className = warning ? "warning" : "";
+  }
+
+  function usesTerminalLineComposer() {
+    return activeSurface === "terminal" && activeCapability === "interact" &&
+      !!serverFeatures.atomicTerminalSubmission && !directTerminalInput;
+  }
+
+  function refreshTerminalInputSubscription() {
+    if (inputSubscription) {
+      inputSubscription.dispose();
+      inputSubscription = null;
+    }
+    if (!term || activeCapability !== "interact" || usesTerminalLineComposer()) { return; }
+    inputSubscription = term.onData(function (data) {
+      if (canWriteInput() && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "input", data: data }));
+      }
+    });
+    term.focus();
+  }
+
+  function updateTerminalComposer() {
+    var supported = activeSurface === "terminal" && activeCapability === "interact" &&
+      !!serverFeatures.atomicTerminalSubmission;
+    els.terminalComposer.hidden = !supported;
+    if (!supported) {
+      refreshTerminalInputSubscription();
+      return;
+    }
+    els.terminalModeLabel.textContent = directTerminalInput
+      ? t("terminal.directActive") : t("terminal.compose");
+    els.terminalMode.textContent = directTerminalInput
+      ? t("terminal.useComposer") : t("terminal.direct");
+    els.terminalMode.setAttribute("aria-pressed", directTerminalInput ? "true" : "false");
+    els.terminalComposerForm.hidden = directTerminalInput;
+    els.terminalPrompt.setAttribute("placeholder", t("terminal.composePlaceholder"));
+    var enabled = usesTerminalLineComposer() && canWriteInput() && !pendingPrompt &&
+      socket && socket.readyState === WebSocket.OPEN;
+    els.terminalSend.disabled = !enabled || !els.terminalPrompt.value.trim();
+    refreshTerminalInputSubscription();
+  }
+
+  function renderPresence() {
+    var people = Object.keys(presenceByID).map(function (key) {
+      return presenceByID[key];
+    });
+    var typing = people.filter(function (person) { return person.state === "typing"; });
+    var visible = typing.length ? typing : people;
+    if (!visible.length) {
+      els.presence.hidden = true;
+      els.presence.textContent = "";
+      return;
+    }
+    var names = visible.map(function (person) {
+      var name = person.displayName || person.deviceName || t("guest.defaultName");
+      if (person.deviceName && person.deviceName !== name) {
+        return t("presence.onDevice", { name: name, device: person.deviceName });
+      }
+      return name;
+    }).filter(function (name, index, values) {
+      return values.indexOf(name) === index;
+    }).sort();
+    var key;
+    var values;
+    if (typing.length) {
+      key = names.length === 1 ? "presence.typingOne" : "presence.typingMany";
+      values = { name: names[0], count: names.length };
+    } else {
+      key = names.length === 1 ? "presence.hereOne" : "presence.hereMany";
+      values = { name: names[0], count: names.length };
+    }
+    els.presence.textContent = t(key, values);
+    els.presence.hidden = false;
+  }
+
+  function canWriteInput() {
+    return !serverFeatures.focusedInputControl || !inputControlState || inputControlState.canWrite;
+  }
+
+  function sendInputControl(action, targetID) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || pendingInputControl) { return; }
+    var requestID = submissionRequestID();
+    pendingInputControl = { requestID: requestID, action: action };
+    els.inputControlStatus.textContent = t("control.pending");
+    socket.send(JSON.stringify({
+      type: "inputControl",
+      state: action,
+      recipientID: targetID || null,
+      requestID: requestID,
+    }));
+    renderInputControl();
+  }
+
+  function receiveInputControlResult(message) {
+    if (!pendingInputControl || pendingInputControl.requestID !== message.requestID) { return; }
+    pendingInputControl = null;
+    var key = message.status === "applied"
+      ? "control.applied"
+      : message.status === "delivered"
+        ? "control.delivered"
+        : message.status === "unavailable"
+          ? "control.unavailable"
+          : "control.rejected";
+    els.inputControlStatus.textContent = t(key);
+    renderInputControl();
+  }
+
+  function renderInputControl() {
+    els.inputControl.replaceChildren();
+    if (!serverFeatures.focusedInputControl || !inputControlState) {
+      els.inputControl.hidden = true;
+      updateComposer();
+      updateTerminalComposer();
+      return;
+    }
+    var state = inputControlState;
+    var label = document.createElement("span");
+    label.className = "control-label";
+    label.textContent = state.mode === "collaborative"
+      ? t("control.collaborative")
+      : state.canWrite
+        ? t("control.you")
+        : t("control.other", {
+          name: state.controllerDisplayName || t("control.otherParticipant")
+        });
+    els.inputControl.appendChild(label);
+
+    if (state.mode === "focused" && state.canHandOff && state.participants.length > 1) {
+      var picker = document.createElement("select");
+      state.participants.forEach(function (participant) {
+        var option = document.createElement("option");
+        option.value = participant.id;
+        option.textContent = participant.displayName +
+          (participant.isOnline ? "" : t("control.awaySuffix"));
+        option.disabled = !participant.isOnline;
+        option.selected = participant.id === state.controllerID;
+        picker.appendChild(option);
+      });
+      picker.addEventListener("change", function () {
+        sendInputControl("handoff", picker.value);
+      });
+      picker.disabled = !!pendingInputControl;
+      els.inputControl.appendChild(picker);
+    }
+
+    var button = document.createElement("button");
+    if (state.mode === "collaborative" && state.canManage) {
+      button.textContent = t("control.focus");
+      button.addEventListener("click", function () {
+        sendInputControl("focused", state.currentParticipantID);
+      });
+    } else if (state.mode === "focused" && state.canManage && !state.canWrite) {
+      button.textContent = t("control.reclaim");
+      button.addEventListener("click", function () { sendInputControl("reclaim"); });
+    } else if (state.mode === "focused" && !state.canWrite) {
+      button.textContent = t("control.request");
+      button.addEventListener("click", function () { sendInputControl("request"); });
+    } else if (state.mode === "focused" && state.canManage) {
+      button.textContent = t("control.open");
+      button.addEventListener("click", function () { sendInputControl("collaborative"); });
+    } else {
+      button = null;
+    }
+    if (button) {
+      button.disabled = !!pendingInputControl;
+      els.inputControl.appendChild(button);
+    }
+    els.inputControl.hidden = false;
+    if (activeCapability === "interact") {
+      if (state.mode === "focused" && !state.canWrite) {
+        setBadge(t("badge.watching"), "");
+      } else {
+        setBadge(t("badge.interactive"), "interact");
+      }
+    }
+    if (state.canWrite && activeSurface === "terminal") { scheduleFit(); }
+    updateComposer();
+    updateTerminalComposer();
+  }
+
+  function receivePresence(message) {
+    var id = message.presenceID || message.memberID;
+    if (!id) { return; }
+    if (message.state === "left") {
+      delete presenceByID[id];
+    } else {
+      presenceByID[id] = message;
+    }
+    renderPresence();
+  }
+
+  function submissionRequestID() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (value) {
+      return value.toString(16).padStart(2, "0");
+    }).join("");
+  }
+
+  function receiveSubmitResult(message) {
+    if (!pendingPrompt || pendingPrompt.requestID !== message.requestID) { return; }
+    var submitted = pendingPrompt;
+    pendingPrompt = null;
+    savePendingSubmission(null);
+    if (message.status === "accepted") {
+      if (submitted.messageType === "terminalSubmit") {
+        if (els.terminalPrompt.value.trim() === submitted.text) {
+          els.terminalPrompt.value = "";
+          saveTerminalDraft();
+        }
+        setTerminalComposerStatus(null);
+      } else {
+        if (els.prompt.value.trim() === submitted.text) {
+          els.prompt.value = "";
+          saveConversationDraft();
+        }
+        setComposerStatus(null);
+        conversationCanSend = false;
+      }
+    } else {
+      var prefix = submitted.messageType === "terminalSubmit" ? "terminal" : "composer";
+      var key = message.status === "busy"
+        ? "composer.busy"
+        : message.status === "rejected"
+          ? prefix + ".rejected"
+          : message.status === "conflict"
+            ? prefix + ".conflict"
+            : prefix + ".unavailable";
+      if (submitted.messageType === "terminalSubmit") {
+        setTerminalComposerStatus(key, true);
+      } else {
+        setComposerStatus(key, true);
+      }
+    }
+    updateComposer();
+    updateTerminalComposer();
+  }
+
+  function sendPendingSubmission(openedSocket) {
+    if (!pendingPrompt || !serverFeatures.submitAcknowledgement ||
+        pendingPrompt.lastSentSocket === openedSocket) { return; }
+    if (Date.now() - pendingPrompt.createdAt >= CONTINUITY.acknowledgedSubmissionRetryMS) {
+      var expired = pendingPrompt;
+      pendingPrompt = null;
+      savePendingSubmission(null);
+      if (expired.messageType === "terminalSubmit") {
+        setTerminalComposerStatus("terminal.unavailable", true);
+      } else {
+        setComposerStatus("composer.unavailable", true);
+      }
+      return;
+    }
+    if (pendingPrompt.messageType === "terminalSubmit" &&
+        !serverFeatures.atomicTerminalSubmission) { return; }
+    pendingPrompt.lastSentSocket = openedSocket;
+    openedSocket.send(JSON.stringify({
+      type: pendingPrompt.messageType,
+      text: pendingPrompt.text,
+      requestID: pendingPrompt.requestID,
+    }));
+  }
+
+  function updateAttentionButton() {
+    var available = !!serverFeatures.attentionRequests &&
+      activeCapability === "interact" && attentionParticipants.length > 0 &&
+      socket && socket.readyState === WebSocket.OPEN;
+    els.attentionButton.hidden = !available;
+    els.attentionButton.setAttribute("aria-label", t("attention.title"));
+  }
+
+  function renderAttentionRecipients() {
+    els.attentionRecipients.querySelectorAll(".attention-recipient").forEach(function (row) {
+      row.remove();
+    });
+    attentionParticipants.forEach(function (participant, index) {
+      var row = document.createElement("label");
+      row.className = "attention-recipient";
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "attentionRecipient";
+      radio.value = participant.id;
+      radio.checked = index === 0;
+      var name = document.createElement("strong");
+      name.textContent = "@" + participant.displayName;
+      var state = document.createElement("span");
+      state.textContent = t(participant.isOnline ? "attention.here" : "attention.away");
+      if (participant.isOnline) { state.className = "online"; }
+      row.appendChild(radio);
+      row.appendChild(name);
+      row.appendChild(state);
+      els.attentionRecipients.appendChild(row);
+    });
+  }
+
+  function receiveAttentionParticipants(message) {
+    attentionParticipants = Array.isArray(message.participants) ? message.participants : [];
+    renderAttentionRecipients();
+    updateAttentionButton();
+  }
+
+  function receiveAttentionEvent(message) {
+    if (attentionActivityTimer !== null) { clearTimeout(attentionActivityTimer); }
+    els.attentionActivity.innerHTML = "";
+    var title = document.createElement("strong");
+    title.textContent = t("attention.activity", {
+      sender: message.senderDisplayName || "",
+      recipient: message.recipientDisplayName || "",
+    });
+    els.attentionActivity.appendChild(title);
+    if (message.note) {
+      var note = document.createElement("span");
+      note.textContent = message.note;
+      els.attentionActivity.appendChild(note);
+    }
+    els.attentionActivity.hidden = false;
+    var age = Math.max(0, Date.now() - Number(message.createdAt || 0) * 1000);
+    attentionActivityTimer = setTimeout(function () {
+      attentionActivityTimer = null;
+      els.attentionActivity.hidden = true;
+      els.attentionActivity.innerHTML = "";
+    }, Math.max(0, 90000 - age));
+  }
+
+  function receiveAttentionResult(message) {
+    if (!pendingAttention || pendingAttention.requestID !== message.requestID) { return; }
+    pendingAttention = null;
+    els.attentionSend.disabled = false;
+    if (message.status === "delivered") {
+      closeAttentionDialog();
+      return;
+    }
+    var key = message.status === "rateLimited"
+      ? "attention.rateLimited"
+      : message.status === "unavailable"
+        ? "attention.unavailable"
+        : "attention.rejected";
+    els.attentionStatus.textContent = t(key);
+    els.attentionStatus.hidden = false;
+  }
+
+  function openAttentionDialog() {
+    if (els.attentionButton.hidden || !attentionParticipants.length) { return; }
+    renderAttentionRecipients();
+    els.attentionStatus.hidden = true;
+    els.attentionStatus.textContent = "";
+    if (typeof els.attentionDialog.showModal === "function") {
+      els.attentionDialog.showModal();
+    } else {
+      els.attentionDialog.setAttribute("open", "");
+    }
+  }
+
+  function closeAttentionDialog() {
+    if (pendingAttention) { return; }
+    if (typeof els.attentionDialog.close === "function") {
+      els.attentionDialog.close();
+    } else {
+      els.attentionDialog.removeAttribute("open");
+    }
+  }
+
   function acceptConnection() {
     if (!token) {
       setStatus(t("link.missingToken"));
@@ -679,9 +1359,13 @@
     }
     recordDiagnostic("hostPairingStarted");
     setStatus(t("invitation.accepting"));
+    if (!invitationRequestID) { invitationRequestID = submissionRequestID(); }
     fetch("/api/invitations/accept", {
       method: "POST",
-      headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+      headers: Object.assign({
+        "Content-Type": "application/json",
+        "X-Threading-Request-ID": invitationRequestID,
+      }, authHeaders()),
       body: JSON.stringify({
         displayName: navigator.platform
           ? navigator.platform + " " + t("guest.browser")
@@ -711,6 +1395,7 @@
           return;
         }
         token = body.accessToken;
+        invitationRequestID = null;
         try {
           sessionStorage.setItem(tokenStorageKey, token);
           if (body.me && body.me.share && body.me.share.scope === "session") {
@@ -858,6 +1543,7 @@
   }
 
   function renderSessions(me) {
+    setContinuityHost(me);
     hostTheme = me.theme || null;
     applyTheme(hostTheme, null);
     els.title.textContent = t("app.code");
@@ -867,6 +1553,20 @@
     if (!me.sessions || me.sessions.length === 0) {
       setStatus(t("sessions.empty"));
       return;
+    }
+
+    if (!hasConsideredContinuityRoute) {
+      hasConsideredContinuityRoute = true;
+      var restoredArchive = loadContinuityArchive();
+      var restoredSession = restoredArchive.lastRoute &&
+        restoredArchive.lastRoute.hostKey === continuityHostKey &&
+        me.sessions.find(function (session) {
+          return session.id === restoredArchive.lastRoute.sessionID;
+        });
+      if (restoredSession) {
+        prepareSession(restoredSession);
+        return;
+      }
     }
 
     var device = document.createElement("li");
@@ -1021,12 +1721,39 @@
   // --- Live surface ------------------------------------------------------
 
   function openSession(session) {
+    saveConversationDraft();
+    saveTerminalDraft();
+    if (sessionReconnectTimer !== null) {
+      clearTimeout(sessionReconnectTimer);
+      sessionReconnectTimer = null;
+    }
     cancelPoll();
     sessionListGeneration += 1;
     closeSocket();
     closeThemeEvents();
     disposeTerminal();
     resetConversation();
+    activeSessionID = session.id;
+    activeSession = session;
+    hasRestoredConversationViewport = false;
+    hasRestoredTerminalViewport = false;
+    var continuityArchive = loadContinuityArchive();
+    continuityArchive.lastRoute = { hostKey: continuityHostKey, sessionID: session.id };
+    saveContinuityArchive(continuityArchive);
+    els.prompt.value = continuityState(session.id).conversationDraft || "";
+    els.terminalPrompt.value = continuityState(session.id).terminalDraft || "";
+    pendingPrompt = restorePendingSubmission(session.id);
+    if (pendingPrompt) {
+      if (pendingPrompt.messageType === "terminalSubmit") {
+        setTerminalComposerStatus("terminal.sendingOnce", false);
+      } else {
+        setComposerStatus("composer.sendingOnce", false);
+      }
+    } else if (continuityRecoveryNotice) {
+      setComposerStatus("terminal.recovery", true);
+      setTerminalComposerStatus("terminal.recovery", true);
+      continuityRecoveryNotice = false;
+    }
 
     applyTheme(hostTheme, session.terminalTheme || null);
     els.title.textContent = session.title || t("session.defaultName");
@@ -1062,7 +1789,9 @@
     openedSocket.onmessage = function (event) {
       if (socket !== openedSocket) { return; }
       if (event.data instanceof ArrayBuffer) {
-        if (term) { term.write(new Uint8Array(event.data)); }
+        if (term) {
+          term.write(new Uint8Array(event.data), restoreTerminalViewport);
+        }
         return;
       }
       var msg;
@@ -1073,6 +1802,23 @@
     openedSocket.onclose = function () {
       if (socket !== openedSocket) { return; }
       socket = null;
+      presenceByID = {};
+      attentionParticipants = [];
+      inputControlState = null;
+      pendingInputControl = null;
+      pendingAttention = null;
+      els.attentionSend.disabled = false;
+      closeAttentionDialog();
+      updateAttentionButton();
+      renderPresence();
+      renderInputControl();
+      if (pendingPrompt) {
+        if (pendingPrompt.messageType === "terminalSubmit") {
+          setTerminalComposerStatus("terminal.sendingOnce", false);
+        } else {
+          setComposerStatus("composer.sendingOnce", false);
+        }
+      }
       recordDiagnostic(
         socketDiagnosticConnected ? "socketEnded" : "socketFailed",
         socketDiagnosticConnected ? "info" : "error",
@@ -1089,6 +1835,15 @@
         appendNotice(t("session.socketDisconnected"));
       }
       updateComposer();
+      updateTerminalComposer();
+      var retryDelay = Math.min(Math.pow(2, sessionReconnectAttempt), 8) * 1000;
+      sessionReconnectAttempt = Math.min(sessionReconnectAttempt + 1, 3);
+      sessionReconnectTimer = setTimeout(function () {
+        sessionReconnectTimer = null;
+        if (!socket && activeSessionID === session.id && activeSession === session) {
+          openSession(session);
+        }
+      }, retryDelay);
     };
   }
 
@@ -1111,9 +1866,35 @@
         theme: xtermTheme(activeTerminalTheme),
       });
       term.open(els.terminal);
+      terminalScrollSubscription = term.onScroll(function () {
+        if (!activeSessionID || !hasRestoredTerminalViewport) { return; }
+        scheduleContinuityScrollSave(saveTerminalViewport);
+      });
     }
     show("terminal");
     scheduleFit();
+  }
+
+  function restoreTerminalViewport() {
+    if (!term || !activeSessionID || hasRestoredTerminalViewport) { return; }
+    var progress = continuityState(activeSessionID).terminalViewportProgress;
+    var maximum = term.buffer.active.baseY;
+    if (typeof progress !== "number") {
+      hasRestoredTerminalViewport = true;
+      return;
+    }
+    if (maximum <= 0) { return; }
+    term.scrollToLine(Math.round(maximum * Math.max(0, Math.min(1, progress))));
+    hasRestoredTerminalViewport = true;
+  }
+
+  function saveTerminalViewport() {
+    if (!term || !activeSessionID) { return; }
+    var buffer = term.buffer.active;
+    var progress = buffer.baseY > 0 ? buffer.viewportY / buffer.baseY : 1;
+    updateContinuity(activeSessionID, function (state) {
+      state.terminalViewportProgress = Math.max(0, Math.min(1, progress));
+    });
   }
 
   // --- Fitting the host's grid -------------------------------------------
@@ -1218,6 +1999,7 @@
     switch (msg.type) {
       case "hello":
         socketDiagnosticConnected = true;
+        sessionReconnectAttempt = 0;
         recordDiagnostic("socketConnected", "info", {
           transport: "websocket",
           surface: msg.surface || "terminal",
@@ -1225,10 +2007,14 @@
         });
         if (msg.theme) { hostTheme = msg.theme; }
         applyTheme(msg.theme || hostTheme, msg.terminalTheme || activeTerminalTheme);
+        serverFeatures = {};
+        (msg.features || []).forEach(function (feature) { serverFeatures[feature] = true; });
         activateSurface(msg.surface);
         if (msg.cols && msg.rows && term) { term.resize(msg.cols, msg.rows); }
         if (msg.title) { els.title.textContent = msg.title; }
         setCapability(msg.capability, openedSocket);
+        sendPendingSubmission(openedSocket);
+        updateAttentionButton();
         scheduleFit();
         break;
       case "resize":
@@ -1245,7 +2031,44 @@
       case "conversation":
         renderConversation(msg);
         break;
+      case "presence":
+        receivePresence(msg);
+        break;
+      case "collaborationParticipants":
+        receiveAttentionParticipants(msg);
+        break;
+      case "inputControl":
+        inputControlState = msg;
+        renderInputControl();
+        break;
+      case "inputControlEvent":
+        break;
+      case "inputControlResult":
+        receiveInputControlResult(msg);
+        break;
+      case "attention":
+        receiveAttentionEvent(msg);
+        break;
+      case "attentionResult":
+        receiveAttentionResult(msg);
+        break;
+      case "submitResult":
+        receiveSubmitResult(msg);
+        break;
       case "error":
+        if ((msg.code === "promptTooLarge" || msg.code === "invalidRequestID") && pendingPrompt) {
+          var failedSubmission = pendingPrompt;
+          pendingPrompt = null;
+          savePendingSubmission(null);
+          if (failedSubmission.messageType === "terminalSubmit") {
+            setTerminalComposerStatus("terminal.rejected", true);
+          } else {
+            setComposerStatus("composer.rejected", true);
+          }
+          updateComposer();
+          updateTerminalComposer();
+          break;
+        }
         if (msg.code === "forbidden") {
           appendNotice(t("error.viewOnly"));
         } else if (msg.code === "inputTooLarge" || msg.code === "promptTooLarge") {
@@ -1285,24 +2108,14 @@
 
   function setCapability(capability, openedSocket) {
     activeCapability = capability;
-    if (inputSubscription) {
-      inputSubscription.dispose();
-      inputSubscription = null;
-    }
     if (capability === "interact") {
       setBadge(t("badge.interactive"), "interact");
-      if (term) {
-        inputSubscription = term.onData(function (data) {
-          if (socket === openedSocket && openedSocket.readyState === WebSocket.OPEN) {
-            openedSocket.send(JSON.stringify({ type: "input", data: data }));
-          }
-        });
-        term.focus();
-      }
     } else {
       setBadge(t("badge.viewOnly"), "");
     }
     updateComposer();
+    updateTerminalComposer();
+    updateAttentionButton();
   }
 
   // --- Conversation ------------------------------------------------------
@@ -1310,14 +2123,40 @@
   function resetConversation() {
     els.conversationRows.innerHTML = "";
     els.prompt.value = "";
+    els.terminalPrompt.value = "";
+    presenceByID = {};
+    pendingPrompt = null;
+    pendingInputControl = null;
+    pendingAttention = null;
+    attentionParticipants = [];
+    inputControlState = null;
+    serverFeatures = {};
+    renderPresence();
+    renderInputControl();
+    setComposerStatus(null);
+    setTerminalComposerStatus(null);
+    els.inputControlStatus.textContent = "";
+    els.attentionActivity.hidden = true;
+    els.attentionActivity.innerHTML = "";
+    if (attentionActivityTimer !== null) {
+      clearTimeout(attentionActivityTimer);
+      attentionActivityTimer = null;
+    }
+    updateAttentionButton();
     conversationCanSend = false;
     activeCapability = "view";
     updateComposer();
+    updateTerminalComposer();
   }
 
   function renderConversation(snapshot) {
+    var savedViewport = activeSessionID ? continuityState(activeSessionID) : {};
+    var restoresSavedViewport = !hasRestoredConversationViewport &&
+      savedViewport.conversationFollowsBottom === false &&
+      typeof savedViewport.conversationViewportProgress === "number";
     var wasNearBottom = els.conversationRows.scrollHeight -
       els.conversationRows.scrollTop - els.conversationRows.clientHeight < 100;
+    if (restoresSavedViewport) { wasNearBottom = false; }
     els.conversationRows.innerHTML = "";
 
     (snapshot.rows || []).forEach(function (row) {
@@ -1327,7 +2166,16 @@
         node.className = "conversation-row user";
         var bubble = document.createElement("div");
         bubble.className = "bubble";
-        bubble.textContent = row.text || "";
+        var contextAttachments = row.contextAttachments || [];
+        if (contextAttachments.length) {
+          renderContextReceipts(bubble, contextAttachments);
+          var messageText = document.createElement("div");
+          messageText.className = "conversation-message-text";
+          messageText.textContent = row.text || "";
+          bubble.appendChild(messageText);
+        } else {
+          bubble.textContent = row.text || "";
+        }
         node.appendChild(bubble);
       } else if (row.kind === "tool") {
         node = document.createElement("details");
@@ -1385,11 +2233,48 @@
 
     conversationCanSend = !!snapshot.canSend;
     updateComposer();
-    if (wasNearBottom) {
+    if (restoresSavedViewport) {
+      requestAnimationFrame(function () {
+        var maximum = Math.max(
+          0,
+          els.conversationRows.scrollHeight - els.conversationRows.clientHeight
+        );
+        els.conversationRows.scrollTop = maximum * Math.max(
+          0,
+          Math.min(1, savedViewport.conversationViewportProgress)
+        );
+        hasRestoredConversationViewport = true;
+      });
+    } else if (wasNearBottom) {
       requestAnimationFrame(function () {
         els.conversationRows.scrollTop = els.conversationRows.scrollHeight;
+        hasRestoredConversationViewport = true;
       });
+    } else {
+      hasRestoredConversationViewport = true;
     }
+  }
+
+  function renderContextReceipts(parent, attachments) {
+    if (!attachments.length) { return; }
+    var rail = document.createElement("div");
+    rail.className = "conversation-context-rail";
+    ["reference", "comment"].forEach(function (kind) {
+      var matching = attachments.filter(function (attachment) {
+        return attachment.kind === kind;
+      });
+      if (!matching.length) { return; }
+      var receipt = document.createElement("span");
+      receipt.className = "conversation-context-receipt " + kind;
+      var key = "conversation." + kind + (matching.length === 1 ? "One" : "Many");
+      receipt.textContent = t(key, { count: matching.length });
+      receipt.title = matching.map(function (attachment) {
+        var detail = attachment.comment || attachment.excerpt || attachment.locator || "";
+        return detail ? attachment.title + " — " + detail : attachment.title;
+      }).join("\n");
+      rail.appendChild(receipt);
+    });
+    parent.appendChild(rail);
   }
 
   function appendNotice(text) {
@@ -1559,26 +2444,143 @@
   }
 
   function updateComposer() {
-    var enabled = activeSurface === "conversation" &&
-      activeCapability === "interact" && conversationCanSend &&
-      socket && socket.readyState === WebSocket.OPEN;
-    els.prompt.disabled = !enabled;
+    var editable = activeSurface === "conversation" &&
+      activeCapability === "interact" && socket && socket.readyState === WebSocket.OPEN;
+    var enabled = editable && conversationCanSend && canWriteInput() &&
+      !pendingPrompt && socket && socket.readyState === WebSocket.OPEN;
+    els.prompt.disabled = !editable;
     els.send.disabled = !enabled || !els.prompt.value.trim();
   }
 
   els.prompt.addEventListener("input", function () {
+    if (!pendingPrompt) { setComposerStatus(null); }
     updateComposer();
     reportTyping(els.prompt.value.trim().length > 0);
+    saveConversationDraft();
+  });
+  els.conversationRows.addEventListener("scroll", function () {
+    if (!activeSessionID || !hasRestoredConversationViewport) { return; }
+    scheduleContinuityScrollSave(function () {
+      var maximum = Math.max(
+        0,
+        els.conversationRows.scrollHeight - els.conversationRows.clientHeight
+      );
+      var progress = maximum > 0 ? els.conversationRows.scrollTop / maximum : 1;
+      var followsBottom = maximum - els.conversationRows.scrollTop < 100;
+      updateContinuity(activeSessionID, function (state) {
+        state.conversationViewportProgress = Math.max(0, Math.min(1, progress));
+        state.conversationFollowsBottom = followsBottom;
+      });
+    });
   });
   els.composer.addEventListener("submit", function (event) {
     event.preventDefault();
     var text = els.prompt.value.trim();
     if (!text || els.send.disabled || !socket) { return; }
     reportTyping(false);
-    socket.send(JSON.stringify({ type: "submit", text: text }));
-    els.prompt.value = "";
-    conversationCanSend = false;
+    var requestID = submissionRequestID();
+    if (serverFeatures.submitAcknowledgement) {
+      pendingPrompt = {
+        requestID: requestID,
+        text: text,
+        messageType: "submit",
+        createdAt: Date.now(),
+        lastSentSocket: socket,
+      };
+      savePendingSubmission({
+        requestID: requestID,
+        text: text,
+        messageType: "submit",
+        createdAt: pendingPrompt.createdAt,
+      });
+      setComposerStatus("composer.sendingOnce", false);
+      socket.send(JSON.stringify({
+        type: "submit",
+        text: text,
+        requestID: requestID,
+      }));
+    } else {
+      socket.send(JSON.stringify({ type: "submit", text: text }));
+      els.prompt.value = "";
+      saveConversationDraft();
+      conversationCanSend = false;
+    }
     updateComposer();
+  });
+
+  els.terminalPrompt.addEventListener("input", function () {
+    if (!pendingPrompt) { setTerminalComposerStatus(null); }
+    reportTyping(els.terminalPrompt.value.trim().length > 0);
+    saveTerminalDraft();
+    updateTerminalComposer();
+  });
+
+  els.terminalComposerForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var text = els.terminalPrompt.value.trim();
+    if (!text || els.terminalSend.disabled || !socket) { return; }
+    reportTyping(false);
+    var requestID = submissionRequestID();
+    pendingPrompt = {
+      requestID: requestID,
+      text: text,
+      messageType: "terminalSubmit",
+      createdAt: Date.now(),
+      lastSentSocket: socket,
+    };
+    savePendingSubmission({
+      requestID: requestID,
+      text: text,
+      messageType: "terminalSubmit",
+      createdAt: pendingPrompt.createdAt,
+    });
+    setTerminalComposerStatus("terminal.sendingOnce", false);
+    socket.send(JSON.stringify({
+      type: "terminalSubmit",
+      text: text,
+      requestID: requestID,
+    }));
+    updateTerminalComposer();
+  });
+
+  els.terminalMode.addEventListener("click", function () {
+    directTerminalInput = !directTerminalInput;
+    try {
+      localStorage.setItem(
+        "threading.directTerminalInput",
+        directTerminalInput ? "true" : "false"
+      );
+    } catch (error) {}
+    updateTerminalComposer();
+  });
+
+  els.attentionButton.addEventListener("click", openAttentionDialog);
+  els.attentionCancel.addEventListener("click", closeAttentionDialog);
+  els.attentionCancelIcon.addEventListener("click", closeAttentionDialog);
+  els.attentionNote.addEventListener("input", function () {
+    while (new TextEncoder().encode(els.attentionNote.value).length > 500) {
+      els.attentionNote.value = els.attentionNote.value.slice(0, -1);
+    }
+    els.attentionStatus.hidden = true;
+  });
+  els.attentionForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (pendingAttention || !socket || socket.readyState !== WebSocket.OPEN) { return; }
+    var selected = els.attentionRecipients.querySelector(
+      'input[name="attentionRecipient"]:checked'
+    );
+    if (!selected) { return; }
+    var requestID = submissionRequestID();
+    pendingAttention = { requestID: requestID, recipientID: selected.value };
+    els.attentionSend.disabled = true;
+    els.attentionStatus.textContent = t("attention.sending");
+    els.attentionStatus.hidden = false;
+    socket.send(JSON.stringify({
+      type: "attentionRequest",
+      recipientID: selected.value,
+      text: els.attentionNote.value.trim() || null,
+      requestID: requestID,
+    }));
   });
 
   // --- Cleanup -----------------------------------------------------------
@@ -1602,13 +2604,24 @@
       inputSubscription.dispose();
       inputSubscription = null;
     }
+    if (terminalScrollSubscription) {
+      terminalScrollSubscription.dispose();
+      terminalScrollSubscription = null;
+    }
     if (term) {
+      saveTerminalViewport();
       term.dispose();
       term = null;
     }
   }
 
   els.back.addEventListener("click", function () {
+    saveConversationDraft();
+    saveTerminalDraft();
+    if (sessionReconnectTimer !== null) {
+      clearTimeout(sessionReconnectTimer);
+      sessionReconnectTimer = null;
+    }
     if (socketDiagnosticConnected) {
       recordDiagnostic("socketEnded", "info", {
         transport: "websocket",
@@ -1620,6 +2633,11 @@
     disposeTerminal();
     resetConversation();
     activeSurface = null;
+    activeSessionID = null;
+    activeSession = null;
+    var continuityArchive = loadContinuityArchive();
+    continuityArchive.lastRoute = null;
+    saveContinuityArchive(continuityArchive);
     els.badge.hidden = true;
     applyTheme(hostTheme, null);
     beginSessionList();
@@ -1628,6 +2646,9 @@
   window.addEventListener("resize", scheduleFit);
 
   window.addEventListener("pagehide", function () {
+    saveConversationDraft();
+    saveTerminalDraft();
+    saveTerminalViewport();
     cancelPoll();
     closeSocket();
     closeThemeEvents();

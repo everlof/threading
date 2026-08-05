@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import ThreadingRemoteKit
 
@@ -75,6 +76,13 @@ final class RemoteSessionMirrorRegistry {
     /// Which subscribers are composing right now, per session. Presence is a relayed message
     /// between clients; this is the Mac keeping the part of it its own sharing pane shows.
     private var typingConnections: [SessionID: Set<ObjectIdentifier>] = [:]
+    /// Random socket-scoped ids keep two tabs owned by the same member distinct. They are never
+    /// credentials and disappear with the live connection.
+    private var presenceIDs: [ObjectIdentifier: String] = [:]
+    private var promptReplayCache = RemotePromptReplayCache()
+    private var attentionRequestPolicy = RemoteAttentionRequestPolicy()
+    private var inputControls: [SessionID: RemoteInputControlRecord] = [:]
+    private var focusedControllerReleaseTasks: [SessionID: DispatchWorkItem] = [:]
     private var sessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
@@ -120,7 +128,7 @@ final class RemoteSessionMirrorRegistry {
                 displayName: authorization.member?.displayName
             ),
             sessions: sessions,
-            host: RemoteHostIdentity.current,
+            host: RemoteAccessCoordinator.shared.hostIdentity(for: authorization),
             theme: RemoteThemeBridge.appTheme(),
             themeCatalog: canManageThemes(authorization)
                 ? RemoteThemeBridge.catalog()
@@ -268,6 +276,21 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         guard attached else { return false }
+        let key = ObjectIdentifier(connection)
+        presenceIDs[key] = UUID().uuidString
+        announcePresence(of: connection, sessionID: sessionID)
+        broadcastCollaborationParticipants(sessionID)
+        // Only the person whose last socket left resumes their grace period. A different
+        // watcher arriving during those 30 seconds must not leave an offline controller holding
+        // the session forever.
+        if RemoteInputControlPolicy.isFocusedController(
+            inputControlRecord(for: sessionID),
+            participantID: authorization.collaborationParticipantID
+        ) {
+            focusedControllerReleaseTasks[sessionID]?.cancel()
+            focusedControllerReleaseTasks[sessionID] = nil
+        }
+        broadcastInputControl(sessionID)
         if authorization.member != nil {
             RemoteAccessCoordinator.shared.noteMemberSeen(shareID: authorization.shareID)
         }
@@ -323,7 +346,8 @@ final class RemoteSessionMirrorRegistry {
             rows: grid.rows,
             title: terminal.title,
             theme: RemoteThemeBridge.appTheme(),
-            terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID)
+            terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
+            features: RemoteWebSocketFeature.allCases.map(\.rawValue)
         )
         connection.sendText(encode(hello))
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
@@ -373,13 +397,15 @@ final class RemoteSessionMirrorRegistry {
             rows: 0,
             title: ProjectStore.shared.session(withID: sessionID)?.displayTitle ?? "",
             theme: RemoteThemeBridge.appTheme(),
-            terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID)
+            terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
+            features: RemoteWebSocketFeature.allCases.map(\.rawValue)
         )))
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
         connection.sendText(encode(RemoteConversationWirePolicy.authorized(
             RemoteConversationWirePolicy.initial(current, revision: revision),
-            for: authorization
+            for: authorization,
+            canWrite: canWrite(sessionID: sessionID, authorization: authorization)
         )))
         return true
     }
@@ -421,7 +447,8 @@ final class RemoteSessionMirrorRegistry {
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
         connection.sendText(encode(RemoteConversationWirePolicy.authorized(
             RemoteConversationWirePolicy.initial(current, revision: revision),
-            for: peer.authorization
+            for: peer.authorization,
+            canWrite: canWrite(sessionID: sessionID, authorization: peer.authorization)
         )))
     }
 
@@ -429,9 +456,12 @@ final class RemoteSessionMirrorRegistry {
         let key = ObjectIdentifier(connection)
         themeEventSubscribers.removeValue(forKey: key)
         guard let sessionID = sessionByConnection.removeValue(forKey: key) else { return }
-        broadcastPresence("idle", from: connection, sessionID: sessionID)
+        let departingParticipantID = connection.authenticatedPeer?.authorization
+            .collaborationParticipantID
+        broadcastPresence("left", from: connection, sessionID: sessionID)
         releaseViewport(for: connection, sessionID: sessionID)
         mirrors[sessionID]?.subscribers.removeValue(forKey: key)
+        presenceIDs[key] = nil
         if mirrors[sessionID]?.subscribers.isEmpty ?? true {
             // While Remote Access is enabled the ring keeps following a live terminal even with
             // no viewer. Otherwise reconnecting later would show only bytes produced after the
@@ -450,6 +480,14 @@ final class RemoteSessionMirrorRegistry {
         if typingConnections[sessionID]?.isEmpty ?? false {
             typingConnections[sessionID] = nil
         }
+        broadcastCollaborationParticipants(sessionID)
+        if let departingParticipantID {
+            scheduleFocusedControlReleaseIfNeeded(
+                sessionID: sessionID,
+                participantID: departingParticipantID
+            )
+        }
+        broadcastInputControl(sessionID)
         followersChanged(sessionID)
     }
 
@@ -490,22 +528,31 @@ final class RemoteSessionMirrorRegistry {
         for work in pendingConversationBroadcasts.values { work.cancel() }
         pendingConversationBroadcasts.removeAll()
         mirrors.removeAll()
+        typingConnections.removeAll()
+        presenceIDs.removeAll()
+        promptReplayCache.removeAll()
+        attentionRequestPolicy.removeAll()
+        for task in focusedControllerReleaseTasks.values { task.cancel() }
+        focusedControllerReleaseTasks.removeAll()
+        inputControls.removeAll()
         sessionByConnection.removeAll()
         themeEventSubscribers.removeAll()
     }
 
     // MARK: - Input
 
+    @discardableResult
     func sendInput(
         _ bytes: [UInt8],
         to sessionID: SessionID,
         device: String?,
         authorization: RemoteAuthorization
-    ) {
+    ) -> Bool {
+        guard canWrite(sessionID: sessionID, authorization: authorization) else { return false }
         guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
               let controller = AgentRuntime.shared.controller(for: sessionID),
               controller.isRunning else {
-            return
+            return false
         }
         let terminal = controller.session
 
@@ -516,6 +563,7 @@ final class RemoteSessionMirrorRegistry {
         )
 
         terminal.sendRemoteInput(bytes)
+        return true
     }
 
     /// Records the visible grid of an interactive phone. This is a lease, not a preference:
@@ -526,7 +574,8 @@ final class RemoteSessionMirrorRegistry {
         cols: Int,
         rows: Int
     ) {
-        guard connection.authenticatedPeer?.authorization.capability == .interact,
+        guard let authorization = connection.authenticatedPeer?.authorization,
+              canWrite(sessionID: sessionID, authorization: authorization),
               (20...240).contains(cols),
               (4...160).contains(rows),
               mirrors[sessionID]?.surface == "terminal",
@@ -549,17 +598,475 @@ final class RemoteSessionMirrorRegistry {
 
     func submitPrompt(
         _ text: String,
+        contextAttachments remoteContext: [RemoteConversationContextAttachmentDTO]? = nil,
         to sessionID: SessionID,
         device: String?,
-        authorization: RemoteAuthorization
-    ) {
-        guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-              let conversation = AgentRuntime.shared.conversation(for: sessionID),
-              conversation.isRunning else {
-            return
+        authorization: RemoteAuthorization,
+        requestID: String?
+    ) -> RemotePromptSubmissionStatus {
+        let context = (remoteContext ?? []).compactMap(ConversationContextAttachment.init(remoteDTO:))
+        let normalizedContext = ConversationContextPolicy.normalized(context)
+        guard context.count == (remoteContext?.count ?? 0),
+              normalizedContext == context else { return .rejected }
+
+        let replayKey = requestID.map {
+            RemotePromptReplayCache.Key(
+                sessionID: sessionID.uuidString,
+                principalID: [
+                    authorization.principal == .ownerDevice ? "owner" : "guest",
+                    authorization.member?.id ?? authorization.shareID,
+                    device ?? "legacy",
+                ].joined(separator: ":"),
+                requestID: $0
+            )
         }
-        recordFirstInput(device: device, sessionID: sessionID)
-        _ = conversation.sendRemotePrompt(text, authorization: authorization)
+        var fingerprintSource = Data(("conversation\0" + text + "\0").utf8)
+        if let remoteContext {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            if let encodedContext = try? encoder.encode(remoteContext) {
+                fingerprintSource.append(encodedContext)
+            }
+        }
+        let fingerprint = Data(SHA256.hash(data: fingerprintSource))
+        if let replayKey {
+            switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
+            case .new:
+                break
+            case .replay(let status):
+                return status
+            case .conflict:
+                return .conflict
+            }
+        }
+
+        let status: RemotePromptSubmissionStatus
+        if !canWrite(sessionID: sessionID, authorization: authorization) {
+            status = .rejected
+        } else if !RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) {
+            status = .unavailable
+        } else if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+                  conversation.isRunning {
+            if !conversation.remoteSnapshot.canSend {
+                status = .busy
+            } else if conversation.sendRemotePrompt(
+                text,
+                context: normalizedContext,
+                authorization: authorization
+            ) {
+                recordFirstInput(device: device, sessionID: sessionID)
+                status = .accepted
+            } else {
+                status = .rejected
+            }
+        } else {
+            status = .unavailable
+        }
+
+        if let replayKey {
+            promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
+        }
+        return status
+    }
+
+    /// Sends one locally composed terminal line as one PTY write. Every device keeps its own
+    /// draft; only the completed line joins the shared byte stream, so two phones cannot splice
+    /// individual keystrokes into one malformed Claude/Codex prompt.
+    func submitTerminalLine(
+        _ text: String,
+        to sessionID: SessionID,
+        device: String?,
+        authorization: RemoteAuthorization,
+        requestID: String?
+    ) -> RemotePromptSubmissionStatus {
+        let replayKey = requestID.map {
+            RemotePromptReplayCache.Key(
+                sessionID: sessionID.uuidString,
+                principalID: [
+                    authorization.principal == .ownerDevice ? "owner" : "guest",
+                    authorization.member?.id ?? authorization.shareID,
+                    device ?? "legacy",
+                ].joined(separator: ":"),
+                requestID: $0
+            )
+        }
+        let fingerprint = Data(SHA256.hash(data: Data(("terminal\0" + text).utf8)))
+        if let replayKey {
+            switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
+            case .new:
+                break
+            case .replay(let status):
+                return status
+            case .conflict:
+                return .conflict
+            }
+        }
+
+        let status: RemotePromptSubmissionStatus
+        if !canWrite(sessionID: sessionID, authorization: authorization) {
+            status = .rejected
+        } else if mirrors[sessionID]?.surface == "terminal",
+           RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+           let controller = AgentRuntime.shared.controller(for: sessionID),
+           controller.isRunning {
+            let bytes = Array((text + "\r").utf8)
+            controller.session.sendRemoteInput(bytes)
+            recordFirstInput(device: device, sessionID: sessionID)
+            RemoteNotificationService.shared.recordInteraction(
+                sessionID: sessionID,
+                authorization: authorization
+            )
+            status = .accepted
+        } else {
+            status = .unavailable
+        }
+
+        if let replayKey {
+            promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
+        }
+        return status
+    }
+
+    // MARK: - Input control
+
+    /// The Mac is a participant too. This is checked at the local submission boundary so a
+    /// focused guest controls both remote clients and the host keyboard without making drafts
+    /// read-only.
+    func ownerCanWrite(to sessionID: SessionID) -> Bool {
+        RemoteInputControlPolicy.canWrite(
+            inputControlRecord(for: sessionID),
+            participantID: RemoteCollaborationParticipantDTO.ownerID
+        )
+    }
+
+    /// Owner-facing state for the Sharing pane. The local Mac is always online and can manage.
+    func ownerInputControlState(for sessionID: SessionID) -> RemoteInputControlStateDTO {
+        inputControlState(
+            sessionID: sessionID,
+            participantID: RemoteCollaborationParticipantDTO.ownerID,
+            canManage: true
+        )
+    }
+
+    @discardableResult
+    func setInputControlFromOwner(
+        _ action: RemoteInputControlAction,
+        sessionID: SessionID,
+        targetID: String? = nil
+    ) -> RemoteInputControlResultStatus {
+        applyInputControl(
+            action,
+            sessionID: sessionID,
+            actorID: RemoteCollaborationParticipantDTO.ownerID,
+            actorDisplayName: RemoteHostIdentity.current.name,
+            actorCanManage: true,
+            targetID: targetID
+        )
+    }
+
+    func updateInputControl(
+        from connection: RemoteConnection,
+        sessionID: SessionID,
+        action: RemoteInputControlAction,
+        targetID: String?,
+        requestID: String
+    ) -> RemoteInputControlResultStatus {
+        guard let peer = connection.authenticatedPeer,
+              peer.authorization.capability == .interact,
+              mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil else {
+            return .forbidden
+        }
+        let actorID = peer.authorization.collaborationParticipantID
+        if action == .request {
+            let record = inputControlRecord(for: sessionID)
+            guard record.mode == .focused,
+                  let controllerID = record.controllerID,
+                  controllerID != actorID else { return .rejected }
+            switch requestAttention(
+                from: connection,
+                sessionID: sessionID,
+                recipientID: controllerID,
+                note: L10n.string("Would like input control"),
+                requestID: requestID,
+                broadcastsCollaborationEvent: false
+            ) {
+            case .delivered:
+                break
+            case .unavailable:
+                return .unavailable
+            case .rateLimited, .rejected:
+                return .rejected
+            }
+        }
+        return applyInputControl(
+            action,
+            sessionID: sessionID,
+            actorID: actorID,
+            actorDisplayName: peer.authorization.member?.displayName
+                ?? peer.deviceName
+                ?? RemoteHostIdentity.current.name,
+            actorCanManage: peer.authorization.canManageHost,
+            targetID: targetID
+        )
+    }
+
+    private func applyInputControl(
+        _ action: RemoteInputControlAction,
+        sessionID: SessionID,
+        actorID: String,
+        actorDisplayName: String,
+        actorCanManage: Bool,
+        targetID: String?
+    ) -> RemoteInputControlResultStatus {
+        let current = inputControlRecord(for: sessionID)
+        let participants = inputControlParticipants(for: sessionID)
+        // Presence is not cosmetic at the handoff boundary. Selecting a participant who is
+        // already away cannot produce a later detach event, so the disconnect grace timer would
+        // never start and the session could remain focused on nobody indefinitely.
+        let eligible = Self.eligibleInputControlParticipantIDs(participants)
+        guard let result = RemoteInputControlPolicy.applying(
+            action,
+            to: current,
+            actorID: actorID,
+            actorCanManage: actorCanManage,
+            targetID: targetID,
+            eligibleParticipantIDs: eligible
+        ) else { return .rejected }
+
+        let resolvedTargetID = action == .reclaim
+            ? RemoteCollaborationParticipantDTO.ownerID
+            : (targetID ?? result.record.controllerID)
+        let targetName = participants.first(where: { $0.id == resolvedTargetID })?.displayName
+
+        if action == .request {
+            let controllerID = current.controllerID
+            let controllerName = participants.first(where: { $0.id == controllerID })?.displayName
+            broadcastInputControlEvent(RemoteInputControlEventDTO(
+                action: "requested",
+                actorID: actorID,
+                actorDisplayName: actorDisplayName,
+                targetID: controllerID,
+                targetDisplayName: controllerName
+            ), sessionID: sessionID)
+            NotificationCenter.default.post(SessionInputControlRequested(
+                sessionID: sessionID,
+                requesterName: actorDisplayName
+            ))
+            return result.status
+        }
+
+        inputControls[sessionID] = result.record
+        focusedControllerReleaseTasks[sessionID]?.cancel()
+        focusedControllerReleaseTasks[sessionID] = nil
+
+        let eventAction: String
+        switch action {
+        case .collaborative, .focused: eventAction = "modeChanged"
+        case .handoff: eventAction = "handedOff"
+        case .reclaim: eventAction = "reclaimed"
+        case .request: eventAction = "requested"
+        }
+        broadcastInputControlEvent(RemoteInputControlEventDTO(
+            action: eventAction,
+            actorID: actorID,
+            actorDisplayName: actorDisplayName,
+            targetID: resolvedTargetID,
+            targetDisplayName: targetName
+        ), sessionID: sessionID)
+        inputControlChanged(sessionID)
+        return result.status
+    }
+
+    nonisolated static func eligibleInputControlParticipantIDs(
+        _ participants: [RemoteCollaborationParticipantDTO]
+    ) -> Set<String> {
+        Set(participants.lazy.filter(\.isOnline).map(\.id))
+    }
+
+    private func inputControlRecord(for sessionID: SessionID) -> RemoteInputControlRecord {
+        if let record = inputControls[sessionID] { return record }
+        let record = RemoteInputControlRecord.initial(
+            default: AppSettings.shared.remoteInputControlDefault
+        )
+        inputControls[sessionID] = record
+        return record
+    }
+
+    private func canWrite(
+        sessionID: SessionID,
+        authorization: RemoteAuthorization
+    ) -> Bool {
+        authorization.capability == .interact && RemoteInputControlPolicy.canWrite(
+            inputControlRecord(for: sessionID),
+            participantID: authorization.collaborationParticipantID
+        )
+    }
+
+    private func inputControlState(
+        sessionID: SessionID,
+        participantID: String,
+        canManage: Bool
+    ) -> RemoteInputControlStateDTO {
+        let record = inputControlRecord(for: sessionID)
+        let participants = inputControlParticipants(for: sessionID)
+        let controller = participants.first { $0.id == record.controllerID }
+        return RemoteInputControlStateDTO(
+            mode: record.mode,
+            controllerID: record.controllerID,
+            controllerDisplayName: controller?.displayName,
+            currentParticipantID: participantID,
+            canWrite: RemoteInputControlPolicy.canWrite(
+                record,
+                participantID: participantID
+            ),
+            canManage: canManage,
+            canHandOff: record.mode == .focused
+                && (record.controllerID == participantID || canManage),
+            participants: participants,
+            revision: record.revision
+        )
+    }
+
+    private func inputControlParticipants(
+        for sessionID: SessionID
+    ) -> [RemoteCollaborationParticipantDTO] {
+        let subscribers = mirrors[sessionID].map { Array($0.subscribers.values) } ?? []
+        var participants = [RemoteCollaborationParticipantDTO(
+            id: RemoteCollaborationParticipantDTO.ownerID,
+            displayName: RemoteHostIdentity.current.name,
+            role: "owner",
+            isOnline: true
+        )]
+        var membersByID = Dictionary(uniqueKeysWithValues:
+            RemoteAccessCoordinator.shared.access(for: sessionID)
+                .members
+                .filter { $0.capability == .interact }
+                .map { member in
+                    (member.id, RemoteCollaborationParticipantDTO(
+                        id: member.id,
+                        displayName: member.displayName,
+                        role: "member",
+                        isOnline: subscribers.contains {
+                            $0.authenticatedPeer?.authorization.member?.id == member.id
+                        }
+                    ))
+                }
+        )
+        // The authenticated socket is also an exact source of live membership. Keeping it in
+        // the roster makes handoff resilient if the durable access read model is refreshing or
+        // recovering while an already-authorized guest is connected.
+        for subscriber in subscribers {
+            guard let authorization = subscriber.authenticatedPeer?.authorization,
+                  authorization.capability == .interact,
+                  let member = authorization.member else { continue }
+            membersByID[member.id] = RemoteCollaborationParticipantDTO(
+                id: member.id,
+                displayName: member.displayName,
+                role: "member",
+                isOnline: true
+            )
+        }
+        participants.append(contentsOf: membersByID.values)
+        return participants.sorted {
+            if $0.role != $1.role { return $0.role == "owner" }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                == .orderedAscending
+        }
+    }
+
+    private func broadcastInputControl(_ sessionID: SessionID) {
+        guard let mirror = mirrors[sessionID] else { return }
+        for connection in mirror.subscribers.values {
+            guard let authorization = connection.authenticatedPeer?.authorization else { continue }
+            connection.sendText(encode(inputControlState(
+                sessionID: sessionID,
+                participantID: authorization.collaborationParticipantID,
+                canManage: authorization.canManageHost
+            )))
+        }
+    }
+
+    private func broadcastInputControlEvent(
+        _ event: RemoteInputControlEventDTO,
+        sessionID: SessionID
+    ) {
+        guard let mirror = mirrors[sessionID] else { return }
+        let message = encode(event)
+        for connection in mirror.subscribers.values { connection.sendText(message) }
+    }
+
+    private func inputControlChanged(_ sessionID: SessionID) {
+        if var mirror = mirrors[sessionID], mirror.surface == "terminal" {
+            let subscribers = mirror.subscribers
+            mirror.viewportRequests = mirror.viewportRequests.filter { key, _ in
+                guard let authorization = subscribers[key]?.authenticatedPeer?.authorization
+                else { return false }
+                return canWrite(sessionID: sessionID, authorization: authorization)
+            }
+            mirrors[sessionID] = mirror
+            applyViewport(for: sessionID)
+        }
+        broadcastInputControl(sessionID)
+        // Provider state did not change, but each viewer's authorised `canSend` may have.
+        if mirrors[sessionID]?.surface == "conversation",
+           let conversation = AgentRuntime.shared.conversation(for: sessionID),
+           let mirror = mirrors[sessionID] {
+            let revision = mirror.conversationRevision
+            for connection in mirror.subscribers.values {
+                guard let authorization = connection.authenticatedPeer?.authorization else { continue }
+                connection.sendText(encode(RemoteConversationWirePolicy.authorized(
+                    RemoteConversationWirePolicy.initial(
+                        conversation.remoteSnapshot,
+                        revision: revision
+                    ),
+                    for: authorization,
+                    canWrite: canWrite(sessionID: sessionID, authorization: authorization)
+                )))
+            }
+        }
+        NotificationCenter.default.post(SessionInputControlDidChange(sessionID: sessionID))
+        followersChanged(sessionID)
+    }
+
+    private func scheduleFocusedControlReleaseIfNeeded(
+        sessionID: SessionID,
+        participantID: String
+    ) {
+        let record = inputControlRecord(for: sessionID)
+        guard participantID != RemoteCollaborationParticipantDTO.ownerID,
+              record.mode == .focused,
+              record.controllerID == participantID,
+              !inputControlParticipants(for: sessionID).contains(where: {
+                  $0.id == participantID && $0.isOnline
+              }) else { return }
+
+        focusedControllerReleaseTasks[sessionID]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let current = self.inputControlRecord(for: sessionID)
+            guard current.mode == .focused,
+                  current.controllerID == participantID,
+                  !self.inputControlParticipants(for: sessionID).contains(where: {
+                      $0.id == participantID && $0.isOnline
+                  }) else { return }
+            var released = current
+            released.controllerID = RemoteCollaborationParticipantDTO.ownerID
+            released.revision &+= 1
+            self.inputControls[sessionID] = released
+            self.broadcastInputControlEvent(RemoteInputControlEventDTO(
+                action: "released",
+                actorID: RemoteCollaborationParticipantDTO.ownerID,
+                actorDisplayName: RemoteHostIdentity.current.name,
+                targetID: RemoteCollaborationParticipantDTO.ownerID,
+                targetDisplayName: RemoteHostIdentity.current.name
+            ), sessionID: sessionID)
+            self.inputControlChanged(sessionID)
+        }
+        focusedControllerReleaseTasks[sessionID] = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + RemoteAccessDefaults.focusedControllerDisconnectGrace,
+            execute: work
+        )
     }
 
     func updatePresence(
@@ -573,6 +1080,114 @@ final class RemoteSessionMirrorRegistry {
             return
         }
         broadcastPresence(state, from: connection, sessionID: sessionID)
+    }
+
+    /// Sends a human-only attention request. This method has no reference to either prompt
+    /// submission or terminal input: its only side effects are a targeted notification and a
+    /// small collaboration event on authenticated session sockets.
+    func requestAttention(
+        from connection: RemoteConnection,
+        sessionID: SessionID,
+        recipientID: String,
+        note: String?,
+        requestID: String,
+        broadcastsCollaborationEvent: Bool = true
+    ) -> RemoteAttentionRequestStatus {
+        guard let peer = connection.authenticatedPeer,
+              peer.authorization.capability == .interact,
+              mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
+              let recipient = collaborationParticipants(
+                for: sessionID,
+                authorization: peer.authorization
+              ).first(where: { $0.id == recipientID }) else {
+            return .rejected
+        }
+
+        // A person can have several devices, but this is one request from that participant.
+        // Otherwise moving from iPhone to browser would bypass the 30-second duplicate collapse.
+        let principalID = peer.authorization.collaborationParticipantID
+        let requestKey = RemoteAttentionRequestPolicy.RequestKey(
+            sessionID: sessionID.uuidString,
+            principalID: principalID,
+            requestID: requestID
+        )
+        let rateKey = RemoteAttentionRequestPolicy.RateKey(
+            sessionID: sessionID.uuidString,
+            principalID: principalID,
+            recipientID: recipientID
+        )
+        let fingerprint = Data(SHA256.hash(data: Data(
+            (recipientID + "\0" + (note ?? "")).utf8
+        )))
+        switch attentionRequestPolicy.decision(
+            requestKey: requestKey,
+            rateKey: rateKey,
+            fingerprint: fingerprint
+        ) {
+        case .replay(let status):
+            return status
+        case .conflict:
+            return .rejected
+        case .rateLimited:
+            return .rateLimited
+        case .proceed:
+            break
+        }
+
+        let senderID = peer.authorization.member?.id
+            ?? "owner:\(peer.deviceID ?? "device")"
+        let senderDisplayName = peer.authorization.member?.displayName
+            ?? peer.deviceName
+            ?? "Owner"
+        let event = RemoteAttentionEventDTO(
+            requestID: requestID,
+            senderID: senderID,
+            senderDisplayName: senderDisplayName,
+            recipientID: recipient.id,
+            recipientDisplayName: recipient.displayName,
+            note: note
+        )
+
+        let liveRecipients = mirrors[sessionID]?.subscribers.values.filter { candidate in
+            guard let authorization = candidate.authenticatedPeer?.authorization else {
+                return false
+            }
+            if recipientID == RemoteCollaborationParticipantDTO.ownerID {
+                return authorization.principal == .ownerDevice
+            }
+            return authorization.member?.id == recipientID
+        }.count ?? 0
+        let optedInDevices = RemoteNotificationService.shared.attentionRequested(
+            eventID: event.id,
+            sessionID: sessionID,
+            senderDisplayName: senderDisplayName,
+            recipientID: recipientID,
+            note: note
+        )
+        let status: RemoteAttentionRequestStatus = liveRecipients > 0 || optedInDevices > 0
+            ? .delivered
+            : .unavailable
+        attentionRequestPolicy.store(
+            status,
+            requestKey: requestKey,
+            rateKey: rateKey,
+            fingerprint: fingerprint
+        )
+        guard status == .delivered else { return status }
+
+        if broadcastsCollaborationEvent {
+            let message = encode(event)
+            for subscriber in mirrors[sessionID].map({ Array($0.subscribers.values) }) ?? [] {
+                subscriber.sendText(message)
+            }
+        }
+        EventLog.shared.record(.remote, "Collaboration attention requested", [
+            "session": sessionID.uuidString,
+            "recipient": recipient.role,
+            "live": String(liveRecipients),
+            "registered": String(optedInDevices),
+        ])
+        return status
     }
 
     /// Called after the native timeline changes. Provider-specific events are still folded only
@@ -617,12 +1232,14 @@ final class RemoteSessionMirrorRegistry {
             if let delta {
                 connection.sendText(encode(RemoteConversationWirePolicy.authorized(
                     delta,
-                    for: authorization
+                    for: authorization,
+                    canWrite: canWrite(sessionID: sessionID, authorization: authorization)
                 )))
             } else {
                 connection.sendText(encode(RemoteConversationWirePolicy.authorized(
                     RemoteConversationWirePolicy.initial(current, revision: revision),
-                    for: authorization
+                    for: authorization,
+                    canWrite: canWrite(sessionID: sessionID, authorization: authorization)
                 )))
             }
         }
@@ -707,7 +1324,22 @@ final class RemoteSessionMirrorRegistry {
 
     func sessionSharingChanged() {
         broadcastSessionsChanged()
-        for sessionID in mirrors.keys { followersChanged(sessionID) }
+        for sessionID in mirrors.keys {
+            if var record = inputControls[sessionID],
+               record.mode == .focused,
+               let controllerID = record.controllerID,
+               !inputControlParticipants(for: sessionID).contains(where: {
+                   $0.id == controllerID
+               }) {
+                record.controllerID = RemoteCollaborationParticipantDTO.ownerID
+                record.revision &+= 1
+                inputControls[sessionID] = record
+                inputControlChanged(sessionID)
+            }
+            broadcastCollaborationParticipants(sessionID)
+            broadcastInputControl(sessionID)
+            followersChanged(sessionID)
+        }
         NotificationCenter.default.post(SessionSharingDidChange())
     }
 
@@ -797,6 +1429,8 @@ final class RemoteSessionMirrorRegistry {
         pendingConversationBroadcasts.removeValue(forKey: sessionID)?.cancel()
         latestWorkspaceActivity.removeValue(forKey: sessionID)
         typingConnections.removeValue(forKey: sessionID)
+        promptReplayCache.remove(sessionID: sessionID.uuidString)
+        attentionRequestPolicy.remove(sessionID: sessionID.uuidString)
         defer { followersChanged(sessionID) }
         guard let mirror = mirrors[sessionID] else { return }
         AgentRuntime.shared.controller(for: sessionID)?.session.clearRemoteViewport()
@@ -808,7 +1442,9 @@ final class RemoteSessionMirrorRegistry {
             // prevents a client that ignores `ended` from typing into a later relaunch of the
             // same session id with its already-authenticated connection.
             connection.sendClose(code: RemoteWebSocket.CloseCode.goingAway, reason: "Session closed")
-            sessionByConnection.removeValue(forKey: ObjectIdentifier(connection))
+            let key = ObjectIdentifier(connection)
+            sessionByConnection.removeValue(forKey: key)
+            presenceIDs[key] = nil
         }
         mirrors[sessionID] = nil
     }
@@ -913,9 +1549,8 @@ final class RemoteSessionMirrorRegistry {
         from connection: RemoteConnection,
         sessionID: SessionID
     ) {
-        guard let peer = connection.authenticatedPeer,
+        guard connection.authenticatedPeer != nil,
               let mirror = mirrors[sessionID] else { return }
-        let authorization = peer.authorization
 
         // The Mac watches this as well as relaying it. A guest composing a reply is the one
         // piece of live state the sharing pane can show that a list of names cannot.
@@ -928,18 +1563,114 @@ final class RemoteSessionMirrorRegistry {
         }
         if wasTyping != (state == "typing") { followersChanged(sessionID) }
 
-        let memberID = authorization.member?.id
-            ?? "owner:\(peer.deviceID ?? "device")"
-        let displayName = authorization.member?.displayName ?? "Owner"
-        let message = encode(RemotePresenceDTO(
-            memberID: memberID,
-            displayName: displayName,
-            state: state
+        let normalizedState = state == "idle" ? "viewing" : state
+        let message = encode(presenceUpdate(
+            for: connection,
+            key: key,
+            surface: mirror.surface,
+            state: normalizedState
         ))
         let source = ObjectIdentifier(connection)
         for (key, subscriber) in mirror.subscribers where key != source {
             subscriber.sendText(message)
         }
+    }
+
+    /// Gives the new client a complete live roster, then tells every existing client that the
+    /// newcomer is here. A typing update is only a delta; without this handshake a second phone
+    /// could not distinguish “nobody else is here” from “somebody is here but not typing.”
+    private func announcePresence(of connection: RemoteConnection, sessionID: SessionID) {
+        let source = ObjectIdentifier(connection)
+        guard let mirror = mirrors[sessionID], presenceIDs[source] != nil else { return }
+
+        let newcomer = encode(presenceUpdate(
+            for: connection,
+            key: source,
+            surface: mirror.surface,
+            state: "viewing"
+        ))
+        let typing = typingConnections[sessionID] ?? []
+        for (key, subscriber) in mirror.subscribers where key != source {
+            connection.sendText(encode(presenceUpdate(
+                for: subscriber,
+                key: key,
+                surface: mirror.surface,
+                state: typing.contains(key) ? "typing" : "viewing"
+            )))
+            subscriber.sendText(newcomer)
+        }
+    }
+
+    private func broadcastCollaborationParticipants(_ sessionID: SessionID) {
+        guard let mirror = mirrors[sessionID] else { return }
+        for connection in mirror.subscribers.values {
+            guard let authorization = connection.authenticatedPeer?.authorization else { continue }
+            connection.sendText(encode(RemoteCollaborationParticipantsDTO(
+                participants: collaborationParticipants(
+                    for: sessionID,
+                    authorization: authorization
+                )
+            )))
+        }
+    }
+
+    private func collaborationParticipants(
+        for sessionID: SessionID,
+        authorization: RemoteAuthorization
+    ) -> [RemoteCollaborationParticipantDTO] {
+        let subscribers = mirrors[sessionID].map { Array($0.subscribers.values) } ?? []
+        var participants: [RemoteCollaborationParticipantDTO] = []
+
+        if authorization.principal != .ownerDevice {
+            participants.append(RemoteCollaborationParticipantDTO(
+                id: RemoteCollaborationParticipantDTO.ownerID,
+                displayName: RemoteHostIdentity.current.name,
+                role: "owner",
+                isOnline: subscribers.contains {
+                    $0.authenticatedPeer?.authorization.principal == .ownerDevice
+                }
+            ))
+        }
+
+        let currentMemberID = authorization.member?.id
+        for member in RemoteAccessCoordinator.shared.access(for: sessionID).members
+            where member.capability == .interact && member.id != currentMemberID {
+            participants.append(RemoteCollaborationParticipantDTO(
+                id: member.id,
+                displayName: member.displayName,
+                role: "member",
+                isOnline: subscribers.contains {
+                    $0.authenticatedPeer?.authorization.member?.id == member.id
+                }
+            ))
+        }
+        return participants.sorted {
+            if $0.role != $1.role { return $0.role == "owner" }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                == .orderedAscending
+        }
+    }
+
+    private func presenceUpdate(
+        for connection: RemoteConnection,
+        key: ObjectIdentifier,
+        surface: String,
+        state: String
+    ) -> RemotePresenceDTO {
+        let peer = connection.authenticatedPeer
+        let authorization = peer?.authorization
+        let deviceName = peer?.deviceName
+        return RemotePresenceDTO(
+            presenceID: presenceIDs[key],
+            memberID: authorization?.member?.id
+                ?? "owner:\(peer?.deviceID ?? "device")",
+            displayName: authorization?.member?.displayName
+                ?? deviceName
+                ?? "Owner",
+            deviceName: deviceName,
+            surface: surface,
+            state: state
+        )
     }
 
     private func sendLatestWorkspaceActivity(

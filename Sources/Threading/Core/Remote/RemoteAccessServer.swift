@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import os
 import ThreadingRemoteKit
@@ -74,6 +75,20 @@ final class RemoteAccessServer: @unchecked Sendable {
     private var listener: NWListener?
     private var connectionsByID: [ObjectIdentifier: RemoteConnection] = [:]
     private var authLimiter = RemoteAuthRateLimiter()
+    private var mutationReplayCache: [MutationReplayKey: MutationReplayEntry] = [:]
+
+    private struct MutationReplayKey: Hashable {
+        let requestID: String
+        let bearerDigest: Data
+        let deviceID: String
+    }
+
+    private struct MutationReplayEntry {
+        let fingerprint: Data
+        let createdAt: Date
+        var response: HTTPResponse?
+        var waiters: [@Sendable (RemoteRouteDecision) -> Void]
+    }
 
     private let dependencies = RemoteAccessServerDependencies()
     private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
@@ -154,6 +169,7 @@ final class RemoteAccessServer: @unchecked Sendable {
             listener = nil
             portStorage.withLock { $0 = nil }
             authLimiter = RemoteAuthRateLimiter()
+            mutationReplayCache.removeAll()
         }
     }
 
@@ -188,6 +204,95 @@ final class RemoteAccessServer: @unchecked Sendable {
 extension RemoteAccessServer: RemoteConnection.Delegate {
 
     func route(
+        _ request: HTTPRequest,
+        from connection: RemoteConnection,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard request.method == "POST",
+              let rawRequestID = request.header(RemoteRouter.requestIDHeader) else {
+            routeUncached(request, from: connection, respond: respond)
+            return
+        }
+        guard let requestID = RemoteInboundPolicy.normalizedMutationRequestID(rawRequestID) else {
+            respond(.respond(RemoteRouter.error(400, "Invalid request id")))
+            return
+        }
+        guard let bearer = RemoteRouter.bearerToken(from: request),
+              RemoteInboundPolicy.acceptsBearerToken(bearer),
+              let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                request.header(RemoteRouter.deviceHeader)
+              ) else {
+            // Authentication owns the response for missing or malformed credentials. Such a
+            // request cannot have performed a mutation, so it does not belong in replay state.
+            routeUncached(request, from: connection, respond: respond)
+            return
+        }
+
+        let now = Date()
+        mutationReplayCache = mutationReplayCache.filter {
+            now.timeIntervalSince($0.value.createdAt) < RemoteAccessDefaults.mutationReplayLifetime
+        }
+        let key = MutationReplayKey(
+            requestID: requestID,
+            bearerDigest: Data(SHA256.hash(data: Data(bearer.utf8))),
+            deviceID: deviceID
+        )
+        let fingerprint = Self.mutationFingerprint(for: request)
+        if var existing = mutationReplayCache[key] {
+            guard existing.fingerprint == fingerprint else {
+                respond(.respond(RemoteRouter.error(409, "Request id was reused")))
+                return
+            }
+            if let response = existing.response {
+                respond(.respond(response))
+                return
+            }
+            guard existing.waiters.count < RemoteAccessDefaults.maximumMutationReplayWaiters else {
+                respond(.respond(RemoteRouter.error(429, "Too Many Requests")))
+                return
+            }
+            existing.waiters.append(respond)
+            mutationReplayCache[key] = existing
+            return
+        }
+
+        if mutationReplayCache.count >= RemoteAccessDefaults.maximumMutationReplayEntries,
+           let oldestCompleted = mutationReplayCache
+            .filter({ $0.value.response != nil })
+            .min(by: { $0.value.createdAt < $1.value.createdAt })?.key {
+            mutationReplayCache.removeValue(forKey: oldestCompleted)
+        }
+        guard mutationReplayCache.count < RemoteAccessDefaults.maximumMutationReplayEntries else {
+            respond(.respond(RemoteRouter.error(503, "Replay cache busy")))
+            return
+        }
+        mutationReplayCache[key] = MutationReplayEntry(
+            fingerprint: fingerprint,
+            createdAt: now,
+            response: nil,
+            waiters: []
+        )
+        routeUncached(request, from: connection) { [weak self] decision in
+            guard let self else { return }
+            self.queue.async {
+                guard case .respond(var response) = decision else {
+                    self.mutationReplayCache.removeValue(forKey: key)
+                    respond(decision)
+                    return
+                }
+                response.extraHeaders["X-Threading-Request-ID"] = requestID
+                var completed = self.mutationReplayCache[key]
+                completed?.response = response
+                let waiters = completed?.waiters ?? []
+                completed?.waiters.removeAll(keepingCapacity: false)
+                if let completed { self.mutationReplayCache[key] = completed }
+                respond(.respond(response))
+                waiters.forEach { $0(.respond(response)) }
+            }
+        }
+    }
+
+    private func routeUncached(
         _ request: HTTPRequest,
         from connection: RemoteConnection,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
@@ -342,6 +447,23 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         respond(.respond(RemoteRouter.error(404, "Not Found")))
     }
 
+    private static func mutationFingerprint(for request: HTTPRequest) -> Data {
+        var input = Data(request.method.utf8)
+        input.append(0)
+        input.append(contentsOf: RemoteRouter.normalizedPath(request.path).utf8)
+        input.append(0)
+        for header in [
+            RemoteRouter.clientHeader,
+            RemoteRouter.protocolHeader,
+            RemoteRouter.protocolMinimumHeader,
+        ] {
+            input.append(contentsOf: (request.header(header) ?? "").utf8)
+            input.append(0)
+        }
+        input.append(request.body)
+        return Data(SHA256.hash(data: input))
+    }
+
     func handleMessage(_ message: RemoteWebSocket.Message, from connection: RemoteConnection) {
         guard case .text(let data) = message,
               let parsed = try? JSONDecoder().decode(RemoteClientMessage.self, from: data) else {
@@ -354,7 +476,28 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "input":
             handleInput(connection, data: parsed.data)
         case "submit":
-            handleSubmit(connection, text: parsed.text)
+            handleSubmit(
+                connection,
+                text: parsed.text,
+                contextAttachments: parsed.contextAttachments,
+                requestID: parsed.requestID
+            )
+        case "terminalSubmit":
+            handleTerminalSubmit(connection, text: parsed.text, requestID: parsed.requestID)
+        case "attentionRequest":
+            handleAttentionRequest(
+                connection,
+                recipientID: parsed.recipientID,
+                note: parsed.text,
+                requestID: parsed.requestID
+            )
+        case "inputControl":
+            handleInputControl(
+                connection,
+                action: parsed.state,
+                targetID: parsed.recipientID,
+                requestID: parsed.requestID
+            )
         case "permission":
             handlePermission(
                 connection,
@@ -965,21 +1108,24 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard let created = RemoteAccessCoordinator.shared.createSessionShare(
+            RemoteAccessCoordinator.shared.createSessionShare(
                 for: sessionID,
                 capability: capability,
                 canApprovePermissions: choice.canApprovePermissions
-            ) else {
-                respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
-                return
+            ) { result in
+                switch result {
+                case .success(let created):
+                    respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
+                        url: created.url.absoluteString,
+                        capability: capability.rawValue,
+                        canApprovePermissions: created.canApprovePermissions,
+                        expiresAt: created.expiresAt.timeIntervalSince1970,
+                        me: RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                    ))))
+                case .failure:
+                    respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
+                }
             }
-            respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
-                url: created.url.absoluteString,
-                capability: capability.rawValue,
-                canApprovePermissions: created.canApprovePermissions,
-                expiresAt: created.expiresAt.timeIntervalSince1970,
-                me: RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
-            ))))
         }
     }
 
@@ -1377,6 +1523,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ) else { return }
 
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendClose(code: 4003, reason: "Share revoked")
+                return
+            }
             let attached = RemoteSessionMirrorRegistry.shared.attach(
                 connection,
                 to: sessionID,
@@ -1426,17 +1576,25 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let bytes = Array(data.utf8)
         let device = connection.deviceID
         DispatchQueue.main.async {
-            RemoteSessionMirrorRegistry.shared.sendInput(
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            let accepted = RemoteSessionMirrorRegistry.shared.sendInput(
                 bytes,
                 to: sessionID,
                 device: device,
                 authorization: authorization
             )
+            if !accepted {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "controlHeld")))
+            }
         }
     }
 
     private func handleViewport(_ connection: RemoteConnection, cols: Int?, rows: Int?) {
-        guard connection.authorization?.capability == .interact else {
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
@@ -1448,6 +1606,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
             RemoteSessionMirrorRegistry.shared.requestViewport(
                 from: connection,
                 sessionID: sessionID,
@@ -1458,12 +1620,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     }
 
     private func handleViewportRelease(_ connection: RemoteConnection) {
-        guard connection.authorization?.capability == .interact,
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             return
         }
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else { return }
             RemoteSessionMirrorRegistry.shared.releaseViewport(
                 from: connection,
                 sessionID: sessionID
@@ -1476,7 +1640,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         beforeRowID: String?,
         limit: Int?
     ) {
-        guard connection.authorization != nil,
+        guard let authorization = connection.authorization,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed),
               beforeRowID.map(RemoteInboundPolicy.acceptsConversationRowID) ?? true,
@@ -1486,6 +1650,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
             RemoteSessionMirrorRegistry.shared.requestConversationPage(
                 from: connection,
                 sessionID: sessionID,
@@ -1496,12 +1664,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     }
 
     private func handleConversationResync(_ connection: RemoteConnection) {
-        guard connection.authorization != nil,
+        guard let authorization = connection.authorization,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             return
         }
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else { return }
             RemoteSessionMirrorRegistry.shared.resyncConversation(
                 for: connection,
                 sessionID: sessionID
@@ -1509,7 +1678,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
-    private func handleSubmit(_ connection: RemoteConnection, text: String?) {
+    private func handleSubmit(
+        _ connection: RemoteConnection,
+        text: String?,
+        contextAttachments: [RemoteConversationContextAttachmentDTO]?,
+        requestID rawRequestID: String?
+    ) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
@@ -1518,20 +1692,84 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let sessionID = SessionID(uuidString: routed) else {
             return
         }
-        guard RemoteInboundPolicy.acceptsPrompt(text) else {
+        guard RemoteInboundPolicy.acceptsPrompt(text),
+              RemoteInboundPolicy.acceptsContextAttachments(contextAttachments) else {
             connection.sendText(encode(RemoteErrorDTO(code: "promptTooLarge")))
             return
         }
 
+        let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
+        if rawRequestID != nil, requestID == nil {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidRequestID")))
+            return
+        }
+
         let device = connection.deviceID
-        guard let authorization = connection.authorization else { return }
         DispatchQueue.main.async {
-            RemoteSessionMirrorRegistry.shared.submitPrompt(
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            let status = RemoteSessionMirrorRegistry.shared.submitPrompt(
+                text,
+                contextAttachments: contextAttachments,
+                to: sessionID,
+                device: device,
+                authorization: authorization,
+                requestID: requestID
+            )
+            guard let requestID else { return }
+            connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
+                requestID: requestID,
+                status: status
+            )))
+        }
+    }
+
+    private func handleTerminalSubmit(
+        _ connection: RemoteConnection,
+        text: String?,
+        requestID rawRequestID: String?
+    ) {
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidTerminalSubmission")))
+            return
+        }
+        guard RemoteInboundPolicy.acceptsTerminalInput(text + "\r") else {
+            connection.sendText(encode(RemoteErrorDTO(code: "promptTooLarge")))
+            return
+        }
+
+        let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
+        guard let requestID else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidRequestID")))
+            return
+        }
+
+        let device = connection.deviceID
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            let status = RemoteSessionMirrorRegistry.shared.submitTerminalLine(
                 text,
                 to: sessionID,
                 device: device,
-                authorization: authorization
+                authorization: authorization,
+                requestID: requestID
             )
+            connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
+                requestID: requestID,
+                status: status
+            )))
         }
     }
 
@@ -1556,6 +1794,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         let notPending = encode(RemoteErrorDTO(code: "permissionNotPending"))
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
             guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
                   let conversation = AgentRuntime.shared.conversation(for: sessionID),
                   conversation.resolveRemotePermission(id: id, decision: decision) else {
@@ -1585,14 +1827,97 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    private func handleAttentionRequest(
+        _ connection: RemoteConnection,
+        recipientID: String?,
+        note rawNote: String?,
+        requestID rawRequestID: String?
+    ) {
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
+        guard let requestID,
+              let recipientID,
+              RemoteInboundPolicy.acceptsAttentionRecipientID(recipientID),
+              rawNote.map(RemoteInboundPolicy.acceptsAttentionNote) ?? true,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidAttentionRequest")))
+            return
+        }
+        let note = RemoteInboundPolicy.normalizedAttentionNote(rawNote)
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            let status = RemoteSessionMirrorRegistry.shared.requestAttention(
+                from: connection,
+                sessionID: sessionID,
+                recipientID: recipientID,
+                note: note,
+                requestID: requestID
+            )
+            connection.sendText(self.encode(RemoteAttentionRequestResultDTO(
+                requestID: requestID,
+                status: status
+            )))
+        }
+    }
+
+    private func handleInputControl(
+        _ connection: RemoteConnection,
+        action rawAction: String?,
+        targetID: String?,
+        requestID rawRequestID: String?
+    ) {
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
+        guard let requestID,
+              let rawAction,
+              let action = RemoteInputControlAction(rawValue: rawAction),
+              targetID.map(RemoteInboundPolicy.acceptsAttentionRecipientID) ?? true,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidInputControl")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            let status = RemoteSessionMirrorRegistry.shared.updateInputControl(
+                from: connection,
+                sessionID: sessionID,
+                action: action,
+                targetID: targetID,
+                requestID: requestID
+            )
+            connection.sendText(self.encode(RemoteInputControlResultDTO(
+                requestID: requestID,
+                status: status
+            )))
+        }
+    }
+
     private func handlePresence(_ connection: RemoteConnection, state: String?) {
-        guard connection.authorization?.capability == .interact,
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact,
               let state, state == "typing" || state == "idle",
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             return
         }
         DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else { return }
             RemoteSessionMirrorRegistry.shared.updatePresence(
                 state,
                 from: connection,

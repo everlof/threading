@@ -28,14 +28,31 @@ final class RemoteNotificationService {
         let environment: RemoteAPNSPushSender.Environment
         let authorization: RemoteAuthorization
         let enabledKinds: Set<RemoteNotificationKind>
+        let soundEnabledKinds: Set<RemoteNotificationKind>
+    }
+
+    private struct DeliverySummary {
+        let liveRecipients: Int
+        let pushTargets: Int
+
+        var isReachable: Bool { liveRecipients > 0 || pushTargets > 0 }
     }
 
     private var subscriptions: [String: Subscription] = [:]
     private let pushSender = RemoteAPNSPushSender.fromEnvironment()
+    private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: InteractionActor] = [:]
+    private var lastActivityBySession: [SessionID: SessionActivity] = [:]
 
-    private init() {}
+    private init() {
+        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+            Task { @MainActor in self?.activityChanged(sessionID: event.sessionID) }
+        }
+        observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
+            Task { @MainActor in self?.lastActivityBySession[event.sessionID] = nil }
+        }
+    }
 
     var supportsPush: Bool { pushSender != nil }
 
@@ -74,7 +91,10 @@ final class RemoteNotificationService {
             deviceToken: registration.deviceToken.lowercased(),
             environment: environment,
             authorization: authorization,
-            enabledKinds: Set(registration.enabledKinds)
+            enabledKinds: Set(registration.enabledKinds),
+            soundEnabledKinds: Set(
+                registration.soundEnabledKinds ?? registration.enabledKinds
+            )
         )
 
         // A guest cannot be notified before accepting a capability: there is no account or
@@ -140,6 +160,47 @@ final class RemoteNotificationService {
             $0.authorization.canApprovePermissions
                 && $0.authorization.scope.covers(sessionID)
         }
+    }
+
+    /// A provider-neutral session edge says the terminal is waiting for a human response.
+    /// The hook/BEL layer owns detecting that state; notifications never scrape terminal text.
+    private func activityChanged(sessionID: SessionID) {
+        let activity = AgentRuntime.shared.activity(sessionID: sessionID)
+        let previous = lastActivityBySession[sessionID] ?? .dormant
+        lastActivityBySession[sessionID] = activity
+        guard activity == .awaitingUser, previous != .awaitingUser,
+              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+
+        // Native permission requests already have a dedicated, safer notification that names
+        // the tool and reaches only people allowed to decide it.
+        if AgentRuntime.shared.conversation(for: sessionID)?.remoteSnapshot.permission != nil {
+            return
+        }
+
+        let title = Self.safeText(
+            "\(session.displayTitle) needs your response",
+            bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+        )
+        let safeTitle = Self.safeText(
+            session.displayTitle,
+            bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+        )
+        let event = RemoteNotificationEventDTO(
+            kind: .agentQuestion,
+            hostID: RemoteHostIdentity.current.id,
+            sessionID: sessionID.uuidString,
+            title: title,
+            body: "Open \(safeTitle) to answer.",
+            titleLocalization: .init(
+                key: "%@ needs your response",
+                arguments: [safeTitle]
+            ),
+            bodyLocalization: .init(
+                key: "Open %@ to answer.",
+                arguments: [safeTitle]
+            )
+        )
+        deliver(event) { $0.authorization.scope.covers(sessionID) }
     }
 
     /// Sends an explicitly requested agent update to the current turn's author by default.
@@ -228,11 +289,67 @@ final class RemoteNotificationService {
                 bytes: RemoteAccessDefaults.maximumNotificationBodyBytes
             )
         )
-        deliver(event) {
+        let delivery = deliver(event) {
             $0.authorization.scope.covers(sessionID)
                 && predicate($0)
         }
+        guard delivery.isReachable else {
+            return .unavailable(reason: "No opted-in device is currently reachable.")
+        }
         return .delivered(recipient: label)
+    }
+
+    /// Delivers the push/live-notification half of an explicit human attention request. The
+    /// session mirror separately emits the quiet collaboration event to open chat sockets.
+    /// Returning the number of reachable push targets lets the caller distinguish a useful
+    /// offline poke from an opted-in registration that has no configured delivery provider.
+    @discardableResult
+    func attentionRequested(
+        eventID: String,
+        sessionID: SessionID,
+        senderDisplayName: String,
+        recipientID: String,
+        note: String?
+    ) -> Int {
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return 0 }
+        let predicate: (Subscription) -> Bool
+        if recipientID == RemoteCollaborationParticipantDTO.ownerID {
+            predicate = { $0.authorization.principal == .ownerDevice }
+        } else {
+            predicate = { $0.authorization.member?.id == recipientID }
+        }
+
+        let sender = Self.safeText(
+            senderDisplayName,
+            bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+        )
+        let safeSessionTitle = Self.safeText(
+            session.displayTitle,
+            bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+        )
+        let event = RemoteNotificationEventDTO(
+            id: eventID,
+            kind: .attentionRequest,
+            hostID: RemoteHostIdentity.current.id,
+            sessionID: sessionID.uuidString,
+            title: Self.safeText(
+                "\(sender) asked for your input",
+                bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+            ),
+            body: note.map {
+                Self.safeText($0, bytes: RemoteAccessDefaults.maximumNotificationBodyBytes)
+            } ?? "Open \(safeSessionTitle) to respond.",
+            titleLocalization: .init(
+                key: "%@ asked for your input",
+                arguments: [sender]
+            ),
+            bodyLocalization: note == nil
+                ? .init(key: "Open %@ to respond.", arguments: [safeSessionTitle])
+                : nil
+        )
+        return deliver(event) {
+            $0.authorization.scope.covers(sessionID) && predicate($0)
+        }.pushTargets
     }
 
     func revoke(shareID: String) {
@@ -246,11 +363,15 @@ final class RemoteNotificationService {
         currentActorBySession.removeAll()
     }
 
+    @discardableResult
     private func deliver(
         _ event: RemoteNotificationEventDTO,
         matching predicate: @escaping (Subscription) -> Bool
-    ) {
-        RemoteSessionMirrorRegistry.shared.broadcastNotification(event) {
+    ) -> DeliverySummary {
+        let targets = subscriptions.values.filter {
+            $0.enabledKinds.contains(event.kind) && predicate($0)
+        }
+        let liveRecipients = RemoteSessionMirrorRegistry.shared.broadcastNotification(event) {
             authorization, deviceID in
             // The authenticated socket proves access, while this exact device registration proves
             // notification consent. One opted-in owner device must not opt every owner device in.
@@ -279,10 +400,7 @@ final class RemoteNotificationService {
                 "kind": event.kind.rawValue,
                 "reason": "provider configuration",
             ])
-            return
-        }
-        let targets = subscriptions.values.filter {
-            $0.enabledKinds.contains(event.kind) && predicate($0)
+            return DeliverySummary(liveRecipients: liveRecipients, pushTargets: 0)
         }
         for target in targets {
             let device = Self.diagnosticID(target.deviceID, prefix: "device")
@@ -290,7 +408,8 @@ final class RemoteNotificationService {
                 let result = await pushSender.send(
                     event,
                     deviceToken: target.deviceToken,
-                    environment: target.environment
+                    environment: target.environment,
+                    playsSound: target.soundEnabledKinds.contains(event.kind)
                 )
                 var detail = [
                     "notification": event.id,
@@ -326,6 +445,10 @@ final class RemoteNotificationService {
                 )
             }
         }
+        return DeliverySummary(
+            liveRecipients: liveRecipients,
+            pushTargets: targets.count
+        )
     }
 
     private func matchingSubscriptions(
@@ -461,7 +584,7 @@ actor RemoteAPNSPushSender {
             }
 
             let alert: Alert
-            let sound: String
+            let sound: String?
             let threadID: String
             let category: String
 
@@ -506,7 +629,8 @@ actor RemoteAPNSPushSender {
     func send(
         _ event: RemoteNotificationEventDTO,
         deviceToken: String,
-        environment: Environment
+        environment: Environment,
+        playsSound: Bool = true
     ) async -> RemoteAPNSDeliveryResult {
         guard let url = URL(
             string: "https://\(environment.host)/3/device/\(deviceToken)"
@@ -519,7 +643,10 @@ actor RemoteAPNSPushSender {
         }
 
         var deliveredEvent = event
-        var body = try? JSONEncoder().encode(envelope(for: deliveredEvent))
+        var body = try? JSONEncoder().encode(envelope(
+            for: deliveredEvent,
+            playsSound: playsSound
+        ))
         if let count = body?.count, count > 4_096 {
             // APNs rejects an alert payload above 4 KB. Keep the same event id/deep link and a
             // useful prefix instead of turning an unusually escaped summary into silent loss.
@@ -534,7 +661,10 @@ actor RemoteAPNSPushSender {
                 bodyLocalization: event.bodyLocalization,
                 createdAt: event.createdAt
             )
-            body = try? JSONEncoder().encode(envelope(for: deliveredEvent))
+            body = try? JSONEncoder().encode(envelope(
+                for: deliveredEvent,
+                playsSound: playsSound
+            ))
         }
         guard let body, body.count <= 4_096 else {
             return RemoteAPNSDeliveryResult(
@@ -603,7 +733,10 @@ actor RemoteAPNSPushSender {
         }
     }
 
-    private func envelope(for event: RemoteNotificationEventDTO) -> Envelope {
+    private func envelope(
+        for event: RemoteNotificationEventDTO,
+        playsSound: Bool
+    ) -> Envelope {
         Envelope(
             aps: .init(
                 alert: .init(
@@ -614,7 +747,7 @@ actor RemoteAPNSPushSender {
                     bodyLocalizationKey: event.bodyLocalization?.key,
                     bodyLocalizationArguments: event.bodyLocalization?.arguments
                 ),
-                sound: "default",
+                sound: playsSound ? "default" : nil,
                 threadID: event.sessionID,
                 category: event.kind == .permissionRequest
                     ? "THREADING_PERMISSION"

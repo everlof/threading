@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <title data-i18n="app.title">Threading Remote</title>
   <!--
@@ -18,15 +18,39 @@
   <header id="bar">
     <button id="back" hidden aria-label="Back to sessions" data-i18n-aria-label="nav.back">‹</button>
     <span id="title" data-i18n="app.title">Threading Remote</span>
+    <button id="attentionButton" hidden type="button" aria-label="Ask for input" data-i18n-aria-label="attention.title">@</button>
     <span id="badge" hidden></span>
   </header>
 
   <main id="content">
     <section id="status" class="pad" role="status" aria-live="polite" data-i18n="status.connecting">Connecting…</section>
+    <div id="attentionActivity" hidden role="status" aria-live="polite"></div>
+    <div id="inputControl" hidden role="group" aria-label="Input control" data-i18n-aria-label="control.label"></div>
+    <div id="inputControlStatus" class="visually-hidden" role="status" aria-live="polite"></div>
     <ul id="sessions" hidden></ul>
     <div id="terminal" hidden></div>
+    <section id="terminalComposer" hidden aria-label="Terminal input" data-i18n-aria-label="terminal.input">
+      <div class="terminal-composer-heading">
+        <span id="terminalModeLabel" data-i18n="terminal.compose">Compose a complete line</span>
+        <button id="terminalMode" type="button" aria-pressed="false" data-i18n="terminal.direct">Use direct typing</button>
+      </div>
+      <div id="terminalComposerStatus" hidden role="status" aria-live="polite"></div>
+      <form id="terminalComposerForm">
+        <textarea
+          id="terminalPrompt"
+          rows="1"
+          placeholder="Compose on this device…"
+          aria-label="Terminal line"
+          data-i18n-placeholder="terminal.composePlaceholder"
+          data-i18n-aria-label="terminal.line"
+        ></textarea>
+        <button id="terminalSend" type="submit" aria-label="Send terminal line" data-i18n-aria-label="terminal.send" disabled>↑</button>
+      </form>
+    </section>
     <section id="conversation" hidden>
       <div id="conversationRows" aria-live="polite"></div>
+      <div id="presence" hidden role="status" aria-live="polite"></div>
+      <div id="composerStatus" hidden role="status" aria-live="polite"></div>
       <form id="composer">
         <textarea
           id="prompt"
@@ -40,6 +64,28 @@
       </form>
     </section>
   </main>
+
+  <dialog id="attentionDialog">
+    <form id="attentionForm">
+      <div class="attention-dialog-heading">
+        <div>
+          <h2 data-i18n="attention.title">Ask for input</h2>
+          <p data-i18n="attention.explainer">This is a human-only notification. Nothing here is sent to Claude, Codex, or the terminal.</p>
+        </div>
+        <button id="attentionCancelIcon" type="button" aria-label="Cancel" data-i18n-aria-label="attention.cancel">×</button>
+      </div>
+      <fieldset id="attentionRecipients">
+        <legend data-i18n="attention.person">Person</legend>
+      </fieldset>
+      <label for="attentionNote" data-i18n="attention.need">What do you need?</label>
+      <textarea id="attentionNote" rows="3" maxlength="500" placeholder="Optional note…" data-i18n-placeholder="attention.note"></textarea>
+      <div id="attentionStatus" hidden role="status" aria-live="polite"></div>
+      <div class="attention-dialog-actions">
+        <button id="attentionCancel" type="button" data-i18n="attention.cancel">Cancel</button>
+        <button id="attentionSend" type="submit" data-i18n="attention.ask">Ask</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/xterm.js"></script>
   <script src="/app.js"></script>

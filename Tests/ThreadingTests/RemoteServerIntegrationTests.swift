@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingRemoteKit
 @testable import Threading
 
 /// Boots the real `RemoteAccessServer` on a loopback port and probes it over an actual socket.
@@ -30,6 +31,224 @@ final class RemoteServerIntegrationTests: XCTestCase {
         }
         wait(for: [ready], timeout: 5)
         XCTAssertNotNil(port, "the server should bind a loopback port")
+    }
+
+    func testFocusedInputControlAllowsOnlyControllerAndOwnerCanAlwaysReclaim() {
+        let owner = RemoteCollaborationParticipantDTO.ownerID
+        let anna = "member-anna"
+        let eligible = Set([owner, anna])
+        let initial = RemoteInputControlRecord.initial(default: .collaborative)
+        XCTAssertTrue(RemoteInputControlPolicy.canWrite(initial, participantID: owner))
+        XCTAssertTrue(RemoteInputControlPolicy.canWrite(initial, participantID: anna))
+
+        let focused = RemoteInputControlPolicy.applying(
+            .focused,
+            to: initial,
+            actorID: owner,
+            actorCanManage: true,
+            targetID: anna,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(focused.status, .applied)
+        XCTAssertEqual(focused.record.mode, .focused)
+        XCTAssertFalse(RemoteInputControlPolicy.canWrite(focused.record, participantID: owner))
+        XCTAssertTrue(RemoteInputControlPolicy.canWrite(focused.record, participantID: anna))
+        XCTAssertTrue(RemoteInputControlPolicy.isFocusedController(
+            focused.record,
+            participantID: anna
+        ))
+        XCTAssertFalse(
+            RemoteInputControlPolicy.isFocusedController(focused.record, participantID: owner),
+            "another participant reconnecting must not cancel Anna's disconnect grace"
+        )
+
+        let reclaimed = RemoteInputControlPolicy.applying(
+            .reclaim,
+            to: focused.record,
+            actorID: owner,
+            actorCanManage: true,
+            targetID: nil,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(reclaimed.record.controllerID, owner)
+        XCTAssertTrue(RemoteInputControlPolicy.canWrite(reclaimed.record, participantID: owner))
+        XCTAssertFalse(RemoteInputControlPolicy.canWrite(reclaimed.record, participantID: anna))
+    }
+
+    func testFocusedControllerCanHandOffButWatcherCannotStealControl() {
+        let owner = RemoteCollaborationParticipantDTO.ownerID
+        let anna = "member-anna"
+        let priya = "member-priya"
+        let eligible = Set([owner, anna, priya])
+        let focused = RemoteInputControlRecord(mode: .focused, controllerID: anna, revision: 8)
+
+        let stolen = RemoteInputControlPolicy.applying(
+            .handoff,
+            to: focused,
+            actorID: priya,
+            actorCanManage: false,
+            targetID: priya,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(stolen.status, .forbidden)
+        XCTAssertEqual(stolen.record, focused)
+
+        let handedOff = RemoteInputControlPolicy.applying(
+            .handoff,
+            to: focused,
+            actorID: anna,
+            actorCanManage: false,
+            targetID: priya,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(handedOff.status, .applied)
+        XCTAssertEqual(handedOff.record.controllerID, priya)
+        XCTAssertEqual(handedOff.record.revision, 9)
+
+        let requested = RemoteInputControlPolicy.applying(
+            .request,
+            to: handedOff.record,
+            actorID: anna,
+            actorCanManage: false,
+            targetID: nil,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(requested.status, .delivered)
+        XCTAssertEqual(requested.record, handedOff.record)
+
+        let selfRequest = RemoteInputControlPolicy.applying(
+            .request,
+            to: handedOff.record,
+            actorID: priya,
+            actorCanManage: false,
+            targetID: nil,
+            eligibleParticipantIDs: eligible
+        )!
+        XCTAssertEqual(selfRequest.status, .rejected)
+        XCTAssertEqual(selfRequest.record, handedOff.record)
+    }
+
+    func testFocusedControlCannotHandOffToSomebodyWhoIsAlreadyOffline() {
+        let participants = [
+            RemoteCollaborationParticipantDTO(
+                id: "owner",
+                displayName: "Owner",
+                role: "owner",
+                isOnline: true
+            ),
+            RemoteCollaborationParticipantDTO(
+                id: "anna",
+                displayName: "Anna",
+                role: "member",
+                isOnline: false
+            ),
+        ]
+        let eligible = RemoteSessionMirrorRegistry.eligibleInputControlParticipantIDs(participants)
+        XCTAssertEqual(eligible, ["owner"])
+
+        let focused = RemoteInputControlRecord(
+            mode: .focused,
+            controllerID: "owner",
+            revision: 3
+        )
+        let result = RemoteInputControlPolicy.applying(
+            .handoff,
+            to: focused,
+            actorID: "owner",
+            actorCanManage: true,
+            targetID: "anna",
+            eligibleParticipantIDs: eligible
+        )
+        XCTAssertEqual(result?.status, .unavailable)
+        XCTAssertEqual(result?.record, focused)
+    }
+
+    func testInputControlIdentityBelongsToAPersonAcrossTheirDevices() {
+        let ownerPhone = RemoteAuthorization(
+            shareID: "owner-phone",
+            capability: .interact,
+            scope: .allSessions,
+            principal: .ownerDevice
+        )
+        let ownerBrowser = RemoteAuthorization(
+            shareID: "owner-browser",
+            capability: .interact,
+            scope: .allSessions,
+            principal: .ownerDevice
+        )
+        let member = RemoteMember(id: "member-anna", displayName: "Anna", deviceID: "phone")
+        let anna = RemoteAuthorization(
+            shareID: "accepted-share",
+            capability: .interact,
+            scope: .session(SessionID()),
+            principal: .guest,
+            member: member
+        )
+
+        XCTAssertEqual(ownerPhone.collaborationParticipantID, "owner")
+        XCTAssertEqual(ownerBrowser.collaborationParticipantID, "owner")
+        XCTAssertEqual(anna.collaborationParticipantID, "member-anna")
+    }
+
+    func testLiveAuthorityKeepsEveryAcceptedMemberCurrentAndRevokesExactlyOneCredential() {
+        let sessionID = SessionID()
+        let anna = RemoteAuthorization(
+            shareID: "shared-chat",
+            capability: .interact,
+            scope: .session(sessionID),
+            member: RemoteMember(id: "anna", displayName: "Anna", deviceID: "anna-phone")
+        )
+        let priya = RemoteAuthorization(
+            shareID: "shared-chat",
+            capability: .interact,
+            scope: .session(sessionID),
+            member: RemoteMember(id: "priya", displayName: "Priya", deviceID: "priya-phone")
+        )
+
+        let store = RemoteAuthorityStore()
+        store.set(anna, forToken: "anna-token")
+        store.set(priya, forToken: "priya-token")
+        XCTAssertTrue(store.isCurrent(anna))
+        XCTAssertTrue(store.isCurrent(priya))
+
+        store.set(nil, forToken: "anna-token")
+        XCTAssertFalse(store.isCurrent(anna))
+        XCTAssertTrue(store.isCurrent(priya))
+    }
+
+    func testConversationProjectionKeepsDraftCapabilityButGatesSendForWatcher() {
+        let authorization = RemoteAuthorization(
+            shareID: "anna-share",
+            capability: .interact,
+            scope: .session(SessionID()),
+            principal: .guest,
+            member: RemoteMember(id: "anna", displayName: "Anna", deviceID: "phone")
+        )
+        let snapshot = RemoteConversationSnapshotDTO(
+            rows: [],
+            streamingText: "",
+            canSend: true,
+            composerCapabilities: [RemoteComposerCapabilityDTO(
+                id: "status",
+                name: "status",
+                displayName: "Status",
+                description: "Show status",
+                argumentHint: "",
+                kind: "command",
+                trigger: "slash",
+                presentation: "command",
+                isEnabled: true
+            )],
+            permission: nil,
+            revision: 2
+        )
+        let watcher = RemoteConversationWirePolicy.authorized(
+            snapshot,
+            for: authorization,
+            canWrite: false
+        )
+        XCTAssertFalse(watcher.canSend)
+        XCTAssertEqual(watcher.composerCapabilities, snapshot.composerCapabilities)
     }
 
     override func tearDown() {
@@ -321,8 +540,69 @@ final class RemoteServerIntegrationTests: XCTestCase {
         controller.onRevokeLink = { revokedLink = $0 }
         _ = controller.view
         controller.view.frame = NSRect(x: 0, y: 0, width: 280, height: 560)
-        controller.apply(followers: followers, access: access)
+
+        // Attaching the controller starts its live refresh timer and immediately reads the real
+        // sharing stores. Install the fixture after that refresh; otherwise the attach rebuilds
+        // the rows and this test retains controls that are no longer in the window.
+        let window = NSWindow(
+            contentRect: controller.view.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        controller.apply(
+            followers: followers,
+            access: access,
+            inputControl: RemoteInputControlStateDTO(
+                mode: .focused,
+                controllerID: "member-anna",
+                controllerDisplayName: "Anna",
+                currentParticipantID: "owner",
+                canWrite: false,
+                canManage: true,
+                canHandOff: true,
+                participants: [
+                    .init(id: "owner", displayName: "David", role: "owner", isOnline: true),
+                    .init(
+                        id: "member-anna",
+                        displayName: "Anna",
+                        role: "member",
+                        isOnline: true
+                    ),
+                    .init(
+                        id: "member-jonas",
+                        displayName: "Jonas",
+                        role: "member",
+                        isOnline: false
+                    ),
+                ],
+                revision: 4
+            )
+        )
         controller.view.layoutSubtreeIfNeeded()
+
+        let mode = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? ThemedSegmentedControl }.first
+        )
+        XCTAssertEqual(mode.selectedIndex, 1)
+        let inputController = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? ThemedPopUp }.first {
+                $0.accessibilityIdentifier() == "sharing.input-controller"
+            }
+        )
+        XCTAssertEqual(inputController.selectedItem?.title, "Anna")
+        XCTAssertGreaterThan(
+            mode.frame.width,
+            240,
+            "input mode should fill the narrow pane instead of retaining the old fixed width"
+        )
+        XCTAssertGreaterThan(
+            inputController.frame.width,
+            140,
+            "controller names need the remaining row width without conflicting constraints"
+        )
 
         let rows = descendants(in: controller.view).compactMap {
             $0 as? SessionSharingRowView
@@ -336,6 +616,13 @@ final class RemoteServerIntegrationTests: XCTestCase {
 
         let jonas = try XCTUnwrap(rows.first { $0.accessibilityLabel()?.contains("Jonas") == true })
         let invitation = try XCTUnwrap(rows.first { button(titled: "Copy", in: $0) != nil })
+        let invitationDetail = try XCTUnwrap(
+            descendants(in: invitation).compactMap { $0 as? NSTextField }.first {
+                $0.stringValue.localizedCaseInsensitiveContains("expires")
+            }
+        )
+        XCTAssertEqual(invitationDetail.lineBreakMode, .byWordWrapping)
+        XCTAssertEqual(invitationDetail.maximumNumberOfLines, 2)
         try XCTUnwrap(button(titled: "Revoke", in: jonas)).performClick()
         try XCTUnwrap(button(titled: "Copy", in: invitation)).performClick()
         try XCTUnwrap(button(titled: "Revoke", in: invitation)).performClick()
@@ -343,15 +630,9 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertEqual(copied, "https://share.example/invite")
         XCTAssertEqual(revokedLink, "unused-link")
 
-        let window = NSWindow(
-            contentRect: controller.view.frame,
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.contentViewController = controller
         let copy = try XCTUnwrap(button(titled: "Copy", in: invitation))
+        XCTAssertTrue(copy.isBordered, "the primary invitation action needs a padded surface")
+        XCTAssertFalse(copy.isProminent)
         XCTAssertTrue(window.makeFirstResponder(copy), "row actions must remain keyboard focusable")
 
         var renders = Set<Data>()
@@ -363,7 +644,23 @@ final class RemoteServerIntegrationTests: XCTestCase {
                 controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds)
             )
             controller.view.cacheDisplay(in: controller.view.bounds, to: rep)
-            renders.insert(try XCTUnwrap(rep.representation(using: .png, properties: [:])))
+            let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+            renders.insert(png)
+            if theme.id == AppThemeStyles.cyberpunk.id {
+                let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+                    URL(fileURLWithPath: $0, isDirectory: true)
+                } ?? FileManager.default.temporaryDirectory.appendingPathComponent(
+                    "ThreadingRenders",
+                    isDirectory: true
+                )
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                try png.write(
+                    to: directory.appendingPathComponent("session-sharing-focused.png")
+                )
+            }
         }
         XCTAssertEqual(renders.count, 2, "sharing rows ignored the authored theme")
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
@@ -413,6 +710,92 @@ final class RemoteServerIntegrationTests: XCTestCase {
             RemoteClientMessage(type: "auth", token: "t", device: "d").deviceName,
             "a client that says nothing stays valid — the field is optional on the wire"
         )
+    }
+
+    func testBrowserShowsTheLiveRosterAndKeepsDraftsUntilTheMacAcknowledgesThem() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+        let page = String(decoding: try XCTUnwrap(get("/")).body, as: UTF8.self)
+
+        XCTAssertTrue(page.contains("id=\"presence\""))
+        XCTAssertTrue(page.contains("id=\"composerStatus\""))
+        XCTAssertTrue(script.contains("case \"presence\""))
+        XCTAssertTrue(script.contains("case \"submitResult\""))
+        XCTAssertTrue(script.contains("pendingPrompt = {"))
+        XCTAssertTrue(script.contains("messageType: \"submit\""))
+        XCTAssertTrue(
+            script.contains("savePendingSubmission({"),
+            "an acknowledged submission must survive a reconnect with the same request id"
+        )
+        XCTAssertTrue(
+            script.contains("if (els.prompt.value.trim() === submitted.text)"),
+            "an acknowledgement may clear only the exact draft that was submitted"
+        )
+        XCTAssertFalse(
+            script.contains("socket.send(JSON.stringify({ type: \"submit\", text: text }));\n    els.prompt.value = \"\";"),
+            "the acknowledged path must not erase a draft before the Mac accepts it"
+        )
+    }
+
+    func testBrowserContinuityIsScopedByHostShareAndSession() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+
+        XCTAssertTrue(script.contains("threading.sessionContinuity.v1"))
+        XCTAssertTrue(script.contains("hostID + \":\" + shareID"))
+        XCTAssertTrue(script.contains("continuitySessionKey(sessionID)"))
+        XCTAssertTrue(script.contains("saveConversationDraft()"))
+        XCTAssertTrue(script.contains("conversationViewportProgress"))
+        XCTAssertTrue(script.contains("terminalViewportProgress"))
+        XCTAssertTrue(script.contains("continuityArchive.lastRoute"))
+        XCTAssertTrue(
+            script.contains("!archive.states[key].conversationDraft"),
+            "position history may be pruned, but unsent words must never be evicted"
+        )
+    }
+
+    func testBrowserAttentionControlIsOutsideAgentAndPTYSubmission() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+        let page = String(decoding: try XCTUnwrap(get("/")).body, as: UTF8.self)
+
+        XCTAssertTrue(page.contains("id=\"attentionButton\""))
+        XCTAssertTrue(page.contains("id=\"attentionDialog\""))
+        XCTAssertTrue(page.contains("human-only notification"))
+        XCTAssertTrue(script.contains("case \"collaborationParticipants\""))
+        XCTAssertTrue(script.contains("case \"attention\""))
+        XCTAssertTrue(script.contains("case \"attentionResult\""))
+        XCTAssertTrue(script.contains("type: \"attentionRequest\""))
+        XCTAssertTrue(script.contains("recipientID: selected.value"))
+
+        let requestStart = try XCTUnwrap(script.range(of: "els.attentionForm.addEventListener"))
+        let cleanupStart = try XCTUnwrap(
+            script.range(of: "// --- Cleanup", range: requestStart.upperBound..<script.endIndex)
+        )
+        let requestPath = script[requestStart.lowerBound..<cleanupStart.lowerBound]
+        XCTAssertFalse(requestPath.contains("type: \"submit\""))
+        XCTAssertFalse(requestPath.contains("type: \"input\""))
+        XCTAssertFalse(requestPath.contains("type: \"terminalSubmit\""))
+    }
+
+    func testBrowserFocusedControlPreservesDraftAndDoesNotMasqueradeAsPTYInput() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+        let page = String(decoding: try XCTUnwrap(get("/")).body, as: UTF8.self)
+
+        XCTAssertTrue(page.contains("id=\"inputControl\""))
+        XCTAssertTrue(script.contains("case \"inputControl\""))
+        XCTAssertTrue(script.contains("type: \"inputControl\""))
+        XCTAssertTrue(script.contains("inputControlState.canWrite"))
+        XCTAssertTrue(
+            script.contains("els.prompt.disabled = !editable"),
+            "focused watching must disable send, not the draft editor"
+        )
+
+        let controlStart = try XCTUnwrap(script.range(of: "function sendInputControl"))
+        let renderStart = try XCTUnwrap(
+            script.range(of: "function renderInputControl", range: controlStart.upperBound..<script.endIndex)
+        )
+        let controlPath = script[controlStart.lowerBound..<renderStart.lowerBound]
+        XCTAssertFalse(controlPath.contains("type: \"submit\""))
+        XCTAssertFalse(controlPath.contains("type: \"input\""))
+        XCTAssertFalse(controlPath.contains("type: \"terminalSubmit\""))
     }
 
     /// The client clamps to the same range the server validates against, so a request from a
@@ -727,11 +1110,28 @@ final class RemoteServerIntegrationTests: XCTestCase {
             principal: .guest
         )
         let projected = RemoteConversationWirePolicy.authorized(
-            RemoteConversationSnapshotDTO(rows: [], canSend: true),
+            RemoteConversationSnapshotDTO(
+                rows: [],
+                canSend: true,
+                composerCapabilities: [RemoteComposerCapabilityDTO(
+                    id: "codex.skill:release",
+                    name: "release",
+                    displayName: "Release",
+                    description: "Private project release workflow",
+                    argumentHint: "",
+                    kind: "skill",
+                    trigger: "dollar",
+                    presentation: "turn"
+                )]
+            ),
             for: viewer
         )
 
         XCTAssertFalse(projected.canSend)
+        XCTAssertTrue(
+            projected.composerCapabilities.isEmpty,
+            "A view-only share does not need project capability metadata"
+        )
         XCTAssertNil(projected.permission)
     }
 
@@ -925,6 +1325,63 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertEqual(redeemer.persistenceRequests, [true, false])
     }
 
+    func testMutationRequestIDReplaysOneInvitationRedemption() throws {
+        let redeemer = InvitationPersistenceSpy()
+        server.invitationRedeemer = redeemer
+        let body = try JSONEncoder().encode(
+            RemoteAcceptInvitationRequestDTO(displayName: "Test iPhone")
+        )
+        let headers = [
+            "X-Threading-Client": "Threading-iOS",
+            "X-Threading-Request-ID": "request-1",
+        ]
+
+        let first = try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: body,
+            headers: headers
+        ))
+        let replay = try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: body,
+            headers: headers
+        ))
+
+        XCTAssertEqual(first.status, 201)
+        XCTAssertEqual(replay.status, 201)
+        XCTAssertEqual(replay.body, first.body)
+        XCTAssertEqual(redeemer.persistenceRequests, [true])
+        XCTAssertEqual(replay.headers["X-Threading-Request-ID"] as? String, "request-1")
+    }
+
+    func testMutationRequestIDRejectsADifferentBody() throws {
+        let redeemer = InvitationPersistenceSpy()
+        server.invitationRedeemer = redeemer
+        let headers = [
+            "X-Threading-Client": "Threading-iOS",
+            "X-Threading-Request-ID": "request-1",
+        ]
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: try JSONEncoder().encode(
+                RemoteAcceptInvitationRequestDTO(displayName: "First Phone")
+            ),
+            headers: headers
+        )).status, 201)
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: try JSONEncoder().encode(
+                RemoteAcceptInvitationRequestDTO(displayName: "Different Phone")
+            ),
+            headers: headers
+        )).status, 409)
+        XCTAssertEqual(redeemer.persistenceRequests, [true])
+    }
+
     func testBearerSchemeIsCaseInsensitive() {
         let raw = "GET /api/me HTTP/1.1\r\nAuthorization: bearer goodtoken\r\n\r\n"
         guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
@@ -1098,6 +1555,10 @@ final class RemoteServerIntegrationTests: XCTestCase {
             RemoteRouter.gitReviewRoute(forPath: "/api/session/abc/git-review/lastTurn"),
             RemoteRouter.GitReviewRoute(sessionID: "abc", mode: .lastTurn)
         )
+        XCTAssertEqual(
+            RemoteRouter.gitReviewRoute(forPath: "/api/session/abc/git-review/uncommitted"),
+            RemoteRouter.GitReviewRoute(sessionID: "abc", mode: .uncommitted)
+        )
         XCTAssertNil(RemoteRouter.gitReviewRoute(
             forPath: "/api/session/abc/git-review/not-a-mode"
         ))
@@ -1218,9 +1679,35 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertFalse(RemoteInboundPolicy.acceptsTerminalInput(
             String(repeating: "i", count: RemoteAccessDefaults.maximumTerminalInputBytes + 1)
         ))
+        XCTAssertTrue(RemoteInboundPolicy.acceptsTerminalInput("one complete line\r"))
+        XCTAssertFalse(RemoteInboundPolicy.acceptsTerminalInput(
+            String(repeating: "i", count: RemoteAccessDefaults.maximumTerminalInputBytes) + "\r"
+        ), "the atomic terminal path includes Return in its bounded PTY write")
         XCTAssertFalse(RemoteInboundPolicy.acceptsPrompt(
             String(repeating: "p", count: RemoteAccessDefaults.maximumPromptBytes + 1)
         ))
+        let context = RemoteConversationContextAttachmentDTO(
+            id: UUID().uuidString,
+            kind: "comment",
+            source: "attachment",
+            title: "layout.png",
+            comment: "Reduce the padding."
+        )
+        XCTAssertTrue(RemoteInboundPolicy.acceptsContextAttachments([context]))
+        XCTAssertFalse(RemoteInboundPolicy.acceptsContextAttachments(
+            Array(repeating: context, count: ConversationContextPolicy.maximumAttachments + 1)
+        ))
+        let oversizedContext = RemoteConversationContextAttachmentDTO(
+            id: UUID().uuidString,
+            kind: "comment",
+            source: "attachment",
+            title: "layout.png",
+            comment: String(
+                repeating: "c",
+                count: ConversationContextPolicy.maximumEnvelopeUTF8Bytes
+            )
+        )
+        XCTAssertFalse(RemoteInboundPolicy.acceptsContextAttachments([oversizedContext]))
     }
 
     func testArchivedSessionsAreOutsideEveryRemoteEntryPoint() {
@@ -1316,6 +1803,246 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertTrue(delta.canSend)
     }
 
+    func testConversationCatalogIsDeltaEncodedAndBoundedWithoutPrivateSkillPaths() throws {
+        let previous = RemoteConversationSnapshotDTO(rows: [], canSend: true)
+        let capabilities = (0..<400).map { index in
+            RemoteComposerCapabilityDTO(
+                id: "codex.skill:\(index)",
+                name: "skill-\(index)",
+                displayName: "Skill \(index)",
+                description: String(repeating: "d", count: 2_000),
+                argumentHint: "[task]",
+                aliases: ["alias-\(index)"],
+                kind: "skill",
+                trigger: "dollar",
+                presentation: "turn"
+            )
+        }
+        let current = RemoteConversationSnapshotDTO(
+            rows: [],
+            canSend: true,
+            composerCapabilities: capabilities
+        )
+
+        let delta = try XCTUnwrap(RemoteConversationWirePolicy.delta(
+            from: previous,
+            to: current,
+            baseRevision: 1,
+            revision: 2
+        ))
+        let catalog = try XCTUnwrap(delta.composerCapabilities)
+        XCTAssertLessThanOrEqual(
+            catalog.count,
+            RemoteAccessDefaults.maximumRemoteComposerCapabilities
+        )
+        XCTAssertLessThanOrEqual(
+            try JSONEncoder().encode(catalog).count,
+            RemoteAccessDefaults.maximumRemoteComposerCapabilityBytes
+        )
+        let encoded = String(decoding: try JSONEncoder().encode(delta), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("/Users/"))
+        XCTAssertNil(RemoteConversationWirePolicy.delta(
+            from: current,
+            to: current,
+            baseRevision: 2,
+            revision: 3
+        )?.composerCapabilities)
+    }
+
+    /// Measures the complete catch-up pipeline without requiring a live provider: a large Mac
+    /// timeline is projected into the bounded recent window, encoded, decoded into the mobile
+    /// state model, paged to the beginning, advanced by one live write, and recovered after a
+    /// revision gap. This is deliberately opt-in because the 20,000-row point is diagnostic,
+    /// not part of the fast protocol suite.
+    func testStressRemoteConversationCatchUpWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_REMOTE_CONVERSATION_STRESS"] == "1",
+            "Set THREADING_REMOTE_CONVERSATION_STRESS=1 to run the remote catch-up sweep."
+        )
+
+        let override = ProcessInfo.processInfo.environment[
+            "THREADING_REMOTE_CONVERSATION_STRESS_ROWS"
+        ].flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil }
+        for rowCount in override.map({ [$0] }) ?? [1_000, 5_000, 20_000] {
+            try autoreleasepool {
+                try runRemoteConversationCatchUpStress(rowCount: rowCount)
+            }
+        }
+    }
+
+    private func runRemoteConversationCatchUpStress(rowCount: Int) throws {
+        let rows = (0..<rowCount).map { index in
+            switch index % 12 {
+            case 0:
+                return RemoteConversationRowDTO(
+                    id: String(index),
+                    kind: "user",
+                    text: "Remote prompt \(index): continue the cross-device performance run."
+                )
+            case 1, 5, 9:
+                return RemoteConversationRowDTO(
+                    id: String(index),
+                    kind: "tool",
+                    toolName: index.isMultiple(of: 2) ? "Read" : "Bash",
+                    summary: "Sources/Remote/Fixture\(index).swift",
+                    result: "Completed deterministic operation \(index)."
+                )
+            default:
+                return RemoteConversationRowDTO(
+                    id: String(index),
+                    kind: "assistant",
+                    text: """
+                    ### Cross-device result \(index)
+
+                    This deterministic Markdown row represents work written from another device. \
+                    It exercises projection, serialization, pagination, and client reconciliation.
+
+                    `let remoteRow = \(index)`
+                    """
+                )
+            }
+        }
+        let complete = RemoteConversationSnapshotDTO(rows: rows, canSend: true)
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        let projectionStarted = DispatchTime.now().uptimeNanoseconds
+        let initial = RemoteConversationWirePolicy.initial(complete, revision: 1)
+        let projectionEnded = DispatchTime.now().uptimeNanoseconds
+        let initialData = try encoder.encode(initial)
+        let encodingEnded = DispatchTime.now().uptimeNanoseconds
+        let decodedInitial = try decoder.decode(
+            RemoteConversationSnapshotDTO.self,
+            from: initialData
+        )
+        var client = RemoteConversationState()
+        _ = client.apply(decodedInitial)
+        let clientEnded = DispatchTime.now().uptimeNanoseconds
+
+        XCTAssertEqual(client.rows.last?.id, String(rowCount - 1))
+        XCTAssertLessThanOrEqual(
+            client.rows.count,
+            RemoteAccessDefaults.maximumRemoteConversationRows
+        )
+        XCTAssertEqual(client.hasEarlier, rowCount > client.rows.count)
+        print(
+            "THREADING_PERF remote-conversation-open "
+                + "source_rows=\(rowCount) recent_rows=\(client.rows.count) "
+                + "wire_bytes=\(initialData.count) "
+                + "projection_ms=\(Self.milliseconds(projectionEnded - projectionStarted)) "
+                + "encode_ms=\(Self.milliseconds(encodingEnded - projectionEnded)) "
+                + "decode_apply_ms=\(Self.milliseconds(clientEnded - encodingEnded)) "
+                + "elapsed_ms=\(Self.milliseconds(clientEnded - projectionStarted))"
+        )
+
+        var reconnectDurations: [UInt64] = []
+        for revision in 2...21 {
+            let started = DispatchTime.now().uptimeNanoseconds
+            let projected = RemoteConversationWirePolicy.initial(complete, revision: revision)
+            let data = try encoder.encode(projected)
+            let decoded = try decoder.decode(RemoteConversationSnapshotDTO.self, from: data)
+            _ = client.apply(decoded)
+            reconnectDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+        }
+        print(
+            "THREADING_PERF remote-conversation-reconnect "
+                + "source_rows=\(rowCount) repetitions=\(reconnectDurations.count) "
+                + "p50_ms=\(Self.milliseconds(Self.percentile(reconnectDurations, 0.50))) "
+                + "p95_ms=\(Self.milliseconds(Self.percentile(reconnectDurations, 0.95)))"
+        )
+
+        _ = client.apply(initial)
+        let paginationStarted = DispatchTime.now().uptimeNanoseconds
+        var pageDurations: [UInt64] = []
+        var pageWireBytes = 0
+        while client.hasEarlier {
+            let pageStarted = DispatchTime.now().uptimeNanoseconds
+            let page = RemoteConversationWirePolicy.page(
+                complete,
+                beforeRowID: client.rows.first?.id,
+                requestedLimit: RemoteAccessDefaults.maximumRemoteConversationPageRows
+            )
+            let data = try encoder.encode(page)
+            let decoded = try decoder.decode(RemoteConversationPageDTO.self, from: data)
+            _ = client.prepend(decoded)
+            pageWireBytes += data.count
+            pageDurations.append(DispatchTime.now().uptimeNanoseconds - pageStarted)
+        }
+        let paginationEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(client.rows.count, rowCount)
+        print(
+            "THREADING_PERF remote-conversation-pagination "
+                + "source_rows=\(rowCount) pages=\(pageDurations.count) "
+                + "wire_bytes=\(pageWireBytes) "
+                + "page_p50_ms=\(Self.milliseconds(Self.percentile(pageDurations, 0.50))) "
+                + "page_p95_ms=\(Self.milliseconds(Self.percentile(pageDurations, 0.95))) "
+                + "elapsed_ms=\(Self.milliseconds(paginationEnded - paginationStarted))"
+        )
+
+        let appended = RemoteConversationRowDTO(
+            id: String(rowCount),
+            kind: "assistant",
+            text: "The remote writer appended one more result."
+        )
+        let advanced = RemoteConversationSnapshotDTO(rows: rows + [appended], canSend: true)
+        let deltaStarted = DispatchTime.now().uptimeNanoseconds
+        let delta = try XCTUnwrap(RemoteConversationWirePolicy.delta(
+            from: complete,
+            to: advanced,
+            baseRevision: 1,
+            revision: 2
+        ))
+        let deltaEnded = DispatchTime.now().uptimeNanoseconds
+        let deltaData = try encoder.encode(delta)
+        let decodedDelta = try decoder.decode(RemoteConversationDeltaDTO.self, from: deltaData)
+        _ = client.apply(decodedDelta)
+        let deltaApplied = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(client.rows.last?.id, appended.id)
+        print(
+            "THREADING_PERF remote-conversation-live-update "
+                + "source_rows=\(rowCount) wire_bytes=\(deltaData.count) "
+                + "delta_ms=\(Self.milliseconds(deltaEnded - deltaStarted)) "
+                + "encode_decode_apply_ms=\(Self.milliseconds(deltaApplied - deltaEnded)) "
+                + "elapsed_ms=\(Self.milliseconds(deltaApplied - deltaStarted))"
+        )
+
+        let gap = RemoteConversationDeltaDTO(
+            baseRevision: 99,
+            revision: 100,
+            streamingText: "missed update",
+            canSend: false
+        )
+        let resyncStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(client.apply(gap), .requiresSnapshot)
+        let resync = RemoteConversationWirePolicy.initial(advanced, revision: 100)
+        let resyncData = try encoder.encode(resync)
+        let decodedResync = try decoder.decode(
+            RemoteConversationSnapshotDTO.self,
+            from: resyncData
+        )
+        _ = client.apply(decodedResync)
+        let resyncEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(client.revision, 100)
+        XCTAssertEqual(client.rows.last?.id, appended.id)
+        print(
+            "THREADING_PERF remote-conversation-resync "
+                + "source_rows=\(rowCount) recent_rows=\(client.rows.count) "
+                + "wire_bytes=\(resyncData.count) "
+                + "elapsed_ms=\(Self.milliseconds(resyncEnded - resyncStarted))"
+        )
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func percentile(_ values: [UInt64], _ fraction: Double) -> UInt64 {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = Int((Double(sorted.count - 1) * fraction).rounded(.up))
+        return sorted[min(max(index, 0), sorted.count - 1)]
+    }
+
     func testAttachmentResponseIsHardenedAndClosesItsConnection() {
         let response = RemoteRouter.data(Data("image".utf8), contentType: "image/png")
         let serialized = String(decoding: response.serialized, as: UTF8.self)
@@ -1371,8 +2098,13 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            Set(found.map { $0.resolvingSymlinksInPath().path }),
+            Set(found.insideProject.map { $0.resolvingSymlinksInPath().path }),
             Set([pdf.path, image.path, nestedImage.path])
+        )
+        XCTAssertEqual(
+            found.outsideProject.map { $0.resolvingSymlinksInPath().path },
+            [outside.resolvingSymlinksInPath().path],
+            "an outside path is sorted, not dropped — the store decides what that means"
         )
     }
 
@@ -1398,6 +2130,69 @@ final class RemoteServerIntegrationTests: XCTestCase {
         let attachments = store.attachments(for: sessionID)
         XCTAssertEqual(attachments.map(\.relativePath), ["first.png", "second.pdf"])
         XCTAssertEqual(attachments.first?.referencedAt, instant)
+    }
+
+    /// Opt-in live host for the browser-driven release gate. Unlike a fixture page, this puts a
+    /// real PTY behind the shipping HTTP/WebSocket server and keeps two independently
+    /// authenticated clients connected until one atomically submits `finish-e2e`.
+    func testInteractiveRemoteBrowserJourneyWhenEnabled() throws {
+        let enableMarker = URL(
+            fileURLWithPath: "/tmp/threading-remote-browser-e2e-enabled",
+            isDirectory: true
+        )
+        let explicitlyEnabled = ProcessInfo.processInfo.environment[
+            "THREADING_REMOTE_BROWSER_E2E"
+        ] == "1" || FileManager.default.fileExists(atPath: enableMarker.path)
+        try XCTSkipUnless(explicitlyEnabled, "Run only from the browser E2E driver.")
+        try? FileManager.default.removeItem(at: enableMarker)
+
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-remote-browser-e2e", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let project = ProjectStore.shared.addProject(folderURL: temporary)
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            title: "Remote collaboration release gate"
+        ))
+        let controller = AgentRuntime.shared.makeController(for: session)
+        controller.startRemoteBrowserE2EFixture()
+        XCTAssertTrue(controller.isRunning)
+
+        let redeemer = RemoteBrowserE2ERedeemer(
+            authority: authority,
+            sessionID: session.id
+        )
+        server.invitationRedeemer = redeemer
+        let origin = "http://127.0.0.1:\(port!)"
+        let launch = [
+            "ownerURL": "\(origin)/#goodtoken",
+            "guestURL": "\(origin)/#guestinvite",
+            "sessionID": session.id.uuidString,
+        ]
+        let launchURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-remote-browser-e2e.json")
+        try JSONSerialization.data(withJSONObject: launch, options: [.sortedKeys])
+            .write(to: launchURL, options: .atomic)
+        print("THREADING_REMOTE_BROWSER_E2E_READY \(launchURL.path)")
+
+        defer {
+            try? FileManager.default.removeItem(at: launchURL)
+            AgentRuntime.shared.discard(sessionID: session.id)
+            ProjectStore.shared.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: temporary)
+            _ = redeemer
+        }
+
+        let deadline = Date(timeIntervalSinceNow: 180)
+        while controller.isRunning, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.05)))
+        }
+        XCTAssertFalse(
+            controller.isRunning,
+            "The browser journey did not atomically submit its finish line before timing out."
+        )
     }
 
     /// Opens a loopback TCP socket, writes `request`, and returns whatever comes back as a string.
@@ -1432,6 +2227,44 @@ final class RemoteServerIntegrationTests: XCTestCase {
 }
 
 @MainActor
+private final class RemoteBrowserE2ERedeemer: RemoteInvitationRedeeming {
+    private let authority: RemoteAuthorityStore
+    private let sessionID: SessionID
+
+    init(authority: RemoteAuthorityStore, sessionID: SessionID) {
+        self.authority = authority
+        self.sessionID = sessionID
+    }
+
+    func redeemInvitation(
+        token: String,
+        deviceID: String,
+        displayName: String,
+        persistsOwnerDevice _: Bool
+    ) -> RemoteInvitationRedemption? {
+        guard token == "guestinvite" else { return nil }
+        let member = RemoteMember(
+            id: "browser-guest",
+            displayName: displayName,
+            deviceID: deviceID
+        )
+        let authorization = RemoteAuthorization(
+            shareID: "browser-guest",
+            capability: .interact,
+            scope: .session(sessionID),
+            principal: .guest,
+            member: member
+        )
+        let accessToken = "accepted-guestinvite"
+        authority.set(authorization, forToken: accessToken)
+        return RemoteInvitationRedemption(
+            accessToken: accessToken,
+            authorization: authorization
+        )
+    }
+}
+
+@MainActor
 private final class InvitationPersistenceSpy: RemoteInvitationRedeeming {
     private(set) var persistenceRequests: [Bool] = []
 
@@ -1460,6 +2293,234 @@ private final class InvitationPersistenceSpy: RemoteInvitationRedeeming {
 @MainActor
 final class RemoteAccessTransportPolicyTests: XCTestCase {
 
+    func testPromptReplayCacheRejectsConflictsExpiresAndStaysBounded() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var cache = RemotePromptReplayCache(maximumEntries: 2, lifetime: 10)
+        let first = RemotePromptReplayCache.Key(
+            sessionID: "session-1",
+            principalID: "device-1",
+            requestID: "request-1"
+        )
+        let second = RemotePromptReplayCache.Key(
+            sessionID: "session-1",
+            principalID: "device-2",
+            requestID: "request-2"
+        )
+        let third = RemotePromptReplayCache.Key(
+            sessionID: "session-2",
+            principalID: "device-3",
+            requestID: "request-3"
+        )
+        let promptA = Data("prompt-a".utf8)
+        let promptB = Data("prompt-b".utf8)
+
+        XCTAssertEqual(cache.decision(for: first, fingerprint: promptA, now: start), .new)
+        cache.store(.accepted, for: first, fingerprint: promptA, now: start)
+        XCTAssertEqual(
+            cache.decision(for: first, fingerprint: promptA, now: start),
+            .replay(.accepted)
+        )
+        XCTAssertEqual(
+            cache.decision(for: first, fingerprint: promptB, now: start),
+            .conflict
+        )
+
+        cache.store(.busy, for: second, fingerprint: promptB, now: start)
+        cache.store(.accepted, for: third, fingerprint: promptA, now: start)
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertEqual(cache.decision(for: first, fingerprint: promptA, now: start), .new)
+
+        XCTAssertEqual(
+            cache.decision(
+                for: second,
+                fingerprint: promptB,
+                now: start.addingTimeInterval(11)
+            ),
+            .new
+        )
+        XCTAssertEqual(cache.count, 0)
+    }
+
+    /// Re-storing a key that is already cached must not cost an unrelated entry its place.
+    ///
+    /// This is the *normal* path, not an edge: a prompt is stored once when it is accepted and
+    /// again when its status settles, so every prompt stores its key twice. The eviction loop
+    /// ran on `entries.count` after the key had been pulled out of `order` but before it was
+    /// pulled out of `entries`, so the count still said "full" and the oldest *other* entry was
+    /// dropped to make room for something already present.
+    ///
+    /// The cost is the exact guarantee this cache exists to provide: the evicted prompt's
+    /// replay state is gone, so its retry reads as `.new` and the prompt is submitted a second
+    /// time.
+    func testUpdatingACachedPromptDoesNotEvictAnotherOne() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var cache = RemotePromptReplayCache(maximumEntries: 2, lifetime: 600)
+        let mine = RemotePromptReplayCache.Key(
+            sessionID: "session-1", principalID: "device-1", requestID: "request-1"
+        )
+        let theirs = RemotePromptReplayCache.Key(
+            sessionID: "session-2", principalID: "device-2", requestID: "request-2"
+        )
+        let promptA = Data("prompt-a".utf8)
+        let promptB = Data("prompt-b".utf8)
+
+        cache.store(.accepted, for: mine, fingerprint: promptA, now: start)
+        cache.store(.busy, for: theirs, fingerprint: promptB, now: start)
+        XCTAssertEqual(cache.count, 2)
+
+        // The second store for `mine` — the status settling, which every prompt does.
+        cache.store(.accepted, for: mine, fingerprint: promptA, now: start)
+
+        XCTAssertEqual(cache.count, 2, "updating an entry changed how many are held")
+        XCTAssertEqual(
+            cache.decision(for: theirs, fingerprint: promptB, now: start),
+            .replay(.busy),
+            "an unrelated prompt was evicted by an update, and would now be submitted twice"
+        )
+        XCTAssertEqual(
+            cache.decision(for: mine, fingerprint: promptA, now: start),
+            .replay(.accepted)
+        )
+    }
+
+    /// A genuine insert past the cap still evicts, oldest first — the property the update path
+    /// above must not be fixed at the expense of.
+    func testAThirdPromptStillEvictsTheOldest() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var cache = RemotePromptReplayCache(maximumEntries: 2, lifetime: 600)
+        let keys = (1...3).map {
+            RemotePromptReplayCache.Key(
+                sessionID: "session-\($0)", principalID: "device-\($0)", requestID: "request-\($0)"
+            )
+        }
+        let fingerprint = Data("prompt".utf8)
+
+        for key in keys { cache.store(.accepted, for: key, fingerprint: fingerprint, now: start) }
+
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertEqual(cache.decision(for: keys[0], fingerprint: fingerprint, now: start), .new)
+        XCTAssertEqual(
+            cache.decision(for: keys[1], fingerprint: fingerprint, now: start), .replay(.accepted)
+        )
+        XCTAssertEqual(
+            cache.decision(for: keys[2], fingerprint: fingerprint, now: start), .replay(.accepted)
+        )
+    }
+
+    /// The attention policy keeps the same bounded map as the prompt cache, and had the same
+    /// eviction defect. Here losing an entry costs the exactly-once guarantee on a *poke*: the
+    /// evicted request replays as `.proceed` and the person is notified twice.
+    func testUpdatingAStoredAttentionRequestDoesNotEvictAnother() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var policy = RemoteAttentionRequestPolicy(maximumEntries: 2, lifetime: 600, cooldown: 30)
+
+        func request(_ index: Int) -> RemoteAttentionRequestPolicy.RequestKey {
+            .init(sessionID: "session-\(index)", principalID: "member-\(index)", requestID: "request-\(index)")
+        }
+        func rate(_ index: Int) -> RemoteAttentionRequestPolicy.RateKey {
+            .init(sessionID: "session-\(index)", principalID: "member-\(index)", recipientID: "anna")
+        }
+        let payload = Data("please review".utf8)
+
+        policy.store(.delivered, requestKey: request(1), rateKey: rate(1), fingerprint: payload, now: start)
+        policy.store(.unavailable, requestKey: request(2), rateKey: rate(2), fingerprint: payload, now: start)
+        XCTAssertEqual(policy.count, 2)
+
+        // The same request settling to a different status — the ordinary second store.
+        policy.store(.rejected, requestKey: request(1), rateKey: rate(1), fingerprint: payload, now: start)
+
+        XCTAssertEqual(policy.count, 2, "updating an entry changed how many are held")
+        XCTAssertEqual(
+            policy.decision(requestKey: request(2), rateKey: rate(2), fingerprint: payload, now: start),
+            .replay(.unavailable),
+            "an unrelated request was evicted by an update, and would poke its recipient twice"
+        )
+        XCTAssertEqual(
+            policy.decision(requestKey: request(1), rateKey: rate(1), fingerprint: payload, now: start),
+            .replay(.rejected)
+        )
+    }
+
+    func testAttentionRequestsReplayExactlyOnceAndCollapseRepeatedPokes() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var policy = RemoteAttentionRequestPolicy(
+            maximumEntries: 2,
+            lifetime: 60,
+            cooldown: 30
+        )
+        let first = RemoteAttentionRequestPolicy.RequestKey(
+            sessionID: "session-1",
+            principalID: "member-david:phone",
+            requestID: "request-1"
+        )
+        let retry = RemoteAttentionRequestPolicy.RequestKey(
+            sessionID: "session-1",
+            principalID: "member-david:phone",
+            requestID: "request-2"
+        )
+        let rate = RemoteAttentionRequestPolicy.RateKey(
+            sessionID: "session-1",
+            principalID: "member-david:phone",
+            recipientID: "member-anna"
+        )
+        let firstPayload = Data("anna\0please review".utf8)
+        let changedPayload = Data("anna\0different".utf8)
+
+        XCTAssertEqual(
+            policy.decision(
+                requestKey: first,
+                rateKey: rate,
+                fingerprint: firstPayload,
+                now: start
+            ),
+            .proceed
+        )
+        policy.store(
+            .delivered,
+            requestKey: first,
+            rateKey: rate,
+            fingerprint: firstPayload,
+            now: start
+        )
+        XCTAssertEqual(
+            policy.decision(
+                requestKey: first,
+                rateKey: rate,
+                fingerprint: firstPayload,
+                now: start.addingTimeInterval(1)
+            ),
+            .replay(.delivered),
+            "a lost acknowledgement must not emit a second notification"
+        )
+        XCTAssertEqual(
+            policy.decision(
+                requestKey: first,
+                rateKey: rate,
+                fingerprint: changedPayload,
+                now: start.addingTimeInterval(1)
+            ),
+            .conflict
+        )
+        XCTAssertEqual(
+            policy.decision(
+                requestKey: retry,
+                rateKey: rate,
+                fingerprint: firstPayload,
+                now: start.addingTimeInterval(10)
+            ),
+            .rateLimited
+        )
+        XCTAssertEqual(
+            policy.decision(
+                requestKey: retry,
+                rateKey: rate,
+                fingerprint: firstPayload,
+                now: start.addingTimeInterval(31)
+            ),
+            .proceed
+        )
+    }
+
     func testTailscaleStatusBecomesAStablePrivateHTTPSOrigin() throws {
         let status = Data("""
         {
@@ -1480,17 +2541,84 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         """.utf8)))
     }
 
+    func testTailscaleReadinessNamesRecoveryInsteadOfCollapsingToUnavailable() {
+        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("""
+        { "BackendState": "NeedsLogin", "Self": { "DNSName": "" } }
+        """.utf8)), .signedOut)
+        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("""
+        { "BackendState": "Stopped", "Self": { "DNSName": "mac.example.ts.net." } }
+        """.utf8)), .stopped)
+        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("{".utf8)),
+                       .statusUnavailable)
+    }
+
+    func testHybridRelayIsLazyButEveryOptInAndPublicShareStartsIt() {
+        XCTAssertFalse(RemoteAccessCoordinator.relayRequired(
+            mode: .tailscaleAndRelay,
+            allowsOwnerFallback: false,
+            keepsRelayReady: false,
+            hasActiveShares: false,
+            hasPendingShares: false
+        ))
+        for reason in 0..<4 {
+            XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
+                mode: .tailscaleAndRelay,
+                allowsOwnerFallback: reason == 0,
+                keepsRelayReady: reason == 1,
+                hasActiveShares: reason == 2,
+                hasPendingShares: reason == 3
+            ))
+        }
+        XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
+            mode: .relay,
+            allowsOwnerFallback: false,
+            keepsRelayReady: false,
+            hasActiveShares: false,
+            hasPendingShares: false
+        ))
+        XCTAssertFalse(RemoteAccessCoordinator.relayRequired(
+            mode: .tailscale,
+            allowsOwnerFallback: true,
+            keepsRelayReady: true,
+            hasActiveShares: true,
+            hasPendingShares: true
+        ))
+    }
+
     func testTailscaleOwnsOnlyItsDedicatedServePort() {
         XCTAssertEqual(TailscaleRemoteTransport.statusArguments, [
             "status", "--json", "--peers=false",
         ])
         XCTAssertEqual(TailscaleRemoteTransport.serveArguments(localPort: 49152), [
-            "serve", "--bg", "--https=8443", "http://127.0.0.1:49152",
+            "serve", "--yes", "--bg", "--https=8443", "http://127.0.0.1:49152",
         ])
         XCTAssertEqual(TailscaleRemoteTransport.stopArguments, [
             "serve", "--https=8443", "off",
         ])
         XCTAssertFalse(TailscaleRemoteTransport.stopArguments.contains("reset"))
+    }
+
+    func testTailscaleRefusesToReplaceAnExistingServeHandler() {
+        let empty = Data(#"{}"#.utf8)
+        let occupied = Data(#"{"TCP":{"8443":{"HTTPS":true}}}"#.utf8)
+        let unrelated = Data(#"{"TCP":{"443":{"HTTPS":true}}}"#.utf8)
+
+        XCTAssertTrue(TailscaleRemoteTransport.isValidServeStatus(empty))
+        XCTAssertFalse(TailscaleRemoteTransport.serveStatus(
+            empty,
+            containsHTTPSPort: 8443
+        ))
+        XCTAssertTrue(TailscaleRemoteTransport.serveStatus(
+            occupied,
+            containsHTTPSPort: 8443
+        ))
+        XCTAssertFalse(TailscaleRemoteTransport.serveStatus(
+            unrelated,
+            containsHTTPSPort: 8443
+        ))
+        XCTAssertEqual(TailscaleRemoteTransport.serveStatusArguments, [
+            "serve", "status", "--json",
+        ])
     }
 
     func testOwnerCredentialIsBoundToTheDeviceThatReceivedIt() {
@@ -1514,8 +2642,17 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
 
         XCTAssertEqual(settings.remoteAccessConnectionMode, .relay)
+        XCTAssertFalse(settings.remoteAccessAllowsOwnerRelayFallback)
+        XCTAssertFalse(settings.remoteAccessKeepsRelayReady)
+        XCTAssertEqual(settings.remoteInputControlDefault, .collaborative)
         settings.remoteAccessConnectionMode = .tailscaleAndRelay
+        settings.remoteAccessAllowsOwnerRelayFallback = true
+        settings.remoteAccessKeepsRelayReady = true
+        settings.remoteInputControlDefault = .focusedOwner
         XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .tailscaleAndRelay)
+        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessAllowsOwnerRelayFallback)
+        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessKeepsRelayReady)
+        XCTAssertEqual(AppSettings(defaults: defaults).remoteInputControlDefault, .focusedOwner)
 
         defaults.set("future-mode", forKey: "remoteAccessConnectionMode")
         XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .relay)
@@ -1609,6 +2746,77 @@ final class RemoteOwnerDeviceRegistryTests: XCTestCase {
         XCTAssertTrue(registry.devices.isEmpty)
         XCTAssertNil(registry.persistenceError)
     }
+}
+
+@MainActor
+final class RemoteGuestSharePersistenceTests: XCTestCase {
+
+    private let invitationToken = String(repeating: "c", count: 43)
+
+    func testAcceptedGuestMembershipAndUnusedInvitationSurviveCoordinatorRecreation() throws {
+        let sessionID = SessionID()
+        let store = InMemoryRemoteGuestShareStore(shares: [RemoteGuestShareRecord(
+            id: "share-one",
+            sessionID: sessionID.uuidString,
+            invitationToken: invitationToken,
+            capability: .interact,
+            canApprovePermissions: false,
+            createdAt: Date(),
+            expiresAt: Date(timeIntervalSinceNow: 3_600),
+            members: []
+        )])
+        let first = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            guestShareStore: store
+        )
+        XCTAssertEqual(first.access(for: sessionID).links.count, 1)
+
+        let redemption = try XCTUnwrap(first.redeemInvitation(
+            token: invitationToken,
+            deviceID: "anna-phone",
+            displayName: "Anna",
+            persistsOwnerDevice: false
+        ))
+        XCTAssertEqual(redemption.authorization.member?.displayName, "Anna")
+        XCTAssertTrue(first.access(for: sessionID).links.isEmpty)
+        XCTAssertEqual(first.access(for: sessionID).members.map(\.displayName), ["Anna"])
+
+        let afterRestart = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            guestShareStore: store
+        )
+        XCTAssertTrue(afterRestart.access(for: sessionID).links.isEmpty)
+        XCTAssertEqual(afterRestart.access(for: sessionID).members.map(\.displayName), ["Anna"])
+    }
+
+    func testUnreadableGuestPersistenceFailsClosedWithoutConsumingAnInvitation() {
+        let store = FailingGuestShareStore()
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            guestShareStore: store
+        )
+
+        XCTAssertNotNil(coordinator.guestSharePersistenceError)
+        XCTAssertNil(coordinator.redeemInvitation(
+            token: invitationToken,
+            deviceID: "anna-phone",
+            displayName: "Anna",
+            persistsOwnerDevice: false
+        ))
+        XCTAssertEqual(store.saveCount, 0)
+    }
+}
+
+private final class FailingGuestShareStore: RemoteGuestSharePersisting {
+    enum Failure: Error { case expected }
+    private(set) var saveCount = 0
+
+    func load() throws -> [RemoteGuestShareRecord] { throw Failure.expected }
+    func save(_: [RemoteGuestShareRecord]) throws {
+        saveCount += 1
+        throw Failure.expected
+    }
+    func deleteAll() throws {}
 }
 
 private final class FailingOwnerDeviceStore: RemoteOwnerDevicePersisting {

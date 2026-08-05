@@ -118,7 +118,12 @@ Checks are read-only unless the user explicitly chooses a test delivery.
 
 ### macOS
 
-- Loopback listener plus the selected Cloudflare and/or Tailscale transport state.
+- Loopback listener plus the selected Cloudflare and/or Tailscale transport state. A Tailscale
+  failure records the typed prerequisite that needs attention (installation, sign-in/running,
+  or HTTPS publishing) rather than including CLI output, hostnames or URLs.
+- The iPhone records the selected policy-approved transport and socket reconnect events using
+  transport kind and pseudonymised host identity only; endpoint addresses and request ids are
+  excluded.
 - APNs provider key load, team/key/topic presence and key age without exposing their values.
 - Subscription matrix counts by owner/member, notification kind, environment and approval
   capability—never tokens or names.

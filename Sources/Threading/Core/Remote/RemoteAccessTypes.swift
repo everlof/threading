@@ -5,6 +5,18 @@ import ThreadingRemoteKit
 // The types below are server-only — they reference `SessionID` and the app's routing — so they
 // stay here.
 
+enum RemoteInputControlDefault: String, CaseIterable {
+    case collaborative
+    case focusedOwner
+
+    var title: String {
+        switch self {
+        case .collaborative: return L10n.string("Collaborative")
+        case .focusedOwner: return L10n.string("Focused on owner")
+        }
+    }
+}
+
 /// Which sessions a share reaches.
 enum RemoteScope: Equatable, Sendable {
     /// The owner's own devices: every live session in the app.
@@ -99,6 +111,98 @@ struct RemoteAuthorization: Equatable, Sendable {
         guard let boundDeviceID else { return true }
         return boundDeviceID == RemoteInboundPolicy.normalizedDeviceID(deviceID)
     }
+
+    var collaborationParticipantID: String {
+        principal == .ownerDevice
+            ? RemoteCollaborationParticipantDTO.ownerID
+            : (member?.id ?? shareID)
+    }
+}
+
+enum RemoteInputControlAction: String {
+    case collaborative
+    case focused
+    case handoff
+    case reclaim
+    case request
+}
+
+struct RemoteInputControlRecord: Equatable {
+    var mode: RemoteInputControlMode
+    var controllerID: String?
+    var revision: Int
+
+    static func initial(default setting: RemoteInputControlDefault) -> Self {
+        switch setting {
+        case .collaborative:
+            return Self(mode: .collaborative, controllerID: nil, revision: 0)
+        case .focusedOwner:
+            return Self(
+                mode: .focused,
+                controllerID: RemoteCollaborationParticipantDTO.ownerID,
+                revision: 0
+            )
+        }
+    }
+}
+
+/// Pure authority rules for a live input-control handoff. UI state is only a projection of this
+/// record; every write is checked against it again on the Mac.
+enum RemoteInputControlPolicy {
+    static func canWrite(_ record: RemoteInputControlRecord, participantID: String) -> Bool {
+        record.mode == .collaborative || record.controllerID == participantID
+    }
+
+    static func isFocusedController(
+        _ record: RemoteInputControlRecord,
+        participantID: String
+    ) -> Bool {
+        record.mode == .focused && record.controllerID == participantID
+    }
+
+    static func applying(
+        _ action: RemoteInputControlAction,
+        to record: RemoteInputControlRecord,
+        actorID: String,
+        actorCanManage: Bool,
+        targetID: String?,
+        eligibleParticipantIDs: Set<String>
+    ) -> (record: RemoteInputControlRecord, status: RemoteInputControlResultStatus)? {
+        var updated = record
+        switch action {
+        case .collaborative:
+            guard actorCanManage else { return (record, .forbidden) }
+            updated.mode = .collaborative
+            updated.controllerID = nil
+        case .focused:
+            guard actorCanManage else { return (record, .forbidden) }
+            let target = targetID ?? actorID
+            guard eligibleParticipantIDs.contains(target) else { return (record, .unavailable) }
+            updated.mode = .focused
+            updated.controllerID = target
+        case .handoff:
+            guard actorCanManage || (
+                record.mode == .focused && record.controllerID == actorID
+            ) else { return (record, .forbidden) }
+            guard let targetID, eligibleParticipantIDs.contains(targetID) else {
+                return (record, .unavailable)
+            }
+            updated.mode = .focused
+            updated.controllerID = targetID
+        case .reclaim:
+            guard actorCanManage else { return (record, .forbidden) }
+            updated.mode = .focused
+            updated.controllerID = RemoteCollaborationParticipantDTO.ownerID
+        case .request:
+            guard record.mode == .focused, record.controllerID != actorID else {
+                return (record, .rejected)
+            }
+            return (record, .delivered)
+        }
+        guard updated != record else { return (record, .applied) }
+        updated.revision &+= 1
+        return (updated, .applied)
+    }
 }
 
 /// Supplies authorizations to the server. Implemented by the coordinator's owner-device token
@@ -106,6 +210,11 @@ struct RemoteAuthorization: Equatable, Sendable {
 /// must be thread-safe (an immutable snapshot behind a lock, not a hop to main).
 protocol RemoteAuthorizing: AnyObject, Sendable {
     func authorization(forToken token: String) -> RemoteAuthorization?
+
+    /// Revalidates an authorization captured by an already-authenticated connection.
+    /// Socket closure is asynchronous, so every operation that crosses to another executor
+    /// checks this immediately before reading or mutating session state.
+    func isCurrent(_ authorization: RemoteAuthorization) -> Bool
 }
 
 /// What the router decided an HTTP request should become.
@@ -121,6 +230,16 @@ enum RemoteRouteDecision: Sendable {
 /// to the main actor. The WebSocket frame ceiling is intentionally much larger than individual
 /// actions, because it is a parser safety limit rather than an application-level allowance.
 enum RemoteInboundPolicy {
+    static func normalizedMutationRequestID(_ rawValue: String?) -> String? {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.utf8.count <= RemoteAccessDefaults.maximumMutationRequestIDBytes,
+              value.utf8.allSatisfy({ $0 >= 0x21 && $0 <= 0x7e }) else {
+            return nil
+        }
+        return value
+    }
+
     static func normalizedDeviceID(_ rawValue: String?) -> String? {
         guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
@@ -141,7 +260,12 @@ enum RemoteInboundPolicy {
     }
 
     static func normalizedMemberName(_ rawValue: String?) -> String? {
-        guard let rawValue else { return nil }
+        // Bounded before the per-scalar work below, not after it: the length that decides the
+        // answer is the *normalized* one, so without this a frame-sized name was normalized in
+        // full before being refused. See `maximumNameInputBytes`.
+        guard let rawValue, rawValue.utf8.count <= RemoteAccessDefaults.maximumNameInputBytes else {
+            return nil
+        }
         let printable = rawValue.unicodeScalars.compactMap { scalar -> String? in
             if CharacterSet.controlCharacters.contains(scalar) { return nil }
             if CharacterSet.whitespacesAndNewlines.contains(scalar) { return " " }
@@ -167,6 +291,42 @@ enum RemoteInboundPolicy {
 
     static func acceptsPrompt(_ value: String) -> Bool {
         value.utf8.count <= RemoteAccessDefaults.maximumPromptBytes
+    }
+
+    static func acceptsContextAttachments(
+        _ values: [RemoteConversationContextAttachmentDTO]?
+    ) -> Bool {
+        guard let values else { return true }
+        guard values.count <= ConversationContextPolicy.maximumAttachments else { return false }
+        guard let encoded = try? ConversationContextPolicy.encoder.encode(values) else {
+            return false
+        }
+        return encoded.count <= ConversationContextPolicy.maximumEnvelopeUTF8Bytes
+    }
+
+    static func acceptsAttentionRecipientID(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= RemoteAccessDefaults.maximumPermissionIDBytes
+            && value.unicodeScalars.allSatisfy { scalar in
+                !CharacterSet.controlCharacters.contains(scalar)
+                    && !CharacterSet.whitespacesAndNewlines.contains(scalar)
+            }
+    }
+
+    static func acceptsAttentionNote(_ value: String) -> Bool {
+        value.utf8.count <= RemoteAttentionDefaults.maximumNoteUTF8Bytes
+            && !value.contains("\u{00}")
+    }
+
+    static func normalizedAttentionNote(_ rawValue: String?) -> String? {
+        guard let rawValue, acceptsAttentionNote(rawValue) else { return nil }
+        let printable = rawValue.unicodeScalars.compactMap { scalar -> String? in
+            if CharacterSet.controlCharacters.contains(scalar) { return nil }
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) { return " " }
+            return String(scalar)
+        }.joined()
+        let value = printable.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return value.isEmpty ? nil : value
     }
 
     static func acceptsPermissionID(_ value: String) -> Bool {
@@ -205,6 +365,218 @@ enum RemoteInboundPolicy {
     }
 }
 
+/// Bounded, in-memory exactly-once state for native conversation prompts sent over WebSocket.
+/// The main-actor mirror owns mutation; this value remains separate so expiry, conflict, and
+/// eviction behavior can be verified without a live agent process.
+struct RemotePromptReplayCache {
+    struct Key: Hashable {
+        let sessionID: String
+        let principalID: String
+        let requestID: String
+    }
+
+    enum Decision: Equatable {
+        case new
+        case replay(RemotePromptSubmissionStatus)
+        case conflict
+    }
+
+    private struct Entry {
+        let fingerprint: Data
+        let status: RemotePromptSubmissionStatus
+        let createdAt: Date
+    }
+
+    private let maximumEntries: Int
+    private let lifetime: TimeInterval
+    private var entries: [Key: Entry] = [:]
+    private var order: [Key] = []
+
+    init(
+        maximumEntries: Int = RemoteAccessDefaults.maximumPromptReplayEntries,
+        lifetime: TimeInterval = RemoteAccessDefaults.promptReplayLifetime
+    ) {
+        self.maximumEntries = max(1, maximumEntries)
+        self.lifetime = max(0, lifetime)
+    }
+
+    var count: Int { entries.count }
+
+    mutating func decision(
+        for key: Key,
+        fingerprint: Data,
+        now: Date = Date()
+    ) -> Decision {
+        purgeExpired(now: now)
+        guard let entry = entries[key] else { return .new }
+        guard entry.fingerprint == fingerprint else { return .conflict }
+        return .replay(entry.status)
+    }
+
+    mutating func store(
+        _ status: RemotePromptSubmissionStatus,
+        for key: Key,
+        fingerprint: Data,
+        now: Date = Date()
+    ) {
+        purgeExpired(now: now)
+        // Dropped from *both* sides before the eviction loop counts. Pulling the key out of
+        // `order` alone left `entries.count` still reading "full", so re-storing a key already
+        // held evicted the oldest *other* entry to make room for something that needed none —
+        // and every prompt stores its key twice, once on accept and once when its status
+        // settles. The evicted prompt's replay state went with it, so its retry read as `.new`
+        // and it was submitted a second time: the one guarantee this cache exists for.
+        if entries[key] != nil {
+            order.removeAll { $0 == key }
+            entries[key] = nil
+        }
+        while entries.count >= maximumEntries, let oldest = order.first {
+            order.removeFirst()
+            entries[oldest] = nil
+        }
+        entries[key] = Entry(fingerprint: fingerprint, status: status, createdAt: now)
+        order.append(key)
+    }
+
+    mutating func remove(sessionID: String) {
+        let keys = entries.keys.filter { $0.sessionID == sessionID }
+        for key in keys { entries[key] = nil }
+        order.removeAll { $0.sessionID == sessionID }
+    }
+
+    mutating func removeAll() {
+        entries.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+    }
+
+    private mutating func purgeExpired(now: Date) {
+        let expired = entries.compactMap { key, entry in
+            now.timeIntervalSince(entry.createdAt) > lifetime ? key : nil
+        }
+        guard !expired.isEmpty else { return }
+        let expiredSet = Set(expired)
+        for key in expiredSet { entries[key] = nil }
+        order.removeAll { expiredSet.contains($0) }
+    }
+}
+
+/// Bounded replay and cooldown state for the human-only attention action. A retry with the same
+/// request id gets its original result, while a new request to the same person inside the
+/// cooldown is collapsed before either an in-app event or a push can be emitted.
+struct RemoteAttentionRequestPolicy {
+    struct RequestKey: Hashable {
+        let sessionID: String
+        let principalID: String
+        let requestID: String
+    }
+
+    struct RateKey: Hashable {
+        let sessionID: String
+        let principalID: String
+        let recipientID: String
+    }
+
+    enum Decision: Equatable {
+        case proceed
+        case replay(RemoteAttentionRequestStatus)
+        case conflict
+        case rateLimited
+    }
+
+    private struct Entry {
+        let fingerprint: Data
+        let status: RemoteAttentionRequestStatus
+        let createdAt: Date
+    }
+
+    private let maximumEntries: Int
+    private let lifetime: TimeInterval
+    private let cooldown: TimeInterval
+    private var entries: [RequestKey: Entry] = [:]
+    private var order: [RequestKey] = []
+    private var latestDelivery: [RateKey: Date] = [:]
+
+    init(
+        maximumEntries: Int = RemoteAccessDefaults.maximumPromptReplayEntries,
+        lifetime: TimeInterval = RemoteAccessDefaults.promptReplayLifetime,
+        cooldown: TimeInterval = RemoteAccessDefaults.attentionRequestCooldown
+    ) {
+        self.maximumEntries = max(1, maximumEntries)
+        self.lifetime = max(0, lifetime)
+        self.cooldown = max(0, cooldown)
+    }
+
+    var count: Int { entries.count }
+
+    mutating func decision(
+        requestKey: RequestKey,
+        rateKey: RateKey,
+        fingerprint: Data,
+        now: Date = Date()
+    ) -> Decision {
+        purgeExpired(now: now)
+        if let entry = entries[requestKey] {
+            return entry.fingerprint == fingerprint ? .replay(entry.status) : .conflict
+        }
+        if let last = latestDelivery[rateKey], now.timeIntervalSince(last) < cooldown {
+            return .rateLimited
+        }
+        return .proceed
+    }
+
+    mutating func store(
+        _ status: RemoteAttentionRequestStatus,
+        requestKey: RequestKey,
+        rateKey: RateKey,
+        fingerprint: Data,
+        now: Date = Date()
+    ) {
+        purgeExpired(now: now)
+        // Both sides, for the reason spelled out in `RemotePromptReplayCache.store`. Here the
+        // entry lost to a needless eviction is a poke, so its retry notifies the person twice.
+        if entries[requestKey] != nil {
+            order.removeAll { $0 == requestKey }
+            entries[requestKey] = nil
+        }
+        while entries.count >= maximumEntries, let oldest = order.first {
+            order.removeFirst()
+            entries[oldest] = nil
+        }
+        entries[requestKey] = Entry(
+            fingerprint: fingerprint,
+            status: status,
+            createdAt: now
+        )
+        order.append(requestKey)
+        if status == .delivered { latestDelivery[rateKey] = now }
+    }
+
+    mutating func remove(sessionID: String) {
+        let requestKeys = entries.keys.filter { $0.sessionID == sessionID }
+        for key in requestKeys { entries[key] = nil }
+        order.removeAll { $0.sessionID == sessionID }
+        latestDelivery = latestDelivery.filter { $0.key.sessionID != sessionID }
+    }
+
+    mutating func removeAll() {
+        entries.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+        latestDelivery.removeAll(keepingCapacity: false)
+    }
+
+    private mutating func purgeExpired(now: Date) {
+        let expiredRequests = entries.compactMap { key, entry in
+            now.timeIntervalSince(entry.createdAt) > lifetime ? key : nil
+        }
+        let expiredSet = Set(expiredRequests)
+        for key in expiredSet { entries[key] = nil }
+        if !expiredSet.isEmpty { order.removeAll { expiredSet.contains($0) } }
+        latestDelivery = latestDelivery.filter {
+            now.timeIntervalSince($0.value) <= max(lifetime, cooldown)
+        }
+    }
+}
+
 /// The one definition of whether a stored session belongs on the remote surface. Keeping this
 /// shared by list, resume and WebSocket attach prevents a known UUID from becoming a side door
 /// around archiving.
@@ -233,6 +605,7 @@ enum RemoteConversationWirePolicy {
                 toUTF8Bytes: RemoteAccessDefaults.maximumRemoteStreamingBytes
             ),
             canSend: snapshot.canSend,
+            composerCapabilities: safeCapabilities(snapshot.composerCapabilities),
             permission: snapshot.permission.map(safePermission),
             revision: snapshot.revision,
             hasEarlier: snapshot.hasEarlier
@@ -256,6 +629,7 @@ enum RemoteConversationWirePolicy {
                 toUTF8Bytes: RemoteAccessDefaults.maximumRemoteStreamingBytes
             ),
             canSend: snapshot.canSend,
+            composerCapabilities: safeCapabilities(snapshot.composerCapabilities),
             permission: snapshot.permission.map(safePermission),
             revision: revision,
             hasEarlier: window.hasEarlier
@@ -309,6 +683,8 @@ enum RemoteConversationWirePolicy {
         let safeUpdated = fittedRows(updated)
         let safeAppended = fittedRows(appended)
         guard safeUpdated.complete, safeAppended.complete else { return nil }
+        let previousCapabilities = safeCapabilities(previous.composerCapabilities)
+        let currentCapabilities = safeCapabilities(current.composerCapabilities)
 
         return RemoteConversationDeltaDTO(
             baseRevision: baseRevision,
@@ -320,6 +696,9 @@ enum RemoteConversationWirePolicy {
                 toUTF8Bytes: RemoteAccessDefaults.maximumRemoteStreamingBytes
             ),
             canSend: current.canSend,
+            composerCapabilities: previousCapabilities == currentCapabilities
+                ? nil
+                : currentCapabilities,
             permission: current.permission.map(safePermission)
         )
     }
@@ -329,9 +708,10 @@ enum RemoteConversationWirePolicy {
     /// collaboration and approval independently configurable without making a guest an owner.
     static func authorized(
         _ snapshot: RemoteConversationSnapshotDTO,
-        for authorization: RemoteAuthorization
+        for authorization: RemoteAuthorization,
+        canWrite: Bool = true
     ) -> RemoteConversationSnapshotDTO {
-        let canSend = snapshot.canSend && authorization.capability == .interact
+        let canSend = snapshot.canSend && authorization.capability == .interact && canWrite
         let permission = snapshot.permission.map { permission in
             guard !authorization.canApprovePermissions else { return permission }
             return RemotePermissionRequestDTO(
@@ -348,6 +728,9 @@ enum RemoteConversationWirePolicy {
             rows: snapshot.rows,
             streamingText: snapshot.streamingText,
             canSend: canSend,
+            composerCapabilities: authorization.capability == .interact
+                ? snapshot.composerCapabilities
+                : [],
             permission: permission,
             revision: snapshot.revision,
             hasEarlier: snapshot.hasEarlier
@@ -356,7 +739,8 @@ enum RemoteConversationWirePolicy {
 
     static func authorized(
         _ delta: RemoteConversationDeltaDTO,
-        for authorization: RemoteAuthorization
+        for authorization: RemoteAuthorization,
+        canWrite: Bool = true
     ) -> RemoteConversationDeltaDTO {
         let permission = authorizedPermission(delta.permission, for: authorization)
         return RemoteConversationDeltaDTO(
@@ -365,7 +749,10 @@ enum RemoteConversationWirePolicy {
             appendedRows: delta.appendedRows,
             updatedRows: delta.updatedRows,
             streamingText: delta.streamingText,
-            canSend: delta.canSend && authorization.capability == .interact,
+            canSend: delta.canSend && authorization.capability == .interact && canWrite,
+            composerCapabilities: authorization.capability == .interact
+                ? delta.composerCapabilities
+                : delta.composerCapabilities.map { _ in [] },
             permission: permission,
             hasEarlier: delta.hasEarlier
         )
@@ -402,6 +789,50 @@ enum RemoteConversationWirePolicy {
             canDecide: false,
             unavailableReason: "You don’t have permission to approve requests in this chat."
         )
+    }
+
+    static func safeCapabilities(
+        _ capabilities: [RemoteComposerCapabilityDTO]
+    ) -> [RemoteComposerCapabilityDTO] {
+        // Reserve the array brackets, then one comma for every item after the first. This keeps
+        // the encoded catalog itself within the advertised aggregate cap rather than only the
+        // sum of its entries.
+        var remaining = max(
+            0,
+            RemoteAccessDefaults.maximumRemoteComposerCapabilityBytes - 2
+        )
+        var result: [RemoteComposerCapabilityDTO] = []
+        for capability in capabilities.prefix(
+            RemoteAccessDefaults.maximumRemoteComposerCapabilities
+        ) {
+            guard remaining > 0 else { break }
+            let safe = RemoteComposerCapabilityDTO(
+                id: truncated(capability.id, toUTF8Bytes: 512),
+                name: truncated(capability.name, toUTF8Bytes: 256),
+                displayName: truncated(capability.displayName, toUTF8Bytes: 256),
+                description: truncated(capability.description, toUTF8Bytes: 1_500),
+                argumentHint: truncated(capability.argumentHint, toUTF8Bytes: 512),
+                aliases: capability.aliases.prefix(12).map {
+                    truncated($0, toUTF8Bytes: 256)
+                },
+                kind: capability.kind == "skill" ? "skill" : "command",
+                isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
+                trigger: capability.trigger == "dollar" ? "dollar" : "slash",
+                presentation: capability.presentation == "command" ? "command" : "turn",
+                isEnabled: capability.isEnabled,
+                unavailableReason: capability.unavailableReason.map {
+                    truncated($0, toUTF8Bytes: 512)
+                }
+            )
+            guard let encodedSize = try? JSONEncoder().encode(safe).count else { break }
+            let size = encodedSize + (result.isEmpty ? 0 : 1)
+            guard size <= remaining else {
+                break
+            }
+            result.append(safe)
+            remaining -= size
+        }
+        return result
     }
 
     private static func pageRows(

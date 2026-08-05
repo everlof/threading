@@ -43,6 +43,16 @@ enum RemoteAccessDefaults {
     static let maximumBearerTokenBytes = 256
     static let maximumDeviceIDBytes = 128
     static let maximumMemberNameBytes = 120
+
+    /// What a name field may weigh **before** it is normalized.
+    ///
+    /// `normalizedMemberName` strips control characters and collapses runs of whitespace, so it
+    /// cannot judge the length until it has done that work — and the work is one `String` per
+    /// scalar. A megabyte frame of spaces therefore bought a megabyte of allocation to produce a
+    /// name that was going to be refused for being empty. The result can only ever shrink, so
+    /// the ceiling is generous rather than exact: sixteen times the answer's own limit leaves
+    /// room for any real name plus padding, and refuses the frame-sized ones outright.
+    static let maximumNameInputBytes = maximumMemberNameBytes * 16
     static let maximumTerminalInputBytes = 64 * 1024
     static let maximumPromptBytes = 256 * 1024
     static let maximumPermissionIDBytes = 256
@@ -54,6 +64,10 @@ enum RemoteAccessDefaults {
     static let maximumPushDeviceTokenBytes = 256
     static let maximumNotificationTitleBytes = 160
     static let maximumNotificationBodyBytes = 1_500
+    static let attentionRequestCooldown: TimeInterval = 30
+    /// A guest can cross a brief network handoff without losing control. After this grace the
+    /// Mac owner gets control back, so a dead phone cannot strand a shared terminal.
+    static let focusedControllerDisconnectGrace: TimeInterval = 30
 
     /// A freshly upgraded socket must send its `auth` frame within this window or be closed. The
     /// browser `WebSocket` API cannot set headers, so the token arrives in the first frame — an
@@ -81,6 +95,8 @@ enum RemoteAccessDefaults {
     static let maximumRemoteConversationFieldBytes = 32 * 1024
     static let maximumRemoteStreamingBytes = 32 * 1024
     static let maximumRemotePermissionBytes = 64 * 1024
+    static let maximumRemoteComposerCapabilities = 256
+    static let maximumRemoteComposerCapabilityBytes = 64 * 1024
 
     // MARK: - Terminal mirror
 
@@ -106,6 +122,21 @@ enum RemoteAccessDefaults {
     /// acceptance response. The QR rotates immediately, so a photographed old code cannot pair a
     /// second device during this window.
     static let pairingRetrySeconds: TimeInterval = 60
+    static let maximumPendingSharePreparations = 32
+    static let sharePreparationTimeout: TimeInterval = 20
+
+    // MARK: - Mutation replay
+
+    static let maximumMutationRequestIDBytes = 80
+    static let maximumMutationReplayEntries = 256
+    static let maximumMutationReplayWaiters = 8
+    static let mutationReplayLifetime: TimeInterval = 5 * 60
+
+    /// WebSocket prompts become safely retryable only while their compact result remains in this
+    /// in-memory cache. Nothing here persists prompt text; only a SHA-256 fingerprint and status
+    /// are retained, bounded across all live sessions.
+    static let maximumPromptReplayEntries = 256
+    static let promptReplayLifetime: TimeInterval = 5 * 60
 
     /// How long the device-approval poll (`GET /api/me` returning `pendingApproval`) waits
     /// between polls, echoed to the client so the two agree.

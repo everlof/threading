@@ -26,6 +26,18 @@
 
 * { box-sizing: border-box; }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -68,6 +80,27 @@ body {
   line-height: 1;
   padding: 0 6px;
   cursor: pointer;
+}
+
+#attentionButton {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--text);
+  background: var(--control-resting);
+  border: var(--border-width) solid var(--border);
+  border-radius: 50%;
+  font: 600 17px/1 inherit;
+  cursor: pointer;
+}
+
+#attentionButton[hidden] { display: none; }
+
+#attentionButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 #badge {
@@ -309,6 +342,92 @@ body {
   background: var(--terminal-bg);
 }
 
+#terminalComposer {
+  flex: none;
+  padding: 8px max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: var(--surface);
+  border-top: var(--border-width) solid var(--divider);
+}
+
+#terminalComposer[hidden],
+#terminalComposerForm[hidden] { display: none; }
+
+.terminal-composer-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 760px;
+  min-height: 32px;
+  margin: 0 auto 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.terminal-composer-heading span { flex: 1; }
+
+#terminalMode {
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: var(--control-resting);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  font: inherit;
+  cursor: pointer;
+}
+
+#terminalComposerForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 8px 8px 12px;
+  background: var(--panel);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--panel-radius);
+}
+
+#terminalPrompt {
+  flex: 1;
+  min-height: 34px;
+  max-height: 120px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: 14px/1.45 "SF Mono", Menlo, Consolas, monospace;
+}
+
+#terminalPrompt::placeholder { color: var(--muted); }
+
+#terminalSend {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--bg);
+  background: var(--text);
+  font: 20px/1 inherit;
+  cursor: pointer;
+}
+
+#terminalSend:disabled { opacity: 0.22; cursor: default; }
+
+#terminalComposerStatus {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#terminalComposerStatus.warning { color: var(--warning); }
+
 #conversation {
   flex: 1;
   min-height: 0;
@@ -318,6 +437,145 @@ body {
 }
 
 #conversation[hidden] { display: none; }
+
+#attentionActivity {
+  width: calc(100% - 28px);
+  max-width: 660px;
+  margin: 8px auto 0;
+  padding: 9px 12px;
+  color: var(--text);
+  background: var(--accent-muted);
+  border-radius: var(--control-radius);
+  font-size: 12px;
+}
+
+#attentionActivity span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+#inputControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 28px);
+  max-width: 660px;
+  margin: 8px auto 0;
+  padding: 8px 10px;
+  color: var(--muted);
+  background: var(--panel);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  font-size: 12px;
+}
+
+#inputControl[hidden] { display: none; }
+#inputControl .control-label { flex: 1; }
+#inputControl button,
+#inputControl select {
+  min-height: 30px;
+  padding: 4px 8px;
+  color: var(--text);
+  background: var(--panel-hover);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  font: inherit;
+}
+
+#attentionDialog {
+  width: min(520px, calc(100% - 28px));
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
+}
+
+#attentionDialog::backdrop { background: #0009; }
+
+#attentionForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+.attention-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.attention-dialog-heading h2 { margin: 0 0 4px; font-size: 20px; }
+.attention-dialog-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+
+#attentionCancelIcon {
+  margin-left: auto;
+  padding: 0 4px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  font: 25px/1 inherit;
+  cursor: pointer;
+}
+
+#attentionRecipients {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#attentionRecipients legend,
+#attentionForm > label { margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+
+.attention-recipient {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--control-resting);
+  border-radius: var(--control-radius);
+  cursor: pointer;
+}
+
+.attention-recipient span { margin-left: auto; color: var(--muted); font-size: 12px; }
+.attention-recipient .online { color: var(--positive); }
+
+#attentionNote {
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  font: inherit;
+}
+
+#attentionStatus { color: var(--warning); font-size: 12px; }
+
+.attention-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.attention-dialog-actions button {
+  padding: 8px 15px;
+  color: var(--text);
+  background: var(--control-resting);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  font: inherit;
+  cursor: pointer;
+}
+
+#attentionSend { color: var(--bg); background: var(--text); }
+.attention-dialog-actions button:disabled { opacity: 0.45; cursor: default; }
 
 #conversationRows {
   flex: 1;
@@ -349,8 +607,32 @@ body {
   border-radius: var(--panel-radius);
 }
 
+.conversation-context-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.conversation-context-receipt {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.conversation-message-text { white-space: pre-wrap; }
+
 .conversation-row.assistant {
-  font: 18px/1.62 ui-serif, Georgia, Cambria, serif;
+  font: inherit;
+  line-height: 1.6;
 }
 
 .assistant-prose + .assistant-prose,
@@ -532,6 +814,18 @@ body {
   box-shadow: var(--panel-shadow);
 }
 
+#presence,
+#composerStatus {
+  width: calc(100% - 28px);
+  max-width: 660px;
+  margin: 0 auto 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#composerStatus.warning { color: var(--warning); }
+
 #prompt {
   flex: 1;
   min-height: 34px;
@@ -561,4 +855,28 @@ body {
 #send:disabled {
   opacity: 0.22;
   cursor: default;
+}
+
+@media (max-width: 560px) {
+  #back,
+  #attentionButton,
+  #inputControl button,
+  #inputControl select,
+  #terminalMode,
+  .attention-dialog-actions button,
+  .permission-actions button {
+    min-height: 44px;
+  }
+
+  #badge,
+  .device-status,
+  .diagnostic-controls span,
+  .session-top-line time,
+  #sessions .meta,
+  #attentionActivity,
+  #inputControl,
+  #presence,
+  #composerStatus {
+    font-size: 13px;
+  }
 }

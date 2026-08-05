@@ -10,10 +10,12 @@ import Foundation
 final class TailscaleRemoteTransport: RemoteAccessTransport {
 
     private(set) var state: RemoteTransportState = .stopped
+    private(set) var readiness: TailscaleReadiness = .notChecked
     private var command: Process?
     private var cleanupCommand: Process?
     private var outputPipe: Pipe?
-    private var outputBuffer = Data()
+    private var outputCollector: CommandOutputCollector?
+    private var commandTimeoutTask: Task<Void, Never>?
     private var launchID: UUID?
     private var onStateChange: (@MainActor @Sendable (RemoteTransportState) -> Void)?
     private var pendingStart: (
@@ -42,12 +44,13 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     private func beginStart(port: UInt16) {
 
         guard let executable = Self.executableURL() else {
-            setState(.unavailable("Install Tailscale on this Mac to use private access."))
+            finishUnavailable(.notInstalled)
             return
         }
 
         let launchID = UUID()
         self.launchID = launchID
+        readiness = .checking
         setState(.starting)
         run(
             executable: executable,
@@ -55,21 +58,49 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             launchID: launchID
         ) { [weak self] status, data in
             guard let self, self.launchID == launchID else { return }
-            guard status == 0,
-                  let origin = Self.origin(fromStatusJSON: data) else {
-                self.finishUnavailable(Self.statusFailureReason(from: data))
+            guard status == 0 else {
+                self.finishUnavailable(Self.statusFailureIssue(from: data))
+                return
+            }
+            if let issue = Self.readinessIssue(fromStatusJSON: data) {
+                self.finishUnavailable(issue)
+                return
+            }
+            guard let origin = Self.origin(fromStatusJSON: data) else {
+                self.finishUnavailable(.statusUnavailable)
                 return
             }
             self.run(
                 executable: executable,
-                arguments: Self.serveArguments(localPort: port),
+                arguments: Self.serveStatusArguments,
                 launchID: launchID
-            ) { [weak self] serveStatus, serveData in
+            ) { [weak self] configStatus, configData in
                 guard let self, self.launchID == launchID else { return }
-                if serveStatus == 0 {
-                    self.finish(.connected(origin))
-                } else {
-                    self.finishUnavailable(Self.serveFailureReason(from: serveData))
+                guard configStatus == 0,
+                      Self.isValidServeStatus(configData) else {
+                    self.finishUnavailable(.statusUnavailable)
+                    return
+                }
+                guard !Self.serveStatus(
+                    configData,
+                    containsHTTPSPort: RemoteTailscaleDefaults.httpsPort
+                ) else {
+                    self.finishUnavailable(.portInUse)
+                    return
+                }
+                self.readiness = .publishing
+                self.run(
+                    executable: executable,
+                    arguments: Self.serveArguments(localPort: port),
+                    launchID: launchID
+                ) { [weak self] serveStatus, serveData in
+                    guard let self, self.launchID == launchID else { return }
+                    if serveStatus == 0 {
+                        self.readiness = .ready(origin)
+                        self.finish(.connected(origin))
+                    } else {
+                        self.finishUnavailable(Self.serveFailureIssue(from: serveData))
+                    }
                 }
             }
         }
@@ -80,6 +111,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         cancelCommands()
         onStateChange = nil
         state = .stopped
+        readiness = .notChecked
 
         guard let executable else { return }
         let cleanup = Process()
@@ -116,7 +148,8 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     ) {
         let process = Process()
         let pipe = Pipe()
-        outputBuffer.removeAll(keepingCapacity: true)
+        let collector = CommandOutputCollector()
+        outputCollector = collector
         outputPipe = pipe
         command = process
         process.executableURL = executable
@@ -127,44 +160,55 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            Task { @MainActor in
-                guard let self,
-                      self.launchID == launchID,
-                      self.command === process else { return }
-                self.outputBuffer.append(data)
-                if self.outputBuffer.count > RemoteTailscaleDefaults.maximumCommandOutputBytes {
-                    self.outputBuffer = self.outputBuffer.suffix(
-                        RemoteTailscaleDefaults.retainedCommandOutputBytes
-                    )
-                }
-            }
+            guard self != nil, process != nil else { return }
+            collector.append(data)
         }
         process.terminationHandler = { [weak self, weak process] terminated in
+            // Process termination can race the final readability callback. Stop installing new
+            // callbacks, synchronously drain the pipe, then take a lock-protected snapshot so a
+            // short error written immediately before exit is not lost.
+            pipe.fileHandleForReading.readabilityHandler = nil
+            collector.append(pipe.fileHandleForReading.readDataToEndOfFile())
+            let output = collector.snapshot()
             Task { @MainActor in
                 guard let self,
                       self.launchID == launchID,
                       self.command === process else { return }
-                self.outputPipe?.fileHandleForReading.readabilityHandler = nil
                 self.outputPipe = nil
+                self.outputCollector = nil
                 self.command = nil
-                completion(terminated.terminationStatus, self.outputBuffer)
+                completion(terminated.terminationStatus, output)
             }
         }
 
         do {
             try process.run()
+            commandTimeoutTask?.cancel()
+            commandTimeoutTask = Task { [weak self, weak process] in
+                try? await Task.sleep(for: .seconds(
+                    RemoteTailscaleDefaults.commandTimeoutSeconds
+                ))
+                guard !Task.isCancelled, let self,
+                      self.launchID == launchID,
+                      self.command === process else { return }
+                collector.append(Data("\nThreading command timeout".utf8))
+                process?.terminate()
+            }
         } catch {
             pipe.fileHandleForReading.readabilityHandler = nil
             outputPipe = nil
+            outputCollector = nil
             command = nil
-            finishUnavailable("Tailscale could not be started from Threading.")
+            finishUnavailable(.statusUnavailable)
         }
     }
 
     private func cancelActiveCommand() {
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         outputPipe = nil
-        outputBuffer.removeAll(keepingCapacity: false)
+        outputCollector = nil
+        commandTimeoutTask?.cancel()
+        commandTimeoutTask = nil
         launchID = nil
 
         command?.terminationHandler = nil
@@ -182,14 +226,18 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     }
 
     private func finish(_ state: RemoteTransportState) {
+        commandTimeoutTask?.cancel()
+        commandTimeoutTask = nil
         launchID = nil
         outputPipe = nil
+        outputCollector = nil
         command = nil
         setState(state)
     }
 
-    private func finishUnavailable(_ reason: String) {
-        finish(.unavailable(reason))
+    private func finishUnavailable(_ issue: TailscaleReadinessIssue) {
+        readiness = .actionRequired(issue)
+        finish(.unavailable(issue.message))
     }
 
     private func setState(_ state: RemoteTransportState) {
@@ -204,9 +252,11 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         "status", "--json", "--peers=false"
     ]
 
+    nonisolated static let serveStatusArguments = ["serve", "status", "--json"]
+
     nonisolated static func serveArguments(localPort: UInt16) -> [String] {
         [
-            "serve", "--bg",
+            "serve", "--yes", "--bg",
             "--https=\(RemoteTailscaleDefaults.httpsPort)",
             "http://127.0.0.1:\(localPort)"
         ]
@@ -215,6 +265,35 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     nonisolated static let stopArguments = [
         "serve", "--https=\(RemoteTailscaleDefaults.httpsPort)", "off"
     ]
+
+    nonisolated static func isValidServeStatus(_ data: Data) -> Bool {
+        (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    nonisolated static func serveStatus(_ data: Data, containsHTTPSPort port: Int) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) else { return true }
+        return containsPort(object, port: port)
+    }
+
+    nonisolated private static func containsPort(_ value: Any, port: Int) -> Bool {
+        switch value {
+        case let dictionary as [String: Any]:
+            return dictionary.contains { key, nested in
+                key == String(port) || key.hasSuffix(":\(port)")
+                    || containsPort(nested, port: port)
+            }
+        case let array as [Any]:
+            return array.contains { containsPort($0, port: port) }
+        case let number as NSNumber:
+            return number.intValue == port
+        case let string as String:
+            return string == String(port)
+                || string.contains(":\(port)")
+                || string.contains("=\(port)")
+        default:
+            return false
+        }
+    }
 
     nonisolated static func origin(fromStatusJSON data: Data) -> URL? {
         guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: data),
@@ -230,6 +309,29 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         components.port = RemoteTailscaleDefaults.httpsPort
         components.path = "/"
         return components.url
+    }
+
+    nonisolated static func readinessIssue(
+        fromStatusJSON data: Data
+    ) -> TailscaleReadinessIssue? {
+        guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: data) else {
+            return .statusUnavailable
+        }
+        switch status.backendState.lowercased() {
+        case "running":
+            guard let name = status.local?.dnsName.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ), !name.isEmpty else {
+                return .statusUnavailable
+            }
+            return nil
+        case "needslogin", "needsmachineauth", "loggedout":
+            return .signedOut
+        case "stopped", "starting", "nomap":
+            return .stopped
+        default:
+            return .statusUnavailable
+        }
     }
 
     nonisolated static func executableURL(
@@ -249,23 +351,49 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             .map { URL(fileURLWithPath: $0) }
     }
 
-    private nonisolated static func statusFailureReason(from data: Data) -> String {
+    private nonisolated static func statusFailureIssue(
+        from data: Data
+    ) -> TailscaleReadinessIssue {
         let output = String(decoding: data, as: UTF8.self).lowercased()
         if output.contains("logged out") || output.contains("needs login") {
-            return "Sign in to Tailscale on this Mac, then retry."
+            return .signedOut
         }
-        return "Turn on Tailscale on this Mac, then retry."
+        if output.contains("stopped") || output.contains("not running") {
+            return .stopped
+        }
+        return .statusUnavailable
     }
 
-    private nonisolated static func serveFailureReason(from data: Data) -> String {
+    nonisolated static func serveFailureIssue(
+        from data: Data
+    ) -> TailscaleReadinessIssue {
         let output = String(decoding: data, as: UTF8.self).lowercased()
         if output.contains("https") || output.contains("certificate") {
-            return "Enable Tailscale HTTPS for this tailnet, then retry."
+            return .httpsRequired
         }
         if output.contains("permission") || output.contains("access denied") {
-            return "Tailscale did not allow Threading to publish this private service."
+            return .permissionDenied
         }
-        return "Tailscale Serve could not publish Threading on this tailnet."
+        return .serveFailed
+    }
+}
+
+private final class CommandOutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        data.append(chunk)
+        if data.count > RemoteTailscaleDefaults.maximumCommandOutputBytes {
+            data = Data(data.suffix(RemoteTailscaleDefaults.retainedCommandOutputBytes))
+        }
+    }
+
+    func snapshot() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return data
     }
 }
 
@@ -292,4 +420,5 @@ private enum RemoteTailscaleDefaults {
     static let httpsPort = 8443
     static let maximumCommandOutputBytes = 64 * 1024
     static let retainedCommandOutputBytes = 32 * 1024
+    static let commandTimeoutSeconds: TimeInterval = 12
 }

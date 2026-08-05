@@ -370,17 +370,107 @@ public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// One currently usable route to the Mac's single authenticated remote-access server.
+///
+/// Endpoints carry no bearer and grant nothing by themselves. A paired client combines one with
+/// its device credential only after applying the host's connection policy. `kind` stays a string
+/// so an older client can ignore a future transport without failing to decode the whole host.
+public struct RemoteHostEndpointDTO: Codable, Equatable, Hashable, Sendable {
+    public let kind: String
+    public let baseURL: URL
+    public let isStable: Bool
+
+    public init(kind: String, baseURL: URL, isStable: Bool) {
+        self.kind = kind
+        self.baseURL = baseURL
+        self.isStable = isStable
+    }
+}
+
+/// The connection policy an owner selected on the Mac.
+///
+/// Unknown values are interpreted by clients as private-only. Adding a policy in a later host
+/// must never make an older phone silently route private work through a public endpoint.
+public enum RemoteHostConnectionPolicy: String, Codable, Equatable, Hashable, Sendable {
+    case privateOnly
+    case relayOnly
+    case preferPrivate
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = Self(rawValue: raw) ?? .privateOnly
+    }
+}
+
+/// Selects validated endpoint candidates without knowing about URLSession or credentials.
+/// Keeping this pure lets every native client use the same fail-closed ordering.
+public enum RemoteHostEndpointSelection {
+    public static func ordered(
+        _ endpoints: [RemoteHostEndpointDTO],
+        policy: RemoteHostConnectionPolicy,
+        currentBaseURL: URL? = nil
+    ) -> [RemoteHostEndpointDTO] {
+        let valid = endpoints.filter { endpoint in
+            guard let link = RemoteConnectionLink(baseURL: endpoint.baseURL, token: "candidate")
+            else { return false }
+            return link.baseURL.scheme?.lowercased() == "https"
+        }
+
+        let allowed: [RemoteHostEndpointDTO]
+        switch policy {
+        case .privateOnly:
+            allowed = valid.filter { $0.kind == "tailscale" }
+        case .relayOnly:
+            allowed = valid.filter { $0.kind == "relay" }
+        case .preferPrivate:
+            allowed = valid.filter { $0.kind == "tailscale" || $0.kind == "relay" }
+        }
+
+        return allowed.sorted { lhs, rhs in
+            func rank(_ endpoint: RemoteHostEndpointDTO) -> Int {
+                switch policy {
+                case .privateOnly, .relayOnly:
+                    // A newly advertised stable endpoint replaces a remembered quick-tunnel
+                    // address without asking the user to pair the same Mac again.
+                    return endpoint.isStable ? 0 : (endpoint.baseURL == currentBaseURL ? 1 : 2)
+                case .preferPrivate:
+                    if endpoint.kind == "tailscale" { return 0 }
+                    if endpoint.isStable { return 1 }
+                    if endpoint.baseURL == currentBaseURL { return 2 }
+                    return 3
+                }
+            }
+            let left = rank(lhs)
+            let right = rank(rhs)
+            if left != right { return left < right }
+            return lhs.baseURL.absoluteString < rhs.baseURL.absoluteString
+        }
+    }
+}
+
 /// The Mac serving a share. Its stable id lets an iOS client replace the existing paired-device
-/// record when the user rescans a short-lived relay URL after a later launch.
+/// record when the user rescans a short-lived relay URL after a later launch. Owner responses may
+/// also advertise several routes to that identity; guest responses deliberately omit them.
 public struct RemoteHostDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let platform: String
+    public let endpoints: [RemoteHostEndpointDTO]?
+    public let connectionPolicy: RemoteHostConnectionPolicy?
 
-    public init(id: String, name: String, platform: String = "macOS") {
+    public init(
+        id: String,
+        name: String,
+        platform: String = "macOS",
+        endpoints: [RemoteHostEndpointDTO]? = nil,
+        connectionPolicy: RemoteHostConnectionPolicy? = nil
+    ) {
         self.id = id
         self.name = name
         self.platform = platform
+        self.endpoints = endpoints
+        self.connectionPolicy = connectionPolicy
     }
 }
 
@@ -637,15 +727,17 @@ public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable, Sendable {
 
 // MARK: - Git review
 
-/// The four comparisons exposed by the compact mobile review sheet.
+/// The five working-copy comparisons exposed by the compact mobile review sheet. Commit history
+/// is navigation rather than a checkout comparison and remains a desktop review surface.
 ///
 /// The Mac owns the git checkout and resolves these modes. A phone receives only the bounded,
 /// parsed result, never a path it can use to reach the host filesystem directly.
 public enum RemoteGitReviewMode: String, Codable, Equatable, CaseIterable, Sendable {
+    case uncommitted
     case unstaged
     case staged
-    case branch
     case lastTurn
+    case branch
 }
 
 public struct RemoteGitDiffLineDTO: Codable, Equatable, Sendable {
@@ -897,6 +989,10 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
     public let title: String
     public let theme: RemoteThemeDTO?
     public let terminalTheme: RemoteTerminalThemeDTO?
+    /// Additive WebSocket behavior this host understands. An older host omits the field, so a
+    /// newer client can keep its legacy behavior instead of waiting for an acknowledgement that
+    /// will never arrive.
+    public let features: [String]?
 
     public init(
         surface: String,
@@ -905,7 +1001,8 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
         rows: Int,
         title: String,
         theme: RemoteThemeDTO? = nil,
-        terminalTheme: RemoteTerminalThemeDTO? = nil
+        terminalTheme: RemoteTerminalThemeDTO? = nil,
+        features: [String]? = nil
     ) {
         self.type = "hello"
         self.surface = surface
@@ -915,7 +1012,24 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
         self.title = title
         self.theme = theme
         self.terminalTheme = terminalTheme
+        self.features = features
     }
+}
+
+/// Optional WebSocket behavior negotiated through `RemoteHelloDTO.features`.
+public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
+    /// The host sends viewing/join/leave state in addition to transient typing state.
+    case presenceRoster
+    /// Prompt submission carries a request id and receives an idempotent result.
+    case submitAcknowledgement
+    /// A terminal client may compose locally and submit one complete line atomically.
+    case atomicTerminalSubmission
+    /// Human attention is a separate app-owned action and never prompt text or PTY input.
+    case attentionRequests
+    /// The host can make one person the writer without discarding anybody else's draft.
+    case focusedInputControl
+    /// Native conversation rows and prompt submissions carry structured references/comments.
+    case conversationContextAttachments
 }
 
 /// A live theme change while a session is already open.
@@ -983,25 +1097,247 @@ public struct RemoteWorkspaceChangedDTO: Codable, Equatable, Sendable {
 /// Ephemeral participant activity. Presence is advisory, never a write lock or authority.
 public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
     public let type: String
+    /// One live socket. Unlike `memberID`, this distinguishes two devices or tabs belonging to
+    /// the same participant and makes a single disconnect safe to remove.
+    public let presenceID: String?
     public let memberID: String
     public let displayName: String
-    /// `typing` or `idle`.
+    public let deviceName: String?
+    public let surface: String?
+    /// `viewing`, `typing`, or `left`. Older clients may still send `idle`.
     public let state: String
     public let updatedAt: Double
 
-    public var id: String { memberID }
+    public var id: String { presenceID ?? memberID }
 
     public init(
+        presenceID: String? = nil,
         memberID: String,
         displayName: String,
+        deviceName: String? = nil,
+        surface: String? = nil,
         state: String,
         updatedAt: Double = Date().timeIntervalSince1970
     ) {
         self.type = "presence"
+        self.presenceID = presenceID
         self.memberID = memberID
         self.displayName = displayName
+        self.deviceName = deviceName
+        self.surface = surface
         self.state = state
         self.updatedAt = updatedAt
+    }
+}
+
+/// One person who can be asked for input in this chat, including accepted members who are not
+/// currently online. `id` is routing identity, while `displayName` is presentation only.
+public struct RemoteCollaborationParticipantDTO: Codable, Equatable, Identifiable, Sendable {
+    public static let ownerID = "owner"
+
+    public let id: String
+    public let displayName: String
+    public let role: String
+    public let isOnline: Bool
+
+    public init(id: String, displayName: String, role: String, isOnline: Bool) {
+        self.id = id
+        self.displayName = displayName
+        self.role = role
+        self.isOnline = isOnline
+    }
+}
+
+/// The complete recipient picker state for the authenticated participant watching one chat.
+public struct RemoteCollaborationParticipantsDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let participants: [RemoteCollaborationParticipantDTO]
+
+    public init(participants: [RemoteCollaborationParticipantDTO]) {
+        self.type = "collaborationParticipants"
+        self.participants = participants
+    }
+}
+
+/// Whether every interactive participant may send, or one participant owns new input.
+public enum RemoteInputControlMode: String, Codable, Equatable, Sendable {
+    case collaborative
+    case focused
+}
+
+/// The host-authoritative, viewer-specific control state for one shared chat.
+///
+/// `canWrite` is deliberately explicit. A client must not infer authority from a display name
+/// or from presence, and an older client that ignores this frame is still checked by the host.
+public struct RemoteInputControlStateDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let mode: RemoteInputControlMode
+    public let controllerID: String?
+    public let controllerDisplayName: String?
+    public let currentParticipantID: String
+    public let canWrite: Bool
+    public let canManage: Bool
+    public let canHandOff: Bool
+    public let participants: [RemoteCollaborationParticipantDTO]
+    public let revision: Int
+
+    public init(
+        mode: RemoteInputControlMode,
+        controllerID: String? = nil,
+        controllerDisplayName: String? = nil,
+        currentParticipantID: String,
+        canWrite: Bool,
+        canManage: Bool,
+        canHandOff: Bool,
+        participants: [RemoteCollaborationParticipantDTO],
+        revision: Int
+    ) {
+        self.type = "inputControl"
+        self.mode = mode
+        self.controllerID = controllerID
+        self.controllerDisplayName = controllerDisplayName
+        self.currentParticipantID = currentParticipantID
+        self.canWrite = canWrite
+        self.canManage = canManage
+        self.canHandOff = canHandOff
+        self.participants = participants
+        self.revision = revision
+    }
+}
+
+public enum RemoteInputControlResultStatus: String, Codable, Equatable, Sendable {
+    case applied
+    case delivered
+    case forbidden
+    case unavailable
+    case rejected
+}
+
+/// Receipt for changing, handing off, reclaiming, or requesting input control.
+public struct RemoteInputControlResultDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+    public let status: RemoteInputControlResultStatus
+
+    public init(requestID: String, status: RemoteInputControlResultStatus) {
+        self.type = "inputControlResult"
+        self.requestID = requestID
+        self.status = status
+    }
+}
+
+/// Quiet collaboration activity. It never becomes prompt text or a terminal write.
+public struct RemoteInputControlEventDTO: Codable, Equatable, Identifiable, Sendable {
+    public let type: String
+    public let id: String
+    /// `modeChanged`, `handedOff`, `reclaimed`, `requested`, or `released`.
+    public let action: String
+    public let actorID: String
+    public let actorDisplayName: String
+    public let targetID: String?
+    public let targetDisplayName: String?
+    public let createdAt: Double
+
+    public init(
+        id: String = UUID().uuidString.lowercased(),
+        action: String,
+        actorID: String,
+        actorDisplayName: String,
+        targetID: String? = nil,
+        targetDisplayName: String? = nil,
+        createdAt: Double = Date().timeIntervalSince1970
+    ) {
+        self.type = "inputControlEvent"
+        self.id = id
+        self.action = action
+        self.actorID = actorID
+        self.actorDisplayName = actorDisplayName
+        self.targetID = targetID
+        self.targetDisplayName = targetDisplayName
+        self.createdAt = createdAt
+    }
+}
+
+public enum RemoteAttentionRequestStatus: String, Codable, Equatable, Sendable {
+    case delivered
+    case unavailable
+    case rateLimited
+    case rejected
+}
+
+/// The acknowledgement for a human-only attention request. It is deliberately distinct from a
+/// prompt result: receiving this type can never imply that Claude, Codex, or a PTY was written.
+public struct RemoteAttentionRequestResultDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+    public let status: RemoteAttentionRequestStatus
+
+    public init(requestID: String, status: RemoteAttentionRequestStatus) {
+        self.type = "attentionResult"
+        self.requestID = requestID
+        self.status = status
+    }
+}
+
+/// Quiet, in-chat collaboration activity emitted after a human attention request was deliverable.
+/// It is not a conversation row and is never replayed into an agent transcript.
+public struct RemoteAttentionEventDTO: Codable, Equatable, Identifiable, Sendable {
+    public let type: String
+    public let id: String
+    public let requestID: String
+    public let senderID: String
+    public let senderDisplayName: String
+    public let recipientID: String
+    public let recipientDisplayName: String
+    public let note: String?
+    public let createdAt: Double
+
+    public init(
+        id: String = UUID().uuidString.lowercased(),
+        requestID: String,
+        senderID: String,
+        senderDisplayName: String,
+        recipientID: String,
+        recipientDisplayName: String,
+        note: String? = nil,
+        createdAt: Double = Date().timeIntervalSince1970
+    ) {
+        self.type = "attention"
+        self.id = id
+        self.requestID = requestID
+        self.senderID = senderID
+        self.senderDisplayName = senderDisplayName
+        self.recipientID = recipientID
+        self.recipientDisplayName = recipientDisplayName
+        self.note = note
+        self.createdAt = createdAt
+    }
+}
+
+/// Shared client/host bound for the optional note attached to an attention request.
+public enum RemoteAttentionDefaults {
+    public static let maximumNoteUTF8Bytes = 500
+}
+
+public enum RemotePromptSubmissionStatus: String, Codable, Equatable, Sendable {
+    case accepted
+    case busy
+    case rejected
+    case unavailable
+    case conflict
+}
+
+/// The authoritative result for one prompt request. The request id lets a client retry the same
+/// submission after a lost socket without creating a second agent turn.
+public struct RemotePromptSubmissionResultDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+    public let status: RemotePromptSubmissionStatus
+
+    public init(requestID: String, status: RemotePromptSubmissionStatus) {
+        self.type = "submitResult"
+        self.requestID = requestID
+        self.status = status
     }
 }
 
@@ -1035,7 +1371,9 @@ public struct RemoteTitleDTO: Codable, Equatable, Sendable {
 public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     case sharedSession
     case permissionRequest
+    case agentQuestion
     case agentMessage
+    case attentionRequest
 }
 
 /// A bundle-localized alternative to notification fallback text.
@@ -1097,15 +1435,20 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     /// "sandbox" for a development build, "production" for TestFlight/App Store.
     public let environment: String
     public let enabledKinds: [RemoteNotificationKind]
+    /// Kinds that may make sound on this device. Nil preserves the behavior of an older client;
+    /// an empty array is an explicit request for quiet delivery.
+    public let soundEnabledKinds: [RemoteNotificationKind]?
 
     public init(
         deviceToken: String,
         environment: String,
-        enabledKinds: [RemoteNotificationKind]
+        enabledKinds: [RemoteNotificationKind],
+        soundEnabledKinds: [RemoteNotificationKind]? = nil
     ) {
         self.deviceToken = deviceToken
         self.environment = environment
         self.enabledKinds = enabledKinds
+        self.soundEnabledKinds = soundEnabledKinds
     }
 }
 
@@ -1145,7 +1488,75 @@ public struct RemoteEndedDTO: Codable, Equatable, Sendable {
 
 // MARK: - Native conversation
 
-/// A provider-neutral reference or comment attached to a native conversation row.
+/// One command or skill the live Mac session says a conversation composer may invoke. Paths,
+/// skill bodies, and provider credentials never cross the wire; submission is resolved again
+/// against the Mac's current authoritative catalog.
+public struct RemoteComposerCapabilityDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let displayName: String
+    public let description: String
+    public let argumentHint: String
+    public let aliases: [String]
+    /// "command" or "skill".
+    public let kind: String
+    /// `true` lets an unclassified initial Claude row remain discoverable in `/skills` until
+    /// the provider publishes authoritative skill membership. Missing means `kind == "skill"`
+    /// for compatibility with older peers.
+    public let isAvailableInSkillCatalog: Bool?
+    /// "slash" or "dollar".
+    public let trigger: String
+    /// "turn" or "command"; presentation only, execution remains on the Mac.
+    public let presentation: String
+    public let isEnabled: Bool
+    public let unavailableReason: String?
+
+    public init(
+        id: String,
+        name: String,
+        displayName: String,
+        description: String,
+        argumentHint: String,
+        aliases: [String] = [],
+        kind: String,
+        isAvailableInSkillCatalog: Bool? = nil,
+        trigger: String,
+        presentation: String,
+        isEnabled: Bool = true,
+        unavailableReason: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.displayName = displayName
+        self.description = description
+        self.argumentHint = argumentHint
+        self.aliases = aliases
+        self.kind = kind
+        self.isAvailableInSkillCatalog = isAvailableInSkillCatalog
+        self.trigger = trigger
+        self.presentation = presentation
+        self.isEnabled = isEnabled
+        self.unavailableReason = unavailableReason
+    }
+
+    public var invocationText: String {
+        (trigger == "dollar" ? "$" : "/") + name
+    }
+
+    public var canBrowseAsSkill: Bool {
+        isAvailableInSkillCatalog ?? (kind == "skill")
+    }
+
+    /// The same secondary text every visual and accessibility presentation should announce.
+    /// A disabled reason supersedes the ordinary description because it explains the action the
+    /// person cannot currently take.
+    public var presentationDetail: String {
+        unavailableReason ?? description
+    }
+}
+
+/// A provider-neutral row in the native conversation surface. The Mac has already normalised
+/// Claude and Codex into this vocabulary, so mobile clients do not need either provider parser.
 public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     /// "reference" or "comment".
@@ -1182,8 +1593,6 @@ public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identi
     }
 }
 
-/// A provider-neutral row in the native conversation surface. The Mac has already normalised
-/// Claude and Codex into this vocabulary, so mobile clients do not need either provider parser.
 public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     /// "user", "assistant", "thinking", "tool", or "notice".
@@ -1225,6 +1634,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
     public let rows: [RemoteConversationRowDTO]
     public let streamingText: String
     public let canSend: Bool
+    public let composerCapabilities: [RemoteComposerCapabilityDTO]
     public let permission: RemotePermissionRequestDTO?
     /// Monotonically increasing within one live conversation mirror.
     public let revision: Int
@@ -1235,6 +1645,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         rows: [RemoteConversationRowDTO],
         streamingText: String = "",
         canSend: Bool,
+        composerCapabilities: [RemoteComposerCapabilityDTO] = [],
         permission: RemotePermissionRequestDTO? = nil,
         revision: Int = 0,
         hasEarlier: Bool = false
@@ -1243,13 +1654,15 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         self.rows = rows
         self.streamingText = streamingText
         self.canSend = canSend
+        self.composerCapabilities = composerCapabilities
         self.permission = permission
         self.revision = revision
         self.hasEarlier = hasEarlier
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, rows, streamingText, canSend, permission, revision, hasEarlier
+        case type, rows, streamingText, canSend, composerCapabilities, permission, revision
+        case hasEarlier
     }
 
     public init(from decoder: Decoder) throws {
@@ -1264,6 +1677,10 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
             forKey: .streamingText
         ) ?? ""
         canSend = try container.decodeIfPresent(Bool.self, forKey: .canSend) ?? false
+        composerCapabilities = try container.decodeIfPresent(
+            [RemoteComposerCapabilityDTO].self,
+            forKey: .composerCapabilities
+        ) ?? []
         permission = try container.decodeIfPresent(
             RemotePermissionRequestDTO.self,
             forKey: .permission
@@ -1286,6 +1703,8 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
     public let updatedRows: [RemoteConversationRowDTO]
     public let streamingText: String
     public let canSend: Bool
+    /// Nil means this delta leaves the catalog unchanged.
+    public let composerCapabilities: [RemoteComposerCapabilityDTO]?
     public let permission: RemotePermissionRequestDTO?
     /// Nil means a live update does not change the client's pagination boundary.
     public let hasEarlier: Bool?
@@ -1297,6 +1716,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         updatedRows: [RemoteConversationRowDTO] = [],
         streamingText: String,
         canSend: Bool,
+        composerCapabilities: [RemoteComposerCapabilityDTO]? = nil,
         permission: RemotePermissionRequestDTO? = nil,
         hasEarlier: Bool? = nil
     ) {
@@ -1307,6 +1727,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         self.updatedRows = updatedRows
         self.streamingText = streamingText
         self.canSend = canSend
+        self.composerCapabilities = composerCapabilities
         self.permission = permission
         self.hasEarlier = hasEarlier
     }
@@ -1425,6 +1846,13 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let rows: Int?
     public let beforeRowID: String?
     public let limit: Int?
+    /// Stable human recipient for an app-owned attention request. It is never parsed from `text`.
+    public let recipientID: String?
+    /// Idempotency key for a prompt submission. Kept separate from `id`, which names permission
+    /// cards and other domain objects.
+    public let requestID: String?
+    /// Structured references/comments submitted by a capable conversation client.
+    public let contextAttachments: [RemoteConversationContextAttachmentDTO]?
 
     public init(
         type: String,
@@ -1441,7 +1869,10 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         cols: Int? = nil,
         rows: Int? = nil,
         beforeRowID: String? = nil,
-        limit: Int? = nil
+        limit: Int? = nil,
+        recipientID: String? = nil,
+        requestID: String? = nil,
+        contextAttachments: [RemoteConversationContextAttachmentDTO]? = nil
     ) {
         self.type = type
         self.token = token
@@ -1458,5 +1889,8 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.rows = rows
         self.beforeRowID = beforeRowID
         self.limit = limit
+        self.recipientID = recipientID
+        self.requestID = requestID
+        self.contextAttachments = contextAttachments
     }
 }

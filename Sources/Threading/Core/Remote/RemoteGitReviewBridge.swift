@@ -37,6 +37,8 @@ enum RemoteGitReviewBridge {
 
         let request: GitReviewReader.DiffRequest
         switch mode {
+        case .uncommitted:
+            request = .uncommitted
         case .unstaged:
             request = .unstaged
         case .staged:
@@ -45,13 +47,22 @@ enum RemoteGitReviewBridge {
             request = .branch
         case .lastTurn:
             guard let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: sessionID) else {
+                let message: String
+                let localizationKey: String
+                if GitTurnBaselineStore.shared.captureFailure(forSessionID: sessionID) != nil {
+                    message = L10n.string("Couldn’t capture this turn’s starting state.")
+                    localizationKey = "Couldn’t capture this turn’s starting state."
+                } else {
+                    message = L10n.string(
+                        "No turn recorded yet. A baseline is captured before the agent starts working."
+                    )
+                    localizationKey =
+                        "No turn recorded yet. A baseline is captured before the agent starts working."
+                }
                 completion(snapshot(
                     mode: mode,
-                    message: L10n.string(
-                        "No turn recorded yet. A baseline is captured when the agent starts working."
-                    ),
-                    localizationKey:
-                        "No turn recorded yet. A baseline is captured when the agent starts working."
+                    message: message,
+                    localizationKey: localizationKey
                 ))
                 return
             }

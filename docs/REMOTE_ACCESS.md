@@ -7,8 +7,9 @@ choose a connection, and turn on **Remote Access**:
 - **Relay** keeps the existing Cloudflare path and supports ordinary public share links.
 - **Tailscale** publishes Threading only inside the owner's tailnet. It is the private option for
   owner devices and can also share a chat with somebody already in that tailnet.
-- **Both** uses Tailscale for owner pairing and the relay for one-chat share links. Selecting it
-  explicitly starts both transports while Remote Access is on.
+- **Private + Sharing** uses Tailscale for owner pairing and starts the public relay only when a
+  one-chat link is created. **Owner Relay Fallback** and **Keep Sharing Relay Ready** are separate,
+  off-by-default controls for people who prefer availability over the fail-closed private path.
 
 All three terminate at the same loopback server, protocol and authorization checks. A transport
 changes who can route packets to Threading; it never expands what a bearer may do.
@@ -16,7 +17,9 @@ changes who can route packets to Threading; it never expands what a bearer may d
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
-2. Choose **Relay**, **Tailscale**, or **Both** and wait for the selected pairing connection.
+2. Choose **Relay**, **Tailscale**, or **Private + Sharing** and wait for the selected pairing
+   connection. The readiness card identifies installation, sign-in/running and HTTPS Serve as
+   separate steps instead of reducing every setup problem to “unavailable.”
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
 The QR value is a one-time bootstrap. The Mac exchanges it for a unique 256-bit, device-bound
@@ -25,6 +28,44 @@ Keychain. iOS stores the paired host and its credential in its Keychain. Pairing
 survives a Threading restart and also survives turning Remote Access off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
 deletes the Mac-side owner credentials. A browser owner pairing deliberately remains tab-scoped.
+Any number of named iPhones and iPads can be paired with the same Mac. They use independent
+device-bound credentials, can connect at the same time, and appear separately in Sharing and
+diagnostics; revoking one does not disturb the others.
+
+Those devices can also participate in the same session at once. Input control is a live,
+per-session choice rather than something fixed when the chat starts:
+
+- **Collaborative** lets every participant with reply access send. Native prompts and the
+  iPhone/browser terminal composers still submit atomically, so two drafts cannot splice into
+  one prompt or terminal line.
+- **Focused** names one controlling person. Everyone else can continue watching and editing a
+  private draft, but Send, raw terminal keys, paste, drop, mouse reporting and remote PTY writes
+  are rejected at the Mac until control is handed over. The current controller or the owner can
+  hand off; the owner can always reclaim or return the session to Collaborative.
+
+Choose the default for newly shared sessions under **Settings → Remote Access → New shared
+chats**. The owner can switch the current session from its **Sharing** pane; iPhone and browser
+controls expose the actions each signed-in person is allowed to take. Ownership is per person,
+not per socket: two paired owner devices share the owner's authority, and two tabs belonging to
+one accepted member share that member's turn. Closing one tab therefore does not release their
+control. If a guest controller's last connection disappears, Threading holds the turn for 30
+seconds so an ordinary route change or Tailscale reconnect does not steal it, then returns it to
+the owner. Revoking that member returns it immediately.
+
+A watcher can choose **Request control**. That is the same human-only attention path as the
+explicit **@** action: it sends no prompt and no terminal bytes, and the current controller's
+independent **Requests for my input** notification preference decides whether it also becomes a
+push. Mode changes and handoffs themselves are quiet live collaboration events, not new push
+categories. Focused mode does not attempt to recognize questions drawn by a Claude Code or Codex
+TUI; only structured Native questions/permissions and explicit human requests can create the
+corresponding notifications.
+
+An owner pairing is stored as one logical Mac identity, not as one hostname. Owner responses
+advertise the currently usable Tailscale and/or relay endpoints plus an explicit `privateOnly`,
+`relayOnly`, or `preferPrivate` policy. The iPhone orders only HTTPS endpoints allowed by that
+policy, prefers Tailscale when requested, records the successful route, and can move to another
+advertised route without creating a duplicate device. Unknown future policies fail closed to
+private-only. Guest shares never receive the Mac's private endpoint list.
 
 The iOS app shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
@@ -76,6 +117,10 @@ relayed ANSI stream locally rather than receiving a scaled screenshot. The Mac s
 **Fit to iPhone · columns×rows** while this lease is active and explains that its desktop size
 returns when the remote view closes. Rotating the phone updates the lease, and disconnecting
 restores the newest natural Mac grid (or another phone that is still controlling the session).
+In Focused mode only the controlling person's devices participate in that resize lease, so a
+watcher's narrow window cannot reflow the controller's TUI. A Tailscale/relay route change does
+not change the person's control identity; reconnecting receives the Mac's authoritative current
+mode before input is accepted.
 
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
@@ -152,8 +197,15 @@ frame. Height counts as much as width there, because the rows that fall off the 
 live ones. A grid that already fits is restored to full size, which is also what returns an
 interactive page to 13px once its lease is honoured.
 
-The Mac and paired iPhone share one app appearance. Choose **Appearance** in the iPhone
-dashboard's `…` menu or choose an app theme on the Mac; the other side changes immediately.
+The first-run iPhone screen exposes **Settings** before any connection exists. App icon,
+notification preferences, in-app presence/typing, independent terminal drafts and local
+diagnostics are useful without a Mac and stay available from the dashboard's `…` menu after
+pairing. The stock icon picker is manual because iOS confirms every icon change; when a connected
+Mac uses a built-in style, the picker names that style as the matching choice.
+
+The Mac and paired iPhone share one in-app appearance. Choose **Appearance** in the iPhone
+dashboard's `…` menu, use **Settings → Mac appearance**, or choose an app theme on the Mac; the
+other side changes immediately.
 Resolved semantic colours, light/dark mode, corner radii, border weight and optional panel glow
 are sent to both iOS and the browser. Terminal palettes remain session-scoped. A terminal
 session's palette button on iPhone offers **Inherit**, **Follow App Theme**, and the Mac's theme
@@ -186,10 +238,13 @@ Pairing and sharing are deliberately different actions:
   a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
   what replaced a `switch` on the alert's button *index*.
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
-  device-bound membership without a 24-hour timer. The member keeps access until **Stop
-  Sharing**, Remote Access is disabled, or the Mac app exits. Create another invitation for
-  another person; forwarding an already accepted invite does not clone the membership. Guest
-  memberships remain launch-scoped: turning Remote Access off or quitting the Mac revokes them.
+  device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
+  are stored in the Mac login Keychain, so turning Remote Access off, restarting Threading, or
+  changing between Tailscale and Relay suspends the route without silently removing the share.
+  The member keeps access until **Stop Sharing** or their named membership is revoked. Create
+  another invitation for another person; forwarding an already accepted invite does not clone
+  the membership. A credential that cannot be restored exactly fails closed rather than creating
+  a replacement identity.
 
 Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
@@ -212,13 +267,22 @@ never eligible. Guest and view-only links cannot upload diagnostics.
 
 ## Notifications
 
-After pairing or accepting a shared chat, the iPhone dashboard explains what notifications do
-before iOS is asked for permission. The system prompt appears only after **Turn on
-notifications**. Notification settings keep three choices independent:
+Notification preferences can be set before pairing from the iPhone's Settings. If permission is
+still undecided after pairing or accepting a shared chat, the dashboard explains what
+notifications do before iOS is asked. The system prompt appears only after **Turn on
+notifications**. Notification settings keep five choices independent:
 
 - a chat shared with this phone;
 - a Native chat waiting for a permission decision;
+- a session whose provider-neutral activity state changed to waiting for the user's response;
+- another participant explicitly asking for this person's input;
 - an update the user explicitly asked the agent to send.
+
+The response-needed event is an activity edge supplied by the hook/BEL/session layer; the
+notification service never scrapes Claude Code or Codex terminal text. A structured Native
+permission request uses its more specific permission notification instead of also sending the
+generic response-needed event. Notification sounds have a master switch and an independent
+switch for every category, so a useful banner does not have to imply an audible interruption.
 
 Opening a notification deep-links to the relevant chat. Permission notifications intentionally
 contain no command, path, tool arguments or diff on the lock screen, and do not offer lock-screen
@@ -234,14 +298,57 @@ target the owner, everyone in this chat, or another member by exact display name
 the agent needs that person's input. Targeting never crosses the current chat, and delivery
 requires that recipient to have enabled **Requested agent updates**.
 
+The explicit `@` control beside the iPhone or browser composer is a different path. It opens an
+**Ask for input** sheet over both Native and agent-UI terminal sessions, lists interactive chat
+members even when they are currently away, and sends an app-owned `attentionRequest` frame to the
+selected stable member id. The optional note is notification copy. It is never inserted into the
+Native prompt, never parsed out of composer text, and never written to the PTY; typing a literal
+`@` in Claude Code or Codex therefore retains its ordinary terminal meaning. The sheet states this
+boundary before sending.
+
+A deliverable request produces a targeted live/APNs notification and one quiet collaboration
+event in every currently open view of that chat. It does not become an agent transcript row.
+**Requests for my input** is independent from requested agent updates, permission requests and
+share notifications. A person who is online can receive the in-chat event without push; an away
+person must have that notification kind enabled. Repeating the same request id is idempotent, and
+new requests from the same participant to the same person are collapsed for 30 seconds. The
+initial slice records delivery and visibility, not assignment, ownership or a task workflow.
+
+**That idempotency is a bounded map, and its eviction had to be counted from both sides.**
+`RemotePromptReplayCache` and `RemoteAttentionRequestPolicy` each keep an `entries` dictionary
+beside an `order` array, and both dropped a re-stored key from `order` *before* the eviction loop
+read `entries.count`. The count therefore still said "full", so re-storing a key already held
+evicted the oldest **other** entry to make room for something that needed none — and this is the
+ordinary path, not an edge: every prompt stores its key twice, once when it is accepted and again
+when its status settles. What went with the evicted entry was its replay state, so the next retry
+of that unrelated request read as new and was run a second time — a prompt submitted twice, or a
+person poked twice. Both tests that covered these caches stored each key exactly once, which is
+precisely why neither saw it.
+
 Native remote prompts carry their member name to the provider while keeping the visible message
 bubble clean, so the agent can resolve speaker-relative requests. Terminal attribution follows
 the latest real input source; local keyboard input takes ownership back from a remote
 controller.
 
-While a shared Native chat is open, clients send ephemeral `typing`/`idle` presence over the
-existing authenticated WebSocket. Other phones show **Name is typing…**. Presence is advisory,
-expires with the connection, and never locks the composer or grants authority.
+While any shared session is open, the Mac sends an ephemeral roster over the existing
+authenticated WebSocket. A distinct presence id represents every live device or browser tab, so
+one person's iPhone and iPad can appear and leave independently. Clients announce `typing`/`idle`;
+other phones show the device-aware participant label and otherwise show who is viewing. Presence
+is advisory, expires with the connection, and never locks a composer or grants authority. The
+iPhone lets people-presence and typing indicators be hidden separately.
+
+Each remote Native composer owns its draft. The iPhone's terminal also uses an independent local
+composer by default and sends the completed text plus Return as one PTY write. This does not make
+the terminal multi-user: it creates a safe atomic boundary at submission so concurrent devices
+cannot interleave individual characters. Escape, Ctrl-C, Tab and arrows remain immediate terminal
+controls. **Independent terminal drafts** can be disabled in the iPhone's collaboration settings
+when raw direct terminal typing is required.
+
+iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
+terminal drafts are written locally as they change, pending request ids survive a reconnect, and
+the last open route and reading position are restored without copying one person's draft to
+another device. The records are versioned. If one is corrupt, the client preserves a quarantine
+copy for diagnosis and fails closed instead of overwriting it with a new blank record.
 
 An open iOS app receives these events over its authenticated live socket. Background and
 lock-screen delivery uses APNs. Development/self-hosted builds can enable the Mac's provider
@@ -284,15 +391,20 @@ feature lock.
 
 - The remote server listens only on `127.0.0.1` and is separate from Threading's MCP and extension
   servers.
-- In **Relay** or **Both**, `cloudflared` opens an outbound tunnel to that one listener. No router
+- In **Relay**, or while **Private + Sharing** needs a public share/fallback, `cloudflared` opens
+  an outbound tunnel to that one listener. No router
   port or inbound firewall rule is opened. Traffic passes through Cloudflare, where TLS is
   terminated, so use that transport only for work you are comfortable sending through it.
-- In **Tailscale** or **Both**, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
+- In **Tailscale** or **Private + Sharing**, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
   port 8443, reachable only according to the tailnet's identity and ACL policy. Threading removes
   only that exact Serve handler when it stops and never runs `tailscale serve reset`, which could
-  erase unrelated services. Tailscale still relays encrypted WireGuard traffic when peers cannot
-  connect directly. Enabling Tailscale HTTPS publishes the machine/tailnet DNS name in public
-  certificate-transparency logs; it does not publish chat contents or make the service public.
+  erase unrelated services. Before starting, it reads `tailscale serve status --json` and refuses
+  to replace an existing HTTPS handler on 8443; remove that handler explicitly and retry. Serve
+  runs in acknowledged background mode and every CLI probe has a bounded timeout, so a wedged CLI
+  cannot leave Remote Access permanently in Starting. Tailscale still relays encrypted WireGuard
+  traffic when peers cannot connect directly. Enabling Tailscale HTTPS publishes the
+  machine/tailnet DNS name in public certificate-transparency logs; it does not publish chat
+  contents or make the service public.
 - Every launch mints a random 128-bit, one-time owner bootstrap, and every chat invite mints an
   independent random 256-bit single-use token scoped to one session. It arrives in the URL
   fragment, so the browser does not include it in its initial HTTP request or referrer. On
@@ -326,11 +438,19 @@ feature lock.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
   are dropped instead of being allowed to back-pressure an agent's terminal.
-- Unused invitations expire after 24 hours; accepted guest memberships do not expire while that
-  launch continues. Stopping a share, turning Remote Access off, or quitting Threading revokes
-  guest memberships and disconnects every open socket immediately. Paired owner credentials are
-  suspended while the listener is off and reloaded from Keychain next time; revoke the named
-  device in Settings to remove one permanently.
+- Native REST mutations carry a request id. The Mac coalesces concurrent duplicates and keeps the
+  bounded result for five minutes, while rejecting the same id with a different path or body.
+  The iPhone can therefore retry a lost response, including over another advertised endpoint,
+  without starting two sessions or applying an action twice. Native prompts and atomic terminal
+  lines use the same five-minute principle on their WebSocket: the draft stays visible until an
+  authoritative result arrives, and reconnect retries the same id only inside a shorter client
+  window. The cache retains a fingerprint and status, never prompt text. Live terminal and
+  conversation output frames are not replayed as actions; reconnect receives authoritative state.
+- Unused invitations expire after 24 hours; accepted guest memberships remain in Keychain until
+  that share or member is explicitly revoked. Turning Remote Access off or quitting Threading
+  disconnects every open socket immediately and empties the live authority map; starting again
+  rehydrates only the still-valid durable records. Paired owner credentials follow the same
+  suspend/rehydrate rule; revoke the named device in Settings to remove one permanently.
 
 Treat the owner QR code and every copied share URL like passwords. The owner code is intentionally
 much stronger than a guest URL; only show it to devices you control.
@@ -340,8 +460,10 @@ much stronger than a guest URL; only show it to devices you control.
 The automatic relay still uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for
 development and testing, have no uptime guarantee, and receive a new public hostname whenever
 Threading starts. The durable device credential survives, but an iPhone paired to that old origin
-cannot discover the new Quick Tunnel and must scan again. The planned stable Cloudflare hostname
-can replace this transport without changing pairing or authorization. Tailscale already has a
+needs another reachable advertised route to discover the new Quick Tunnel; a relay-only pairing
+must still scan again. The logical-host model now prefers an advertised stable relay URL, so a
+future named Cloudflare Tunnel can replace the quick endpoint without changing pairing or
+authorization. Provisioning and operating that named tunnel is not part of this phase. Tailscale already has a
 stable tailnet origin, so an owner paired through Tailscale reconnects after a Mac/app restart
 without rescanning as long as Tailscale is available on both devices.
 
