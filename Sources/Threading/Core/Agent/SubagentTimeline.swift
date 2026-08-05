@@ -256,6 +256,15 @@ enum SubagentEvent: Sendable {
 /// rows used for the parent instead of inventing a second transcript renderer.
 struct SubagentTimeline {
 
+    /// A conversation reduced on a worker and transferred once to the main-actor session state.
+    /// `ConversationTimeline` predates strict concurrency and is not declared `Sendable`; this
+    /// wrapper is safe because the worker relinquishes its fresh value before the main actor
+    /// installs it, and neither side shares mutable access.
+    fileprivate struct ConversationReplay: @unchecked Sendable {
+        let conversation: ConversationTimeline
+        let runProgress: RunProgress?
+    }
+
     /// The compact durable form of a child timeline.
     ///
     /// Full child conversations stay in the providers' own transcript files. Persisting them
@@ -521,7 +530,22 @@ struct SubagentTimeline {
         threadID: String,
         events: [StreamEvent]
     ) {
-        let threadID = ensureAgent(threadID)
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "subagent.transcript.reduce",
+            category: "conversation",
+            metadata: ["events": "\(events.count)"]
+        )
+        defer { performanceSpan.end() }
+        replaceConversation(
+            threadID: threadID,
+            replay: Self.replayConversation(sessionID: sessionID, events: events)
+        )
+    }
+
+    fileprivate static func replayConversation(
+        sessionID: SessionID,
+        events: [StreamEvent]
+    ) -> ConversationReplay {
         var conversation = ConversationTimeline(sessionID: sessionID)
         var runProgress: RunProgress?
         for event in events {
@@ -534,9 +558,20 @@ struct SubagentTimeline {
                 runProgress = nil
             }
         }
-        agentsByID[threadID]?.conversation = conversation
+        return ConversationReplay(
+            conversation: conversation,
+            runProgress: runProgress
+        )
+    }
+
+    fileprivate mutating func replaceConversation(
+        threadID: String,
+        replay: ConversationReplay
+    ) {
+        let threadID = ensureAgent(threadID)
+        agentsByID[threadID]?.conversation = replay.conversation
         let isDone = agentsByID[threadID]?.status.isDone == true
-        agentsByID[threadID]?.runProgress = isDone ? nil : runProgress
+        agentsByID[threadID]?.runProgress = isDone ? nil : replay.runProgress
     }
 }
 
@@ -605,6 +640,7 @@ final class SubagentSessionState {
     private var persistenceTimer: Timer?
     private var persistenceDirty = false
     private var isInvalidated = false
+    private var transcriptReductionGeneration: [String: Int] = [:]
 
     init(
         sessionID: SessionID,
@@ -677,6 +713,42 @@ final class SubagentSessionState {
         onChange?()
     }
 
+    /// Reduces a completed provider transcript away from the event loop, then installs the
+    /// finished value atomically. Tool summaries and edit previews made a real 457 KB child
+    /// transcript occupy the main thread for about 49 ms even after view virtualization; none
+    /// of that pure model work needs AppKit or actor-owned state.
+    func replaceTranscriptConversation(
+        threadID: String,
+        events: [StreamEvent],
+        completion: (@MainActor @Sendable () -> Void)? = nil
+    ) {
+        guard !isInvalidated else { return }
+        let generation = (transcriptReductionGeneration[threadID] ?? 0) + 1
+        transcriptReductionGeneration[threadID] = generation
+        let sessionID = self.sessionID
+
+        DispatchQueue.global(qos: .userInitiated).async { [events] in
+            let span = PerformanceRecorder.shared.begin(
+                "subagent.transcript.reduce",
+                category: "conversation",
+                metadata: ["events": "\(events.count)"]
+            )
+            let replay = SubagentTimeline.replayConversation(
+                sessionID: sessionID,
+                events: events
+            )
+            span.end()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isInvalidated,
+                      self.transcriptReductionGeneration[threadID] == generation else { return }
+                self.timeline.replaceConversation(threadID: threadID, replay: replay)
+                self.onChange?()
+                completion?()
+            }
+        }
+    }
+
     /// Commits any coalesced navigator update before app shutdown or renderer disposal.
     func flushPersistence() {
         persistenceTimer?.invalidate()
@@ -690,6 +762,7 @@ final class SubagentSessionState {
     func invalidate() {
         isInvalidated = true
         onChange = nil
+        transcriptReductionGeneration.removeAll()
         persistenceTimer?.invalidate()
         persistenceTimer = nil
         persistenceDirty = false
@@ -907,12 +980,22 @@ enum SubagentTranscriptLoader {
         case .claude:
             ClaudeSubagentTranscriptReplay.loadConversation(at: url, completion: completion)
         case .codex:
+            let span = PerformanceRecorder.shared.begin(
+                "subagent.transcript.read",
+                category: "conversation"
+            )
             DispatchQueue.global(qos: .userInitiated).async {
                 let replay = TranscriptReplay.read(at: url, kind: .codex)
+                span.end(metadata: [
+                    "events": "\(replay.0.count)",
+                    "truncated": replay.1 ? "true" : "false"
+                ])
                 DispatchQueue.main.async {
                     completion(replay.0, replay.1)
                 }
             }
+        case .grok, .openCode:
+            completion([], false)
         }
     }
 
@@ -1010,6 +1093,8 @@ enum SubagentUsageReader {
 
         case .codex:
             return readCodex(at: url)
+        case .grok, .openCode:
+            return nil
         }
     }
 

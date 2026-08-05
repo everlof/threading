@@ -127,7 +127,7 @@ final class TranscriptUsageService {
         // Resolved on the main queue, because both stores are main-actor bound; the walk that
         // follows touches neither.
         let accounts = AgentKind.allCases
-            .filter { $0 == .claude }
+            .filter { $0.supports(.transcriptUsageIndex) }
             .flatMap { AgentAccountDiscovery.accounts(for: $0) }
             .map { (path: $0.configPath, name: AccountName.display(for: $0)) }
 

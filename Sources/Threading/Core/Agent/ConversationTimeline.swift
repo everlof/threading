@@ -253,10 +253,17 @@ struct ConversationTimeline {
         case .turnFinished(let text, let isError, let metrics):
             var changes = clearStreaming()
             changes.append(contentsOf: settleUnansweredToolCalls())
-            // Only a failed turn is reported. A successful one's text is the assistant message
-            // already rendered, and showing it twice reads as the agent repeating itself.
-            if isError, let text, !text.isEmpty {
-                changes.append(append(.notice(text, kind: .error)))
+            if let text, !text.isEmpty {
+                if isError {
+                    changes.append(append(.notice(text, kind: .error)))
+                } else if !hasAssistantMessageInCurrentTurn {
+                    // Session commands such as Claude's /context return their useful output only
+                    // on the terminal result event. Ordinary model turns already emitted an
+                    // assistant message, so this fills the command-only shape without repeating
+                    // a normal answer.
+                    changes.append(append(.assistant(markdown: text)))
+                    compactedAssistantTextByRow[rows.count - 1] = Self.compact(text)
+                }
             }
             if let startIndex = currentTurnStartIndex {
                 if let duration = metrics.duration {
@@ -330,6 +337,14 @@ struct ConversationTimeline {
         }
 
         return (latest.index, latest.text, endIndex)
+    }
+
+    private var hasAssistantMessageInCurrentTurn: Bool {
+        guard let start = currentTurnStartIndex, start + 1 < rows.count else { return false }
+        return rows[(start + 1)...].contains { row in
+            if case .assistant = row { return true }
+            return false
+        }
     }
 
     /// Collapses whitespace, so a preview of a markdown message is one readable line rather

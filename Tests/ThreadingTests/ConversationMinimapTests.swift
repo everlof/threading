@@ -183,6 +183,74 @@ final class ConversationMinimapTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Preview Placement
+
+    /// The card the rail hangs beside a mark, and the two ways it went wrong at once.
+    ///
+    /// Shipped, this drew an **empty** translucent panel in the pane's bottom-left corner,
+    /// underneath the composer — see the composer redesign. Both causes are asserted here
+    /// because either alone puts it back: it was attached visible with no mark to describe,
+    /// and it was positioned by an assigned frame while Auto Layout owned its geometry, so the
+    /// next layout pass resolved the position it had never been given as the origin.
+    @MainActor
+    func testTheTurnPreviewStaysHiddenUntilAMarkIsPointedAtAndHoldsItsPlaceThrough() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: window.contentLayoutRect)
+        window.contentView = container
+
+        let rail = ConversationMinimapView(frame: NSRect(x: 0, y: 0, width: 24, height: 600))
+        container.addSubview(rail)
+        rail.setTurns((1...8).map {
+            ConversationTimeline.Turn(
+                rowIndex: $0,
+                endIndex: $0,
+                finalAssistantIndex: $0,
+                userText: "Question \($0)",
+                assistantText: "Answer \($0)",
+                duration: nil
+            )
+        })
+        rail.attachPreview(to: container)
+        container.layoutSubtreeIfNeeded()
+
+        let card = try XCTUnwrap(
+            container.subviews.first { $0 is ConversationTurnPreview },
+            "The rail attached no preview at all"
+        )
+        XCTAssertTrue(
+            card.isHidden,
+            "An unpointed rail left its preview on screen, describing nothing"
+        )
+
+        rail.mouseMoved(with: try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: rail.convert(NSPoint(x: rail.bounds.midX, y: 300), to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        )))
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(card.isHidden, "Pointing at a mark showed no preview")
+        let placed = card.frame
+        XCTAssertGreaterThan(placed.minX, rail.frame.maxX, "The card covered the rail it hangs off")
+
+        // The pass that used to lose it. Nothing about the pointer changed, so nothing about
+        // the card may either.
+        container.needsLayout = true
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(card.frame, placed, "A layout pass moved the card out from under the pointer")
+    }
 }
 
 // MARK: - Turns

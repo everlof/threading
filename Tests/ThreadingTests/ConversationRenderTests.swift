@@ -311,9 +311,13 @@ final class ConversationRenderTests: XCTestCase {
         // Chosen to straddle the thresholds: no gutter, a rail that fades in, a rail shown at
         // rest, and a window wide enough that the rail's placement stops being obvious — which
         // is the width at which it was found to be wrong.
+        // `guard let … else { continue }` on a failed render used to stand here, so a pane that
+        // stopped drawing entirely still passed — silently, having written nothing for anyone to
+        // review. These renders exist to be looked at; producing none of them is the one outcome
+        // that must fail rather than pass quietly.
         for width in [Design.Size.readableWidth, 720, 1000, 1800] as [CGFloat] {
             let host = pane(rows: rows, turns: turns, width: width)
-            guard let data = png(of: host) else { continue }
+            let data = try XCTUnwrap(png(of: host), "the pane drew nothing at \(Int(width))pt")
             try data.write(to: directory.appendingPathComponent("pane-\(Int(width)).png"))
         }
 
@@ -402,6 +406,178 @@ final class ConversationRenderTests: XCTestCase {
             shape: shape,
             sessionCount: sessionCount,
             turns: turns
+        )
+    }
+
+    /// Opt-in child-transcript workload. Unlike the parent renderer, the Subagents pane has its
+    /// own host and update lifecycle, so the ordinary conversation sweep cannot catch it
+    /// eagerly constructing every Markdown and tool row or rebuilding them on selection.
+    func testStressSubagentTranscriptWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_SUBAGENT_STRESS"] == "1",
+            "Set THREADING_SUBAGENT_STRESS=1 to run the child-transcript sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let readStarted = DispatchTime.now().uptimeNanoseconds
+        let events: [StreamEvent]
+        let source: String
+        if let path = environment["THREADING_SUBAGENT_STRESS_TRANSCRIPT"], !path.isEmpty {
+            let url = URL(fileURLWithPath: path)
+            try XCTSkipUnless(
+                FileManager.default.fileExists(atPath: url.path),
+                "The requested child transcript does not exist."
+            )
+            events = ClaudeSubagentTranscriptReplay.readConversation(at: url).events
+            source = "transcript"
+        } else {
+            let turns = environment["THREADING_SUBAGENT_STRESS_TURNS"]
+                .flatMap(Int.init)
+                .flatMap { $0 > 0 ? $0 : nil }
+                ?? 100
+            events = Self.stressEvents(shape: .mixed, turns: turns)
+            source = "generated"
+        }
+        let readEnded = DispatchTime.now().uptimeNanoseconds
+
+        let sessionID = SessionID()
+        let threadID = "profile-child"
+        let state = SubagentSessionState(sessionID: sessionID)
+        state.apply(.discovered(SubagentDescriptor(
+            threadID: threadID,
+            nickname: "Profile child",
+            role: "Explore"
+        )))
+        state.apply(.state(threadID: threadID, status: .completed, message: nil))
+        let reduced = expectation(description: "child transcript reduced off the main queue")
+        let modelStarted = DispatchTime.now().uptimeNanoseconds
+        state.replaceTranscriptConversation(threadID: threadID, events: events) {
+            reduced.fulfill()
+        }
+        wait(for: [reduced], timeout: 10)
+        let modelEnded = DispatchTime.now().uptimeNanoseconds
+        let timeline = state.timeline
+
+        let baselineMemory = Self.physicalFootprintBytes()
+        let controller = SubagentTranscriptViewController()
+        let frame = NSRect(
+            x: 0,
+            y: 0,
+            width: 540,
+            height: Render.viewportHeight
+        )
+        _ = controller.view
+        controller.view.frame = frame
+        controller.view.layoutSubtreeIfNeeded()
+
+        let renderStarted = DispatchTime.now().uptimeNanoseconds
+        controller.update(timeline, selectedThreadID: threadID)
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+
+        // An unshown NSTableView deliberately asks for no cells. Materialize the production
+        // presentation rows into a width-constrained document to measure first-paint view work
+        // without ordering a test window on screen or constructing rows the collapsed model
+        // does not contain.
+        let materializedDocument = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: frame.width,
+            height: 1
+        ))
+        let materializedStack = NSStackView()
+        materializedStack.orientation = .vertical
+        materializedStack.alignment = .leading
+        materializedStack.spacing = 0
+        materializedStack.translatesAutoresizingMaskIntoConstraints = false
+        materializedDocument.addSubview(materializedStack)
+        NSLayoutConstraint.activate([
+            materializedStack.topAnchor.constraint(equalTo: materializedDocument.topAnchor),
+            materializedStack.leadingAnchor.constraint(equalTo: materializedDocument.leadingAnchor),
+            materializedStack.trailingAnchor.constraint(equalTo: materializedDocument.trailingAnchor)
+        ])
+
+        let table = controller.transcriptTableView
+        let viewportStart = max(0, table.numberOfRows - 18)
+        let viewportRows = viewportStart..<table.numberOfRows
+        var rowMountDurations: [UInt64] = []
+        for row in 0..<table.numberOfRows {
+            autoreleasepool {
+                let started = DispatchTime.now().uptimeNanoseconds
+                guard let rowView = controller.tableView(
+                    table,
+                    viewFor: table.tableColumns.first,
+                    row: row
+                ) else { return }
+                rowView.frame = NSRect(x: 0, y: 0, width: frame.width, height: 1)
+                rowView.frame.size.height = max(1, rowView.fittingSize.height)
+                rowView.layoutSubtreeIfNeeded()
+                rowMountDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            }
+        }
+        let materializeStarted = DispatchTime.now().uptimeNanoseconds
+        for row in viewportRows {
+            guard let rowView = controller.tableView(
+                table,
+                viewFor: table.tableColumns.first,
+                row: row
+            ) else { continue }
+            materializedStack.addArrangedSubview(rowView)
+            rowView.widthAnchor.constraint(equalTo: materializedStack.widthAnchor).isActive = true
+        }
+        let materializeEnded = DispatchTime.now().uptimeNanoseconds
+        materializedDocument.layoutSubtreeIfNeeded()
+        materializedDocument.frame.size.height = max(
+            Render.viewportHeight,
+            materializedStack.fittingSize.height
+        )
+        materializedDocument.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+        let renderedMemory = Self.physicalFootprintBytes()
+
+        let scrollView = ThemedScrollView(frame: frame)
+        scrollView.documentView = materializedDocument
+        let overflow = max(0, materializedDocument.bounds.height - scrollView.contentSize.height)
+        var scrollDurations: [UInt64] = []
+        if overflow > 0 {
+            for tick in 0..<120 {
+                let progress = CGFloat(tick) / 119
+                let started = DispatchTime.now().uptimeNanoseconds
+                scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: overflow * progress))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                materializedDocument.layoutSubtreeIfNeeded()
+                scrollDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            }
+        }
+
+        let descendants = Self.descendantCount(in: materializedDocument)
+        print(
+            "THREADING_PERF subagent-transcript "
+                + "source=\(source) events=\(events.count) rows=\(controller.renderedRowCount) "
+                + "presented=\(controller.renderedPresentationCount) "
+                + "materialized=\(viewportRows.count) "
+                + "descendants=\(descendants) "
+                + "read_ms=\(Self.milliseconds(readEnded - readStarted)) "
+                + "model_ms=\(Self.milliseconds(modelEnded - modelStarted)) "
+                + "model_thread=worker "
+                + "render_ms=\(Self.milliseconds(renderEnded - renderStarted)) "
+                + "materialize_ms=\(Self.milliseconds(materializeEnded - materializeStarted)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - materializeEnded)) "
+                + "elapsed_ms=\(Self.milliseconds(layoutEnded - renderStarted)) "
+                + "row_mount_p50_ms="
+                + Self.milliseconds(Self.percentile(rowMountDurations, 0.50)) + " "
+                + "row_mount_p95_ms="
+                + Self.milliseconds(Self.percentile(rowMountDurations, 0.95)) + " "
+                + "scroll_p50_ms=\(Self.milliseconds(Self.percentile(scrollDurations, 0.50))) "
+                + "scroll_p95_ms=\(Self.milliseconds(Self.percentile(scrollDurations, 0.95))) "
+                + "renderer_delta_mb="
+                + Self.megabytes(Self.positiveDifference(renderedMemory, baselineMemory))
+        )
+
+        XCTAssertLessThan(
+            viewportRows.count,
+            max(40, controller.renderedPresentationCount + 1),
+            "the child transcript materialized an unexpectedly large working set"
         )
     }
 
@@ -1464,6 +1640,58 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(written.count, Fixture.allCases.count * 2)
     }
 
+    func testHandoffDividerRendersWithinTheConversationColumn() throws {
+        let kinds: [AgentKind] = [.claude, .codex, .grok, .openCode]
+        let endpoints = kinds.enumerated().map { index, kind in
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: kind,
+                model: "provider/model-with-a-deliberately-long-name-\(index)",
+                title: "Hop \(index)"
+            )
+        }
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: endpoints))
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var payload: Data?
+            let render = {
+                let divider = ConversationHandoffView(
+                    handoff: handoff,
+                    canOpenSource: true,
+                    onOpenSource: { _ in }
+                )
+                let host = NSView(frame: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: Design.Size.readableWidth,
+                    height: 1
+                ))
+                host.appearance = appearance
+                divider.appearance = appearance
+                host.addSubview(divider)
+                NSLayoutConstraint.activate([
+                    divider.topAnchor.constraint(equalTo: host.topAnchor),
+                    divider.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    divider.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+                ])
+                host.layoutSubtreeIfNeeded()
+                host.frame.size.height = divider.fittingSize.height
+                host.layoutSubtreeIfNeeded()
+
+                XCTAssertGreaterThan(host.frame.height, 0)
+                XCTAssertLessThanOrEqual(divider.frame.maxX, Design.Size.readableWidth + 1)
+                XCTAssertTrue(divider.accessibilityLabel()?.contains("Context handoff") == true)
+                payload = self.png(of: host)
+            }
+            appearance?.performAsCurrentDrawingAppearance(render)
+            let data = try XCTUnwrap(payload, "Failed to render handoff divider in \(name)")
+            try data.write(to: directory.appendingPathComponent("handoff-divider-\(name).png"))
+        }
+    }
+
     // MARK: - Long User Messages
 
     func testTheCollapseThresholdCountsCharactersAndHardLines() {
@@ -1558,6 +1786,171 @@ final class ConversationRenderTests: XCTestCase {
             let payload = try XCTUnwrap(data, "Failed to render the changed-files card in \(name)")
             try payload.write(to: directory.appendingPathComponent("changed-files-card-\(name).png"))
         }
+    }
+
+    // MARK: - Reply Composer
+
+    /// The composer at the foot of the pane, with the narration line above it.
+    ///
+    /// The picture is the point. This surface was reviewed for a long time only by using the
+    /// app, and what it had become — a strip of chips floating between the conversation and the
+    /// input, clustered at the leading edge with the pane's whole width empty beside them, and
+    /// an empty preview card parked underneath the box — was plain in a screenshot and in no
+    /// assertion anyone had written. Both appearances, because every surface here is derived
+    /// from a system colour and a change that breaks one is easy to miss from inside the other.
+    func testRendersTheReplyComposer() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let host = NSView(frame: NSRect(x: 0, y: 0, width: Render.width, height: 1))
+
+                // Both states in one picture: the box as it rests, waiting for a reply, and the
+                // box with something in it. The resting one is what the pane shows nearly all
+                // the time and is the height the whole redesign turns on.
+                let column = NSStackView(views: [
+                    self.replyComposerColumn(typing: ""),
+                    self.replyComposerColumn(typing: "Have another look at the diff")
+                ])
+                column.orientation = .vertical
+                column.alignment = .leading
+                column.spacing = Design.Spacing.large
+                column.translatesAutoresizingMaskIntoConstraints = false
+                for band in column.arrangedSubviews {
+                    band.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+                }
+                host.addSubview(column)
+                NSLayoutConstraint.activate([
+                    column.topAnchor.constraint(
+                        equalTo: host.topAnchor,
+                        constant: Design.Spacing.inset
+                    ),
+                    column.leadingAnchor.constraint(
+                        equalTo: host.leadingAnchor,
+                        constant: Design.Spacing.inset
+                    ),
+                    column.trailingAnchor.constraint(
+                        equalTo: host.trailingAnchor,
+                        constant: -Design.Spacing.inset
+                    )
+                ])
+                host.appearance = appearance
+                column.appearance = appearance
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+                host.frame.size.height = column.fittingSize.height + Design.Spacing.inset * 2
+                host.layoutSubtreeIfNeeded()
+                data = self.png(of: host)
+            }
+
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            let payload = try XCTUnwrap(data, "Failed to render the reply composer in \(name)")
+            try payload.write(to: directory.appendingPathComponent("reply-composer-\(name).png"))
+        }
+    }
+
+    /// The composer's controls reach the pane's trailing edge rather than trailing the chips.
+    ///
+    /// The strip this replaced sized itself to its content and was pinned by one edge, so the
+    /// meter and the send sat wherever the last chip happened to end — which on a wide pane is
+    /// the middle of an otherwise empty row.
+    func testTheReplyComposerSpansThePaneAndFinishesAtItsTrailingEdge() throws {
+        let column = replyComposerColumn(typing: "")
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: Render.width, height: 1))
+        host.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.topAnchor.constraint(equalTo: host.topAnchor),
+            column.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        host.frame.size.height = column.fittingSize.height
+        host.layoutSubtreeIfNeeded()
+
+        let prompt = try XCTUnwrap(
+            Self.descendants(in: column).compactMap { $0 as? PromptView }.first
+        )
+        XCTAssertEqual(prompt.frame.width, Render.width, accuracy: 1, "The box left the pane's width behind")
+
+        let send = try XCTUnwrap(
+            Self.descendants(in: prompt).compactMap { $0 as? ThemedButton }.first,
+            "The composer drew no send control"
+        )
+        XCTAssertLessThan(
+            prompt.bounds.maxX - send.convert(send.bounds, to: prompt).maxX,
+            Design.Spacing.large,
+            "The send did not reach the box's trailing edge"
+        )
+    }
+
+    /// Builds the pane's whole bottom band — the narration line and the composer under it —
+    /// with the controls a live Codex session would have put on the row.
+    private func replyComposerColumn(typing text: String) -> NSStackView {
+        let orb = WorkingOrbView()
+        orb.isHidden = true
+        let status = NSTextField(labelWithString: "Ready · last turn 47s · ↓ 1.2k tokens")
+        status.applyFont(.subheading)
+        status.textColor = Design.Text.tertiary
+        status.lineBreakMode = .byTruncatingTail
+
+        let narration = NSStackView(views: [orb, status])
+        narration.orientation = .horizontal
+        narration.alignment = .centerY
+        narration.spacing = Design.Spacing.tight
+        narration.edgeInsets = NSEdgeInsets(
+            top: 0,
+            left: Design.Spacing.inset,
+            bottom: 0,
+            right: 0
+        )
+
+        let model = ChipView()
+        model.configure(symbolName: "cpu", title: "Opus · 1M")
+        // Model then mode, the pair the opening composer leads with.
+        let mode = ChipView()
+        mode.configure(
+            symbolName: PermissionModePresentation.symbol,
+            title: AgentPermissionMode.acceptEdits.displayName
+        )
+        let effort = ChipView()
+        effort.configure(symbolName: "brain", title: "High")
+        let speed = ChipView()
+        speed.configure(symbolName: "bolt.fill", title: "Standard")
+
+        let context = NSTextField(labelWithString: TurnStatusText.context(
+            tokens: 74_000,
+            window: 200_000
+        ))
+        context.applyFont(.subheading)
+        context.textColor = Design.Text.tertiary
+
+        let prompt = PromptView()
+        prompt.fontSurface = .conversation
+        prompt.showsImageAttachments = true
+        prompt.submitPlacement = .footer
+        prompt.placeholder = "Reply to Codex"
+        prompt.setFooterControls(leading: [model, mode, effort, speed], trailing: [context])
+        prompt.stringValue = text
+
+        let column = NSStackView(views: [narration, prompt])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        column.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            narration.widthAnchor.constraint(equalTo: column.widthAnchor),
+            prompt.widthAnchor.constraint(equalTo: column.widthAnchor)
+        ])
+        return column
     }
 
     // MARK: - Theme Matrix
@@ -1832,11 +2225,19 @@ final class SubagentSummaryViewTests: XCTestCase {
                 .first { $0.title == "Second child" }
         )
         _ = second.sendAction(second.action, to: second.target)
+        controller.view.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(selectedID, "child-two")
         XCTAssertEqual(controller.representedThreadID, "child-two")
+        let transcriptRow = try XCTUnwrap(
+            controller.transcriptTableView.view(
+                atColumn: 0,
+                row: 1,
+                makeIfNecessary: true
+            )
+        )
         XCTAssertTrue(
-            descendants(of: controller.view)
+            descendants(of: transcriptRow)
                 .compactMap { $0 as? NSTextField }
                 .contains { $0.stringValue == "Second reply" }
         )
@@ -2133,9 +2534,14 @@ final class SubagentSummaryViewTests: XCTestCase {
             "The compact child transcript did not replace tool runs with disclosures"
         )
         XCTAssertEqual(
-            transcriptDescendants.compactMap { $0 as? ToolCallView }.filter(\.isHidden).count,
-            3,
-            "Tool rows should start hidden behind their run disclosure"
+            transcriptDescendants.compactMap { $0 as? ToolCallView }.count,
+            0,
+            "Collapsed virtual tool rows should not be materialized behind their disclosure"
+        )
+        XCTAssertEqual(
+            controller.renderedPresentationCount,
+            8,
+            "Markdown blocks should be separate virtual rows beside the two tool folds"
         )
         let summary = try XCTUnwrap(
             transcriptDescendants.compactMap { $0 as? SubagentSummaryView }.first
@@ -2147,23 +2553,39 @@ final class SubagentSummaryViewTests: XCTestCase {
                 .contains { $0.title == agent.descriptor.displayName },
             "The side pane no longer exposes the child navigator"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             transcriptDescendants.contains { $0 is MarkdownView },
-            "The child reply did not use the native Markdown renderer"
+            "A long reply was rebuilt as one eager Markdown constraint tree"
+        )
+        XCTAssertTrue(
+            transcriptDescendants.compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue.contains("The focused regression now passes") },
+            "The block-virtualized reply did not retain its rendered Markdown text"
         )
 
-        let scrollView = try XCTUnwrap(
-            controller.view.subviews.compactMap { $0 as? NSScrollView }.first
+        let firstFold = try XCTUnwrap(
+            transcriptDescendants.compactMap { $0 as? TurnFoldView }.first
         )
-        let documentView = try XCTUnwrap(scrollView.documentView)
-        let stack = try XCTUnwrap(
-            documentView.subviews.compactMap { $0 as? NSStackView }.first
-        )
+        firstFold.setExpanded(true)
         XCTAssertEqual(
-            stack.frame.width,
-            documentView.bounds.width,
+            controller.renderedPresentationCount,
+            10,
+            "Opening a two-tool fold should insert exactly its two virtual rows"
+        )
+        firstFold.setExpanded(false)
+        XCTAssertEqual(
+            controller.renderedPresentationCount,
+            8,
+            "Closing a tool fold should release its virtual rows again"
+        )
+
+        let scrollView = controller.transcriptScrollView
+        let tableView = controller.transcriptTableView
+        XCTAssertEqual(
+            tableView.frame.width,
+            scrollView.contentSize.width,
             accuracy: 1,
-            "A narrow detail pane must fill its document width so transcript rows wrap"
+            "A narrow virtual transcript must fill its clip width so rows wrap"
         )
 
         let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))

@@ -13,17 +13,19 @@ import Foundation
 ///
 /// It also speaks the CLI's **control channel** — the same line-delimited stdin the turns use,
 /// carrying `control_request` objects the CLI answers with a `control_response`. Verified against
-/// CLI 2.1.218: a control request works with no `initialize` handshake (Threading never sends one),
-/// `set_model` switches the model mid-conversation without a respawn — the next model round-trip
-/// uses it, and the assistant message that follows reports the new model — and `apply_flag_settings`
-/// carries the fast-mode flag. Codex's per-turn `exec` has no equivalent live channel, so the
-/// capability protocols below are Claude-only and the UI offers the control only when the cast
-/// succeeds.
+/// CLI 2.1.220: `initialize` returns the session's rich slash-command catalog before the first
+/// prompt, `set_model` switches the model mid-conversation without a respawn — the next model
+/// round-trip uses it — `apply_flag_settings` carries the fast-mode flag, and
+/// `set_permission_mode` moves the conversation's permission posture (re-verified against 2.1.221,
+/// where the accepted subtype list holds `set_model` and `set_permission_mode` side by side).
 @MainActor
 final class ClaudeStreamSession:
     ConversationStreamSession,
+    ProviderExecutionReportingConversation,
+    ComposerCapabilityProviding,
     ModelSwitchableConversation,
     FastModeConversation,
+    PermissionModeSwitchableConversation,
     SubagentReportingConversation,
     SubagentHistoryConversation {
 
@@ -37,6 +39,7 @@ final class ClaudeStreamSession:
 
     /// Fired on the main queue for every parsed event.
     var onEvent: ((StreamEvent) -> Void)?
+    var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
 
     /// Fired on the main queue for child-agent events. Forwarded child output is deliberately
     /// absent from `onEvent`, because it belongs to the child's drill-in transcript.
@@ -46,6 +49,8 @@ final class ClaudeStreamSession:
     var onExit: ((Int32) -> Void)?
 
     var onSendAvailabilityChange: (() -> Void)?
+    var onComposerCapabilitiesChange: (() -> Void)?
+    private(set) var composerCapabilities: [ComposerCapability] = []
 
     private(set) var isRunning = false
 
@@ -65,7 +70,16 @@ final class ClaudeStreamSession:
     /// on the main queue — reads, writes and the response routing all hop there — so the map needs
     /// no locking. A monotonic counter mints the ids rather than a UUID, so the wire is legible.
     private var controlRequestSequence = 0
-    private var pendingControl: [String: (Result<Void, Error>) -> Void] = [:]
+    private var pendingControl: [String: (Result<ControlResponse, Error>) -> Void] = [:]
+
+    /// Rich metadata arrives before the first turn through the control channel. `system/init`
+    /// later identifies which advertised names are user-invocable skills.
+    private var commandMetadata: [String: ClaudeCommandMetadata] = [:]
+    private var knownSkillNames: Set<String> = []
+    private var hasAuthoritativeSkillMembership = false
+    private var didRequestComposerCapabilities = false
+    private var capabilityInitializationFinished = true
+    private var pendingPrompt: String?
 
     /// Diagnostic fallback for a child that exits before stream-json can explain why.
     private var errorBuffer = Data()
@@ -113,6 +127,13 @@ final class ClaudeStreamSession:
         errorBuffer.removeAll(keepingCapacity: true)
         parseDiagnostics.reset()
         subagentAdapter.reset()
+        pendingPrompt = nil
+        commandMetadata.removeAll()
+        knownSkillNames.removeAll()
+        hasAuthoritativeSkillMembership = false
+        didRequestComposerCapabilities = false
+        capabilityInitializationFinished = onComposerCapabilitiesChange == nil
+        replaceComposerCapabilities([])
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
@@ -153,12 +174,22 @@ final class ClaudeStreamSession:
         self.inputPipe = input
         self.isRunning = true
         onSendAvailabilityChange?()
+        if onComposerCapabilitiesChange != nil {
+            requestComposerCapabilities()
+        }
     }
 
     /// Sends a user turn.
     ///
     /// The CLI accepts the same message envelope the API uses, one JSON object per line.
-    var canSend: Bool { isRunning && inputPipe != nil && !isTurnInFlight }
+    var canSend: Bool {
+        isRunning && inputPipe != nil && !isTurnInFlight && pendingPrompt == nil
+    }
+
+    /// The control channel accepts a request while a turn is active; it applies to the next
+    /// model round-trip without restarting the persistent process. So this asks only that the
+    /// conversation is open, not that it is idle.
+    var acceptsConfigurationChange: Bool { isRunning }
 
     /// One process serves the whole conversation here, so this is stable across turns.
     var rootProcessIdentifier: pid_t? {
@@ -168,28 +199,59 @@ final class ClaudeStreamSession:
 
     @discardableResult
     func send(_ text: String) -> Bool {
-        guard canSend, let inputPipe else { return false }
+        guard canSend else { return false }
+
+        pendingPrompt = text
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        isTurnInFlight = true
+        onSendAvailabilityChange?()
+        sendPendingTurnIfReady()
+        return true
+    }
+
+    @discardableResult
+    func send(_ invocation: ComposerInvocation) -> Bool {
+        guard composerCapabilities.contains(where: {
+            $0.id == invocation.capability.id && $0.isEnabled
+        }) else { return false }
+        return send(invocation.sourceText)
+    }
+
+    private func sendPendingTurnIfReady() {
+        guard capabilityInitializationFinished,
+              let text = pendingPrompt,
+              let inputPipe else { return }
 
         let message: [String: Any] = [
             "type": "user",
             "message": ["role": "user", "content": [["type": "text", "text": text]]]
         ]
 
-        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
+        guard var data = try? JSONSerialization.data(withJSONObject: message) else {
+            pendingPrompt = nil
+            isTurnInFlight = false
+            turnStartedAt = nil
+            onSendAvailabilityChange?()
+            return
+        }
         data.append(0x0A)
 
         // A write to a dead process raises SIGPIPE rather than returning an error, and the
         // process may have exited between the check above and here.
-        let startedAt = ProcessInfo.processInfo.systemUptime
         do {
             try inputPipe.fileHandleForWriting.write(contentsOf: data)
-            turnStartedAt = startedAt
-            isTurnInFlight = true
-            onSendAvailabilityChange?()
-            return true
+            pendingPrompt = nil
         } catch {
             ThreadingLogger.agent.error("Stream session write failed: \(error.localizedDescription)")
-            return false
+            pendingPrompt = nil
+            isTurnInFlight = false
+            turnStartedAt = nil
+            onSendAvailabilityChange?()
+            onEvent?(.turnFinished(
+                text: error.localizedDescription,
+                isError: true,
+                metrics: .empty
+            ))
         }
     }
 
@@ -244,7 +306,9 @@ final class ClaudeStreamSession:
     /// round-trip, so switching mid-turn is legitimate.
     func setModel(_ model: String?, completion: @escaping (Result<Void, Error>) -> Void) {
         let body: [String: Any] = ["model": model.map { $0 as Any } ?? NSNull()]
-        sendControl(subtype: ClaudeControlRequest.setModel, body: body, completion: completion)
+        sendControl(subtype: ClaudeControlRequest.setModel, body: body) { result in
+            completion(result.map { _ in () })
+        }
     }
 
     /// Toggles Claude Code's fast mode for the rest of the conversation. Fast mode is off by
@@ -253,13 +317,54 @@ final class ClaudeStreamSession:
     /// subscription, usage credits and org policy still gate.
     func setFastMode(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
         let body: [String: Any] = ["settings": ["fastMode": enabled]]
-        sendControl(subtype: ClaudeControlRequest.applyFlagSettings, body: body, completion: completion)
+        sendControl(subtype: ClaudeControlRequest.applyFlagSettings, body: body) { result in
+            completion(result.map { _ in () })
+        }
+    }
+
+    /// Moves the permission posture for the rest of the conversation, without a respawn.
+    ///
+    /// The mode travels as Claude's own **external** flag value, which is what `rawValue` is —
+    /// the CLI normalises `manual` to its internal `default` on the way in, and rejects anything
+    /// outside its six with `Cannot set permission mode: must be one of …`.
+    ///
+    /// A mode the session may not have is refused rather than silently kept: `bypassPermissions`
+    /// on a session not launched with `--dangerously-skip-permissions`, or either of the two
+    /// gated modes where settings disable them, comes back as a `control_response` of subtype
+    /// `error` carrying the CLI's own sentence. That is why the completion reports the verdict
+    /// instead of assuming one — the caller must not claim a change the agent declined.
+    func setPermissionMode(
+        _ mode: AgentPermissionMode,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let body: [String: Any] = ["mode": mode.claudeFlagValue]
+        sendControl(subtype: ClaudeControlRequest.setPermissionMode, body: body) { result in
+            completion(result.map { _ in () })
+        }
+    }
+
+    private func requestComposerCapabilities() {
+        guard !didRequestComposerCapabilities else { return }
+        didRequestComposerCapabilities = true
+        capabilityInitializationFinished = false
+        sendControl(subtype: ClaudeControlRequest.initialize, body: [:]) { [weak self] result in
+            guard let self else { return }
+            if case .success(let response) = result,
+               let commands = ClaudeCapabilityWire.commands(from: response.payload) {
+                self.applyCommandMetadata(commands, replacing: true)
+            }
+            // Discovery never blocks ordinary chat indefinitely. An older CLI falls through
+            // after the control timeout, and system/init still provides a name-only fallback.
+            self.capabilityInitializationFinished = true
+            self.sendPendingTurnIfReady()
+            self.onSendAvailabilityChange?()
+        }
     }
 
     private func sendControl(
         subtype: String,
         body: [String: Any],
-        completion: @escaping (Result<Void, Error>) -> Void
+        completion: @escaping (Result<ControlResponse, Error>) -> Void
     ) {
         guard isRunning, let inputPipe else {
             completion(.failure(ClaudeControlError.notRunning))
@@ -298,7 +403,7 @@ final class ClaudeStreamSession:
         if response.isError {
             completion(.failure(ClaudeControlError.rejected(response.error ?? "unknown error")))
         } else {
-            completion(.success(()))
+            completion(.success(response))
         }
     }
 
@@ -330,7 +435,15 @@ final class ClaudeStreamSession:
                 continue
             }
 
+            updateComposerCapabilities(from: line)
+
             HookOutcomeLog.note(line: line, sessionID: sessionID)
+
+            // Audit the provider's complete tool objects before either the parent or subagent
+            // conversation adapter turns them into display rows.
+            for event in ClaudeProviderExecutionAdapter.events(line: line) {
+                onProviderExecution?(event)
+            }
 
             if let route = subagentAdapter.route(line) {
                 for event in route.events { onSubagentEvent?(event) }
@@ -360,6 +473,7 @@ final class ClaudeStreamSession:
         (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         process = nil
         inputPipe = nil
+        pendingPrompt = nil
         onSendAvailabilityChange?()
 
         // A request whose reply will now never arrive fails rather than sitting on its timeout.
@@ -396,6 +510,7 @@ final class ClaudeStreamSession:
         }
         turnStartedAt = nil
         isTurnInFlight = false
+        pendingPrompt = nil
         onSendAvailabilityChange?()
 
         return .turnFinished(
@@ -403,6 +518,177 @@ final class ClaudeStreamSession:
             isError: isError,
             metrics: metrics.filling(duration: duration, effort: effort)
         )
+    }
+
+    // MARK: - Composer Capabilities
+
+    private func updateComposerCapabilities(from line: String) {
+        guard let update = ClaudeCapabilityWire.update(from: line) else { return }
+        if let skills = update.skillNames {
+            knownSkillNames = ComposerCapabilityCatalogPolicy.boundedNames(skills)
+            hasAuthoritativeSkillMembership = true
+        } else if update.newCommandsAreSkills {
+            // `commands_changed` carries the complete command metadata but no kind field. Claude
+            // emits it when its live registry discovers commands such as skills in a newly
+            // entered subdirectory. Preserve known memberships, discard removed names, and mark
+            // newly introduced rows as skills rather than silently presenting them as commands.
+            let names = ComposerCapabilityCatalogPolicy.boundedNames(
+                update.commands?.map(\.name) ?? update.commandNames ?? []
+            )
+            let additions = names.subtracting(commandMetadata.keys)
+            knownSkillNames.formIntersection(names)
+            knownSkillNames.formUnion(additions)
+        }
+        if let commands = update.commands {
+            applyCommandMetadata(commands, replacing: update.replacesCommands)
+        } else if let names = update.commandNames {
+            let metadata = names.map { name in
+                commandMetadata[name] ?? ClaudeCommandMetadata(
+                    name: name,
+                    description: "",
+                    argumentHint: "",
+                    aliases: []
+                )
+            }
+            applyCommandMetadata(metadata, replacing: true)
+        } else if !composerCapabilities.isEmpty {
+            rebuildComposerCapabilities()
+        }
+    }
+
+    private func applyCommandMetadata(
+        _ commands: [ClaudeCommandMetadata],
+        replacing: Bool
+    ) {
+        if replacing { commandMetadata.removeAll() }
+        let inspected = commands.prefix(
+            ComposerCapabilityCatalogPolicy.maximumInspectedCapabilities
+        )
+        for command in inspected { commandMetadata[command.name] = command }
+        rebuildComposerCapabilities(order: inspected.map(\.name))
+    }
+
+    private func rebuildComposerCapabilities(order preferredOrder: [String] = []) {
+        var seenPreferredNames: Set<String> = []
+        let preferred = preferredOrder.filter { name in
+            commandMetadata[name] != nil && seenPreferredNames.insert(name).inserted
+        }
+        let remainder = commandMetadata.keys
+            .filter { !seenPreferredNames.contains($0) }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        let capabilities = (preferred + remainder).compactMap { name -> ComposerCapability? in
+            guard let command = commandMetadata[name] else { return nil }
+            guard !ClaudeComposerCommandPolicy.hiddenNames.contains(name) else { return nil }
+            let isSkill = knownSkillNames.contains(name)
+            // A project can choose a skill name that collides with a built-in command. Claude's
+            // slash resolver, not the catalog's kind label, decides what raw `/name` ultimately
+            // invokes, so the lifecycle/sensitive denylist must win over skill membership.
+            let availability: ComposerCapability.Availability =
+                ClaudeComposerCommandPolicy.nativeUnsafeNames.contains(name)
+                    ? .unavailable(reason: L10n.string(
+                        "Available in Claude Terminal; not safe in native Chat yet"
+                    ))
+                    : .available
+            return ComposerCapability(
+                id: "claude.command:\(name)",
+                name: name,
+                description: command.description,
+                argumentHint: command.argumentHint,
+                aliases: command.aliases,
+                kind: isSkill ? .skill : .command,
+                isAvailableInSkillCatalog: isSkill || !hasAuthoritativeSkillMembership,
+                trigger: .slash,
+                presentation: ClaudeComposerCommandPolicy.presentation(
+                    for: name,
+                    isSkill: isSkill
+                ),
+                availability: availability
+            )
+        }
+        replaceComposerCapabilities(capabilities)
+    }
+
+    private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
+        if normalization.wasTruncated {
+            ThreadingLogger.agent.warning(
+                "Claude composer catalog exceeded local presentation limits; truncated"
+            )
+        }
+        let names = Set(normalization.capabilities.map(\.name))
+        // Retain the normalized values too. Filtering only the keys would leave a provider's
+        // multi-megabyte description alive in `commandMetadata` even though the UI saw a bound
+        // copy, and the next membership update would expand it again.
+        commandMetadata = Dictionary(uniqueKeysWithValues: normalization.capabilities.map { capability in
+            (
+                capability.name,
+                ClaudeCommandMetadata(
+                    name: capability.name,
+                    description: capability.description,
+                    argumentHint: capability.argumentHint,
+                    aliases: capability.aliases
+                )
+            )
+        })
+        knownSkillNames.formIntersection(names)
+        guard composerCapabilities != normalization.capabilities else { return }
+        composerCapabilities = normalization.capabilities
+        onComposerCapabilitiesChange?()
+    }
+}
+
+/// A small native-surface override over Claude's live catalog. The provider remains the source
+/// of truth for membership; these sets only state where raw passthrough would desynchronize
+/// Threading's transcript/session ownership or expose an internal transport command.
+enum ClaudeComposerCommandPolicy {
+    static let hiddenNames: Set<String> = [
+        "__remote-workflow",
+        "workflow-launch-exec"
+    ]
+
+    static let nativeUnsafeNames: Set<String> = [
+        "clear", "reset", "new",
+        "background", "bg", "branch", "fork", "btw", "cd",
+        "exit", "quit", "remote-control", "rc", "resume", "continue",
+        "rewind", "checkpoint", "undo", "stop", "subtask", "tasks", "bashes",
+        "teleport", "tp", "tui", "workflows",
+        "heapdump", "ultrareview", "usage-credits", "extra-usage", "upgrade",
+        "autofix-pr", "bug", "share", "feedback", "install-github-app",
+        "install-slack-app", "web-setup", "design", "design-consent", "design-revoke"
+    ]
+
+    /// Command-versus-skill does not answer whether a user-visible agent turn follows. These
+    /// measured commands and bundled workflows do, so their invocation remains a user bubble
+    /// rather than being reduced to a muted session-control notice.
+    static let turnNames: Set<String> = [
+        "init", "review", "security-review", "insights", "recap", "goal",
+        "team-onboarding", "deep-research", "design-sync", "dataviz", "verify",
+        "debug", "code-review", "simplify", "batch", "fewer-permission-prompts",
+        "doctor", "checkup", "loop", "proactive", "schedule", "routines",
+        "claude-api", "run", "run-skill-generator"
+    ]
+
+    /// Claude does not identify which non-skill rows are prompt workflows and which are
+    /// immediate CLI controls. Keep a bounded allowlist for commands measured/documented as
+    /// session UI or state operations; an unknown name (including a legacy `.claude/commands`
+    /// entry) is conservatively presented as a user turn so its prompt is not hidden as chrome.
+    static let sessionCommandNames: Set<String> = [
+        "add-dir", "advisor", "agents", "allowed-tools", "app", "chrome", "color",
+        "compact", "config", "context", "copy", "cost", "desktop", "diff", "effort",
+        "export", "fast", "focus", "help", "hooks", "ide", "ios", "android",
+        "keybindings", "login", "logout", "mcp", "memory", "mobile", "model", "passes",
+        "permissions", "plan", "plugin", "powerup", "privacy-settings", "radio",
+        "release-notes", "reload-plugins", "reload-skills", "remote-env", "rename",
+        "sandbox", "scroll-speed", "settings", "skills", "stats", "status", "statusline",
+        "stickers", "tasks", "usage"
+    ]
+
+    static func presentation(
+        for name: String,
+        isSkill: Bool
+    ) -> ComposerCapability.Presentation {
+        if isSkill || turnNames.contains(name) { return .turn }
+        return sessionCommandNames.contains(name) ? .command : .turn
     }
 }
 
@@ -436,6 +722,21 @@ protocol FastModeConversation: AnyObject {
     func setFastMode(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
+/// A conversation transport that can change how much the agent may do before it has to ask,
+/// mid-conversation and without a respawn.
+///
+/// The mode is **not** optional here, unlike `ModelSwitchableConversation`'s: `set_model` takes an
+/// explicit null meaning "back to the session default", and the permission channel has no
+/// equivalent. Inherit is therefore a question the caller has to resolve before it reaches the
+/// wire, and where it resolves to nothing there is nothing honest to send.
+@MainActor
+protocol PermissionModeSwitchableConversation: AnyObject {
+    func setPermissionMode(
+        _ mode: AgentPermissionMode,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+}
+
 // MARK: - Wire Format
 
 /// Builds the `control_request` line the CLI reads off stdin. Pure and separate from the session so
@@ -444,7 +745,9 @@ protocol FastModeConversation: AnyObject {
 enum ClaudeControlRequest {
     static let requestIDPrefix = "threading-ctrl-"
     static let setModel = "set_model"
+    static let setPermissionMode = "set_permission_mode"
     static let applyFlagSettings = "apply_flag_settings"
+    static let initialize = "initialize"
 
     /// `{"type":"control_request","request_id":"…","request":{"subtype":"…", …body}}` plus a
     /// trailing newline, matching the one-object-per-line envelope the turns use.
@@ -463,12 +766,13 @@ enum ClaudeControlRequest {
 }
 
 /// The parsed half of a `control_response` line. `request_id` lives inside `response`, as measured
-/// against CLI 2.1.218: `{"type":"control_response","response":{"subtype":"success","request_id":"…"}}`
+/// against CLI 2.1.220: `{"type":"control_response","response":{"subtype":"success","request_id":"…"}}`
 /// and, on failure, `{"…","response":{"subtype":"error","request_id":"…","error":"…"}}`.
 struct ControlResponse {
     let requestID: String?
     let isError: Bool
     let error: String?
+    let payload: [String: Any]?
 
     /// Returns nil for anything that is not a control response, so the caller falls through to the
     /// ordinary event parser. The substring guard keeps the full JSON parse off the hot path — a
@@ -484,8 +788,77 @@ struct ControlResponse {
         return ControlResponse(
             requestID: response["request_id"] as? String,
             isError: response["subtype"] as? String == "error",
-            error: response["error"] as? String
+            error: response["error"] as? String,
+            payload: response["response"] as? [String: Any]
         )
+    }
+}
+
+struct ClaudeCommandMetadata: Equatable {
+    let name: String
+    let description: String
+    let argumentHint: String
+    let aliases: [String]
+}
+
+enum ClaudeCapabilityWire {
+    struct Update {
+        let commandNames: [String]?
+        let skillNames: [String]?
+        let commands: [ClaudeCommandMetadata]?
+        let replacesCommands: Bool
+        let newCommandsAreSkills: Bool
+    }
+
+    static func commands(from payload: [String: Any]?) -> [ClaudeCommandMetadata]? {
+        guard let raw = payload?["commands"] as? [[String: Any]] else { return nil }
+        return commands(from: raw)
+    }
+
+    static func update(from line: String) -> Update? {
+        guard line.contains("\"system\"") else { return nil }
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["type"] as? String == "system",
+              let subtype = object["subtype"] as? String else { return nil }
+
+        switch subtype {
+        case "init":
+            return Update(
+                commandNames: object["slash_commands"] as? [String],
+                skillNames: object["skills"] as? [String],
+                commands: nil,
+                replacesCommands: true,
+                newCommandsAreSkills: false
+            )
+        case "commands_changed":
+            guard let raw = object["commands"] as? [[String: Any]] else { return nil }
+            return Update(
+                commandNames: nil,
+                // The current wire has no membership field, but accepting one makes the parser
+                // forward-compatible if Claude adds the explicit subset used by `system/init`.
+                skillNames: object["skills"] as? [String],
+                commands: commands(from: raw),
+                replacesCommands: true,
+                newCommandsAreSkills: true
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func commands(from raw: [[String: Any]]) -> [ClaudeCommandMetadata] {
+        raw.compactMap { object in
+            guard let name = object["name"] as? String, !name.isEmpty else { return nil }
+            return ClaudeCommandMetadata(
+                name: name,
+                description: object["description"] as? String ?? "",
+                argumentHint: object["argumentHint"] as? String
+                    ?? object["argument_hint"] as? String
+                    ?? "",
+                aliases: object["aliases"] as? [String] ?? []
+            )
+        }
     }
 }
 

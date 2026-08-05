@@ -22,6 +22,12 @@ The app does not rewrite provider history into a new proprietary format. It
 interprets provider events for presentation while preserving the boundaries
 needed for resume and audit.
 
+Type `/` in a native conversation to browse commands advertised by its live session. Codex
+skills use `$`; Claude skills follow Claude’s advertised slash syntax. The catalog can change
+while a session is open, and disabled actions remain visible with their reason but cannot be
+run. Selecting an entry inserts it into the composer so its arguments can be completed before
+submission.
+
 ## Permission requests
 
 Consequential actions stay attached to the conversation that proposed them. A
@@ -61,4 +67,3 @@ When remote access is enabled, a paired collaborator may be allowed to view,
 participate in, or approve a specific shared conversation. The granted role
 determines which controls are available; pairing a device does not grant
 blanket access to every project.
-

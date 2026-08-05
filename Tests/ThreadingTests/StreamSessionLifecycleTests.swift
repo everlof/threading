@@ -194,6 +194,59 @@ final class StreamSessionLifecycleTests: XCTestCase {
         session.terminate()
     }
 
+    /// The permission posture moves on the same channel the model does, and the CLI's own
+    /// verdict is what the caller hears: `set_permission_mode` is in the accepted subtype list
+    /// beside `set_model` (CLI 2.1.221), and a mode it will not take comes back as a
+    /// `control_response` of subtype `error` carrying a sentence — `bypassPermissions` on a
+    /// session not launched with `--dangerously-skip-permissions` is the one to expect.
+    func testSetPermissionModeResolvesOnSuccessAndSurfacesTheCLIsRefusal() {
+        let accepted = expectation(description: "permission mode accepted")
+
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r line; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        session.start()
+        session.setPermissionMode(.plan) { result in
+            if case .failure(let error) = result {
+                XCTFail("Expected success, got \(error)")
+            }
+            accepted.fulfill()
+        }
+        wait(for: [accepted], timeout: 2)
+        session.terminate()
+
+        let refused = expectation(description: "permission mode refused")
+        let strict = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r line; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
+                    + "\"request_id\":\"threading-ctrl-1\","
+                    + "\"error\":\"Cannot set permission mode to bypassPermissions because it is "
+                    + "disabled by settings or configuration\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        strict.start()
+        strict.setPermissionMode(.bypassPermissions) { result in
+            guard case .failure(let error) = result else {
+                return XCTFail("Expected a rejection")
+            }
+            XCTAssertTrue(
+                error.localizedDescription.contains("disabled by settings"),
+                "the CLI's own sentence has to reach the caller, got \(error)"
+            )
+            refused.fulfill()
+        }
+        wait(for: [refused], timeout: 2)
+        strict.terminate()
+    }
+
     func testPendingControlRequestFailsWhenProcessExits() {
         let resolved = expectation(description: "pending control request failed on exit")
 
@@ -229,6 +282,591 @@ final class StreamSessionLifecycleTests: XCTestCase {
         guard case .failure(let error)? = received, case ClaudeControlError.notRunning = error else {
             return XCTFail("Expected an immediate notRunning failure, got \(String(describing: received))")
         }
+    }
+
+    func testClaudeInitializeAndSystemInitExposeRichCommandsAndSkills() throws {
+        let discovered = expectation(description: "Claude catalog discovered")
+        var didFulfill = false
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":["
+                    + "{\"name\":\"context\",\"description\":\"Show context usage\","
+                    + "\"argumentHint\":\"\",\"aliases\":[\"ctx\"]},"
+                    + "{\"name\":\"release\",\"description\":\"Prepare release\","
+                    + "\"argumentHint\":\"[version]\",\"aliases\":[]}]}}}'; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"system\",\"subtype\":\"init\","
+                    + "\"session_id\":\"claude-thread\",\"model\":\"claude-test\","
+                    + "\"slash_commands\":[\"context\",\"release\"],"
+                    + "\"skills\":[\"release\"]}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard !didFulfill,
+                  session.composerCapabilities.contains(where: {
+                      $0.name == "release" && $0.kind == .skill
+                  }) else { return }
+            didFulfill = true
+            discovered.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+
+        let context = try XCTUnwrap(session.composerCapabilities.first { $0.name == "context" })
+        XCTAssertEqual(context.description, "Show context usage")
+        XCTAssertEqual(context.aliases, ["ctx"])
+        XCTAssertEqual(context.presentation, .command)
+        XCTAssertFalse(context.isAvailableInSkillCatalog)
+        let release = try XCTUnwrap(session.composerCapabilities.first { $0.name == "release" })
+        XCTAssertEqual(release.argumentHint, "[version]")
+        XCTAssertEqual(release.kind, .skill)
+        XCTAssertTrue(release.isAvailableInSkillCatalog)
+        XCTAssertEqual(release.presentation, .turn)
+        session.terminate()
+    }
+
+    func testClaudeInitializeDeduplicatesCollidingCommandNames() throws {
+        let discovered = expectation(description: "Claude duplicate catalog normalized")
+        var didFulfill = false
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":["
+                    + "{\"name\":\"run\",\"description\":\"Built-in run\"},"
+                    + "{\"name\":\"context\",\"description\":\"Show context\"},"
+                    + "{\"name\":\"run\",\"description\":\"Project run\"}"
+                    + "]}}}'; cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard !didFulfill,
+                  session.composerCapabilities.contains(where: { $0.name == "run" })
+            else { return }
+            didFulfill = true
+            discovered.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+
+        XCTAssertEqual(session.composerCapabilities.map(\.name), ["run", "context"])
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "run" }?.description,
+            "Project run",
+            "The existing last-metadata-wins rule must survive order deduplication"
+        )
+        session.terminate()
+    }
+
+    func testClaudeLiveCatalogAppliesNativeSafetyAndPresentationOverrides() throws {
+        let discovered = expectation(description: "Claude safe catalog discovered")
+        var didFulfill = false
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":["
+                    + "{\"name\":\"clear\",\"description\":\"Start over\"},"
+                    + "{\"name\":\"review\",\"description\":\"Review work\"},"
+                    + "{\"name\":\"build\",\"description\":\"Legacy project command\"},"
+                    + "{\"name\":\"__remote-workflow\",\"description\":\"Internal\"}"
+                    + "]}}}'; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"system\",\"subtype\":\"init\","
+                    + "\"slash_commands\":[\"clear\",\"review\",\"build\"],"
+                    + "\"skills\":[\"clear\"]}'; cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard !didFulfill,
+                  session.composerCapabilities.contains(where: { $0.name == "review" }),
+                  session.composerCapabilities.first(where: { $0.name == "clear" })?.kind == .skill,
+                  session.composerCapabilities.contains(where: { $0.name == "build" })
+            else { return }
+            didFulfill = true
+            discovered.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+
+        let clear = try XCTUnwrap(
+            session.composerCapabilities.first { $0.name == "clear" }
+        )
+        XCTAssertFalse(clear.isEnabled)
+        XCTAssertFalse(clear.unavailableReason?.isEmpty ?? true)
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "review" }?.presentation,
+            .turn
+        )
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "build" }?.presentation,
+            .turn,
+            "Unknown and legacy project commands are prompt workflows unless proven otherwise"
+        )
+        XCTAssertEqual(clear.kind, .skill, "The provider's membership is still represented")
+        XCTAssertFalse(clear.isEnabled, "Unsafe command names must win over skill membership")
+        XCTAssertFalse(
+            session.composerCapabilities.contains { $0.name == "__remote-workflow" }
+        )
+        session.terminate()
+    }
+
+    func testClaudeInitializeKeepsUnclassifiedRowsBrowsableAsSkills() throws {
+        let discovered = expectation(description: "Claude provisional catalog discovered")
+        var didFulfill = false
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":["
+                    + "{\"name\":\"release\",\"description\":\"Prepare release\","
+                    + "\"argumentHint\":\"[version]\",\"aliases\":[]}]}}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard !didFulfill,
+                  session.composerCapabilities.first(where: {
+                      $0.name == "release"
+                  })?.isAvailableInSkillCatalog == true
+            else { return }
+            didFulfill = true
+            discovered.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+
+        let release = try XCTUnwrap(session.composerCapabilities.first { $0.name == "release" })
+        XCTAssertEqual(release.kind, .command, "The provider has not classified this row yet")
+        XCTAssertTrue(release.isAvailableInSkillCatalog)
+        session.terminate()
+    }
+
+    func testClaudeCommandsChangedPreservesKnownSkillsAndClassifiesNewDiscoveries() throws {
+        let discovered = expectation(description: "Claude discovered a nested skill")
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":["
+                    + "{\"name\":\"context\",\"description\":\"Show context\","
+                    + "\"argumentHint\":\"\"},"
+                    + "{\"name\":\"release\",\"description\":\"Release\","
+                    + "\"argumentHint\":\"\"}]}}}'; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"system\",\"subtype\":\"init\","
+                    + "\"slash_commands\":[\"context\",\"release\"],"
+                    + "\"skills\":[\"release\"]}'; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"system\",\"subtype\":\"commands_changed\","
+                    + "\"commands\":["
+                    + "{\"name\":\"context\",\"description\":\"Show context\","
+                    + "\"argumentHint\":\"\"},"
+                    + "{\"name\":\"release\",\"description\":\"Release\","
+                    + "\"argumentHint\":\"\"},"
+                    + "{\"name\":\"nested-audit\",\"description\":\"Audit this folder\","
+                    + "\"argumentHint\":\"[target]\"}]}'; cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard session.composerCapabilities.contains(where: {
+                $0.name == "nested-audit" && $0.kind == .skill
+            }) else { return }
+            discovered.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "context" }?.kind,
+            .command
+        )
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "release" }?.kind,
+            .skill
+        )
+        XCTAssertEqual(
+            session.composerCapabilities.first { $0.name == "nested-audit" }?.presentation,
+            .turn
+        )
+        session.terminate()
+    }
+
+    func testClaudeQueuesOpeningPromptBehindCapabilityInitialization() {
+        let finished = expectation(description: "queued prompt delivered")
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; /bin/sleep 0.05; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{"
+                    + "\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\","
+                    + "\"response\":{\"commands\":[]}}}'; "
+                    + "read -r prompt; case \"$prompt\" in "
+                    + "*'opening task'*) printf '%s\\n' "
+                    + "'{\"type\":\"result\",\"subtype\":\"success\","
+                    + "\"result\":\"queued prompt arrived\",\"is_error\":false}' ;; "
+                    + "*) exit 9 ;; esac; cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {}
+        session.onEvent = { event in
+            guard case .turnFinished(let text, let isError, _) = event else { return }
+            XCTAssertFalse(isError)
+            XCTAssertEqual(text, "queued prompt arrived")
+            finished.fulfill()
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("opening task"))
+        wait(for: [finished], timeout: 2)
+        session.terminate()
+    }
+
+    func testCodexDiscoversSkillsAndSendsStructuredSkillInput() throws {
+        let capture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: capture) }
+        let discovered = expectation(description: "Codex skill discovered")
+        let finished = expectation(description: "Codex skill turn finished")
+        var didDiscover = false
+        let session = CodexStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/repo"
+        ) {
+            self.shellPlan(
+                "read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; read -r open_thread; "
+                    + "printf '%s\\n' "
+                    + "'{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-1\","
+                    + "\"model\":\"gpt-test\"}}}'; "
+                    + "read -r skills; printf '%s\\n' "
+                    + "'{\"method\":\"skills/changed\",\"params\":{}}'; "
+                    + "printf '%s\\n' "
+                    + "'{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"/repo\","
+                    + "\"errors\":[],"
+                    + "\"skills\":[{\"name\":\"release\","
+                    + "\"path\":\"/repo/.codex/skills/release/SKILL.md\","
+                    + "\"description\":\"Prepare a release\",\"enabled\":true,"
+                    + "\"scope\":\"repo\","
+                    + "\"interface\":{\"displayName\":\"Release\","
+                    + "\"shortDescription\":\"Ship safely\"}},"
+                    + "{\"name\":\"blocked\",\"path\":\"/repo/blocked/SKILL.md\","
+                    + "\"description\":\"Disabled skill\",\"enabled\":false,"
+                    + "\"scope\":\"repo\"}]}]}}'; "
+                    + "read -r reloaded_skills; case \"$reloaded_skills\" in "
+                    + "*'\"forceReload\":true'*) ;; *) exit 8 ;; esac; "
+                    + "printf '%s\\n' "
+                    + "'{\"id\":4,\"result\":{\"data\":[{\"cwd\":\"/repo\","
+                    + "\"errors\":[],"
+                    + "\"skills\":[{\"name\":\"release\","
+                    + "\"path\":\"/repo/.codex/skills/release/SKILL.md\","
+                    + "\"description\":\"Prepare a release\",\"enabled\":true,"
+                    + "\"scope\":\"repo\","
+                    + "\"interface\":{\"displayName\":\"Release\","
+                    + "\"shortDescription\":\"Ship reloaded\"}},"
+                    + "{\"name\":\"blocked\",\"path\":\"/repo/blocked/SKILL.md\","
+                    + "\"description\":\"Disabled skill\",\"enabled\":false,"
+                    + "\"scope\":\"repo\"}]}]}}'; "
+                    + "read -r start_turn; printf '%s' \"$start_turn\" > '\(capture.path)'; "
+                    + "printf '%s\\n' '{\"id\":5,\"result\":{\"turn\":{"
+                    + "\"id\":\"skill-turn\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"skill-turn\","
+                    + "\"items\":[],\"status\":\"completed\"}}}'; cat >/dev/null"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard !didDiscover,
+                  session.composerCapabilities.contains(where: {
+                      $0.name == "release" && $0.description == "Ship reloaded"
+                  })
+            else { return }
+            didDiscover = true
+            discovered.fulfill()
+        }
+        session.onEvent = { event in
+            guard case .turnFinished(_, let isError, _) = event else { return }
+            XCTAssertFalse(isError)
+            finished.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered], timeout: 2)
+        let disabled = try XCTUnwrap(ComposerCapabilityResolver.invocation(
+            in: "$blocked do not run",
+            capabilities: session.composerCapabilities
+        ))
+        XCTAssertFalse(session.send(disabled), "Disabled skills must be rejected at dispatch")
+        let invocation = try XCTUnwrap(ComposerCapabilityResolver.invocation(
+            in: "$release 1.2.3",
+            capabilities: session.composerCapabilities
+        ))
+        XCTAssertTrue(session.send(invocation))
+        wait(for: [finished], timeout: 2)
+
+        let data = try Data(contentsOf: capture)
+        let request = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(request["method"] as? String, "turn/start")
+        let parameters = try XCTUnwrap(request["params"] as? [String: Any])
+        let input = try XCTUnwrap(parameters["input"] as? [[String: Any]])
+        XCTAssertEqual(input.first?["text"] as? String, "$release 1.2.3")
+        XCTAssertEqual(input.last?["type"] as? String, "skill")
+        XCTAssertEqual(input.last?["name"] as? String, "release")
+        XCTAssertEqual(
+            input.last?["path"] as? String,
+            "/repo/.codex/skills/release/SKILL.md"
+        )
+        session.terminate()
+    }
+
+    func testCodexKeepsLastGoodSkillsAcrossWrongScopeAndIncompleteReloads() {
+        let discovered = expectation(description: "initial Codex skill discovered")
+        let exited = expectation(description: "invalid reload fixtures consumed")
+        let session = CodexStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/repo/../repo/"
+        ) {
+            self.shellPlan(
+                "read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\"}}}'; "
+                    + "read -r skills; printf '%s\\n' '{\"id\":3,\"result\":{"
+                    + "\"data\":[{\"cwd\":\"/repo\",\"errors\":[],\"skills\":[{"
+                    + "\"name\":\"release\",\"path\":\"/repo/release/SKILL.md\","
+                    + "\"description\":\"Ship safely\",\"enabled\":true,"
+                    + "\"scope\":\"repo\"}]}]}}'; "
+                    + "printf '%s\\n' '{\"method\":\"skills/changed\",\"params\":{}}'; "
+                    + "read -r wrong_cwd; printf '%s\\n' '{\"id\":4,\"result\":{"
+                    + "\"data\":[{\"cwd\":\"/other\",\"errors\":[],\"skills\":[{"
+                    + "\"name\":\"foreign\",\"path\":\"/other/foreign/SKILL.md\","
+                    + "\"description\":\"Wrong checkout\",\"enabled\":true,"
+                    + "\"scope\":\"repo\"}]}]}}'; "
+                    + "printf '%s\\n' '{\"method\":\"skills/changed\",\"params\":{}}'; "
+                    + "read -r empty_data; printf '%s\\n' "
+                    + "'{\"id\":5,\"result\":{\"data\":[]}}'; "
+                    + "printf '%s\\n' '{\"method\":\"skills/changed\",\"params\":{}}'; "
+                    + "read -r scan_error; printf '%s\\n' '{\"id\":6,\"result\":{"
+                    + "\"data\":[{\"cwd\":\"/repo\",\"errors\":[{"
+                    + "\"message\":\"broken metadata\",\"path\":\"/repo/bad/SKILL.md\"}],"
+                    + "\"skills\":[]}]}}'; /bin/sleep 0.1"
+            )
+        }
+        session.onComposerCapabilitiesChange = {
+            guard session.composerCapabilities.contains(where: { $0.name == "release" }) else {
+                return
+            }
+            discovered.fulfill()
+        }
+        session.onExit = { status in
+            XCTAssertEqual(status, 0)
+            exited.fulfill()
+        }
+
+        session.start()
+        wait(for: [discovered, exited], timeout: 3)
+
+        XCTAssertTrue(session.composerCapabilities.contains { $0.name == "release" })
+        XCTAssertFalse(session.composerCapabilities.contains { $0.name == "foreign" })
+    }
+
+    func testClaudeAndCodexApplyTheSharedLocalCatalogBudget() throws {
+        func writeJSONLine(_ object: [String: Any], to url: URL) throws {
+            var data = try JSONSerialization.data(withJSONObject: object)
+            data.append(0x0A)
+            try data.write(to: url, options: .atomic)
+        }
+
+        let claudeFixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let codexFixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: claudeFixture)
+            try? FileManager.default.removeItem(at: codexFixture)
+        }
+        let oversizedDescription = String(repeating: "metadata", count: 500)
+        let commandRows: [[String: Any]] = (0..<400).map { index in
+            [
+                "name": "command-\(index)",
+                "description": oversizedDescription,
+                "argumentHint": "[target]"
+            ]
+        }
+        try writeJSONLine([
+            "type": "control_response",
+            "response": [
+                "subtype": "success",
+                "request_id": "threading-ctrl-1",
+                "response": ["commands": commandRows]
+            ]
+        ], to: claudeFixture)
+
+        let claudeDiscovered = expectation(description: "bounded Claude catalog")
+        let claude = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; /bin/cat '\(claudeFixture.path)'; cat >/dev/null"
+            )
+        }
+        claude.onComposerCapabilitiesChange = {
+            guard !claude.composerCapabilities.isEmpty else { return }
+            claudeDiscovered.fulfill()
+        }
+        claude.start()
+        wait(for: [claudeDiscovered], timeout: 3)
+        XCTAssertLessThanOrEqual(
+            claude.composerCapabilities.count,
+            ComposerCapabilityCatalogPolicy.maximumCapabilities
+        )
+        XCTAssertTrue(claude.composerCapabilities.allSatisfy {
+            $0.description.utf8.count
+                <= ComposerCapabilityCatalogPolicy.maximumDescriptionUTF8Bytes
+        })
+        claude.terminate()
+
+        let skillRows: [[String: Any]] = (0..<400).map { index in
+            [
+                "name": "skill-\(index)",
+                "path": "/repo/.codex/skills/skill-\(index)/SKILL.md",
+                "description": oversizedDescription,
+                "enabled": true,
+                "scope": "repo"
+            ]
+        }
+        try writeJSONLine([
+            "id": 3,
+            "result": [
+                "data": [["cwd": "/repo", "errors": [], "skills": skillRows]]
+            ]
+        ], to: codexFixture)
+
+        let codexDiscovered = expectation(description: "bounded Codex catalog")
+        let codex = CodexStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/repo"
+        ) {
+            self.shellPlan(
+                "read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\"}}}'; "
+                    + "read -r skills; /bin/cat '\(codexFixture.path)'; cat >/dev/null"
+            )
+        }
+        codex.onComposerCapabilitiesChange = {
+            guard codex.composerCapabilities.contains(where: { $0.kind == .skill }) else {
+                return
+            }
+            codexDiscovered.fulfill()
+        }
+        codex.start()
+        wait(for: [codexDiscovered], timeout: 3)
+        XCTAssertLessThanOrEqual(
+            codex.composerCapabilities.count,
+            ComposerCapabilityCatalogPolicy.maximumCapabilities
+        )
+        XCTAssertTrue(codex.composerCapabilities.allSatisfy {
+            $0.description.utf8.count
+                <= ComposerCapabilityCatalogPolicy.maximumDescriptionUTF8Bytes
+        })
+        codex.terminate()
+    }
+
+    func testCodexCompactAndReviewUseNativeAppServerMethods() throws {
+        let compactCapture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let reviewCapture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: compactCapture)
+            try? FileManager.default.removeItem(at: reviewCapture)
+        }
+        let initialized = expectation(description: "Codex thread initialized")
+        let compacted = expectation(description: "Codex compacted")
+        let reviewed = expectation(description: "Codex review finished")
+        var finishCount = 0
+        let session = CodexStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\"}}}'; "
+                    + "read -r compact; printf '%s' \"$compact\" > '\(compactCapture.path)'; "
+                    + "printf '%s\\n' '{\"id\":3,\"result\":{}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"compact-turn\","
+                    + "\"items\":[],\"status\":\"completed\"}}}'; "
+                    + "read -r review; printf '%s' \"$review\" > '\(reviewCapture.path)'; "
+                    + "printf '%s\\n' '{\"id\":4,\"result\":{\"turn\":{"
+                    + "\"id\":\"review-turn\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"review-turn\","
+                    + "\"items\":[],\"status\":\"completed\"}}}'; cat >/dev/null"
+            )
+        }
+        session.onEvent = { event in
+            switch event {
+            case .initialised:
+                initialized.fulfill()
+            case .turnFinished(_, let isError, _):
+                XCTAssertFalse(isError)
+                finishCount += 1
+                if finishCount == 1 { compacted.fulfill() }
+                if finishCount == 2 { reviewed.fulfill() }
+            default:
+                break
+            }
+        }
+
+        session.start()
+        wait(for: [initialized], timeout: 2)
+        let compact = try XCTUnwrap(ComposerCapabilityResolver.invocation(
+            in: "/compact",
+            capabilities: session.composerCapabilities
+        ))
+        XCTAssertTrue(session.send(compact))
+        wait(for: [compacted], timeout: 2)
+        let review = try XCTUnwrap(ComposerCapabilityResolver.invocation(
+            in: "/review focus on authentication",
+            capabilities: session.composerCapabilities
+        ))
+        XCTAssertTrue(session.send(review))
+        wait(for: [reviewed], timeout: 2)
+
+        let compactRequest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: compactCapture)
+        ) as? [String: Any]
+        XCTAssertEqual(compactRequest?["method"] as? String, "thread/compact/start")
+        let reviewRequest = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: reviewCapture)
+        ) as? [String: Any])
+        XCTAssertEqual(reviewRequest["method"] as? String, "review/start")
+        let parameters = try XCTUnwrap(reviewRequest["params"] as? [String: Any])
+        XCTAssertEqual(parameters["delivery"] as? String, "inline")
+        let target = try XCTUnwrap(parameters["target"] as? [String: Any])
+        XCTAssertEqual(target["type"] as? String, "custom")
+        XCTAssertEqual(target["instructions"] as? String, "focus on authentication")
+        session.terminate()
     }
 
     func testClaudeRoutesForwardedChildOutputAwayFromParentOnMain() {
@@ -492,6 +1130,49 @@ final class SubagentSessionStateTests: XCTestCase {
 
         XCTAssertTrue(state.timeline.agents.isEmpty)
         XCTAssertNil(store.load(sessionID: sessionID))
+    }
+
+    func testTranscriptReplacementPublishesOneAtomicWorkerReduction() {
+        let state = SubagentSessionState(sessionID: SessionID())
+        let threadID = "worker-child"
+        state.apply(.discovered(SubagentDescriptor(threadID: threadID, role: "Explore")))
+        state.apply(.state(threadID: threadID, status: .completed, message: nil))
+
+        var observedRowCounts: [Int] = []
+        state.onChange = {
+            observedRowCounts.append(
+                state.timeline.agents.first?.conversation.rows.count ?? -1
+            )
+        }
+        let loaded = expectation(description: "worker reduction installed")
+        state.replaceTranscriptConversation(
+            threadID: threadID,
+            events: [
+                .userMessage("Inspect the renderer."),
+                .assistantMessage(blocks: [
+                    .toolUse(
+                        id: "read-1",
+                        tool: .read,
+                        input: ["path": .string("Renderer.swift")]
+                    ),
+                    .text("The renderer is virtualized.")
+                ]),
+                .toolResults([ToolResult(
+                    toolUseID: "read-1",
+                    text: "source",
+                    isError: false
+                )])
+            ]
+        ) {
+            loaded.fulfill()
+        }
+
+        // The method returns before reducing. The main actor sees either the old conversation
+        // or the complete replacement, never event-by-event prefixes.
+        XCTAssertEqual(state.timeline.agents.first?.conversation.rows.count, 0)
+        wait(for: [loaded], timeout: 2)
+        XCTAssertEqual(state.timeline.agents.first?.conversation.rows.count, 3)
+        XCTAssertEqual(observedRowCounts, [3])
     }
 
     func testClaudeAgentAndToolUseIDsReconcileToOneDurableChild() throws {
@@ -1057,6 +1738,24 @@ final class ClaudeControlRequestTests: XCTestCase {
         XCTAssertEqual(request["subtype"] as? String, "apply_flag_settings")
         let settings = try XCTUnwrap(request["settings"] as? [String: Any])
         XCTAssertEqual(settings["fastMode"] as? Bool, true)
+    }
+
+    /// The mode travels as Claude's **external** flag value, which the CLI normalises to its own
+    /// internal name on the way in — `manual` becomes `default` there, and sending `default`
+    /// from here would be writing down an internal detail this app has no business knowing.
+    func testSetPermissionModeProducesControlRequestEnvelopeWithTheExternalValue() throws {
+        for mode in AgentPermissionMode.allCases {
+            let data = try XCTUnwrap(ClaudeControlRequest.line(
+                subtype: ClaudeControlRequest.setPermissionMode,
+                requestID: "threading-ctrl-6",
+                body: ["mode": mode.claudeFlagValue]
+            ))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let request = try XCTUnwrap(object["request"] as? [String: Any])
+            XCTAssertEqual(request["subtype"] as? String, "set_permission_mode")
+            XCTAssertEqual(request["mode"] as? String, mode.rawValue)
+        }
+        XCTAssertEqual(AgentPermissionMode.manual.claudeFlagValue, "manual")
     }
 
     func testNilModelSerializesAsJSONNullToResetToDefault() throws {

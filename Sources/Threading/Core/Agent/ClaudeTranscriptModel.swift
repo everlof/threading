@@ -140,4 +140,17 @@ enum TranscriptModelDefaults {
     static let scanBytes = 2 * JSONLDefaults.chunkBytes
     static let messageKey = "message"
     static let modelKey = "model"
+
+    /// Where Claude keeps one directory of transcripts per project it has been run in, under the
+    /// account's own config directory.
+    static let claudeProjectsDirectory = "projects"
+    static let transcriptExtension = "jsonl"
+
+    /// How wide an account-level search goes before settling. A directory's modification date
+    /// moves when a transcript is added to it, so the newest activity is in the newest
+    /// directories and a handful of them is enough to find the newest conversation — measured
+    /// against a login with 15 project directories and 167 transcripts. The alternative is
+    /// walking every conversation an account has ever held to answer one menu row.
+    static let projectDirectoryBudget = 5
+    static let transcriptBudget = 10
 }

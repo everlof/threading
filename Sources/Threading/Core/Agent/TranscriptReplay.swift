@@ -38,7 +38,7 @@ enum TranscriptReplay {
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let url = transcriptURL(
+            guard let url = SessionTranscript.url(
                 sessionID: agentSessionID,
                 for: session,
                 in: project,
@@ -54,20 +54,6 @@ enum TranscriptReplay {
     }
 
     // MARK: - Private Methods
-
-    private static func transcriptURL(
-        sessionID: TranscriptID,
-        for session: AgentSession,
-        in project: Project,
-        account: AgentAccount
-    ) -> URL? {
-        switch session.kind {
-        case .claude:
-            return ClaudeTranscript.url(sessionID: sessionID, account: account, in: project)
-        case .codex:
-            return CodexTranscript.url(sessionID: sessionID, account: account)
-        }
-    }
 
     /// Reads one transcript file synchronously. Internal rather than private so the tests can
     /// point it at a fixture: `load` needs a real session, a real project and the on-disk
@@ -177,6 +163,8 @@ enum TranscriptReplay {
             if let effort = nonEmpty(payload["effort"]) { return effort }
             guard let settings = payload["thread_settings"] as? [String: Any] else { return nil }
             return nonEmpty(settings["reasoning_effort"])
+        case .grok, .openCode:
+            return nil
         }
     }
 
@@ -212,6 +200,8 @@ enum TranscriptReplay {
                   let last = info["last_token_usage"] as? [String: Any],
                   let tokens = (last["total_tokens"] as? NSNumber)?.intValue else { return nil }
             return (tokens, (info["model_context_window"] as? NSNumber)?.intValue)
+        case .grok, .openCode:
+            return nil
         }
     }
 
@@ -252,6 +242,8 @@ enum TranscriptReplay {
             return claudeEvent(from: record)
         case .codex:
             return codexEvent(from: record)
+        case .grok, .openCode:
+            return nil
         }
     }
 

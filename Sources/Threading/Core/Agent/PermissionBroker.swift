@@ -280,17 +280,23 @@ enum PermissionBroker {
         _ request: PermissionRequest,
         completion: @escaping @MainActor @Sendable (PermissionDecision) -> Void
     ) {
+        ExecutionAuditStore.shared.recordPermissionRequest(request)
+        let auditedCompletion: @MainActor @Sendable (PermissionDecision) -> Void = { decision in
+            ExecutionAuditStore.shared.recordPermissionDecision(decision, for: request)
+            completion(decision)
+        }
+
         // Ahead of every other rule, including the modes that promise not to interrupt. What
         // follows is not one of Threading's permission questions — it is the only warning the
         // user will get that *macOS* is about to put a dialog on their screen naming Threading
         // for something an agent did. No mode Threading offers can promise the system stays
         // quiet, so none of them is a reason to let that dialog arrive unexplained.
         if let grant = foreseenSystemGrant(for: request) {
-            brief(grant, before: request, completion: completion)
+            brief(grant, before: request, completion: auditedCompletion)
             return
         }
 
-        decideIgnoringSystemGrant(request, completion: completion)
+        decideIgnoringSystemGrant(request, completion: auditedCompletion)
     }
 
     // MARK: - System Grants

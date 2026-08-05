@@ -39,11 +39,12 @@ enum JSONLReader {
 
         var buffer = Data()
         var consumed = 0
+        var reachedEndOfFile = false
         let newline = UInt8(ascii: "\n")
 
         while consumed < limit {
             guard let chunk = try? file.read(upToCount: JSONLDefaults.chunkBytes),
-                  !chunk.isEmpty else { break }
+                  !chunk.isEmpty else { reachedEndOfFile = true; break }
 
             consumed += chunk.count
             buffer.append(chunk)
@@ -63,8 +64,14 @@ enum JSONLReader {
             buffer.removeSubrange(buffer.startIndex..<lineStart)
         }
 
-        // A trailing record with no newline is still a record.
-        if !buffer.isEmpty { _ = handle(buffer) }
+        // A trailing record with no newline is still a record — but only at **end of file**.
+        // When the loop stopped because `limit` was reached, what is left in the buffer is the
+        // front of a record whose rest was never read, and handing that out is the one thing
+        // this reader promises not to do. It did: a `limit` below one chunk still reads a whole
+        // chunk, so every bounded scan of a file larger than 64 KB ended by delivering a record
+        // cut in half. `forEachRecordFromEnd` already guards this with `offset == 0`; the two
+        // directions now make the same promise.
+        if reachedEndOfFile, !buffer.isEmpty { _ = handle(buffer) }
     }
 
     /// Reads the last complete JSON object without walking the whole file.

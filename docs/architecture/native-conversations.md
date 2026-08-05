@@ -43,9 +43,16 @@ Two constraints survive, and the implementation is shaped by them:
 Codex is *not* covered by that measurement — only Claude was probed — so its behaviour on a
 switch is inference from a shared design, not evidence.
 
-The mode is gated behind `AgentKind.supportsNativeUI`, which now admits every kind — it stayed
-a property rather than being deleted with its call sites, because an agent without a structured
-transport would need it back and the branches reading it are the honest place to notice.
+The mode is gated behind `AgentKind.supportsNativeUI`, which admits Claude, Codex, and Grok.
+OpenCode remains terminal-only: its TUI/resume CLI is enough for an honest terminal integration,
+but native rendering still requires a measured transport and transcript replay. Neither is
+inferred from terminal output or private storage.
+
+Structured execution also crosses a separate boundary before presentation normalization. Claude's
+native tool blocks, Codex App Server item notifications and Grok ACP tool updates are handed to the
+[Execution Audit](execution-audit.md) adapters before `StreamEvent` turns them into shared timeline
+rows. This preserves exact native inputs/results without admitting prompt, reasoning or assistant
+prose into the audit store.
 
 **Claude was gated off here for most of this project's life, and no longer is.** The reason it
 was disabled — `claude -p` runs on the user's subscription, and Anthropic's terms reserved
@@ -63,16 +70,16 @@ explicitly as a pause. If it returns, native Claude sessions cost differently fr
 — worth surfacing to the user then, but not a reason to keep the surface unreachable now.
 
 ```
-                    ConversationStreamSession
-                              │
-            ┌─────────────────┴─────────────────┐
-            ▼                                   ▼
- CodexStreamSession                    ClaudeStreamSession
- persistent JSON-RPC                   persistent stream
- codex app-server                      claude --print --stream-json
-            │
-            ▼
- ConversationViewController
+                       ConversationStreamSession
+                                  │
+            ┌─────────────────┼─────────────────┐
+            ▼                  ▼                  ▼
+ CodexStreamSession    ClaudeStreamSession    GrokACPStreamSession
+ codex app-server      claude stream-json     grok agent stdio (ACP)
+            │                  │                  │
+            └─────────────────┴─────────────────┘
+                                  ▼
+                    ConversationViewController
 ```
 
 Codex native rendering uses the CLI's **app-server**, not the one-shot `codex exec --json`
@@ -88,6 +95,137 @@ markdown, command/MCP/dynamic/file/plan items become the same collapsible tool r
 `turn/completed` returns the composer to Ready. The older `CodexStreamEvent` adapter remains
 for `exec --json` fixtures and one-shot surfaces, but it is not the native conversation
 transport.
+
+Grok native rendering uses the public **Agent Client Protocol** exposed by
+`grok agent stdio`, verified against Grok 0.2.118 and ACP protocol version 1. A fresh chat sends
+`session/new`; a resumable one sends `session/load`, whose standard replay notifications rebuild
+the historical user, assistant, reasoning, tool, and plan rows before the composer becomes live.
+The provider-returned session id is persisted just like Codex's assigned thread id. Prompts use
+`session/prompt`; `usage_update` supplies the context meter; and the prompt response's stop reason
+settles the turn. A standard `session_info_update` title is routed through the same protected
+agent-title slot as terminal and transcript-reported names, so it cannot overwrite a user rename.
+
+ACP is also the abstraction boundary for parity features. `available_commands_update` becomes the
+ordinary provider-neutral composer catalog. Session-owning or sensitive commands such as
+`/always-approve`, `/fork`, `/resume`, and `/feedback` remain visible but disabled until Threading
+can update its retained state atomically; safe commands are sent verbatim as prompts. Tool kinds
+map onto `ToolIdentity`, complete tool updates attach results, plans become `runPlanUpdated`, and
+`session/request_permission` is answered through the same `PermissionBroker` used by Codex.
+Threading advertises no filesystem or terminal client capability because it implements neither;
+Grok continues to execute its own tools. Its HTTP MCP capability does let `session/new/load` carry
+the per-session Threading endpoint without changing the project's or user's persistent Grok
+configuration.
+
+## Composer commands and skills
+
+Commands are a live transport capability, not a list copied from either CLI. The optional
+`ComposerCapabilityProviding` protocol exposes provider-neutral metadata — stable id, provider
+name, description, argument hint, aliases, `/` or `$` trigger, availability, and whether the
+action is a model turn or a session command. `ConversationStreamSession` deliberately does not
+require it: another provider can ship ordinary native chat first, then add discovery without a
+provider switch in `PromptView` or `ConversationViewController`.
+
+**Availability is one value, not a flag beside an optional.** `ComposerCapability.Availability`
+is `.available` or `.unavailable(reason:)`, and the reason is required rather than optional.
+The pair it replaced — `isEnabled: Bool` next to `unavailableReason: String?` — admitted two
+states nothing could render: disabled with no explanation, where `PromptCompletionView` greys
+the row and shows a blank line in place of the description it substitutes the reason for; and
+enabled *with* a reason, where the row offers an action and explains why it cannot be used.
+All four producers (Claude's unsafe-command policy, Codex's disabled skills and its
+terminal-only commands, Grok's terminal-only commands) had to hold the two in step by hand, and
+three wrote the same `enabled ? nil : reason` ternary to do it. `isEnabled` and
+`unavailableReason` survive as computed properties, so every call site that only asks those two
+questions was untouched; only the four producers changed. The remote DTOs keep two flat
+JSON fields — that is a wire shape the client reads, and it is deliberately not this enum.
+
+The composer owns only the leading token. `ComposerCapabilityResolver` matches that token and
+leaves everything after its first whitespace opaque; quotes, paths, flags, and a second slash
+are never re-parsed or rebuilt by Threading. Disabled or stale ids are checked again by the live
+transport at dispatch. Unknown `/text` remains an ordinary prompt instead of becoming an
+app-owned command language. For Claude it is also kept byte-for-byte at the start of a remote
+submission: the shared-chat participant envelope must not move the slash away from column zero
+and silently turn a future command or MCP prompt into prose. Codex has no raw slash fallback, so
+its unknown slash-shaped prompts retain the participant envelope and attribution.
+
+Claude's persistent process receives a control `initialize` request before its first prompt.
+The nested response supplies rich command metadata; `system/init` supplies the session's
+authoritative `slash_commands` and `skills` membership, and `system/commands_changed` replaces
+the catalog while the process is alive. The changed payload has no kind field: memberships
+already learned from `system/init` survive a replacement, removed names are discarded, and new
+names are classified as the dynamically discovered skills the event represents. Before the
+first `system/init`, the initialize-only list is necessarily provisional — the CLI exposes no
+command/skill discriminator there. Those rows retain a command badge but are temporarily
+eligible for `/skills`, so opening-session skills remain discoverable without falsely claiming
+that every slash row is a skill. Authoritative membership replaces that provisional eligibility
+as soon as `system/init` arrives. An opening prompt may arrive during this handshake, so the
+session accepts and holds one prompt until initialization succeeds, fails, or reaches the
+existing control timeout. This avoids a second probe process (which would run hooks and discover
+a different session) and avoids losing the first turn. Claude executes a selected action by
+sending the exact `/name arguments` text back through its ordinary stream. Successful commands
+such as `/context` can return their only useful text on the terminal `result`; the timeline adds
+that result only when the turn did not already produce an assistant message.
+
+The live Claude catalog is dispatch authority, but not unrestricted UI authority. Internal
+handoff rows (`/__remote-workflow`, `/workflow-launch-exec`) are omitted. Commands that would
+change the provider's session, transcript, cwd or process ownership behind Threading's retained
+state — `/clear` and its aliases, resume/fork/rewind/background families, and similar lifecycle
+commands — remain visible but disabled with a Terminal explanation until an atomic native
+mapping exists. The same gate covers commands with an interactive, external or sensitive side
+effect such as heap dumps, feedback uploads and cloud reviews. Command membership also does not
+decide presentation: measured agent-work commands such as `/review`, `/security-review`,
+`/code-review`, `/doctor`, `/verify` and `/run` are ordinary user turns even though Claude does
+not classify them as skills. A skill name cannot override the lifecycle/sensitive gate because
+Claude's raw slash resolver ultimately decides which colliding entry runs. Conversely, an
+unknown non-skill name defaults to a visible user turn: this preserves legacy `.claude/commands`
+and future prompt workflows without requiring Threading to know their names in advance; only a
+small measured set of immediate CLI/session controls renders as a muted command notice.
+
+Codex app-server has no general slash-command catalog. Threading therefore enables only the
+native operations it can map without pretending to emulate the TUI: `/review [instructions]`
+uses `review/start`, and `/compact` uses `thread/compact/start`. The latter response is only an
+acceptance; the composer remains Working until the standard `turn/completed` notification
+settles the compaction. `skills/list`, scoped to the conversation checkout, provides `$` skills;
+`skills/changed` invalidates and reloads that list. A response is accepted atomically only for a
+normalized exact cwd match and an error-free scan; a wrong, empty, partial, or malformed response
+keeps the latest good catalog rather than borrowing another checkout or erasing working skills.
+A selected skill sends both the literal
+`$name task` text and the recommended structured `{type: "skill", name, path}` turn input. The
+private path is retained only inside `CodexStreamSession`.
+
+Codex's documented TUI vocabulary is retained separately as an **expectation catalog**, pinned
+to the locally verified CLI/docs version. Known commands such as `/model`, `/permissions`,
+`/diff`, `/usage`, `/goal`, `/fork`, `/archive`, `/mcp`, `/apps`, `/plugins`, `/hooks` and the
+terminal appearance commands appear disabled with a Terminal explanation instead of falling
+through to the model as ordinary prompts. This catalog never grants execution: app-server RPCs
+such as `thread/fork`, `thread/name/set`, `thread/rollback`, `thread/goal/*`,
+`account/usage/read` and `mcpServerStatus/list` are candidates for explicit mappings, and each
+graduates only with response, lifecycle and retained-state handling. `/status` is the first
+shared app-owned fallback: when the provider has no enabled command, it reports Native Chat's
+provider, model, run state and latest context reading locally without opening a model turn.
+The reference snapshots are the official
+[Codex slash-command guide](https://learn.chatgpt.com/docs/developer-commands.md?surface=cli)
+and [Claude Code command reference](https://code.claude.com/docs/en/commands); runtime discovery
+wins whenever a provider exposes it.
+
+`PromptCompletionPresenter` is a non-key child surface in the conversation window, so the text
+view keeps first responder. Up/Down move, Tab or Return inserts, Escape closes, and Return is
+left to an active IME while it has marked text. `/skills` is an app-owned catalog filter rather
+than a provider prompt. It appears only when the live catalog contains skills and is resolved
+before transport dispatch. Provider metadata is normalized before it becomes retained UI state:
+at most 256 entries and 64 KiB of bounded presentation fields survive, and one query materializes
+at most 64 AppKit rows. A catalog-kind filter runs before that row limit, so a large command set
+cannot crowd every skill out of `/skills`. Identity fields are rejected rather than truncated,
+so a visual bound can never change which provider action runs. Pointer selection commits on
+release inside the row, and disabled reasons are the same text drawn and announced by
+accessibility.
+
+Remote clients receive the same bounded, presentation-safe catalog in conversation snapshots
+and replacement deltas. Skill bodies, local paths, and provider credentials never cross the
+wire; a mobile submission is resolved again against the Mac session's current catalog. The iOS
+composer uses the shared `RemoteComposerCompletionQuery` for `/` and `$`, exposes the complete
+catalog from its plus button, and handles `/skills` locally as the same skill filter. Catalog
+fields are capped independently of transcript rows so a provider-controlled description cannot
+push a WebSocket beyond its high-water limit.
 
 Both transports expose **subagent rendering** through the same provider-neutral path, including
 their terminal surfaces. `SubagentSessionState`, owned by `AgentRuntime`, keeps a session's
@@ -110,6 +248,13 @@ same native rows as the parent rather than a log-shaped second renderer. Adjacen
 their chronological position but start behind one `N tool calls` disclosure; opening it reveals
 the ordinary individually-expandable tool rows. New events update that controller only while
 its tab exists; closing the tab is respected and later activity does not reopen it.
+
+The selected child transcript is itself a view-based table. The navigator, cheap presentation
+identities and parsed Markdown block models remain addressable, while AppKit creates only the rows
+around the viewport. Collapsed tool disclosures do not hide prebuilt rows; they omit those row
+identities until expansion. Long assistant answers are also split at Markdown block boundaries,
+so revealing a large report near the bottom does not attach one document-sized constraint tree.
+Selection and tool/user disclosure state live in the controller and survive row recycling.
 
 A navigator row only carries a chevron when opening it reaches a transcript — rows already
 replayed, a provider file on disk, or a child still running, which is the one case where "has
@@ -324,7 +469,50 @@ reminder envelopes are suppressed; a complete command triple becomes one muted
 incomplete envelopes remain literal user text. This is an allowlist of measured record shapes,
 not a general XML stripper.
 
+### References and review comments
+
+Context attached to a Chat turn has one provider-neutral model:
+`ConversationContextAttachment` is either a reference or comment, sourced from a message, code
+line, or attachment. It carries a short title and bounded excerpt, an optional project-relative
+locator and line range, and the human's comment when it is an instruction. The same value stages
+in `PromptView`, appears as a receipt on the sent message, crosses RemoteKit, and is recovered by
+transcript replay. Claude, Codex, and Grok therefore cannot drift into three UI or persistence
+shapes.
+
+Every native transport ultimately accepts a text turn, so `ConversationPrompt.transportText`
+appends one versioned, sorted-JSON `<threading_context_attachments>` envelope after readable user
+prose. The provider sees the referenced material and instruction; the timeline keeps the typed
+sidecar and does not paste it into the editable bubble. A reference/comment-only submission gains
+a short readable instruction before transport. Replay hides the envelope only when its complete
+closing marker and bounded JSON decode successfully; malformed or hand-written markers remain
+literal user text. The boundary admits at most 32 receipts, bounds each field, caps the envelope at
+96 KiB, removes duplicate ids, and rejects malformed remote values rather than partially sending a
+different prompt.
+
+The entry points use the same staged receipt rail:
+
+- each user or assistant message offers **Add … to chat** and **Comment…**;
+- a Git Review or edit-tool diff line offers **Add line to chat** and **Comment on line…**;
+- a Git Review file, including an image comparison, can be referenced or commented on as a file;
+- the Attachments pane can stage or comment on its selected item, and a composer image thumbnail
+  offers the comment action directly.
+
+Code anchors use the rendered line's new number, falling back to its old number for deletions.
+Paths are project-relative when they belong to the checkout; attachment-store paths never expose a
+machine-private absolute path. `ConversationContextRailView` groups a review batch into reference
+and comment count chips, with details and removal behind its themed menus. The same counts are
+included in iOS and browser conversation snapshots. OpenCode remains outside this path because it
+currently has only the terminal surface, not Threading's native composer.
+
 ## Conversation Rendering
+
+A cross-runtime destination begins with a retained **Context handoff** row before its replayed
+turns. It shows the compact provider/model path, falls back to the runtime name when no model was
+reported, and makes the direct source endpoint a navigation action while that session still
+exists. The complete retained path also appears in the sidebar hover card, which is how
+terminal-only OpenCode exposes the same provenance without drawing over its TUI. The row is part
+of `presentationItems`, so replay virtualization, theme changes and scroll restoration treat it
+as conversation chrome rather than as a synthetic user message.
 
 Two things about the conversation's *appearance* were changed by looking at rendered fixtures
 rather than by reasoning about single rows, because both are properties of a page rather than
@@ -404,8 +592,8 @@ instead of reading "running…" forever.
 
 **A settled turn also leaves a changed-files card** (`ChangedFilesCardView`,
 `ChangedFilesTree`) — t3code's per-turn summary, wired to machinery Git Review already owns:
-the same `stash create` baseline `GitTurnBaselineStore` captures at the entering-working
-edge, read through the same `GitReviewReader.lastTurn` request, so the card and the review
+the same immutable tree baseline `GitTurnBaselineStore` captures before provider admission,
+read through the same `GitReviewReader.lastTurn` request, so the card and the review
 pane cannot disagree about what a turn touched. The tree is a pure derivation with its own
 tests: single-child directory chains compress into one `a/b` row, ±counts roll up through
 ancestors, directories precede files and both sort alphabetically. It auto-expands only for a
@@ -413,7 +601,7 @@ small turn (≤ 5 files and ≤ 200 changed lines — t3code's thresholds, compu
 otherwise every directory starts folded so a wide sweep is a line per scope, not forty rows.
 Each directory row discloses its own subtree; the header offers Collapse all and **View
 diff**, which opens Git Review on the Last Turn scope — and is therefore withdrawn from a
-card the moment a newer turn settles, because that scope now answers for the newer turn.
+card the moment a newer turn is accepted, before its new baseline replaces the old one.
 Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
 against it would attribute later work to an old exchange. An empty diff leaves no card.
 
@@ -452,10 +640,13 @@ no row at all. Sidechains are excluded on the same rule as the context reading: 
 running at its own effort is not what the user's turn ran at. The value carries across turns,
 since a turn that restates nothing ran at whatever the last one did — an empty string is
 therefore not a reading, or it would erase a real inherited value with something no chip can
-name. This is what a Claude effort control would read; the chip stays Codex-only until the model
-catalog has a source for Claude's *levels* (`reasoningLevels` comes only from Codex's own models
-cache), and `--effort` is a real Claude flag, so that is a plumbing gap rather than a protocol
-one.
+name. The same reading labels inherited effort in either composer. Claude's installed CLI
+publishes one session-level set (`low`, `medium`, `high`, `xhigh`, `max`), which `AgentModels`
+attaches to every Claude model option; Codex continues to take per-model levels from its own
+cache. That is enough to choose Claude effort before launch and emit `--effort`, but it is not
+evidence of a live `set_effort` control request. The Claude reply chip therefore stays hidden
+while the Codex app-server, which implements `ReasoningEffortConfigurableConversation`, may
+change the next turn.
 
 **Auto-scroll is a mode, not a reflex** (`ConversationAutoScroll`, the state machine tested
 apart from the scroll view). The naive version — pin to bottom on every appended row, result,
@@ -471,6 +662,29 @@ our own `setBoundsOrigin` can never release the pin. A bounds change within
 `gestureAttribution` of the last gesture event re-derives the mode — near the bottom re-pins,
 anywhere else frees — and momentum events keep refreshing the window, so a flick stays
 attributed to its end. A minimap jump frees; a finished replay lands at the bottom and follows.
+
+### iOS conversation boundary
+
+The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
+`RemoteConversationViewController` owns the virtual collection, composer, command/skill results,
+presence, input authority, submission receipts and keyboard constraint. It subscribes to the
+connection, notification preferences and active host directly, coalescing changes onto one main
+queue render. Draft and viewport continuity still use the host-and-session-scoped store; changing
+the rendering owner did not change which client owns that working state.
+
+The app and scene lifecycle are UIKit-owned so a native route can start without constructing a
+root hosting graph. The dashboard and screens not yet migrated are intentionally contained in one
+`UIHostingController`; the conversation stress route enters a native navigation controller
+directly. A hosted `UIViewControllerRepresentable` remains the compatibility boundary when the
+current SwiftUI dashboard navigates into a session. Rare modal work may still host SwiftUI—the
+attention-recipient sheet does—but no hosting transaction participates in conversation cold open,
+scrolling, typing or submission on the direct route.
+
+Do not anchor the cold composer to `UIKeyboardLayoutGuide`. On the measured simulator that caused
+UIKit to load and initialize its text-input tracking coordinator while attaching the first window,
+adding about 108 ms before paint. Keyboard frame notifications update the safe-area bottom
+constraint instead; the keyboard demo verifies the same layout behavior when input is actually
+requested.
 
 ## The Turn Rail
 
@@ -580,6 +794,85 @@ when the message is sent are their quoted file paths appended for the agent tran
 applies to follow-up messages only under native rendering — terminal sessions keep the agent
 CLI's own composer.
 
+It differs from the opening composer in one way, `PromptView.SubmitPlacement.footer`: the model,
+mode, effort and speed chips and the context meter sit on a control row **inside** the box, with
+the send closing that row. They edit the next message, so they belong to it. The line above the
+box is narration only — the working orb, the word for the turn in flight, and after it what the
+last turn cost (`TurnStatusText.ready`). Splitting the two is the point: everything the user can
+change is in the box, everything the session is telling them is above it. Before the split both
+lived on one strip between the conversation and the input, which sized itself to its content and
+so left the controls clustered at the leading edge of an otherwise empty row.
+
+**Model then mode then effort leads the row**, matching the opening composer wherever the
+selected model publishes effort levels. Speed is reply-only, so it follows. The mode chip
+is also configured *before* the model-catalog guard: a runtime that publishes no catalog — Grok
+today — still has a permission posture, and the early return that hides the model, effort and
+speed chips used to take this one with it.
+
+**What choosing a mode does differs by provider, and the menu says which.**
+`PermissionModePresentation` is the one place the rows, the inherit wording and the `hand.raised`
+symbol are written down; the session row's menu, the opening composer's chip and this chip all
+build from it, so three entrances to one setting cannot name the app-wide default three ways.
+Each surface passes only its own `Timing`, which is the one thing they genuinely differ about:
+
+- **Claude switches live.** `set_permission_mode` rides the same control channel `set_model`
+  does, and the request schema is `{subtype, mode, ultraplan?}`. Driven against CLI 2.1.221 on
+  the flags this transport actually launches with
+  (`--print --input-format stream-json --output-format stream-json --verbose`), three requests
+  down one stdin:
+
+  ```
+  → {"subtype":"set_permission_mode","mode":"plan"}
+  ← {"subtype":"success","response":{"mode":"plan"}}
+  ← {"type":"system","subtype":"status","permissionMode":"plan"}
+  → {"subtype":"set_permission_mode","mode":"nonsense"}
+  ← {"subtype":"error","error":"Cannot set permission mode: must be one of acceptEdits, auto,
+     bypassPermissions, default, dontAsk, plan"}
+  → {"subtype":"set_permission_mode","mode":"manual"}
+  ← {"subtype":"success","response":{"mode":"default"}}
+  ```
+
+  Three things are settled by that transcript. The set is **exactly Threading's six**. The mode
+  goes over as Claude's own **external** value and the CLI normalises `manual` to its internal
+  `default` itself, so this app never writes that internal name down. And the channel **refuses
+  in writing** — the same shape carries `bypassPermissions` on a session not launched with
+  `--dangerously-skip-permissions`, and either gated mode where settings disable it — which
+  `configurationChangeFailed` prints the way a rejected model id already is. So the chip never
+  claims a posture the agent declined. `PermissionModeSwitchableConversation` is the seam, and
+  its `mode` is **not** optional: `set_model` takes an explicit null meaning "back to the session
+  default" and this channel has no equivalent, so inherit has to be resolved before it reaches
+  the wire. (The `system`/`status` line above is a standing offer this does not yet take up: the
+  CLI volunteers its current `permissionMode`, which would make the chip authoritative rather
+  than merely consistent with the record.)
+- **Codex records for the next launch.** Its posture is stated in the `--ask-for-approval` and
+  `--sandbox` flags of the `codex app-server` process, and `turn/start` carries only
+  `model`, `effort` and `serviceTier` — reasoning effort is read into the next turn, the
+  permission mode is not. (The app-server binary does list a `turn/start.permissions` key, but
+  among the `experimentalFeature/list` names, so it is a gate rather than a contract to build
+  on.) Choosing here therefore writes the record and says so.
+- **A dormant conversation records too**, whichever provider it is, because there is no process
+  to ask.
+
+The record-only cases append one disabled row saying "Applies the next time this chat starts.",
+which is the sentence the session row's item has always meant in a doc comment and never said on
+screen. The one case with nothing honest to say is inherit chosen on a live Claude conversation
+with no app-wide default to resolve it to: there the record changes, the running agent keeps its
+posture, and the conversation gets a muted notice saying exactly that rather than a chip quietly
+reading "Agent's Setting".
+
+Unlike the other three chips, this one is **not** gated on `stream.acceptsConfigurationChange`.
+Model, effort and speed mean nothing without a live transport; a permission mode also has a
+durable record that states the next launch, and the session row's own item is editable at exactly
+the times this would be closed. Two entrances to one setting must not disagree about whether it
+can be changed at all.
+
+The turn rail's preview card hangs off the pane, not off the rail (`attachPreview(to:)`), and is
+attached **hidden** and positioned by constraints the pointer moves. Both matter: a card is only
+ever correct beside the mark it describes, and one attached visible with no active mark, holding
+a frame assigned to a view Auto Layout owns, resolved to the container's origin at the next
+layout pass — an empty translucent panel parked in the pane's bottom-left corner under the
+composer, which is how it shipped.
+
 `Markdown` is a hand-written CommonMark subset — headings, paragraphs, fenced code, simple
 lists, GFM pipe tables, inline emphasis and code spans — because the project depends only on
 SwiftTerm and this is a small scanner rather than a package to track. Parsing is a **reader
@@ -589,7 +882,10 @@ is read first and verbatim, so a `*` in a shell glob is never mistaken for empha
 reader requires the delimiter row, so ordinary prose containing pipes stays prose. Code blocks
 and tables draw on their own horizontal viewport; a vertical-dominant gesture over either is
 forwarded to the enclosing conversation rather than being swallowed by a surface with no
-vertical range. Everything else is a selectable label, so wrapping and selection come free.
+vertical range. That choice is locked for the complete trackpad gesture and its momentum tail:
+minor diagonal noise cannot retarget an in-flight vertical flick to a nested horizontal surface
+and make the parent conversation appear to stop. Everything else is a selectable label, so
+wrapping and selection come free.
 
 Tool calls render through `ToolCallView`: a fixed-width **glyph column** (`$` bash, `→` read,
 `←` write, `✱` grep/glob, `◈` search — the vocabulary a terminal user already knows), the

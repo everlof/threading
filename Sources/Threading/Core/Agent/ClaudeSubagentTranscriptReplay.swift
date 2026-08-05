@@ -21,11 +21,16 @@ enum ClaudeSubagentTranscriptReplay {
         plan: ClaudeSubagentTranscriptPlan,
         completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
     ) {
+        let span = PerformanceRecorder.shared.begin(
+            "subagent.index.read",
+            category: "conversation"
+        )
         DispatchQueue.global(qos: .userInitiated).async {
             let events = index(
                 rootThreadID: plan.rootThreadID,
                 directory: plan.directory
             )
+            span.end(metadata: ["events": "\(events.count)"])
             DispatchQueue.main.async { completion(events) }
         }
     }
@@ -36,8 +41,16 @@ enum ClaudeSubagentTranscriptReplay {
             _ events: [StreamEvent], _ isTruncated: Bool
         ) -> Void
     ) {
+        let span = PerformanceRecorder.shared.begin(
+            "subagent.transcript.read",
+            category: "conversation"
+        )
         DispatchQueue.global(qos: .userInitiated).async {
             let replay = readConversation(at: url)
+            span.end(metadata: [
+                "events": "\(replay.events.count)",
+                "truncated": replay.isTruncated ? "true" : "false"
+            ])
             DispatchQueue.main.async { completion(replay.events, replay.isTruncated) }
         }
     }

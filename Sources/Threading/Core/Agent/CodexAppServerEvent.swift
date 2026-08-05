@@ -2,21 +2,21 @@ import Foundation
 
 // MARK: - App-Server Envelope
 
-/// The small JSON-RPC surface Threading needs from `codex app-server`.
+/// The small newline-delimited JSON-RPC surface shared by persistent agent transports.
 ///
-/// The protocol intentionally omits the `"jsonrpc"` member and evolves independently of the
-/// MCP models elsewhere in the app. Keeping this decoder tolerant and dictionary-backed lets a
-/// newer Codex add fields without taking down a native conversation.
-enum CodexAppServerEnvelope {
-    case response(id: CodexAppServerRequestID, result: [String: Any]?, error: String?)
+/// Codex omits the optional `"jsonrpc"` member while ACP includes it. Keeping this decoder
+/// tolerant and dictionary-backed lets either protocol add fields without taking down a native
+/// conversation, and keeps process/framing mechanics out of each provider adapter.
+enum JSONRPCLineEnvelope {
+    case response(id: JSONRPCRequestID, result: [String: Any]?, error: String?)
     case request(
-        id: CodexAppServerRequestID,
+        id: JSONRPCRequestID,
         method: String,
         parameters: [String: Any]
     )
     case notification(method: String, parameters: [String: Any])
 
-    static func parse(_ line: String) -> CodexAppServerEnvelope? {
+    static func parse(_ line: String) -> JSONRPCLineEnvelope? {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -24,13 +24,13 @@ enum CodexAppServerEnvelope {
         let method = object["method"] as? String
         let parameters = object["params"] as? [String: Any] ?? [:]
 
-        if let method, let id = CodexAppServerRequestID(object["id"]) {
+        if let method, let id = JSONRPCRequestID(object["id"]) {
             return .request(id: id, method: method, parameters: parameters)
         }
         if let method {
             return .notification(method: method, parameters: parameters)
         }
-        guard let id = CodexAppServerRequestID(object["id"]) else { return nil }
+        guard let id = JSONRPCRequestID(object["id"]) else { return nil }
 
         return .response(
             id: id,
@@ -46,7 +46,7 @@ enum CodexAppServerEnvelope {
             ?? encodedText(object)
     }
 
-    fileprivate static func encodedText(_ value: Any?) -> String {
+    static func encodedText(_ value: Any?) -> String {
         guard let value,
               JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(
@@ -58,7 +58,7 @@ enum CodexAppServerEnvelope {
     }
 }
 
-enum CodexAppServerRequestID: Hashable {
+enum JSONRPCRequestID: Hashable {
     case integer(Int64)
     case string(String)
     case null
@@ -84,6 +84,10 @@ enum CodexAppServerRequestID: Hashable {
         }
     }
 }
+
+/// Source-compatible names retained for the Codex adapter and its focused wire tests.
+typealias CodexAppServerEnvelope = JSONRPCLineEnvelope
+typealias CodexAppServerRequestID = JSONRPCRequestID
 
 // MARK: - Parent Conversation Adapter
 

@@ -540,14 +540,29 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.rows, [.notice("orphaned output", kind: .muted)])
     }
 
-    func testAFailedTurnIsReportedButASuccessfulOneIsNot() {
+    func testSuccessfulResultFillsCommandOnlyOutputWithoutRepeatingAnAssistantTurn() {
         var succeeded = ConversationTimeline(sessionID: SessionID())
+        _ = succeeded.apply(.userMessage("Do the work"))
+        _ = succeeded.apply(.assistantMessage(blocks: [.text("All done.")]))
         _ = succeeded.apply(.turnFinished(
             text: "All done.",
             isError: false,
             metrics: .empty
         ))
-        XCTAssertTrue(succeeded.rows.isEmpty, "A successful turn repeated itself")
+        XCTAssertEqual(succeeded.rows, [
+            .userMessage("Do the work"),
+            .assistant(markdown: "All done.")
+        ], "A successful model turn repeated its final assistant message")
+
+        var command = ConversationTimeline(sessionID: SessionID())
+        _ = command.apply(.turnFinished(
+            text: "## Context\n42% remaining",
+            isError: false,
+            metrics: .empty
+        ))
+        XCTAssertEqual(command.rows, [
+            .assistant(markdown: "## Context\n42% remaining")
+        ])
 
         var failed = ConversationTimeline(sessionID: SessionID())
         _ = failed.apply(.turnFinished(

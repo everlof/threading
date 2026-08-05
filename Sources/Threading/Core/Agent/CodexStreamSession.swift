@@ -26,21 +26,34 @@ struct CodexTurnConfiguration {
 /// process subscribed to the thread graph, which gives Threading both a reusable conversation
 /// channel and structured subagent lifecycle events.
 @MainActor
-final class CodexStreamSession: ConversationStreamSession, SubagentReportingConversation {
+final class CodexStreamSession:
+    ConversationStreamSession,
+    ProviderExecutionReportingConversation,
+    ComposerCapabilityProviding,
+    ReasoningEffortConfigurableConversation,
+    SubagentReportingConversation {
 
     // MARK: - Properties
 
     let sessionID: SessionID
 
     var onEvent: ((StreamEvent) -> Void)?
+    var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
     var onSubagentEvent: ((SubagentEvent) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onSendAvailabilityChange: (() -> Void)?
+    var onComposerCapabilitiesChange: (() -> Void)?
+    private(set) var composerCapabilities: [ComposerCapability] = []
 
     private(set) var isRunning = false
     var canSend: Bool {
-        isRunning && inputPipe != nil && !isTurnInFlight && pendingPrompt == nil
+        isRunning && inputPipe != nil && !isTurnInFlight && pendingTurn == nil
+            && !isCompactionInFlight
     }
+
+    /// Model, effort and service tier ride on the turn request, so a change takes effect on
+    /// the next one — which means the same readiness as sending it.
+    var acceptsConfigurationChange: Bool { canSend }
 
     var rootProcessIdentifier: pid_t? {
         guard let process, process.isRunning else { return nil }
@@ -49,6 +62,7 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
 
     private let plan: () -> AgentLaunchPlan
     private let configurationProvider: () -> CodexTurnConfiguration
+    private let workingDirectory: String
 
     private var process: Process?
     private var inputPipe: Pipe?
@@ -64,10 +78,14 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
     private var didInitialize = false
     private var didReportThread = false
     private var rootThreadID: String?
-    private var pendingPrompt: String?
+    private var pendingTurn: CodexPendingTurn?
     private var isTurnInFlight = false
+    private var isCompactionInFlight = false
+    private var isSkillsRequestInFlight = false
+    private var shouldReloadSkills = false
     private var isTerminating = false
     private var receivedTurnFinished = false
+    private var skillsByCapabilityID: [String: CodexSkillMetadata] = [:]
 
     private var turnStartedAt: TimeInterval?
     private var turnEffort: String?
@@ -83,10 +101,12 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
 
     init(
         sessionID: SessionID,
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
         plan: @escaping () -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
+        self.workingDirectory = workingDirectory
         self.configurationProvider = configurationProvider
         self.plan = plan
     }
@@ -99,6 +119,7 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
     ) {
         self.init(
             sessionID: sessionID,
+            workingDirectory: FileManager.default.currentDirectoryPath,
             configurationProvider: {
                 CodexTurnConfiguration(effort: effortProvider())
             },
@@ -175,15 +196,102 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
     /// root thread is ready. This preserves the native composer's first-message path.
     @discardableResult
     func send(_ text: String) -> Bool {
+        beginTurn(CodexPendingTurn(
+            input: [["type": "text", "text": text]]
+        ))
+    }
+
+    @discardableResult
+    func send(_ invocation: ComposerInvocation) -> Bool {
+        guard composerCapabilities.contains(where: {
+            $0.id == invocation.capability.id && $0.isEnabled
+        }) else {
+            return false
+        }
+
+        if let skill = skillsByCapabilityID[invocation.capability.id] {
+            return beginTurn(CodexPendingTurn(
+                input: [
+                    ["type": "text", "text": invocation.sourceText],
+                    ["type": "skill", "name": skill.name, "path": skill.path]
+                ]
+            ))
+        }
+
+        switch invocation.capability.id {
+        case CodexComposerCatalog.compactID:
+            return startCompact()
+        case CodexComposerCatalog.reviewID:
+            return startReview(arguments: invocation.arguments)
+        default:
+            return false
+        }
+    }
+
+    @discardableResult
+    private func beginTurn(_ turn: CodexPendingTurn) -> Bool {
         guard canSend else { return false }
 
-        pendingPrompt = text
+        pendingTurn = turn
         isTurnInFlight = true
         receivedTurnFinished = false
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         turnEffort = configurationProvider().effort
         onSendAvailabilityChange?()
         sendPendingTurnIfReady()
+        return true
+    }
+
+    private func startCompact() -> Bool {
+        guard canSend, let threadID = rootThreadID else { return false }
+        // The request only acknowledges that compaction started. App-server then treats the
+        // work as a turn and settles it through ordinary turn/item notifications.
+        isCompactionInFlight = true
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = nil
+        onSendAvailabilityChange?()
+        guard sendRequest(
+            method: "thread/compact/start",
+            parameters: ["threadId": threadID],
+            purpose: .compact
+        ) != nil else {
+            isCompactionInFlight = false
+            isTurnInFlight = false
+            turnStartedAt = nil
+            onSendAvailabilityChange?()
+            return false
+        }
+        return true
+    }
+
+    private func startReview(arguments: String) -> Bool {
+        guard canSend, let threadID = rootThreadID else { return false }
+        let target: [String: Any] = arguments.isEmpty
+            ? ["type": "uncommittedChanges"]
+            : ["type": "custom", "instructions": arguments]
+
+        isTurnInFlight = true
+        receivedTurnFinished = false
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = configurationProvider().effort
+        onSendAvailabilityChange?()
+        guard sendRequest(
+            method: "review/start",
+            parameters: [
+                "threadId": threadID,
+                "delivery": "inline",
+                "target": target
+            ],
+            purpose: .startReview
+        ) != nil else {
+            isTurnInFlight = false
+            turnStartedAt = nil
+            turnEffort = nil
+            onSendAvailabilityChange?()
+            return false
+        }
         return true
     }
 
@@ -221,10 +329,15 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
         didInitialize = false
         didReportThread = false
         rootThreadID = nil
-        pendingPrompt = nil
+        pendingTurn = nil
         isTurnInFlight = false
+        isCompactionInFlight = false
+        isSkillsRequestInFlight = false
+        shouldReloadSkills = false
         isTerminating = false
         receivedTurnFinished = false
+        skillsByCapabilityID.removeAll()
+        replaceComposerCapabilities([])
         turnStartedAt = nil
         turnEffort = nil
         outputTokensByTurn.removeAll()
@@ -270,12 +383,12 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
     private func sendPendingTurnIfReady() {
         guard didInitialize,
               let threadID = rootThreadID,
-              let prompt = pendingPrompt else { return }
+              let pendingTurn else { return }
 
         let configuration = configurationProvider()
         var parameters: [String: Any] = [
             "threadId": threadID,
-            "input": [["type": "text", "text": prompt]]
+            "input": pendingTurn.input
         ]
         if let model = configuration.model { parameters["model"] = model }
         if let effort = configuration.effort { parameters["effort"] = effort }
@@ -291,13 +404,14 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
             finishTurnWithTransportError("Threading could not send the Codex turn.")
             return
         }
-        pendingPrompt = nil
+        self.pendingTurn = nil
     }
 
     private func reportRootThread(_ thread: [String: Any]) {
         guard let threadID = thread["id"] as? String else { return }
 
         rootThreadID = threadID
+        replaceComposerCapabilities(CodexComposerCatalog.builtIns)
         if !didReportThread {
             didReportThread = true
             onEvent?(.initialised(
@@ -306,7 +420,130 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
             ))
         }
         sendPendingTurnIfReady()
+        requestSkillsIfNeeded()
         onSendAvailabilityChange?()
+    }
+
+    private func requestSkillsIfNeeded(forceReload: Bool = false) {
+        if forceReload { shouldReloadSkills = true }
+        guard onComposerCapabilitiesChange != nil,
+              didInitialize,
+              rootThreadID != nil,
+              !isSkillsRequestInFlight else { return }
+
+        let reload = shouldReloadSkills
+        shouldReloadSkills = false
+        isSkillsRequestInFlight = true
+        var parameters: [String: Any] = ["cwds": [workingDirectory]]
+        if reload { parameters["forceReload"] = true }
+        if sendRequest(
+            method: "skills/list",
+            parameters: parameters,
+            purpose: .listSkills
+        ) == nil {
+            isSkillsRequestInFlight = false
+            shouldReloadSkills = reload
+        }
+    }
+
+    private func applySkills(_ result: [String: Any]?) {
+        guard let entries = result?["data"] as? [[String: Any]] else {
+            rejectSkillsResponse("missing data")
+            return
+        }
+        let expectedCWD = normalizedCheckoutPath(workingDirectory)
+        guard let entry = entries.first(where: { entry in
+            guard let cwd = entry["cwd"] as? String else { return false }
+            return normalizedCheckoutPath(cwd) == expectedCWD
+        }) else {
+            // Never borrow the first entry: one request may contain several cwd scopes, and a
+            // catalog from another checkout can invoke a same-named skill with a different path.
+            rejectSkillsResponse("no matching cwd")
+            return
+        }
+        guard let errors = entry["errors"] as? [[String: Any]], errors.isEmpty else {
+            // A partial scan is not authoritative. Keep the last complete snapshot so one broken
+            // SKILL.md cannot make unrelated, previously valid skills disappear.
+            rejectSkillsResponse("scan errors")
+            return
+        }
+        guard let rawSkills = entry["skills"] as? [[String: Any]] else {
+            rejectSkillsResponse("missing skills")
+            return
+        }
+
+        var metadataByID: [String: CodexSkillMetadata] = [:]
+        var capabilities: [ComposerCapability] = CodexComposerCatalog.builtIns
+        for object in rawSkills.prefix(
+            ComposerCapabilityCatalogPolicy.maximumInspectedCapabilities
+        ) {
+            guard let name = object["name"] as? String,
+                  let path = object["path"] as? String,
+                  let rawDescription = object["description"] as? String,
+                  let enabled = object["enabled"] as? Bool,
+                  object["scope"] as? String != nil,
+                  !name.isEmpty,
+                  (path as NSString).isAbsolutePath,
+                  ComposerCapabilityCatalogPolicy.acceptsPrivatePath(path)
+            else {
+                rejectSkillsResponse("invalid skill metadata")
+                return
+            }
+            let interface = object["interface"] as? [String: Any]
+            let displayName = interface?["displayName"] as? String
+            let shortDescription = interface?["shortDescription"] as? String
+                ?? object["shortDescription"] as? String
+            let description = shortDescription ?? rawDescription
+            let id = "codex.skill:\(name)"
+            guard metadataByID[id] == nil else {
+                rejectSkillsResponse("duplicate skill identity")
+                return
+            }
+            metadataByID[id] = CodexSkillMetadata(name: name, path: path)
+            capabilities.append(ComposerCapability(
+                id: id,
+                name: name,
+                displayName: displayName,
+                description: description,
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn,
+                availability: enabled
+                    ? .available
+                    : .unavailable(reason: L10n.string("Disabled in Codex settings"))
+            ))
+        }
+        if rawSkills.count > ComposerCapabilityCatalogPolicy.maximumInspectedCapabilities {
+            ThreadingLogger.agent.warning(
+                "Codex skills response exceeded local inspection limits; truncated"
+            )
+        }
+        skillsByCapabilityID = metadataByID
+        replaceComposerCapabilities(capabilities)
+    }
+
+    private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
+        if normalization.wasTruncated {
+            ThreadingLogger.agent.warning(
+                "Codex composer catalog exceeded local presentation limits; truncated"
+            )
+        }
+        let allowedIDs = Set(normalization.capabilities.map(\.id))
+        skillsByCapabilityID = skillsByCapabilityID.filter { allowedIDs.contains($0.key) }
+        guard composerCapabilities != normalization.capabilities else { return }
+        composerCapabilities = normalization.capabilities
+        onComposerCapabilitiesChange?()
+    }
+
+    private func rejectSkillsResponse(_ reason: String) {
+        ThreadingLogger.agent.warning(
+            "Ignored incomplete Codex skills snapshot: \(reason, privacy: .public)"
+        )
+    }
+
+    private func normalizedCheckoutPath(_ path: String) -> String {
+        (path as NSString).standardizingPath
     }
 
     // MARK: - JSON-RPC
@@ -406,8 +643,14 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
             case .initialize, .openThread:
                 finishTurnWithTransportError(error)
                 terminate()
-            case .startTurn:
+            case .startTurn, .startReview:
                 finishTurnWithTransportError(error)
+            case .listSkills:
+                isSkillsRequestInFlight = false
+                if shouldReloadSkills { requestSkillsIfNeeded() }
+            case .compact:
+                isCompactionInFlight = false
+                finishTurnWithTransportError(L10n.format("Compact failed: %@", error))
             }
             return
         }
@@ -427,10 +670,26 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
 
         case .startTurn:
             break
+
+        case .startReview:
+            break
+
+        case .listSkills:
+            isSkillsRequestInFlight = false
+            applySkills(result)
+            if shouldReloadSkills { requestSkillsIfNeeded() }
+
+        case .compact:
+            // Acceptance is not completion. Standard `turn/completed` settles the operation.
+            break
         }
     }
 
     private func handleNotification(method: String, parameters: [String: Any]) {
+        if method == "skills/changed" {
+            requestSkillsIfNeeded(forceReload: true)
+        }
+
         if method == "thread/started",
            let thread = parameters["thread"] as? [String: Any],
            (thread["parentThreadId"] == nil || thread["parentThreadId"] is NSNull),
@@ -470,6 +729,15 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
             onSubagentEvent?(event)
         }
 
+        // App-server's item notification is the authoritative execution object. Capture it
+        // before the root-thread guard so delegated tools remain auditable too.
+        for event in CodexProviderExecutionAdapter.events(
+            method: method,
+            parameters: parameters
+        ) {
+            onProviderExecution?(event)
+        }
+
         guard CodexAppServerEvent.threadID(
             method: method,
             parameters: parameters
@@ -494,11 +762,16 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
 
         for event in events {
             let completed = completingTurnMetrics(in: event)
-            if case .turnFinished = completed {
+            if case .turnFinished(_, let isError, _) = completed {
+                let completedCompaction = isCompactionInFlight
                 receivedTurnFinished = true
                 isTurnInFlight = false
-                pendingPrompt = nil
+                isCompactionInFlight = false
+                pendingTurn = nil
                 if let turnID { outputTokensByTurn[turnID] = nil }
+                if completedCompaction, !isError {
+                    onEvent?(.transcriptNotice(L10n.string("Context compacted.")))
+                }
                 onSendAvailabilityChange?()
             }
             onEvent?(completed)
@@ -625,6 +898,9 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
         let wasTerminating = isTerminating
         isTerminating = false
         isRunning = false
+        isCompactionInFlight = false
+        isSkillsRequestInFlight = false
+        shouldReloadSkills = false
 
         if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
             let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
@@ -641,7 +917,7 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
     }
 
     private func finishTurnWithTransportError(_ message: String) {
-        pendingPrompt = nil
+        pendingTurn = nil
         isTurnInFlight = false
         receivedTurnFinished = true
         onEvent?(completingTurnMetrics(in: .turnFinished(
@@ -681,6 +957,121 @@ private enum RequestPurpose {
     case initialize
     case openThread
     case startTurn
+    case startReview
+    case listSkills
+    case compact
+}
+
+private struct CodexPendingTurn {
+    let input: [[String: Any]]
+}
+
+private struct CodexSkillMetadata {
+    let name: String
+    let path: String
+}
+
+enum CodexComposerCatalog {
+    static let compactID = "codex.command:compact"
+    static let reviewID = "codex.command:review"
+
+    /// Codex's TUI owns a much larger command language than app-server. Keep the current
+    /// documented names visible as disabled expectations so a known TUI command cannot fall
+    /// through as an ordinary model prompt in native Chat. This is deliberately not an
+    /// execution catalog: direct app-server mappings graduate into `builtIns` one at a time,
+    /// with their own response and lifecycle handling.
+    ///
+    /// Snapshot: Codex CLI 0.145.0 documentation, 2026-08-01. Aliases share one row so the
+    /// completion list stays below its bounded 64-row presentation limit.
+    static let terminalOnly: [ComposerCapability] = [
+        terminalCommand("permissions"),
+        terminalCommand("ide"),
+        terminalCommand("keymap"),
+        terminalCommand("vim"),
+        terminalCommand("setup-default-sandbox"),
+        terminalCommand("sandbox-add-read-dir"),
+        terminalCommand("agent", aliases: ["subagents"]),
+        terminalCommand("apps"),
+        terminalCommand("plugins"),
+        terminalCommand("hooks"),
+        terminalCommand("clear"),
+        terminalCommand("rename"),
+        terminalCommand("archive"),
+        terminalCommand("delete"),
+        terminalCommand("copy"),
+        terminalCommand("diff"),
+        terminalCommand("exit", aliases: ["quit"]),
+        terminalCommand("experimental"),
+        terminalCommand("approve"),
+        terminalCommand("memories"),
+        terminalCommand("skills"),
+        terminalCommand("import"),
+        terminalCommand("feedback"),
+        terminalCommand("init"),
+        terminalCommand("logout"),
+        terminalCommand("mcp"),
+        terminalCommand("mention"),
+        terminalCommand("model"),
+        terminalCommand("fast"),
+        terminalCommand("plan"),
+        terminalCommand("goal"),
+        terminalCommand("personality"),
+        terminalCommand("ps"),
+        terminalCommand("stop", aliases: ["clean"]),
+        terminalCommand("fork"),
+        terminalCommand("app"),
+        terminalCommand("side", aliases: ["btw"]),
+        terminalCommand("raw"),
+        terminalCommand("resume"),
+        terminalCommand("new"),
+        terminalCommand("status"),
+        terminalCommand("usage"),
+        terminalCommand("debug-config"),
+        terminalCommand("statusline"),
+        terminalCommand("title"),
+        terminalCommand("theme"),
+        terminalCommand("pets", aliases: ["pet"])
+    ]
+
+    static let builtIns: [ComposerCapability] = [
+        ComposerCapability(
+            id: compactID,
+            name: "compact",
+            description: L10n.string("Compact the conversation context"),
+            kind: .command,
+            trigger: .slash,
+            presentation: .command
+        ),
+        ComposerCapability(
+            id: reviewID,
+            name: "review",
+            description: L10n.string(
+                "Review uncommitted changes, or follow custom review instructions"
+            ),
+            argumentHint: "[instructions]",
+            kind: .command,
+            trigger: .slash,
+            presentation: .turn
+        )
+    ] + terminalOnly
+
+    private static func terminalCommand(
+        _ name: String,
+        aliases: [String] = []
+    ) -> ComposerCapability {
+        ComposerCapability(
+            id: "codex.terminal-command:\(name)",
+            name: name,
+            aliases: aliases,
+            kind: .command,
+            trigger: .slash,
+            presentation: .command,
+            availability: .unavailable(reason: L10n.string(
+                "Available in Codex Terminal; not available in native Chat yet"
+            ))
+        )
+    }
+
 }
 
 enum CodexStreamDefaults {
