@@ -70,6 +70,15 @@ authorization/cookie fields and payment verification codes) are replaced, as are
 replacement becomes a labelled placeholder with an explicit path and reason. Password values are
 already unavailable to browser tools, but the storage boundary does not rely on that upstream fact.
 
+`browser_fill_credentials` is the one tool whose *arguments* are safe by construction rather than
+by redaction: it accepts no origin, username or password, only an optional user-authored account
+name and a target. Its result is a fresh page snapshot, which reaches the ledger after
+`BrowserViewController.scrubFilledSecrets` has removed the filled value — see
+[`agent-browser.md`](agent-browser.md) for why that scrub exists and what it cannot reach. The
+browser trace records that a credential fill happened and the structural target kind, and
+deliberately not which account: it already omits locator names and field values, and an account
+name is the user's own words about an account.
+
 Files live under `~/Library/Application Support/Threading/ExecutionAudit/` with a `0700` directory
 and `0600` files. Each session is append-only JSONL, capped to a current 4 MiB segment plus three
 rotated segments. Records are SHA-256 linked. Verification distinguishes a complete chain from a

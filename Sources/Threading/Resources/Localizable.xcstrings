@@ -23981,6 +23981,346 @@
           }
         }
       }
+    },
+    "Could not save the test credential (%lld).": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att spara testinloggningen (%lld)."
+          }
+        }
+      }
+    },
+    "Could not read the test credential (%lld).": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att läsa testinloggningen (%lld)."
+          }
+        }
+      }
+    },
+    "Could not delete the test credential (%lld).": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att ta bort testinloggningen (%lld)."
+          }
+        }
+      }
+    },
+    "The stored test credential could not be read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den sparade testinloggningen kunde inte läsas."
+          }
+        }
+      }
+    },
+    "Sign in with a test credential": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga in med en testinloggning"
+          }
+        }
+      }
+    },
+    "Fill a stored test account for this exact origin. Never returns the value.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fyll i ett sparat testkonto för exakt detta ursprung. Returnerar aldrig värdet."
+          }
+        }
+      }
+    },
+    "Browser Sign-In": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webbinloggning"
+          }
+        }
+      }
+    },
+    "Sign-in values come from": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningsuppgifter hämtas från"
+          }
+        }
+      }
+    },
+    "macOS AutoFill and password managers": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS autofyll och lösenordshanterare"
+          }
+        }
+      }
+    },
+    "Threading test credentials": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threadings testinloggningar"
+          }
+        }
+      }
+    },
+    "1Password (not yet available)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Password (inte tillgängligt än)"
+          }
+        }
+      }
+    },
+    "Threading never sees a password. When an agent reaches a sign-in field the browser is revealed with that field focused, and you complete it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading ser aldrig något lösenord. När en agent når ett inloggningsfält visas webbläsaren med fältet fokuserat, och du fyller i det."
+          }
+        }
+      }
+    },
+    "Agents may fill test accounts you store below, without asking, on the exact origin each is stored for. Deliberately less protected than a password manager: store only throwaway accounts. Everything else still asks.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter får fylla i testkonton du sparar nedan, utan att fråga, på exakt det ursprung vart och ett sparats för. Medvetet sämre skyddat än en lösenordshanterare: spara bara engångskonton. Allt annat frågar fortfarande."
+          }
+        }
+      }
+    },
+    "Not available in this build. Sign-in falls back to revealing the field for you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte tillgängligt i den här versionen. Inloggning återgår till att visa fältet för dig."
+          }
+        }
+      }
+    },
+    "No test credentials stored": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga testinloggningar sparade"
+          }
+        }
+      }
+    },
+    "Add a throwaway account and agents can sign in to that exact origin without you typing it. Never store a real account here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till ett engångskonto så kan agenter logga in på exakt det ursprunget utan att du skriver något. Spara aldrig ett riktigt konto här."
+          }
+        }
+      }
+    },
+    "Add…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till…"
+          }
+        }
+      }
+    },
+    "Agents may fill this account on this exact origin.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter får fylla i det här kontot på exakt det här ursprunget."
+          }
+        }
+      }
+    },
+    "Another test account": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ytterligare ett testkonto"
+          }
+        }
+      }
+    },
+    "Add a Test Credential": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till en testinloggning"
+          }
+        }
+      }
+    },
+    "Agents may fill this account, without asking, on this exact origin only. Threading stores it in your Keychain without a Touch ID prompt, which is what makes unattended filling possible — so store only an account you would not mind losing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter får fylla i det här kontot, utan att fråga, endast på exakt det här ursprunget. Threading sparar det i din nyckelring utan Touch ID-fråga, vilket är det som gör obevakad ifyllnad möjlig — spara därför bara ett konto du inte skulle sakna."
+          }
+        }
+      }
+    },
+    "Add": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till"
+          }
+        }
+      }
+    },
+    "This is a throwaway test account": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det här är ett engångstestkonto"
+          }
+        }
+      }
+    },
+    "http://localhost:3000": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "http://localhost:3000"
+          }
+        }
+      }
+    },
+    "admin": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "admin"
+          }
+        }
+      }
+    },
+    "Username or email (optional)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Användarnamn eller e-post (valfritt)"
+          }
+        }
+      }
+    },
+    "The test credential was not added": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Testinloggningen lades inte till"
+          }
+        }
+      }
+    },
+    "Enter the origin as a full URL, for example http://localhost:3000 or https://staging.example.com.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange ursprunget som en fullständig URL, till exempel http://localhost:3000 eller https://staging.example.com."
+          }
+        }
+      }
+    },
+    "Give the account a name so an agent can ask for it by name.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ge kontot ett namn så att en agent kan efterfråga det med namn."
+          }
+        }
+      }
+    },
+    "A test credential needs a password.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En testinloggning behöver ett lösenord."
+          }
+        }
+      }
+    },
+    "%@ is not on this machine. Tick “This is a throwaway test account” to store a credential for it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ finns inte på den här datorn. Kryssa i ”Det här är ett engångstestkonto” för att spara en inloggning för det."
+          }
+        }
+      }
+    },
+    "%@ looks like a real account provider. Threading's test credentials are stored without a Touch ID prompt so agents can use them unattended, which is not safe for an account you care about.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ser ut att vara en riktig kontoleverantör. Threadings testinloggningar sparas utan Touch ID-fråga så att agenter kan använda dem obevakat, vilket inte är säkert för ett konto du bryr dig om."
+          }
+        }
+      }
+    },
+    "Stored in your login Keychain, and removed by Reset Everything. This build cannot use the protected Keychain, so a command line on this Mac — including an agent's — could add or delete entries here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sparas i din inloggningsnyckelring och tas bort av Återställ allt. Den här versionen kan inte använda den skyddade nyckelringen, så en kommandorad på den här datorn — inklusive en agents — skulle kunna lägga till eller ta bort poster här."
+          }
+        }
+      }
+    },
+    "Stored in your protected Keychain, out of reach of the command line, and removed by Reset Everything.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sparas i din skyddade nyckelring, utom räckhåll för kommandoraden, och tas bort av Återställ allt."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

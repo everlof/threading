@@ -38,6 +38,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "quitWithRunningAgents",
             "removeExtension",
             "revokeAllWebsiteAccess",
+            "storeTestCredential",
             "removeProject",
             "revokeChatAccess",
             "revokePairedDevice",

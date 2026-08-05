@@ -248,6 +248,14 @@ enum MCPToolCatalog {
         symbol: "trash"
       ),
       MCPToolInfo(
+        tool: .browserFillCredentials,
+        title: "Sign in with a test credential",
+        detail: """
+          Fill a stored test account for this exact origin. Never returns the value.
+          """,
+        symbol: "key"
+      ),
+      MCPToolInfo(
         tool: .browserTrace,
         title: "Record browser trace",
         detail: "Capture and export bounded, sanitized agent and network diagnostics.",

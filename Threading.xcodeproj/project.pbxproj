@@ -225,6 +225,7 @@
 		21CA8BB18DADC918372DC30E /* SettingsSearchResearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E789C75038880C2482B7CB /* SettingsSearchResearchTests.swift */; };
 		9A040A0CC45A0F3ADBF4BC1A /* SelectionSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */; };
 		FB109FE898A0299570931640 /* ThemeDerivedContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */; };
+		E72A7AF284752BC985388027 /* BrowserCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -494,6 +495,7 @@
 		A5E789C75038880C2482B7CB /* SettingsSearchResearchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsSearchResearchTests.swift; sourceTree = "<group>"; };
 		266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionSurfaceTests.swift; sourceTree = "<group>"; };
 		32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeDerivedContentTests.swift; sourceTree = "<group>"; };
+		47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserCredentialStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -826,6 +828,7 @@
 				A5E789C75038880C2482B7CB /* SettingsSearchResearchTests.swift */,
 				266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */,
 				32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */,
+				47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1402,6 +1405,7 @@
 				21CA8BB18DADC918372DC30E /* SettingsSearchResearchTests.swift in Sources */,
 				9A040A0CC45A0F3ADBF4BC1A /* SelectionSurfaceTests.swift in Sources */,
 				FB109FE898A0299570931640 /* ThemeDerivedContentTests.swift in Sources */,
+				E72A7AF284752BC985388027 /* BrowserCredentialStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

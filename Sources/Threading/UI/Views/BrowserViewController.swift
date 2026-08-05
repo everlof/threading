@@ -1479,6 +1479,96 @@ final class BrowserViewController: NSViewController {
         )
     }
 
+    // MARK: - Filled Credentials
+
+    /// Values this tab has put into a sign-in form, kept so they can be taken back out of
+    /// anything the agent is about to read.
+    ///
+    /// **Why this exists at all.** Snapshot redaction keys off the field's live `type` attribute,
+    /// so a page that flips its own password input to `type=text`, or copies the value into a
+    /// `div`, hands the plaintext to the next `browser_snapshot`. For an ordinary site that would
+    /// only expose a secret to a page that already had it — but here the page can use the *agent*
+    /// as an exfiltration channel, and the agent has an unrestricted shell that no Content
+    /// Security Policy touches. Threading is the only party that knows the string, so Threading
+    /// is the only party that can take it back out.
+    ///
+    /// **This is a retention trade, stated rather than hidden.** The value lives as long as the
+    /// tab holds it — not "for the duration of one fill" — because scrubbing needs the string.
+    /// It never reaches disk, and it is dropped when the document leaves the origin it was filled
+    /// on, when the tab closes, and when the session ends.
+    ///
+    /// **Screenshots cannot be scrubbed.** A filled password is masked on screen by the page's
+    /// own input, but nothing here would catch one a page had chosen to render as text. That is a
+    /// residual channel, and it is named in `agent-browser.md` rather than papered over.
+    private var filledSecrets: Set<String> = []
+
+    /// The origin the retained values belong to, so a navigation away can drop them.
+    private var filledSecretsOrigin: String?
+
+    func noteFilledSecrets(_ values: [String], origin: BrowserOrigin) {
+        let meaningful = values.filter { $0.count >= BrowserAgentDefaults.minimumScrubbableSecret }
+        guard !meaningful.isEmpty else { return }
+        if filledSecretsOrigin != origin.key { filledSecrets.removeAll() }
+        filledSecretsOrigin = origin.key
+        filledSecrets.formUnion(meaningful)
+    }
+
+    func forgetFilledSecrets() {
+        filledSecrets.removeAll()
+        filledSecretsOrigin = nil
+    }
+
+    /// Replaces every retained value wherever it appears in text bound for the agent.
+    ///
+    /// A plain substring replacement on purpose: the page may have re-encoded, split or re-cased
+    /// the value in ways no pattern would anticipate, and the cases this *does* catch — the value
+    /// echoed into a snapshot, a query result, a console line — are the ones that actually
+    /// happen. It is a mitigation, not a proof.
+    func scrubFilledSecrets(_ text: String) -> String {
+        guard !filledSecrets.isEmpty else { return text }
+        var scrubbed = text
+        // Longest first, so a value that contains another does not leave a fragment behind.
+        for secret in filledSecrets.sorted(by: { $0.count > $1.count }) {
+            scrubbed = scrubbed.replacingOccurrences(
+                of: secret,
+                with: BrowserAgentDefaults.filledSecretPlaceholder
+            )
+        }
+        return scrubbed
+    }
+
+    /// Fills one sign-in form from a credential the user stored for this exact origin.
+    ///
+    /// The expected origin is passed *into* the script rather than checked before it, for the
+    /// reason `BrowserAgentScripts.fillCredentials` states at length: `callAsyncJavaScript` runs
+    /// against whichever document exists when WebKit delivers the script, and by the time a
+    /// Swift-side check could notice a navigation the value would already have crossed.
+    ///
+    /// Both values reach JavaScript through the arguments dictionary and are never interpolated
+    /// into the script source, which surfaces in error strings.
+    func agentFillCredentials(
+        ref: String?,
+        selector: String?,
+        locator: BrowserSemanticLocator?,
+        expectedOrigin: BrowserOrigin,
+        username: String?,
+        password: String
+    ) async throws -> BrowserActionOutcome {
+        var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
+        arguments["expectedOrigin"] = expectedOrigin.key
+        arguments["username"] = username ?? ""
+        arguments["password"] = password
+
+        let outcome = try await callAgentActionScript(
+            BrowserAgentScripts.fillCredentials,
+            arguments: arguments
+        )
+        if outcome.ok {
+            noteFilledSecrets([password, username].compactMap { $0 }, origin: expectedOrigin)
+        }
+        return outcome
+    }
+
     func agentClick(
         ref: String?,
         selector: String?,
@@ -3201,6 +3291,12 @@ extension BrowserViewController: WKNavigationDelegate {
         documentSequences[identifier, default: 0] += 1
         if webView === self.webView {
             recordAgentNavigationTrace("commit")
+            // A filled value is retained only to scrub it back out of this origin's pages. Once
+            // the tab is somewhere else it is nothing but a secret held for no reason.
+            if let committed = webView.url.flatMap(BrowserOrigin.init(url:)),
+               committed.key != filledSecretsOrigin {
+                forgetFilledSecrets()
+            }
         }
         guard webView === self.webView, loadCompletion != nil else { return }
         trackedLoadHasCommitted = true

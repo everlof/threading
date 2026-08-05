@@ -418,6 +418,18 @@ struct BrowserSetCheckedArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
+/// Deliberately carries no origin, username, or password. The origin comes from the live
+/// authorized page and the values from the user's own vault, so neither the agent nor a page
+/// that injected instructions into it can name what gets filled where.
+struct BrowserFillCredentialsArguments: Decodable, Sendable {
+  /// Which stored test account, when one origin holds more than one. User-authored and not a
+  /// secret, so it is safe both to accept and to name back in an error.
+  let account: String?
+  let ref: String?
+  let selector: String?
+  var locator: BrowserSemanticLocator? = nil
+}
+
 struct BrowserKeyArguments: Decodable, Sendable {
   let key: String?
   let ref: String?
@@ -1225,6 +1237,7 @@ enum AgentCommand: Sendable {
   case browserDrag(BrowserDragArguments)
   case browserType(BrowserTypeArguments)
   case browserFillForm(BrowserFillFormArguments)
+  case browserFillCredentials(BrowserFillCredentialsArguments)
   case browserSelect(BrowserSelectArguments)
   case browserSetChecked(BrowserSetCheckedArguments)
   case browserPressKey(BrowserKeyArguments)
@@ -1293,6 +1306,7 @@ enum AgentCommand: Sendable {
     case .browserDrag: return .browserDrag
     case .browserType: return .browserType
     case .browserFillForm: return .browserFillForm
+    case .browserFillCredentials: return .browserFillCredentials
     case .browserSelect: return .browserSelect
     case .browserSetChecked: return .browserSetChecked
     case .browserPressKey: return .browserPressKey
@@ -1540,6 +1554,11 @@ struct MCPToolCallParameters: Decodable, Sendable {
       call = .browserFillForm(
         try container.decodeIfPresent(BrowserFillFormArguments.self, forKey: .arguments)
           ?? BrowserFillFormArguments(fields: nil)
+      )
+    case .browserFillCredentials:
+      call = .browserFillCredentials(
+        try container.decodeIfPresent(BrowserFillCredentialsArguments.self, forKey: .arguments)
+          ?? BrowserFillCredentialsArguments(account: nil, ref: nil, selector: nil)
       )
     case .browserSelect:
       call = .browserSelect(
@@ -3243,6 +3262,44 @@ enum MCPTools {
           ),
         ],
         required: ["text"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .browserFillCredentials,
+      description: """
+        Sign in with a test credential the user stored in Threading for the page's exact \
+        origin. This tool takes no username, password, or origin: Threading resolves the \
+        credential itself from the live page, and no value is ever returned to you. If the \
+        user has not stored a credential for this origin, or has chosen to keep sign-in with \
+        macOS AutoFill or a password manager, the browser is revealed with the field focused \
+        so the user can complete it — that is reported as a failure because nothing was \
+        filled. Never submits the form: use browser_click or browser_type with submit after \
+        the fill, which asks the user to confirm. On a two-step sign-in that shows only a \
+        username field, that field alone is filled and the result says so.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "account": MCPPropertySchema(
+            type: .string,
+            description: """
+              Which stored account to use, when the origin has more than one. Omit when \
+              there is only one; an ambiguous origin fails with the available names.
+              """
+          ),
+          "ref": MCPPropertySchema(
+            type: .string,
+            description: """
+              The password field's ref from a current browser_snapshot. Omit to let \
+              Threading find the one visible password field on the page.
+              """
+          ),
+          "selector": MCPPropertySchema(
+            type: .string,
+            description: "Fallback CSS selector for the password field."
+          ),
+          "locator": browserSemanticLocatorSchema,
+        ],
+        required: []
       )
     ),
     MCPToolDefinition(

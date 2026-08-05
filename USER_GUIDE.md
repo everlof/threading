@@ -1750,6 +1750,34 @@ Grok Terminal and OpenCode currently expose no equivalent structured feed throug
 terminal integration, so Threading does not infer actions from terminal text; their audit may be
 empty rather than speculative.
 
+### Signing in to test accounts
+
+When an agent reaches a password field, Threading normally brings the browser forward, focuses that
+exact field, and waits for you — it never sees the value. That is right for a real account and
+tedious for a throwaway one you re-type all day.
+
+**Settings ▸ Tools ▸ Browser Sign-In** lets you change where sign-in values come from:
+
+- **macOS AutoFill and password managers** (the default) — the behaviour above. Threading never
+  sees a password.
+- **Threading test credentials** — accounts you store here, which agents may fill without asking,
+  on the exact origin each was stored for.
+- **1Password** — planned; today it falls back to revealing the field for you.
+
+Choose **Add…** to store one. Give it the origin as a full URL (`http://localhost:3000`), a name
+you can recognise (`admin`), an optional username, and the password. Agents ask for it by that
+name, and never receive the password itself — Threading fills the page directly and removes the
+value from anything the agent reads back afterwards.
+
+Deliberately less protected than a real password manager: it is stored in your Keychain without a
+Touch ID prompt, which is exactly what lets an agent sign in unattended. **Store only accounts you
+would not mind losing.** Anything that is not on your own machine asks you to confirm it is a
+throwaway account first, and well-known providers like Google or GitHub are refused outright.
+
+Signing in is still not submitting: an agent that fills a form must still ask before it submits
+one. Remove a stored account at any time from the same page, and **Reset Everything** removes them
+all.
+
 ### Letting an agent use a signed-in Chrome
 
 The in-app browser cannot load browser extensions, which is what makes a one-shortcut 1Password

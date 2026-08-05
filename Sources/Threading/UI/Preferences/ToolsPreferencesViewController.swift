@@ -25,6 +25,17 @@ final class ToolsPreferencesViewController: NSViewController {
     private let browserAccessStore: BrowserAccessStore
     private let chromeAutomationProfile: ChromeAutomationProfile
     private var persistentOriginKeys: [String] = []
+    private let credentialStore: BrowserCredentialStore
+    private var storedCredentials: [BrowserCredentialIdentity] = []
+
+    /// Hosts whose accounts are worth more than a vault without a biometric gate protects.
+    ///
+    /// Deliberately short and honestly incomplete: it catches the mistake someone makes while
+    /// hurrying, not a determined user, and a long list would imply a completeness it cannot have.
+    static let wellKnownIdentityHosts = [
+        "google.com", "apple.com", "icloud.com", "github.com", "gitlab.com",
+        "microsoftonline.com", "live.com", "okta.com", "amazon.com", "facebook.com"
+    ]
 
     convenience init(groups: [MCPToolGroup]? = nil) {
         self.init(groups: groups, browserAccessStore: BrowserAccessStore())
@@ -33,11 +44,13 @@ final class ToolsPreferencesViewController: NSViewController {
     init(
         groups: [MCPToolGroup]?,
         browserAccessStore: BrowserAccessStore,
-        chromeAutomationProfile: ChromeAutomationProfile = .shared
+        chromeAutomationProfile: ChromeAutomationProfile = .shared,
+        credentialStore: BrowserCredentialStore = BrowserCredentialStore()
     ) {
         groupOverride = groups
         self.browserAccessStore = browserAccessStore
         self.chromeAutomationProfile = chromeAutomationProfile
+        self.credentialStore = credentialStore
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -77,6 +90,7 @@ final class ToolsPreferencesViewController: NSViewController {
         for (index, group) in displayedGroups.enumerated() {
             sections.append(groupSection(group, index: index))
         }
+        sections.append(browserSignInSection())
         sections.append(chromeAutomationSection())
         sections.append(websiteAccessSection())
 
@@ -255,6 +269,111 @@ final class ToolsPreferencesViewController: NSViewController {
         )
     }
 
+    /// Where an agent's sign-in values come from, and the test accounts it may use.
+    ///
+    /// Called **Browser Sign-In** and its entries **test credentials**, never "password manager".
+    /// The naming is a guardrail, not decoration: the dominant failure mode of a deliberately
+    /// weaker vault is people putting real credentials in it because it was convenient, and what
+    /// the screen calls itself is most of what prevents that.
+    private func browserSignInSection() -> NSView {
+        let picker = SettingsUI.popUp(target: self, action: #selector(credentialProviderChanged(_:)))
+        for provider in BrowserCredentialProvider.allCases {
+            picker.addItem(withTitle: Self.providerTitle(provider))
+        }
+        picker.selectItem(at: BrowserCredentialProvider.allCases.firstIndex(
+            of: BrowserCredentialPreference.provider
+        ) ?? 0)
+
+        var rows: [NSView] = [
+            SettingsUI.row(
+                title: "Sign-in values come from",
+                subtitle: Self.providerExplanation(BrowserCredentialPreference.provider),
+                control: picker
+            )
+        ]
+
+        if BrowserCredentialPreference.provider == .threadingVault {
+            storedCredentials = credentialStore.identities()
+            if storedCredentials.isEmpty {
+                rows.append(SettingsUI.row(
+                    title: "No test credentials stored",
+                    subtitle: """
+                        Add a throwaway account and agents can sign in to that exact origin \
+                        without you typing it. Never store a real account here.
+                        """,
+                    control: SettingsUI.button(
+                        "Add…",
+                        target: self,
+                        action: #selector(addTestCredential)
+                    )
+                ))
+            } else {
+                rows.append(contentsOf: storedCredentials.enumerated().map { index, identity in
+                    let remove = SettingsUI.button(
+                        "Remove",
+                        target: self,
+                        action: #selector(removeTestCredential(_:))
+                    )
+                    remove.tag = index
+                    return SettingsUI.row(
+                        title: "\(identity.label) — \(identity.originKey)",
+                        subtitle: "Agents may fill this account on this exact origin.",
+                        control: remove
+                    )
+                })
+                rows.append(SettingsUI.row(
+                    title: L10n.string("Another test account"),
+                    subtitle: BrowserCredentialStore.isShellReachable
+                        ? L10n.string("""
+                            Stored in your login Keychain, and removed by Reset Everything. This \
+                            build cannot use the protected Keychain, so a command line on this \
+                            Mac — including an agent's — could add or delete entries here.
+                            """)
+                        : L10n.string("""
+                            Stored in your protected Keychain, out of reach of the command line, \
+                            and removed by Reset Everything.
+                            """),
+                    control: SettingsUI.button(
+                        "Add…",
+                        target: self,
+                        action: #selector(addTestCredential)
+                    ),
+                    localizes: false
+                ))
+            }
+        }
+
+        return SettingsUI.section("Browser Sign-In", SettingsCard(rows: rows))
+    }
+
+    private static func providerTitle(_ provider: BrowserCredentialProvider) -> String {
+        switch provider {
+        case .systemAutoFill: return L10n.string("macOS AutoFill and password managers")
+        case .threadingVault: return L10n.string("Threading test credentials")
+        case .onePassword: return L10n.string("1Password (not yet available)")
+        }
+    }
+
+    private static func providerExplanation(_ provider: BrowserCredentialProvider) -> String {
+        switch provider {
+        case .systemAutoFill:
+            return L10n.string("""
+                Threading never sees a password. When an agent reaches a sign-in field the \
+                browser is revealed with that field focused, and you complete it.
+                """)
+        case .threadingVault:
+            return L10n.string("""
+                Agents may fill test accounts you store below, without asking, on the exact \
+                origin each is stored for. Deliberately less protected than a password manager: \
+                store only throwaway accounts. Everything else still asks.
+                """)
+        case .onePassword:
+            return L10n.string("""
+                Not available in this build. Sign-in falls back to revealing the field for you.
+                """)
+        }
+    }
+
     private func websiteAccessSection() -> NSView {
         persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
         guard !persistentOriginKeys.isEmpty else {
@@ -314,6 +433,150 @@ final class ToolsPreferencesViewController: NSViewController {
         render()
     }
 
+    @objc private func credentialProviderChanged(_ sender: ThemedPopUp) {
+        let providers = BrowserCredentialProvider.allCases
+        guard providers.indices.contains(sender.indexOfSelectedItem) else { return }
+        BrowserCredentialPreference.provider = providers[sender.indexOfSelectedItem]
+        render()
+    }
+
+    /// Adds one test credential.
+    ///
+    /// The origin is typed by the user and parsed through `BrowserOrigin`, so what is stored is
+    /// the same key the fill compares against — a host typed with a path or a trailing slash
+    /// cannot become an entry that never matches anything.
+    ///
+    /// A non-loopback origin needs the throwaway acknowledgement ticked. Loopback does not,
+    /// because `localhost:3000` is the case this feature exists for and asking there would train
+    /// people to tick it everywhere.
+    @objc private func addTestCredential() {
+        guard let window = view.window else { return }
+
+        let originField = ThemedTextField()
+        originField.placeholderString = L10n.string("http://localhost:3000")
+        let labelField = ThemedTextField()
+        labelField.placeholderString = L10n.string("admin")
+        let usernameField = ThemedTextField()
+        usernameField.placeholderString = L10n.string("Username or email (optional)")
+        let passwordField = ThemedSecureField()
+        passwordField.placeholderString = L10n.string("Test account password")
+
+        let acknowledgement = ThemedCheckbox(
+            title: L10n.string("This is a throwaway test account"),
+            changed: { _ in }
+        )
+
+        let fields = NSStackView(views: [
+            originField, labelField, usernameField, passwordField, acknowledgement
+        ] as [NSView])
+        fields.orientation = .vertical
+        fields.alignment = .leading
+        fields.spacing = Design.Spacing.small
+        for field in [originField, labelField, usernameField, passwordField] {
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: ToolsPreferencesDefaults.sheetFieldWidth)
+                .isActive = true
+        }
+
+        // Through `ConfirmationAlert` rather than a bare `ThemedAlert`: this asks a question
+        // whose answer grants a capability, and the registry is what states that it may never be
+        // switched off.
+        let request = ConfirmationRequest(
+            prompt: .storeTestCredential,
+            title: L10n.string("Add a Test Credential"),
+            message: L10n.string("""
+                Agents may fill this account, without asking, on this exact origin only. \
+                Threading stores it in your Keychain without a Touch ID prompt, which is what \
+                makes unattended filling possible — so store only an account you would not mind \
+                losing.
+                """),
+            confirmTitle: L10n.string("Add"),
+            accessory: fields
+        )
+
+        ConfirmationAlert.ask(request, in: window) { [weak self] confirmed in
+            guard let self, confirmed else { return }
+            self.saveTestCredential(
+                origin: originField.stringValue,
+                label: labelField.stringValue,
+                username: usernameField.stringValue,
+                password: passwordField.stringValue,
+                acknowledged: acknowledgement.state == .on
+            )
+        }
+    }
+
+    private func saveTestCredential(
+        origin rawOrigin: String,
+        label rawLabel: String,
+        username: String,
+        password: String,
+        acknowledged: Bool
+    ) {
+        let label = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        func refuse(_ reason: String) {
+            // A plain themed alert, not a `ConfirmationRequest`: this states an outcome and
+            // asks nothing, so it reads no response and needs no registered prompt.
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("The test credential was not added")
+            alert.informativeText = reason
+            alert.addButton(withTitle: L10n.string("OK"))
+            if let window = view.window { alert.beginSheetModal(for: window) }
+        }
+
+        guard let url = URL(string: rawOrigin.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let origin = BrowserOrigin(url: url), !origin.host.isEmpty else {
+            refuse(L10n.string("""
+                Enter the origin as a full URL, for example http://localhost:3000 or \
+                https://staging.example.com.
+                """))
+            return
+        }
+        guard !label.isEmpty else {
+            refuse(L10n.string("Give the account a name so an agent can ask for it by name."))
+            return
+        }
+        guard !password.isEmpty else {
+            refuse(L10n.string("A test credential needs a password."))
+            return
+        }
+        guard origin.isLocal || acknowledged else {
+            refuse(L10n.format("""
+                %@ is not on this machine. Tick “This is a throwaway test account” to store a \
+                credential for it.
+                """, origin.displayName))
+            return
+        }
+        if Self.wellKnownIdentityHosts.contains(where: {
+            origin.host == $0 || origin.host.hasSuffix("." + $0)
+        }) {
+            refuse(L10n.format("""
+                %@ looks like a real account provider. Threading's test credentials are stored \
+                without a Touch ID prompt so agents can use them unattended, which is not safe \
+                for an account you care about.
+                """, origin.displayName))
+            return
+        }
+
+        do {
+            try credentialStore.save(
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password,
+                for: BrowserCredentialIdentity(originKey: origin.key, label: label)
+            )
+            render()
+        } catch {
+            refuse(error.localizedDescription)
+        }
+    }
+
+    @objc private func removeTestCredential(_ sender: ThemedButton) {
+        guard storedCredentials.indices.contains(sender.tag) else { return }
+        try? credentialStore.delete(storedCredentials[sender.tag])
+        render()
+    }
+
     @objc private func revokeWebsiteAccess(_ sender: ThemedButton) {
         guard persistentOriginKeys.indices.contains(sender.tag) else { return }
         browserAccessStore.revoke(key: persistentOriginKeys[sender.tag])
@@ -345,4 +608,5 @@ enum ToolsPreferencesDefaults {
     static let iconWidth: CGFloat = 20
     static let toolNameFontSize: CGFloat = 10.5
     static let disabledAlpha: CGFloat = 0.45
+    static let sheetFieldWidth: CGFloat = 260
 }

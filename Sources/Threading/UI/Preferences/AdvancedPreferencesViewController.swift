@@ -217,6 +217,10 @@ final class AdvancedPreferencesViewController: NSViewController {
                 // listener first, then erase the one app-owned Keychain item before moving the
                 // file state aside. A settings-only reset deliberately keeps pairings.
                 try RemoteAccessCoordinator.shared.deleteOwnerDevicesForAppReset()
+                // Same reason, second store: the browser's test credentials are Keychain items,
+                // so moving the app's directories aside would leave every one of them behind
+                // while telling the user their state had been removed.
+                try BrowserCredentialStore().deleteAll()
             }
             let outcome = try AppDataReset.perform(scope, at: Date())
             ThreadingLogger.agent.info(

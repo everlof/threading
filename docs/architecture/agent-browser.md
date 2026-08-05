@@ -387,12 +387,96 @@ It is copy, not capability: Threading invokes no vault and still never sees the 
 
 This distinction is load-bearing. Public Authentication Services password requests return an
 `ASPasswordCredential` containing plaintext user and password strings to the app, while the
-AutoFill-assisted request API is unavailable on macOS. Threading therefore does not call a password
-provider, read a vault, or inject credentials. Any system Password AutoFill that WebKit offers,
-plus WebAuthn and passkey challenges, remains WebKit- and system-owned. Ordinary password values
-remain redacted from snapshots, unavailable to browser actions and waits, omitted from traces
-and diagnostics, and protected by the existing form-submission confirmation after the user fills
-them.
+AutoFill-assisted request API is unavailable on macOS. Threading therefore never calls a password
+provider. Any system Password AutoFill that WebKit offers, plus WebAuthn and passkey challenges,
+remains WebKit- and system-owned. Ordinary password values remain redacted from snapshots,
+unavailable to browser actions and waits, omitted from traces and diagnostics, and protected by
+the existing form-submission confirmation after the user fills them.
+
+## Test credentials
+
+The takeover above is what the app does **by default and unless the user changes it**. It is also
+the wrong shape for the case it kept hitting: a throwaway login on `localhost:3000`, typed by hand
+forty times a week, where a human touch per fill protects nothing. So Settings ▸ Tools ▸ Browser
+Sign-In offers three sources, and `browser_fill_credentials` behaves according to which is chosen.
+
+| Provider | Threading sees plaintext | Human touch per fill |
+|---|---|---|
+| **macOS AutoFill and password managers** (default) | never | yes — the takeover above |
+| **Threading test credentials** | transiently, per fill | no |
+| **1Password** | transiently, per fill | no (planned; falls back to the takeover today) |
+
+The tool takes **no origin, username, or password**. The origin comes from the live authorized
+page, the values from the user's own vault. It may name an `account` when one origin holds several
+test logins, because choosing between "admin" and "read-only" is part of a real task — the origin
+fence still holds, so the worst a prompt-injected page buys is the wrong test account on a page the
+user already granted. Every path that is not a fill — the default provider, no entry for this
+origin, a provider that is not ready — ends in `beginPasswordTakeover`, so the agent's code path is
+the same whatever the user chose, and the tool is honest in every configuration.
+
+**The consent chain is new and has to be said outright.** "Always Allow This Host" never mentioned
+credential injection, and loopback origins skip the prompt entirely. So the grant is *not* what
+authorizes a fill: **authoring the entry in Settings is**, per origin, and the fill asks for its
+origin grant with its own purpose — "sign in to" — rather than the generic "interact with", so a
+first grant names the stakes.
+
+**The origin is verified inside the fill script, not before it.** This is the one place a
+Swift-side check would have been theatre: `callAsyncJavaScript` is given `in: nil`, so WebKit runs
+against whichever main-frame document exists when it *delivers* the script. Every other action
+tolerates that race because the worst case is a click landing on a fresh page and the final origin
+is authorized again afterwards; here the secret has already crossed by then. A `<meta
+http-equiv="refresh">` moves the document with no script at all, and the user can navigate the
+shared browser themselves. The expected scheme/host/port therefore arrive as arguments and the
+isolated-world script compares them against its own `location`, which page JavaScript cannot shadow
+because it does not share that world's global object. Both the origin and `type === "password"` are
+re-checked after the actionability await, which is a yield a page can navigate inside. Values reach
+JavaScript only through the arguments dictionary, never interpolated into script source, which
+surfaces in error strings.
+
+**A filled value is retained per tab so it can be scrubbed back out.** Snapshot redaction keys off
+the field's live `type` attribute, so a page that flips its own password input to `type=text`, or
+copies the value into a `div`, would hand the plaintext to the next `browser_snapshot`. That is
+worse here than an ordinary XSS: a page whose CSP blocks its own exfiltration can use the *agent*
+as the channel, and the agent has a shell no CSP touches. Threading is the only party that knows
+the string, so it removes it from snapshots, query output, and the console and network buffers.
+This is a deliberate retention trade rather than "held for the duration of one fill": the value
+lives as long as the tab holds it, never reaches disk, and is dropped when the document leaves that
+origin. **Screenshots cannot be scrubbed and remain a residual channel.** Values under six
+characters are not scrubbed either — replacing a short string everywhere it appears would both
+ruin the snapshot and advertise the secret's shape.
+
+The vault prefers `kSecUseDataProtectionKeychain`, **and probes rather than assumes it**. That
+keychain is unreachable from `security add-generic-password` and `security
+delete-generic-password`, which the file-based login keychain is not — and this app hands agents an
+unrestricted shell. But it needs a `keychain-access-groups` entitlement backed by a real team
+identity, so an ad-hoc-signed Debug build gets `errSecMissingEntitlement` on every write. This was
+found by the store's own suite failing eight tests while the feature "worked": the writes had been
+silently going nowhere. `BrowserCredentialStore.usesDataProtectionKeychain` therefore runs one
+throwaway write at startup and falls back to the login keychain, and
+`isShellReachable` reports which vault the build actually got — surfaced in the Settings row and in
+`browser_capabilities` as `vault_reachable_from_shell`. Reads prompt in either keychain, so an
+agent cannot *learn* a stored password either way; what the weaker one allows is planting or
+deleting an entry. The point is that the weaker build says so rather than inheriting the stronger
+build's promise.
+
+There is deliberately **no biometric gate**: unattended filling is the whole point, and a vault
+that asks for Touch ID per fill is the takeover flow with extra steps. That is the "less secure"
+this feature is named for, which is also why the UI calls it *test credentials* and never a
+password manager, warns on well-known identity providers, and requires an explicit throwaway
+acknowledgement for any origin that is not loopback.
+
+**One known limit, written down rather than claimed away.** The provider choice and
+`BrowserAccessStore`'s persistent grants live in `UserDefaults`, so an agent with shell access can
+`defaults write` both. Neither hole is new and neither yields a password — the vault itself is out
+of the shell's reach, and an entry must exist before a provider choice means anything. It matters
+because it sets the bar for what may be built on top: a per-origin "don't confirm submissions here"
+must **not** live there, or one `defaults write` plus one prompt injection becomes fill-and-submit
+with nobody watching.
+
+`browser_fill_credentials` never submits; submission keeps its own confirmation.
+`browser_run_isolated` does not get this tool at all — its checkable promise is that nothing
+authenticated is reachable, and the way to keep a promise like that is to not add a flag to the
+function that makes it. `browser_attach_chrome` is untouched: it has the real 1Password extension.
 
 Files remain user-controlled boundaries. A plain file-input click reveals the browser and uses a
 native open panel. `browser_upload` can seed that same panel with up to ten existing absolute paths,

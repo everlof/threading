@@ -783,10 +783,24 @@ extension AgentToolCoordinator {
                 "Downloads, arbitrary JavaScript evaluation, and network interception are disabled."
             ]
         )
+        let provider = BrowserCredentialPreference.provider
+        let signIn = BrowserCapabilitiesPayload.SignIn(
+            provider: provider.rawValue,
+            // Only the vault fills unattended today. Reported as a capability rather than left
+            // for the agent to infer from the provider name, so adding 1Password later changes
+            // one answer instead of every caller's assumption.
+            fillsWithoutUser: provider == .threadingVault,
+            hasStoredCredentials: provider == .threadingVault
+                && !BrowserCredentialStore().identities().isEmpty,
+            // Reported because it is the difference between two real guarantees, and an agent
+            // reading its own environment should not have to guess which build it is in.
+            vaultReachableFromShell: BrowserCredentialStore.isShellReachable
+        )
         let payload = BrowserCapabilitiesPayload(
             schemaVersion: 1,
             defaultBackend: "webkit_in_app",
             activeTab: activeTab,
+            signIn: signIn,
             backends: [webKitBackend, playwrightBackend, attachedBackend]
         )
         let encoder = JSONEncoder()

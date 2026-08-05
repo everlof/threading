@@ -220,6 +220,22 @@ nor issues a credential it cannot persist. Turning Remote Access off clears runt
 does not unpair devices. Named revocation writes Keychain first, then drops live authority and
 sockets, so a failed revoke cannot appear successful and return after restart.
 
+The browser's **test credentials** are the second store in that third category, and the one whose
+placement is a decision rather than a default. `BrowserCredentialStore` writes generic-password
+items under `codes.threading.browser.credential`, preferring `kSecUseDataProtectionKeychain` —
+which puts them out of reach of `security add-generic-password` and `security
+delete-generic-password`, since the CLI cannot address that keychain at all and this app launches
+agents with an unrestricted shell. That keychain needs an entitlement an ad-hoc-signed build does
+not have, so the store **probes once and falls back** to the login keychain, and reports which one
+it got through `isShellReachable` rather than letting a Debug build claim a Release build's
+guarantee. It is deliberately separate from `KeychainManager`, which keeps
+API keys in the login keychain: moving those to share one implementation would orphan every key
+already saved. Because neither store lives under Application Support, **Reset Everything deletes
+each explicitly**; without that, a reset would move the app's directories aside while leaving every
+stored credential behind, having told the user it removed the app's state. Under a hosted test
+bundle the service name redirects to a scratch service, for the same reason `PreferenceStore`
+redirects its suite.
+
 **What is deliberately outside the two.** Anything written into *another* program's folder is not
 ours to reset: the Claude status-line cache under `Claudex/ClaudeStatus` is there because that is
 where the CLI reads it from, and per-session hook and MCP config files are handed to an agent

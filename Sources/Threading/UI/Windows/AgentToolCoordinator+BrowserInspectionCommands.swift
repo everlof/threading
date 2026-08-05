@@ -34,10 +34,10 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            completion(.success(browser.consoleOutput(
+            completion(.success(browser.scrubFilledSecrets(browser.consoleOutput(
                 minimumLevel: level,
                 clear: arguments.clear ?? false
-            )))
+            ))))
         }
     }
 
@@ -51,11 +51,11 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            completion(.success(browser.networkOutput(
+            completion(.success(browser.scrubFilledSecrets(browser.networkOutput(
                 kind: arguments.kind,
                 errorsOnly: arguments.errorsOnly ?? false,
                 clear: arguments.clear ?? false
-            )))
+            ))))
         }
     }
 
@@ -818,7 +818,13 @@ extension AgentToolCoordinator {
                         + "was being read; retry against the current page."
                 )
             }
-            return .success(outcome.message + "\n\n" + snapshot.agentText)
+            // Scrubbed here rather than at each producer, because this is the one funnel every
+            // mutating action's page text passes through on its way to the agent. Snapshot
+            // redaction keys off the live `type` attribute, so a page that flipped a filled
+            // password field to `type=text` would otherwise hand the value straight back.
+            return .success(browser.scrubFilledSecrets(
+                outcome.message + "\n\n" + snapshot.agentText
+            ))
         } catch {
             guard browser.agentPageIdentity == authorizedPage,
                   displayPaneController.browser(for: sessionID) === browser else {

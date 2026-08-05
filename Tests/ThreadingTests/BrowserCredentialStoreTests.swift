@@ -1,0 +1,198 @@
+import XCTest
+@testable import Threading
+
+/// The test-account vault and the fence around it.
+///
+/// The fence is the whole feature: a stored credential may only ever be filled on the exact
+/// origin it was stored for, and "exact" has to survive the hostnames that are *designed* to read
+/// as something else.
+final class BrowserCredentialStoreTests: XCTestCase {
+
+    private var store: BrowserCredentialStore!
+
+    override func setUp() {
+        super.setUp()
+        store = BrowserCredentialStore()
+        try? store.deleteAll()
+    }
+
+    override func tearDown() {
+        try? store.deleteAll()
+        store = nil
+        super.tearDown()
+    }
+
+    private func origin(_ string: String) throws -> BrowserOrigin {
+        let url = try XCTUnwrap(URL(string: string))
+        return try XCTUnwrap(BrowserOrigin(url: url))
+    }
+
+    // MARK: - Test Redirect
+
+    /// The bundle is hosted in the app, so an unredirected round trip would leave real items — and
+    /// possibly a system prompt — in the developer's own keychain. Asserted rather than trusted,
+    /// for the same reason `PreferenceStore` exposes `isRedirected`.
+    func testTheVaultRedirectsToAScratchServiceUnderTests() {
+        XCTAssertTrue(BrowserCredentialStore.isRedirected)
+        XCTAssertEqual(
+            BrowserCredentialStore.resolvedService,
+            BrowserCredentialStore.hostedTestService
+        )
+    }
+
+    // MARK: - Round Trip
+
+    func testACredentialSurvivesASaveAndComesBackWhole() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:3000").key,
+            label: "admin"
+        )
+        try store.save(username: "root", password: "hunter2-test", for: identity)
+
+        let secret = try store.secret(for: identity)
+        XCTAssertEqual(secret.username, "root")
+        XCTAssertEqual(secret.password, "hunter2-test")
+    }
+
+    /// Some staging sign-ins take one field. An absent username has to stay absent rather than
+    /// coming back as an empty string the fill would then type into a field.
+    func testAPasswordOnlyCredentialKeepsNoUsername() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:8080").key,
+            label: "shared"
+        )
+        try store.save(username: "", password: "only-a-password", for: identity)
+
+        XCTAssertNil(try store.secret(for: identity).username)
+    }
+
+    /// Saving twice must leave one item, not two answering for one account.
+    func testSavingTheSameAccountTwiceReplacesIt() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:3000").key,
+            label: "admin"
+        )
+        try store.save(username: "root", password: "first-password", for: identity)
+        try store.save(username: "root", password: "second-password", for: identity)
+
+        XCTAssertEqual(store.identities().count, 1)
+        XCTAssertEqual(try store.secret(for: identity).password, "second-password")
+    }
+
+    func testDeletingRemovesOnlyTheNamedAccount() throws {
+        let key = try origin("http://localhost:3000").key
+        let admin = BrowserCredentialIdentity(originKey: key, label: "admin")
+        let viewer = BrowserCredentialIdentity(originKey: key, label: "viewer")
+        try store.save(username: "a", password: "admin-password", for: admin)
+        try store.save(username: "v", password: "viewer-password", for: viewer)
+
+        try store.delete(admin)
+
+        XCTAssertEqual(store.identities().map(\.label), ["viewer"])
+    }
+
+    // MARK: - The Origin Fence
+
+    /// `127.` is a legal subdomain label, so `127.evil.com` is a registrable domain anyone can
+    /// own. `BrowserOrigin` parses the octets for exactly this reason; the vault must not undo
+    /// that by matching on anything looser than the whole key.
+    func testALoopbackLookalikeHostReachesNoLoopbackCredential() throws {
+        let loopback = try origin("http://127.0.0.1:3000")
+        try store.save(
+            username: "root",
+            password: "loopback-password",
+            for: BrowserCredentialIdentity(originKey: loopback.key, label: "admin")
+        )
+
+        let lookalike = try origin("http://127.evil.com:3000")
+        XCTAssertFalse(lookalike.isLocal, "the lookalike parsed as this machine")
+        XCTAssertTrue(store.identities(for: lookalike).isEmpty)
+        XCTAssertEqual(store.identities(for: loopback).map(\.label), ["admin"])
+    }
+
+    /// A subdomain is a different origin, and a suffix comparison is how that stops being true.
+    func testASubdomainReachesNoParentCredential() throws {
+        let parent = try origin("https://staging.example.com")
+        try store.save(
+            username: "root",
+            password: "staging-password",
+            for: BrowserCredentialIdentity(originKey: parent.key, label: "admin")
+        )
+
+        XCTAssertTrue(store.identities(for: try origin("https://evil.staging.example.com")).isEmpty)
+        XCTAssertTrue(store.identities(for: try origin("https://example.com")).isEmpty)
+    }
+
+    /// Two servers on one host are two origins. This is the case a developer actually hits — an
+    /// app on 3000 and an admin tool on 3001 — and it is also the one a looser key would merge.
+    func testTwoPortsOnOneHostAreTwoOrigins() throws {
+        let app = try origin("http://localhost:3000")
+        let admin = try origin("http://localhost:3001")
+        try store.save(
+            username: "root",
+            password: "app-password",
+            for: BrowserCredentialIdentity(originKey: app.key, label: "app")
+        )
+
+        XCTAssertEqual(store.identities(for: app).map(\.label), ["app"])
+        XCTAssertTrue(store.identities(for: admin).isEmpty)
+    }
+
+    /// A scheme change is an origin change: the same host over http is not the same place.
+    func testHTTPAndHTTPSAreTwoOrigins() throws {
+        let secure = try origin("https://staging.example.com")
+        try store.save(
+            username: "root",
+            password: "secure-password",
+            for: BrowserCredentialIdentity(originKey: secure.key, label: "admin")
+        )
+
+        XCTAssertTrue(store.identities(for: try origin("http://staging.example.com")).isEmpty)
+    }
+
+    // MARK: - Account Encoding
+
+    /// One keychain account string carries both fields, so the split has to be on the *first*
+    /// separator: an origin key cannot contain one, but a label is free text the user typed.
+    func testALabelMayContainTheFieldSeparator() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:3000").key,
+            label: "admin|owner"
+        )
+        let round = try XCTUnwrap(BrowserCredentialIdentity(account: identity.account))
+
+        XCTAssertEqual(round.originKey, "http://localhost:3000")
+        XCTAssertEqual(round.label, "admin|owner")
+    }
+
+    func testAMalformedAccountStringYieldsNoIdentity() {
+        XCTAssertNil(BrowserCredentialIdentity(account: "http://localhost:3000"))
+        XCTAssertNil(BrowserCredentialIdentity(account: "|admin"))
+        XCTAssertNil(BrowserCredentialIdentity(account: "http://localhost:3000|"))
+    }
+
+    // MARK: - Provider
+
+    /// The behaviour the app shipped with stays the default: Threading sees no password until the
+    /// user has said otherwise.
+    func testTheDefaultProviderHandsSignInToTheUser() {
+        XCTAssertEqual(BrowserCredentialProvider.fallback, .systemAutoFill)
+    }
+
+    // MARK: - Which Keychain
+
+    /// The two answers are two different guarantees, and the store must report the one it has.
+    ///
+    /// The data-protection keychain needs a `keychain-access-groups` entitlement backed by a real
+    /// team identity, so an ad-hoc-signed Debug build cannot use it — every write returns
+    /// `errSecMissingEntitlement`. That was found by this suite failing eight tests while the
+    /// feature "worked". What must never happen is the weaker build quietly claiming the stronger
+    /// promise, so the pair is asserted to agree rather than either being asserted outright.
+    func testTheStoreReportsWhichKeychainItActuallyGot() {
+        XCTAssertEqual(
+            BrowserCredentialStore.isShellReachable,
+            !BrowserCredentialStore.usesDataProtectionKeychain,
+            "the vault's shell-reachability disagreed with the keychain it is using"
+        )
+    }
+}

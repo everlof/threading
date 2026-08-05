@@ -51,6 +51,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case quitWithRunningAgents
     case removeExtension
     case revokeAllWebsiteAccess
+    case storeTestCredential
 
     // MARK: Irreversible
 
@@ -215,6 +216,12 @@ enum ConfirmationPrompt: String, CaseIterable {
              .updateExtensionCapabilities,
              .approveAgentExtensionInstall,
              .shareChatLink,
+             // Storing a test credential is the moment an origin gains the right to be signed
+             // in to unattended, so it belongs with the other grants rather than with the
+             // reversible edits: removing the entry later does not un-ring whatever an agent
+             // did with it. It is scoped to one origin and revocable in Settings ▸ Tools,
+             // which is exactly the shape this branch describes.
+             .storeTestCredential,
              // The capability here is macOS's to give, not Threading's — but the thing being
              // handed out is the same: a program gets to reach past the app for something the
              // user has not agreed to yet. It cannot be switched off for a reason the other

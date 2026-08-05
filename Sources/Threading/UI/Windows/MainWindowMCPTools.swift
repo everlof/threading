@@ -79,9 +79,29 @@ struct BrowserCapabilitiesPayload: Encodable {
     }
   }
 
+  /// Whether `browser_fill_credentials` can do anything on this machine, so an agent can find
+  /// out before it asks rather than discovering it through a refusal.
+  ///
+  /// It reports the *provider* and whether the vault holds anything at all — never which origins
+  /// have entries, which would let a page enumerate where the user keeps test accounts.
+  struct SignIn: Encodable {
+    let provider: String
+    let fillsWithoutUser: Bool
+    let hasStoredCredentials: Bool
+    let vaultReachableFromShell: Bool
+
+    private enum CodingKeys: String, CodingKey {
+      case provider
+      case fillsWithoutUser = "fills_without_user"
+      case hasStoredCredentials = "has_stored_credentials"
+      case vaultReachableFromShell = "vault_reachable_from_shell"
+    }
+  }
+
   let schemaVersion: Int
   let defaultBackend: String
   let activeTab: ActiveTab?
+  let signIn: SignIn
   let backends: [Backend]
 
   private enum CodingKeys: String, CodingKey {
@@ -89,6 +109,7 @@ struct BrowserCapabilitiesPayload: Encodable {
     case schemaVersion = "schema_version"
     case defaultBackend = "default_backend"
     case activeTab = "active_tab"
+    case signIn = "sign_in"
   }
 }
 
@@ -337,6 +358,15 @@ final class AgentToolCoordinator: AgentCommandHandling {
       ) + "; \(arguments.text?.count ?? 0) characters"
     case .browserFillForm(let arguments):
       return "\(arguments.fields?.count ?? 0) fields"
+    // The trace deliberately records that a credential fill happened and nothing about which
+    // one: it already omits locator names and field values, and an account label is the user's
+    // own words about an account.
+    case .browserFillCredentials(let arguments):
+      return target(
+        ref: arguments.ref,
+        selector: arguments.selector,
+        locator: arguments.locator
+      ) + "; stored credential"
     case .browserSelect(let arguments):
       return target(
         ref: arguments.ref,
@@ -537,6 +567,8 @@ final class AgentToolCoordinator: AgentCommandHandling {
       browserType(arguments, for: sessionID, completion: observed)
     case .browserFillForm(let arguments):
       browserFillForm(arguments, for: sessionID, completion: observed)
+    case .browserFillCredentials(let arguments):
+      browserFillCredentials(arguments, for: sessionID, completion: observed)
     case .browserSelect(let arguments):
       browserSelect(arguments, for: sessionID, completion: observed)
     case .browserSetChecked(let arguments):

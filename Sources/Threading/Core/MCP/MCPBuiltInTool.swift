@@ -34,6 +34,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case browserDrag = "browser_drag"
   case browserType = "browser_type"
   case browserFillForm = "browser_fill_form"
+  case browserFillCredentials = "browser_fill_credentials"
   case browserSelect = "browser_select"
   case browserSetChecked = "browser_set_checked"
   case browserPressKey = "browser_press_key"
@@ -93,7 +94,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
       .browserCapabilities, .browserRunIsolated, .browserAttachChrome, .browserSnapshot,
       .browserAnnotations,
       .browserScreenshot, .browserVisualCompare, .browserQuery, .browserClick,
-      .browserHover, .browserDrag, .browserType, .browserFillForm, .browserSelect,
+      .browserHover, .browserDrag, .browserType, .browserFillForm, .browserFillCredentials,
+      .browserSelect,
       .browserSetChecked, .browserPressKey, .browserScroll, .browserWait, .browserConsole,
       .browserNetwork, .browserPerformance, .browserAccessibilityAudit:
       return .browser
@@ -159,7 +161,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
       .browserHistory, .browserStop, .browserTabs, .browserUpload, .browserDownload,
       .browserResize, .browserEmulate, .browserRunIsolated, .browserAttachChrome,
       .browserClick, .browserHover,
-      .browserDrag, .browserType, .browserFillForm, .browserSelect, .browserSetChecked,
+      .browserDrag, .browserType, .browserFillForm, .browserFillCredentials,
+      .browserSelect, .browserSetChecked,
       .browserPressKey, .browserScroll, .browserWait, .panelActivateTab, .setProjectIcon,
       .notifyUser, .setTheme, .createTheme, .setAppTheme, .createAppTheme,
       .duplicateAppTheme, .updateAppTheme, .extensionScaffoldProject,

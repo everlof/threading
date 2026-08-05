@@ -1362,6 +1362,211 @@ enum BrowserAgentScripts {
         });
         """#
 
+    /// Fills one sign-in form from the credential the user stored for this exact origin.
+    ///
+    /// **The origin is verified in here, and that is the whole point of the script's shape.**
+    /// Checking it in Swift and then dispatching would not be checking it: `callAsyncJavaScript`
+    /// is given `in: nil`, so WebKit runs the script against whatever main-frame document exists
+    /// when it *delivers* it. Every other action tolerates that race because the worst case is a
+    /// click landing on a fresh page, and the final origin is authorized again afterwards. Here
+    /// the secret has already crossed by then. A `<meta http-equiv="refresh">` on the granted page
+    /// moves the document with no script at all, and the user can navigate the shared browser
+    /// themselves — which is the very case grant guarantee 4 exists for. So the expected origin
+    /// arrives as an argument and this script compares it against its own `location`, which page
+    /// JavaScript cannot shadow because it does not share the client world's global object.
+    ///
+    /// The origin is re-checked after the actionability await, immediately before each value is
+    /// set, because that await is a yield the page can navigate inside.
+    ///
+    /// Nothing about the values is returned, and neither value is interpolated into this source:
+    /// they arrive in the arguments dictionary, because script text surfaces in error strings.
+    static let fillCredentials = targetPrelude + #"""
+        function currentOriginKey() {
+          const scheme = String(location.protocol || '').replace(/:$/, '').toLowerCase();
+          const host = String(location.hostname || '').toLowerCase();
+          return `${scheme}://${host}${location.port ? ':' + location.port : ''}`;
+        }
+        const expected = String(expectedOrigin || '');
+        function originMoved() {
+          return !expected || currentOriginKey() !== expected;
+        }
+        const staleOrigin = {
+          ok: false,
+          message: 'The page is no longer the origin this credential belongs to; retry against '
+            + 'the page now on screen.'
+        };
+        if (originMoved()) return JSON.stringify(staleOrigin);
+
+        function isPasswordInput(element) {
+          const view = element.ownerDocument?.defaultView || globalThis;
+          return element instanceof view.HTMLInputElement
+            && String(element.getAttribute('type') || '').toLowerCase() === 'password';
+        }
+
+        // The same visibility predicate every other action uses, rather than a second notion of
+        // what "visible" means for one tool.
+        function collectDeep(test) {
+          const found = [];
+          function visit(root) {
+            for (const element of Array.from(root?.children || [])) {
+              try {
+                if (test(element) && visibilityIssue(element) === null) found.push(element);
+              } catch (_) {}
+              if (element.shadowRoot) visit(element.shadowRoot);
+              if (element.tagName.toLowerCase() === 'iframe') {
+                // Cross-origin frames throw here and stay opaque, which is the actual iframe
+                // defence: everything this reaches is same-origin with the verified document.
+                try {
+                  if (element.contentDocument?.documentElement) visit(element.contentDocument);
+                } catch (_) {}
+              }
+              visit(element);
+            }
+          }
+          visit(document);
+          return found;
+        }
+
+        // Any ordinary text-shaped input is a *candidate*; `autocomplete="username"` only makes
+        // one preferred, below. Narrowing here instead would refuse the many sign-in forms that
+        // mark up nothing at all.
+        function looksLikeUsername(element) {
+          const view = element.ownerDocument?.defaultView || globalThis;
+          if (!(element instanceof view.HTMLInputElement)) return false;
+          const type = String(element.getAttribute('type') || 'text').toLowerCase();
+          return ['text', 'email', 'tel', ''].includes(type);
+        }
+
+        let passwordField = null;
+        const targeted = !!(ref || selector || locator);
+        if (targeted) {
+          passwordField = resolveTarget();
+          if (!passwordField) return JSON.stringify({ ok: false, message: targetFailure() });
+          if (!isPasswordInput(passwordField)) {
+            return JSON.stringify({
+              ok: false,
+              message: 'The target is not a password field.'
+            });
+          }
+        } else {
+          const fields = collectDeep(isPasswordInput);
+          if (fields.length > 1) {
+            return JSON.stringify({
+              ok: false,
+              message: `This page has ${fields.length} visible password fields. Pass a ref, `
+                + 'selector, or locator naming the one to fill.'
+            });
+          }
+          passwordField = fields[0] || null;
+        }
+
+        // Two-step sign-in: no password field on screen yet. Filling the username alone is the
+        // only way these flows can proceed, because the agent is never told the username and so
+        // cannot type it itself.
+        let usernameField = null;
+        if (passwordField) {
+          const scope = passwordField.form
+            || passwordField.closest('form')
+            || passwordField.getRootNode();
+          const candidates = collectDeep(looksLikeUsername).filter(candidate => {
+            const candidateScope = candidate.form
+              || candidate.closest('form')
+              || candidate.getRootNode();
+            return candidateScope === scope;
+          });
+          const preferred = candidates.filter(candidate =>
+            String(candidate.getAttribute('autocomplete') || '').toLowerCase()
+              .includes('username'));
+          const pool = preferred.length ? preferred : candidates;
+          // The nearest one *before* the password field: a sign-in form that also carries a
+          // search box puts the search box first, not between the two sign-in fields.
+          // `DOCUMENT_POSITION_FOLLOWING` is spelled as its numeric value because these elements
+          // may live in a frame whose `Node` is not this world's `Node`.
+          const following = 0x04;
+          usernameField = pool.filter(candidate =>
+            candidate.compareDocumentPosition(passwordField) & following
+          ).pop() || pool[0] || null;
+        } else {
+          const candidates = collectDeep(looksLikeUsername);
+          if (candidates.length !== 1) {
+            return JSON.stringify({
+              ok: false,
+              message: candidates.length
+                ? `This page has no visible password field and ${candidates.length} possible `
+                  + 'username fields. Pass a ref, selector, or locator.'
+                : 'This page has no visible password or username field to fill.'
+            });
+          }
+          usernameField = candidates[0];
+        }
+
+        function setValue(element, next) {
+          const view = element.ownerDocument?.defaultView || globalThis;
+          const setter = Object.getOwnPropertyDescriptor(
+            view.HTMLInputElement.prototype, 'value'
+          )?.set;
+          setter ? setter.call(element, next) : (element.value = next);
+          // Deliberately no `data` on the InputEvent: the page can read `element.value` anyway,
+          // but there is no reason to hand the secret to every listener a second way.
+          element.dispatchEvent(new view.InputEvent('input', {
+            bubbles: true, composed: true, inputType: 'insertText'
+          }));
+          element.dispatchEvent(new view.Event('change', { bubbles: true, composed: true }));
+        }
+
+        let filledUsername = false;
+        let filledPassword = false;
+
+        if (usernameField && typeof username === 'string' && username.length) {
+          const actionability = await actionabilityIssue(usernameField, {
+            enabled: true, editable: true
+          });
+          if (actionability) return JSON.stringify({ ok: false, message: actionability });
+          if (originMoved()) return JSON.stringify(staleOrigin);
+          usernameField.focus({ preventScroll: true });
+          setValue(usernameField, username);
+          filledUsername = true;
+        }
+
+        if (passwordField) {
+          const actionability = await actionabilityIssue(passwordField, {
+            enabled: true, editable: true
+          });
+          if (actionability) return JSON.stringify({ ok: false, message: actionability });
+          // Both re-checks matter after the await: a page can navigate inside it, and a page can
+          // swap the field's own type out from under a resolution made before it.
+          if (originMoved()) return JSON.stringify(staleOrigin);
+          if (!isPasswordInput(passwordField)) {
+            return JSON.stringify({
+              ok: false,
+              message: 'The target stopped being a password field before it could be filled.'
+            });
+          }
+          passwordField.focus({ preventScroll: true });
+          setValue(passwordField, password);
+          filledPassword = true;
+        }
+
+        if (!filledUsername && !filledPassword) {
+          return JSON.stringify({
+            ok: false,
+            message: 'Nothing was filled: the stored credential had no value for any field '
+              + 'found on this page.'
+          });
+        }
+
+        return JSON.stringify({
+          ok: true,
+          filled_username: filledUsername,
+          filled_password: filledPassword,
+          message: filledPassword
+            ? (filledUsername
+              ? 'Filled the username and password.'
+              : 'Filled the password.')
+            : 'Filled the username. This page asks for the password on a later step.'
+        });
+        """#
+
     /// Runs in WebKit's isolated client world in every frame. Only a boolean crosses the native
     /// bridge: never the field name, associated account, or value. Page JavaScript cannot forge
     /// or suppress this state because it does not share the client-world global object.
@@ -3387,6 +3592,17 @@ enum BrowserAgentScripts {
 enum BrowserAgentDefaults {
     static let maximumSnapshotNodes = 180
     static let maximumFormFields = 25
+
+    /// What a scrubbed credential reads as in agent-bound text.
+    static let filledSecretPlaceholder = "[redacted]"
+
+    /// Below this length a stored value is not scrubbed from agent output.
+    ///
+    /// Not a security threshold — a usability one. A three-character test password would match
+    /// ordinary page text everywhere, and a snapshot with a dozen unrelated words replaced by
+    /// `[redacted]` is both useless to the agent and a strong hint about the secret's shape. A
+    /// value this short is guessable regardless of what Threading redacts.
+    static let minimumScrubbableSecret = 6
     static let maximumRenderedNameLength = 220
     /// How much of a component's role and name the annotation overlay draws over the page. Long
     /// enough for "button “Continue with another provider”", short enough that a page cannot lay
