@@ -293,6 +293,17 @@ applies is the *gesture's* knowledge, so it travels with the report — `ThemedT
 its strip an anchor rather than a bare "a menu was asked for", and the accessibility
 show-menu route, which has no pointer behind it, asks for `.control`.
 
+**A window carries one root menu.** The ordinary left-click route dismisses an open dropdown
+through its overlay before handing the press to another menu-opening control, but a list's
+secondary-click route is independent of that overlay. With the pane's Context menu open,
+secondary-clicking a sidebar row therefore presented a second menu while the first was still up.
+The sidebar retains one menu token; replacing it deallocated the first session without removing
+the first overlay, leaving a full-window hit-testing surface that no owner could ever dismiss —
+the visible menu stayed over the pane and blocked controls such as the project `+` permanently.
+`ThemedMenuPresenter.present` now closes every open session belonging to the source window before
+constructing its replacement. The dismissal is synchronous, so a caller's one token slot is
+cleared before it receives the new token, and a menu in another window remains independent.
+
 **Scrolling a menu moves the rows, not the hand, and the highlight belongs to the hand.** A
 row's hover *is* the menu's highlight, and hover is a tracking-area fact: wheel a clamped menu
 (the session row's is the one that overflows `ThemedMenuLayout.maximumHeight`) and AppKit hands

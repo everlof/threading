@@ -564,6 +564,83 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
     }
 
+    /// A secondary-click route can ask the presenter for a menu without first passing through
+    /// the open dropdown's outside-click overlay. The pane Context menu followed by a sidebar
+    /// row's context menu did exactly that: the owner retained only the new token, the first
+    /// session deallocated, and its now-ownerless overlay stayed over the window permanently.
+    func testPresentingASecondMenuReplacesTheOpenMenuInItsWindow() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let firstSource = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        let secondSource = NSView(frame: NSRect(x: 220, y: 80, width: 140, height: 26))
+        root.addSubview(firstSource)
+        root.addSubview(secondSource)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        var activeSession: AnyObject?
+        var firstDismissals = 0
+        var secondDismissals = 0
+        activeSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Pane Context"))],
+                minimumWidth: firstSource.bounds.width
+            ),
+            from: firstSource,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {
+                firstDismissals += 1
+                activeSession = nil
+            }
+        )
+        XCTAssertNotNil(activeSession)
+
+        // Match the real owner: it has one token slot, so presenting the row menu overwrites
+        // the pane menu's token after `present` returns.
+        activeSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Row Context"))],
+                minimumWidth: secondSource.bounds.width
+            ),
+            from: secondSource,
+            anchor: .pointer(NSPoint(x: secondSource.frame.midX, y: secondSource.frame.midY)),
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {
+                secondDismissals += 1
+                activeSession = nil
+            }
+        )
+
+        XCTAssertEqual(firstDismissals, 1, "the first menu was orphaned instead of dismissed")
+        XCTAssertNotNil(activeSession)
+        let openMenus = descendants(in: root).filter { $0.accessibilityRole() == .menu }
+        XCTAssertEqual(openMenus.count, 1, "two root menus remained attached to one window")
+        XCTAssertEqual(
+            descendants(in: try XCTUnwrap(openMenus.first))
+                .compactMap { $0.accessibilityTitle() },
+            ["Row Context"]
+        )
+
+        ThemedMenuPresenter.dismiss(activeSession)
+
+        XCTAssertNil(activeSession)
+        XCTAssertEqual(secondDismissals, 1)
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "dismissing the replacement revealed the orphaned first menu"
+        )
+    }
+
     /// Two *adjacent* filled rows keep a hairline of panel between them.
     ///
     /// A menu reaches that pair whenever the highlight and a press part company — the keyboard

@@ -138,6 +138,16 @@ enum ThemedMenuPresenter {
         // `ThemedPopover.closeAll(presentedFrom:)`.
         ThemedPopover.closeAll(presentedFrom: window)
 
+        // A window carries one root menu. Most controls dismiss the current overlay through
+        // its outside-click handoff before opening the next one, but secondary-click routes do
+        // not pass through that overlay. Without this replacement, a caller retaining one menu
+        // token overwrites the first token, deallocating its session while leaving its overlay
+        // attached and unable to dismiss. Close every extant session in this window before the
+        // new one can replace its owner's token.
+        for session in ThemedMenuSession.open.allObjects where session.window === window {
+            session.close()
+        }
+
         return ThemedMenuSession(
             presentation: presentation,
             source: source,
@@ -348,8 +358,9 @@ private final class ThemedMenuSession: NSObject {
 
     /// The sessions currently up, which is how `ThemedMenuPresenter.isMenuOpen(in:)` answers
     /// for a window. Weak, and dropped in `finish`, so the roster ends where the session does
-    /// rather than where its exit animation does. Held per session rather than per window
-    /// because a menu can be let go and a sibling's opened by the same click.
+    /// rather than where its exit animation does. The presenter closes a window's current
+    /// session before adding its replacement; keeping the roster as sessions still lets the
+    /// dismiss-and-open handoff complete synchronously inside one click.
     static let open = NSHashTable<ThemedMenuSession>.weakObjects()
 
     private weak var source: NSView?
