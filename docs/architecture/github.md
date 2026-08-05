@@ -1,7 +1,7 @@
 # GitHub Connectivity
 
-The credential chain, the GitHub App connection, and the brokered network fetch that lets a
-safe extension read from the internet without ever holding a socket or a token.
+The credential chain, the GitHub App connection, native pull requests, and the brokered network
+fetch that lets a safe extension read from the internet without ever holding a socket or a token.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -52,7 +52,7 @@ live probes, so "why did that read work" is answerable from one screen.
 ## Filing an issue (`GitHubIssueSubmitter`)
 
 Two places raise a ticket against this app's own repository: the inspector's report sheet
-(View ▸ Inspect Element / Inspect Geometry, then **Submit Issue**) and **Help ▸ Report a
+(View ▸ Inspect…, then **Submit Issue**) and **Help ▸ Report a
 Problem…**. Both compose through `GitHubIssueComposer` — description first, evidence under it,
 environment last — and both POST through the credential chain above. The repository is a
 constant, not a setting: a field pointing it elsewhere would let one user file this app's
@@ -79,6 +79,38 @@ rather than `[String: Any]`. The generated API body is capped at 60,000 characte
 fallback at 6,000, and labels have explicit count and length budgets. Truncation includes its
 marker inside the budget. An accepted POST with an unreadable response still counts as created:
 retrying would risk filing a duplicate.
+
+## Native pull requests (`GitHubPullRequestClient`)
+
+Pull-request state belongs in Git Review rather than in an extension card. The controller joins
+local branch/upstream state with a provider-neutral `ChangeRequestRepositoryStatus`: the open pull
+request, draft state, latest decision from each reviewer, requested reviewers, and check runs for
+the remote head. GitHub is the first provider implementation; the UI and durable policy do not use
+GitHub wire types.
+
+The publish policy is **repository scoped** and keyed by `git rev-parse --git-common-dir`, so all
+linked worktrees share one answer. It is exposed from each project's sidebar menu because that is
+where its effect is legible. The default opens an editable native composer. Codex may fill the
+title and body, but the composer owns no credential and the text-composition type has no publish
+method. The user must still press Publish.
+
+Every primary-button press advances exactly one external transition:
+
+- an unpublished branch is pushed;
+- a pushed branch opens the composer or, under an explicit repository policy, creates a draft or
+  ready pull request;
+- an existing pull request is opened, or a newer local head is pushed.
+
+"Create draft" and "create ready" are therefore shortcuts after an explicit click, never
+background automation. Uncommitted work is called out and remains local. Pushes and creations get
+bounded durable receipts naming the repository, branch, resulting URL, and credential tier where
+one was used.
+
+Reads use the normal credential-tier walk because they are idempotent. Creation may walk after an
+explicit 401/403/404 refusal, but it **never retries after a transport failure**: GitHub may have
+accepted the POST before the connection failed. A 2xx response that cannot be decoded is treated
+the same way. With no usable API credential, the client opens GitHub's prefilled compare form and
+does not issue an anonymous POST.
 
 ### The screenshot is not in the issue, and cannot be
 

@@ -1,0 +1,167 @@
+import AppKit
+
+/// The native pull-request strip in Git Review: one current state, one next transition, and the
+/// repository policy beside it. It does not know GitHub or git; the controller supplies the
+/// provider-neutral reading and owns every effect.
+final class GitReviewChangeRequestBar: NSView {
+    private let surface = ThemedSurfaceView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let policyChip = ChipView()
+    private var policy: ChangeRequestPublishPolicy = .reviewBeforePublishing
+    private lazy var actionButton = ThemedButton(
+        title: "",
+        target: self,
+        action: #selector(performPrimaryAction)
+    )
+    private lazy var openButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "arrow.up.right.square",
+            accessibility: L10n.string("Open pull request on GitHub"),
+            target: self,
+            action: #selector(openPullRequest)
+        )
+        button.emphasis = .tertiary
+        button.toolTip = L10n.string("Open pull request on GitHub")
+        return button
+    }()
+
+    var onPrimaryAction: (() -> Void)?
+    var onOpen: (() -> Void)?
+    var onPolicyChange: ((ChangeRequestPublishPolicy) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func showLoading(branch: String?) {
+        isHidden = false
+        titleLabel.stringValue = branch.map { L10n.format("Pull request · %@", $0) }
+            ?? L10n.string("Pull request")
+        detailLabel.stringValue = L10n.string("Reading GitHub…")
+        statusLabel.stringValue = ""
+        actionButton.title = L10n.string("Loading…")
+        actionButton.isEnabled = false
+        openButton.isHidden = true
+    }
+
+    func configure(
+        title: String,
+        detail: String,
+        status: String,
+        statusColor: NSColor,
+        actionTitle: String,
+        actionEnabled: Bool,
+        showsOpen: Bool,
+        policy: ChangeRequestPublishPolicy
+    ) {
+        isHidden = false
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        statusLabel.stringValue = status
+        statusLabel.textColor = statusColor
+        actionButton.title = actionTitle
+        actionButton.isEnabled = actionEnabled
+        openButton.isHidden = !showsOpen
+        configurePolicy(policy)
+    }
+
+    func showFailure(_ message: String, policy: ChangeRequestPublishPolicy) {
+        configure(
+            title: L10n.string("Pull request"),
+            detail: message,
+            status: "",
+            statusColor: Design.Text.tertiary,
+            actionTitle: L10n.string("Retry"),
+            actionEnabled: true,
+            showsOpen: false,
+            policy: policy
+        )
+    }
+
+    private func setup() {
+        surface.applySurface(fill: Design.Surface.panel, radius: .control)
+
+        titleLabel.applyFont(.control)
+        titleLabel.textColor = Design.Text.label
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        detailLabel.applyFont(.caption)
+        detailLabel.textColor = Design.Text.secondary
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        statusLabel.applyFont(.caption)
+        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        policyChip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        policyChip.itemsProvider = { [weak self] in self?.policyEntries() ?? [] }
+        policyChip.onSelect = { [weak self] item in
+            guard let raw = item.representedValue as? String,
+                  let policy = ChangeRequestPublishPolicy(rawValue: raw) else { return }
+            self?.configurePolicy(policy)
+            self?.onPolicyChange?(policy)
+        }
+
+        actionButton.emphasis = .primary
+        actionButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let heading = NSStackView(views: [titleLabel, statusLabel])
+        heading.orientation = .horizontal
+        heading.alignment = .firstBaseline
+        heading.spacing = Design.Spacing.small
+
+        let copy = NSStackView(views: [heading, detailLabel])
+        copy.orientation = .vertical
+        copy.alignment = .leading
+        copy.spacing = Design.Spacing.hairline
+        copy.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [copy, policyChip, openButton, actionButton])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.small
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(surface)
+        surface.addSubview(row)
+        NSLayoutConstraint.activate([
+            surface.topAnchor.constraint(equalTo: topAnchor),
+            surface.leadingAnchor.constraint(equalTo: leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            row.topAnchor.constraint(equalTo: surface.topAnchor, constant: Design.Spacing.small),
+            row.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: Design.Spacing.medium),
+            row.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -Design.Spacing.medium),
+            row.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -Design.Spacing.small)
+        ])
+        setAccessibilityElement(true)
+    }
+
+    private func configurePolicy(_ policy: ChangeRequestPublishPolicy) {
+        self.policy = policy
+        policyChip.configure(symbolName: "slider.horizontal.3", title: policy.title)
+        policyChip.toolTip = policy.explanation
+    }
+
+    private func policyEntries() -> [ThemedMenuEntry] {
+        ChangeRequestPublishPolicy.allCases.map { policy in
+            .item(ThemedMenuItem(
+                title: policy.title,
+                representedValue: policy.rawValue,
+                isSelected: policy == self.policy
+            ))
+        }
+    }
+
+    @objc private func performPrimaryAction() { onPrimaryAction?() }
+    @objc private func openPullRequest() { onOpen?() }
+}

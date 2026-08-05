@@ -19,7 +19,7 @@ enum GitHubDefaults {
 /// private repository under `anonymous` is fixed in Settings, the same answer under `app` is
 /// a commit that genuinely is not there.
 struct GitHubCredential: Equatable, Sendable {
-    enum Tier: String, CaseIterable, Sendable {
+    enum Tier: String, CaseIterable, Codable, Sendable {
         case app
         case ghCLI = "gh-cli"
         case gitCredential = "git-credential"
