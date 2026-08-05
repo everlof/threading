@@ -15,6 +15,7 @@ final class RemoteConversationStore {
             updated: [String],
             streamingChanged: Bool,
             permissionChanged: Bool,
+            capabilitiesChanged: Bool,
             historyChanged: Bool
         )
         case prepended([String])
@@ -57,6 +58,7 @@ final class RemoteConversationStore {
     func apply(_ delta: RemoteConversationDeltaDTO) -> Bool {
         let oldStreaming = state.streamingText
         let oldPermission = state.permission
+        let oldCapabilities = state.composerCapabilities
         let oldCanSend = state.canSend
         let oldHasEarlier = state.hasEarlier
         switch state.apply(delta) {
@@ -75,6 +77,7 @@ final class RemoteConversationStore {
                 updated: updated,
                 streamingChanged: oldStreaming != state.streamingText,
                 permissionChanged: oldPermission != state.permission,
+                capabilitiesChanged: oldCapabilities != state.composerCapabilities,
                 historyChanged: oldHasEarlier != state.hasEarlier
             ))
         case .unchanged:

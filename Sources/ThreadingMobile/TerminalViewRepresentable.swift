@@ -8,9 +8,17 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     @ObservedObject var connection: RemoteSessionConnection
     let theme: RemoteTerminalThemeDTO?
+    let allowsDirectInput: Bool
+    let initialScrollProgress: Double?
+    let onScrollProgress: (Double) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(connection: connection)
+        Coordinator(
+            connection: connection,
+            allowsInput: allowsDirectInput,
+            initialScrollProgress: initialScrollProgress,
+            onScrollProgress: onScrollProgress
+        )
     }
 
     func makeUIView(context: Context) -> RemoteTerminalView {
@@ -23,24 +31,34 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         view.autocapitalizationType = .none
         view.smartQuotesType = .no
         view.smartDashesType = .no
+        view.setAllowsKeyboardInput(allowsDirectInput)
+        context.coordinator.attach(to: view)
         Self.apply(theme, to: view)
         view.accessibilityLabel = MobileL10n.string("Remote terminal")
 
+        let coordinator = context.coordinator
         connection.onTerminalOutput = { [weak view] data in
             view?.feed(byteArray: Array(data)[...])
+            coordinator.restoreViewportIfPossible()
         }
         connection.onTerminalGridChange = { [weak view] cols, rows in
             guard view?.usesLocalViewport == false else { return }
             view?.setAuthoritativeGrid(cols: cols, rows: rows)
         }
-        DispatchQueue.main.async {
-            _ = view.becomeFirstResponder()
+        if allowsDirectInput {
+            DispatchQueue.main.async {
+                _ = view.becomeFirstResponder()
+            }
         }
         return view
     }
 
     func updateUIView(_ uiView: RemoteTerminalView, context: Context) {
         context.coordinator.connection = connection
+        context.coordinator.allowsInput = allowsDirectInput
+        context.coordinator.initialScrollProgress = initialScrollProgress
+        context.coordinator.onScrollProgress = onScrollProgress
+        uiView.setAllowsKeyboardInput(allowsDirectInput)
         let ownsViewport = connection.capability == .interact
         uiView.setUsesLocalViewport(ownsViewport)
         if !ownsViewport {
@@ -53,6 +71,8 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: RemoteTerminalView, coordinator: Coordinator) {
+        coordinator.captureViewport()
+        coordinator.detach()
         coordinator.connection.onTerminalOutput = nil
         coordinator.connection.onTerminalGridChange = nil
         coordinator.connection.releaseTerminalViewport()
@@ -105,12 +125,67 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     final class Coordinator: NSObject, TerminalViewDelegate {
         var connection: RemoteSessionConnection
+        var allowsInput: Bool
+        var initialScrollProgress: Double?
+        var onScrollProgress: (Double) -> Void
+        private weak var terminalView: RemoteTerminalView?
+        private var contentOffsetObservation: NSKeyValueObservation?
+        private var hasRestoredViewport = false
 
-        init(connection: RemoteSessionConnection) {
+        init(
+            connection: RemoteSessionConnection,
+            allowsInput: Bool,
+            initialScrollProgress: Double?,
+            onScrollProgress: @escaping (Double) -> Void
+        ) {
             self.connection = connection
+            self.allowsInput = allowsInput
+            self.initialScrollProgress = initialScrollProgress
+            self.onScrollProgress = onScrollProgress
+        }
+
+        func attach(to view: RemoteTerminalView) {
+            terminalView = view
+            contentOffsetObservation = view.observe(\.contentOffset, options: [.new]) {
+                [weak self, weak view] _, _ in
+                guard let self, let view,
+                      view.isDragging || view.isDecelerating || view.isTracking else { return }
+                self.captureViewport()
+            }
+        }
+
+        func detach() {
+            contentOffsetObservation?.invalidate()
+            contentOffsetObservation = nil
+            terminalView = nil
+        }
+
+        func restoreViewportIfPossible() {
+            guard !hasRestoredViewport, let view = terminalView,
+                  let progress = initialScrollProgress else { return }
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view, !self.hasRestoredViewport else { return }
+                let maximum = max(0, view.contentSize.height - view.bounds.height)
+                guard maximum > 0 else { return }
+                view.setContentOffset(
+                    CGPoint(x: view.contentOffset.x, y: maximum * min(max(progress, 0), 1)),
+                    animated: false
+                )
+                self.hasRestoredViewport = true
+            }
+        }
+
+        func captureViewport() {
+            guard let view = terminalView else { return }
+            let maximum = max(0, view.contentSize.height - view.bounds.height)
+            let progress = maximum > 0
+                ? Double(min(max(view.contentOffset.y / maximum, 0), 1))
+                : 1
+            onScrollProgress(progress)
         }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            guard allowsInput else { return }
             let bytes = Array(data)
             Task { @MainActor [weak self] in
                 self?.connection.sendTerminalInput(bytes[...])
@@ -145,8 +220,21 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 /// view holds that authoritative size against its own layout.
 final class RemoteTerminalView: TerminalView {
     private(set) var usesLocalViewport = false
+    private var allowsKeyboardInput = true
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
+
+    override var canBecomeFirstResponder: Bool {
+        allowsKeyboardInput && super.canBecomeFirstResponder
+    }
+
+    func setAllowsKeyboardInput(_ allowed: Bool) {
+        guard allowsKeyboardInput != allowed else { return }
+        allowsKeyboardInput = allowed
+        if !allowed, isFirstResponder {
+            resignFirstResponder()
+        }
+    }
 
     /// Answers before the emulator is touched, so a layout pass cannot reflow the Mac's grid to
     /// this phone's pixel size and back. The round trip also soft-reset the buffer, which threw

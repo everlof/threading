@@ -14,51 +14,10 @@ struct PairingView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 22) {
+                VStack(spacing: MobileDesign.Spacing.large) {
                     scannerCard
 
-                    HStack(spacing: 12) {
-                        Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
-                        Text("or paste a private link")
-                            .font(.caption)
-                            .foregroundStyle(theme.secondaryLabel)
-                        Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("https://…/#private-link", text: $linkText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .padding(14)
-                            .background(
-                                theme.panel,
-                                in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                            )
-
-                        HStack {
-                            Button("Paste") {
-                                linkText = UIPasteboard.general.string ?? ""
-                            }
-                            .buttonStyle(.bordered)
-
-                            Spacer()
-
-                            Button {
-                                pair(linkText)
-                            } label: {
-                                if isConnecting {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Text("Connect")
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.accent)
-                            .foregroundStyle(theme.ground)
-                            .disabled(isConnecting || linkText.isEmpty)
-                        }
-                    }
+                    linkCard
 
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -67,12 +26,9 @@ struct PairingView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Text("For your own Mac, open Threading → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can.")
-                        .font(.footnote)
-                        .foregroundStyle(theme.secondaryLabel)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    pairingHelp
                 }
-                .padding(20)
+                .padding(MobileDesign.Spacing.large)
             }
             .navigationTitle("Add Connection")
             .navigationBarTitleDisplayMode(.inline)
@@ -83,7 +39,7 @@ struct PairingView: View {
                     Button("Close") { dismiss() }
                 }
             }
-            .background(theme.ground)
+            .background(theme.ground.ignoresSafeArea())
         }
         .presentationDetents([.large])
     }
@@ -96,10 +52,10 @@ struct PairingView: View {
                 linkText = value
                 pair(value)
             }
-            .frame(height: 310)
+            .frame(height: 286)
             .clipShape(RoundedRectangle(cornerRadius: theme.panelRadius))
             .overlay(alignment: .bottom) {
-                Label("Scan the code shown on your Mac", systemImage: "qrcode")
+                Label("Scan the code on your Mac", systemImage: "qrcode")
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -124,6 +80,89 @@ struct PairingView: View {
         }
     }
 
+    private var linkCard: some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+            Label("Use a link", systemImage: "link")
+                .font(.headline)
+
+            Text("Paste a pairing link, or a chat link someone shared with you.")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryLabel)
+
+            HStack(spacing: MobileDesign.Spacing.small) {
+                TextField("https://…", text: $linkText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                    .background(
+                        theme.controlResting,
+                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                    )
+
+                Button {
+                    linkText = UIPasteboard.general.string ?? ""
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .frame(
+                            width: MobileDesign.Size.minimumTapTarget,
+                            height: MobileDesign.Size.minimumTapTarget
+                        )
+                        .background(
+                            theme.controlResting,
+                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Paste")
+            }
+
+            Button {
+                pair(linkText)
+            } label: {
+                HStack {
+                    if isConnecting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Connect", systemImage: "arrow.right")
+                    }
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(theme.accent, in: Capsule())
+                .foregroundStyle(theme.ground)
+            }
+            .buttonStyle(.plain)
+            .disabled(isConnecting || linkText.isEmpty)
+            .opacity(isConnecting || linkText.isEmpty ? 0.45 : 1)
+        }
+        .padding(MobileDesign.Spacing.inset)
+        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.panelRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
+        }
+        .remoteThemeGlow(theme)
+    }
+
+    private var pairingHelp: some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+            PairingHelpRow(
+                symbol: "laptopcomputer",
+                title: "Your Mac",
+                detail: "Open Threading → Settings → Remote Access to show its pairing code."
+            )
+            PairingHelpRow(
+                symbol: "bubble.left",
+                title: "Shared chat",
+                detail: "A shared link opens one chat and can never manage your Mac."
+            )
+        }
+        .padding(.horizontal, MobileDesign.Spacing.tight)
+    }
+
     private func pair(_ text: String) {
         guard let link = RemoteConnectionLink(string: text),
               link.baseURL.scheme?.lowercased() == "https" else {
@@ -143,6 +182,29 @@ struct PairingView: View {
                 isConnecting = false
             }
         }
+    }
+}
+
+private struct PairingHelpRow: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MobileDesign.Spacing.medium) {
+            Image(systemName: symbol)
+                .foregroundStyle(theme.accent)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

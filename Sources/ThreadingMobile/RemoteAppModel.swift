@@ -14,20 +14,35 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var me: RemoteMeDTO?
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var activeHostID: String?
+    @Published private(set) var storageIssue: String? = nil
     @Published var isPairing = false
-    @Published var navigationPath: [String] = []
+    @Published var navigationPath: [String] = [] {
+        didSet {
+            guard let activeHostID else { return }
+            if let sessionID = navigationPath.last {
+                continuity.setLastRoute(hostID: activeHostID, sessionID: sessionID)
+            } else {
+                continuity.clearLastRoute()
+            }
+        }
+    }
 
     private let store = RemoteHostStore()
+    private let continuity: MobileSessionContinuityStore
     private let isDemo: Bool
     private var themeEventsTask: URLSessionWebSocketTask?
     private var themeEventsReceiveTask: Task<Void, Never>?
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
+    private var refreshGeneration = 0
 
-    init() {
+    init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
+        self.continuity = continuity
 #if DEBUG
         if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] != nil,
-           let link = RemoteConnectionLink(string: "https://demo.invalid/#preview") {
+           let link = RemoteConnectionLink(
+            string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
+           ) {
             isDemo = true
             let host = PairedRemoteHost(
                 id: "demo-mac",
@@ -36,19 +51,64 @@ final class RemoteAppModel: ObservableObject {
                 scope: "all",
                 name: "David’s MacBook Pro",
                 link: link,
-                lastConnectedAt: Date()
+                lastConnectedAt: Date(),
+                endpoints: [
+                    RemoteHostEndpointDTO(
+                        kind: "tailscale",
+                        baseURL: link.baseURL,
+                        isStable: true
+                    ),
+                    RemoteHostEndpointDTO(
+                        kind: "relay",
+                        baseURL: URL(string: "https://threading-demo.example.com/")!,
+                        isStable: true
+                    ),
+                ],
+                connectionPolicy: .preferPrivate,
+                activeEndpointKind: "tailscale"
             )
-            hosts = [host]
+            let studioLink = RemoteConnectionLink(
+                string: "https://studio-mac.tailnet-demo.ts.net:8443/#preview"
+            )!
+            let studio = PairedRemoteHost(
+                id: "demo-studio",
+                hostID: "demo-studio",
+                shareID: "my-devices",
+                scope: "all",
+                name: "Studio Mac",
+                link: studioLink,
+                lastConnectedAt: Date().addingTimeInterval(-600),
+                endpoints: [RemoteHostEndpointDTO(
+                    kind: "tailscale",
+                    baseURL: studioLink.baseURL,
+                    isStable: true
+                )],
+                connectionPolicy: .privateOnly,
+                activeEndpointKind: "tailscale"
+            )
+            hosts = [host, studio]
             activeHostID = host.id
+            continuity.setActiveHostID(host.id)
             me = Self.demoResponse
             phase = .online
             return
         }
 #endif
         isDemo = false
-        let loaded = store.load()
+        let loaded: [PairedRemoteHost]
+        switch store.load() {
+        case .success(let hosts):
+            loaded = hosts
+        case .failure(let error):
+            loaded = []
+            storageIssue = error.localizedDescription
+        }
         hosts = loaded
-        activeHostID = loaded.first?.id
+        let restoredHostID = continuity.activeHostID.flatMap { candidate in
+            loaded.contains(where: { $0.id == candidate }) ? candidate : nil
+        }
+        activeHostID = restoredHostID ?? loaded.first?.id
+        continuity.setActiveHostID(activeHostID)
     }
 
     var activeHost: PairedRemoteHost? {
@@ -108,16 +168,30 @@ final class RemoteAppModel: ObservableObject {
             scope: me.share.scope,
             name: identity?.name ?? link.baseURL.host ?? "Threading Mac",
             link: link,
-            lastConnectedAt: Date()
+            lastConnectedAt: Date(),
+            endpoints: identity?.endpoints,
+            connectionPolicy: identity?.connectionPolicy,
+            activeEndpointKind: PairedRemoteHost.endpointKind(for: link.baseURL)
         )
 
+        let previousHosts = hosts
         if let index = hosts.firstIndex(where: { $0.id == id }) {
             hosts[index] = host
         } else {
             hosts.append(host)
         }
-        store.save(hosts)
+        do {
+            try store.save(hosts)
+            storageIssue = nil
+        } catch {
+            hosts = previousHosts
+            storageIssue = error.localizedDescription
+            phase = .offline(error.localizedDescription)
+            throw error
+        }
+        invalidateRefreshes()
         activeHostID = id
+        continuity.setActiveHostID(id)
         self.me = me
         phase = .online
         isPairing = false
@@ -131,7 +205,10 @@ final class RemoteAppModel: ObservableObject {
     func selectHost(_ id: String) {
         guard hosts.contains(where: { $0.id == id }), activeHostID != id else { return }
         disconnectThemeEvents()
+        invalidateRefreshes()
         activeHostID = id
+        continuity.setActiveHostID(id)
+        navigationPath.removeAll()
         // Never show one Mac's session identifiers while requests are already routed to another.
         me = nil
         phase = .connecting
@@ -141,11 +218,17 @@ final class RemoteAppModel: ObservableObject {
         MobileDiagnostics.record(.hostRemoved, fields: [
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         ])
+        let previousHosts = hosts
         hosts.removeAll { $0.id == host.id }
-        store.save(hosts)
+        guard persistHosts() else {
+            hosts = previousHosts
+            return
+        }
+        invalidateRefreshes()
         if activeHostID == host.id {
             disconnectThemeEvents()
             activeHostID = hosts.first?.id
+            continuity.setActiveHostID(activeHostID)
             me = nil
             phase = activeHostID == nil ? .idle : .connecting
         }
@@ -153,13 +236,14 @@ final class RemoteAppModel: ObservableObject {
 
     func refresh() async {
         guard !isDemo else { return }
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         guard let host = activeHost else {
             me = nil
             phase = .idle
             return
         }
         let hostID = host.id
-        let client = RemoteClient(link: host.link)
         let wasOnline = phase == .online && me != nil
         let wasOffline: Bool
         if case .offline = phase {
@@ -169,33 +253,41 @@ final class RemoteAppModel: ObservableObject {
         }
         if !wasOnline { phase = .connecting }
         do {
-            let response = try await client.fetchMe()
-            guard activeHostID == hostID else { return }
+            let (response, successfulLink) = try await fetchMe(from: host)
+            guard activeHostID == hostID, refreshGeneration == generation else { return }
             me = response
             phase = .online
+            restoreRouteIfPossible(hostID: hostID, response: response)
             if !wasOnline {
                 MobileDiagnostics.record(.hostRefreshSucceeded, fields: [
                     .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
+                    .transport: PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
                     .protocolVersion: String(response.serverProtocol.version),
                     .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
                 ])
             }
-            ensureThemeEvents(for: host)
             if let index = hosts.firstIndex(where: { $0.id == hostID }) {
-                let resolvedName = response.host?.name
-                let nameChanged = resolvedName.map { $0 != hosts[index].name } ?? false
+                let old = hosts[index]
+                var updated = old
+                updated.merge(identity: response.host, successfulLink: successfulLink)
+                let metadataChanged = old.name != updated.name
+                    || old.link != updated.link
+                    || old.endpoints != updated.endpoints
+                    || old.connectionPolicy != updated.connectionPolicy
+                    || old.activeEndpointKind != updated.activeEndpointKind
                 // Polling is every three seconds. Persist only a real connection transition or
                 // identity change, rather than rewriting the credential-bearing Keychain item
                 // on every healthy poll.
-                guard !wasOnline || nameChanged else { return }
-                hosts[index].lastConnectedAt = Date()
-                if let resolvedName { hosts[index].name = resolvedName }
-                store.save(hosts)
+                if !wasOnline || metadataChanged {
+                    hosts[index] = updated
+                    _ = persistHosts()
+                }
+                ensureThemeEvents(for: updated)
             }
         } catch is CancellationError {
             return
         } catch {
-            guard activeHostID == hostID else { return }
+            guard activeHostID == hostID, refreshGeneration == generation else { return }
             phase = .offline(error.localizedDescription)
             if !wasOffline {
                 MobileDiagnostics.record(
@@ -221,8 +313,11 @@ final class RemoteAppModel: ObservableObject {
     func makeSessionReady(_ session: RemoteSessionSummaryDTO) async throws {
         guard !session.isAvailable, let host = activeHost else { return }
         let hostID = host.id
-        let client = RemoteClient(link: host.link)
-        try await client.resume(sessionID: session.id)
+        let link = try await performMutation(for: hostID) { client, requestID in
+            try await client.resume(sessionID: session.id, requestID: requestID)
+            return client.link
+        }
+        let client = RemoteClient(link: link)
         guard activeHostID == hostID else { throw CancellationError() }
 
         for _ in 0..<30 {
@@ -253,7 +348,9 @@ final class RemoteAppModel: ObservableObject {
         if isDemo { return }
 #endif
         do {
-            let response = try await RemoteClient(link: host.link).setAppTheme(themeID: themeID)
+            let response = try await performMutation(for: hostID) { client, requestID in
+                try await client.setAppTheme(themeID: themeID, requestID: requestID)
+            }
             guard activeHostID == hostID else { throw CancellationError() }
             me = response
         } catch {
@@ -287,10 +384,13 @@ final class RemoteAppModel: ObservableObject {
         if isDemo { return }
 #endif
         do {
-            let response = try await RemoteClient(link: host.link).setSessionTheme(
-                sessionID: sessionID,
-                themeID: themeID
-            )
+            let response = try await performMutation(for: hostID) { client, requestID in
+                try await client.setSessionTheme(
+                    sessionID: sessionID,
+                    themeID: themeID,
+                    requestID: requestID
+                )
+            }
             guard activeHostID == hostID else { throw CancellationError() }
             me = response
         } catch {
@@ -328,7 +428,9 @@ final class RemoteAppModel: ObservableObject {
             return me?.sessions.first ?? Self.demoResponse.sessions[0]
         }
 #endif
-        let response = try await RemoteClient(link: host.link).createSession(request)
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.createSession(request, requestID: requestID)
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response.me
         guard let session = response.me.sessions.first(where: { $0.id == response.sessionID }) else {
@@ -345,10 +447,13 @@ final class RemoteAppModel: ObservableObject {
 #if DEBUG
         if isDemo { return }
 #endif
-        let response = try await RemoteClient(link: host.link).renameSession(
-            sessionID: session.id,
-            title: title
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.renameSession(
+                sessionID: session.id,
+                title: title,
+                requestID: requestID
+            )
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
     }
@@ -361,10 +466,13 @@ final class RemoteAppModel: ObservableObject {
 #if DEBUG
         if isDemo { return }
 #endif
-        let response = try await RemoteClient(link: host.link).setSessionPinned(
-            sessionID: session.id,
-            isPinned: pinned
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionPinned(
+                sessionID: session.id,
+                isPinned: pinned,
+                requestID: requestID
+            )
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
     }
@@ -377,10 +485,13 @@ final class RemoteAppModel: ObservableObject {
 #if DEBUG
         if isDemo { return }
 #endif
-        let response = try await RemoteClient(link: host.link).setSessionArchived(
-            sessionID: session.id,
-            isArchived: archived
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionArchived(
+                sessionID: session.id,
+                isArchived: archived,
+                requestID: requestID
+            )
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
     }
@@ -396,10 +507,13 @@ final class RemoteAppModel: ObservableObject {
             return
         }
 #endif
-        let response = try await RemoteClient(link: host.link).setSessionSurface(
-            sessionID: session.id,
-            surface: surface
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionSurface(
+                sessionID: session.id,
+                surface: surface,
+                requestID: requestID
+            )
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
     }
@@ -413,11 +527,14 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-        let response = try await RemoteClient(link: host.link).createShare(
-            sessionID: session.id,
-            capability: capability,
-            canApprovePermissions: canApprovePermissions
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.createShare(
+                sessionID: session.id,
+                capability: capability,
+                canApprovePermissions: canApprovePermissions,
+                requestID: requestID
+            )
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response.me
         return response
@@ -428,9 +545,9 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-        let response = try await RemoteClient(link: host.link).revokeShares(
-            sessionID: session.id
-        )
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.revokeShares(sessionID: session.id, requestID: requestID)
+        }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
     }
@@ -452,7 +569,100 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
+    private func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {
+        guard navigationPath.isEmpty,
+              let route = continuity.lastRoute,
+              route.hostID == hostID,
+              response.sessions.contains(where: { $0.id == route.sessionID }) else { return }
+        navigationPath = [route.sessionID]
+    }
+
     // MARK: - Live app-theme events
+
+    private func fetchMe(
+        from host: PairedRemoteHost
+    ) async throws -> (RemoteMeDTO, RemoteConnectionLink) {
+        let candidates = host.candidateLinks
+        var lastError: Error = RemoteClientError.invalidResponse
+        for (index, link) in candidates.enumerated() {
+            do {
+                let timeout: TimeInterval? = candidates.count > 1 && index < candidates.count - 1
+                    ? 4 : nil
+                let response = try await RemoteClient(link: link).fetchMe(timeout: timeout)
+                return (response, link)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    /// Tries every policy-approved endpoint with one request id. A timeout after the Mac has
+    /// committed the operation therefore cannot create a second session or apply an action
+    /// twice when the client continues over another route.
+    private func performMutation<Response>(
+        for hostID: String,
+        operation: (RemoteClient, String) async throws -> Response
+    ) async throws -> Response {
+        guard let host = hosts.first(where: { $0.id == hostID }) else {
+            throw CancellationError()
+        }
+        let requestID = UUID().uuidString.lowercased()
+        var lastError: Error = RemoteClientError.invalidResponse
+        let candidates = host.candidateLinks
+        for (index, link) in candidates.enumerated() {
+            do {
+                let timeout: TimeInterval? = candidates.count > 1 && index < candidates.count - 1
+                    ? 8 : nil
+                let response = try await operation(
+                    RemoteClient(link: link, requestTimeout: timeout),
+                    requestID
+                )
+                guard activeHostID == hostID else { throw CancellationError() }
+                invalidateRefreshes()
+                if let index = hosts.firstIndex(where: { $0.id == hostID }),
+                   hosts[index].link != link {
+                    hosts[index].merge(identity: nil, successfulLink: link)
+                    _ = persistHosts()
+                    disconnectThemeEvents()
+                }
+                return response
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as RemoteClientError {
+                // HTTP answers are authoritative. Failover is for transport loss, not for
+                // bypassing an authorization or compatibility decision made by the Mac. A
+                // gateway failure can belong to the route in front of it, and the same request
+                // id keeps trying the next route safe even if the Mac did receive it.
+                if case .server(let status) = error, [502, 503, 504].contains(status) {
+                    lastError = error
+                    continue
+                }
+                throw error
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    @discardableResult
+    private func persistHosts() -> Bool {
+        do {
+            try store.save(hosts)
+            storageIssue = nil
+            return true
+        } catch {
+            storageIssue = error.localizedDescription
+            return false
+        }
+    }
+
+    private func invalidateRefreshes() {
+        refreshGeneration &+= 1
+    }
 
     private func ensureThemeEvents(for host: PairedRemoteHost) {
         guard !isDemo else { return }

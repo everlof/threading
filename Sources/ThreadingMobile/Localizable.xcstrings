@@ -1,6 +1,315 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A shared link opens one chat and can never manage your Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En delad länk öppnar en chatt och kan aldrig hantera din Mac." } } }
+    },
+    "Chats": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chattar" } } }
+    },
+    "Open Threading → Settings → Remote Access to show its pairing code.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna Threading → Inställningar → Fjärråtkomst för att visa parkopplingskoden." } } }
+    },
+    "Presence, typing and drafts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro, skrivindikatorer och utkast" } } }
+    },
+    "Shared": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delat" } } }
+    },
+    "Shared chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delad chatt" } } }
+    },
+    "Your Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Din Mac" } } }
+    },
+    "App icon": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Appikon" } } }
+    },
+    "Collaboration": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete" } } }
+    },
+    "Mac appearance": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-utseende" } } }
+    },
+    "Not set": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte inställt" } } }
+    },
+    "Off": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Av" } } }
+    },
+    "On": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "På" } } }
+    },
+    "On this iPhone": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "På denna iPhone" } } }
+    },
+    "Paste a pairing link, or a chat link someone shared with you.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Klistra in en parkopplingslänk eller en chattlänk som någon delat med dig." } } }
+    },
+    "Presence stays inside the live session. Independent drafts keep devices from mixing keystrokes in the same terminal.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro visas bara i livesessionen. Separata utkast hindrar enheter från att blanda tangenttryckningar i samma terminal." } } }
+    },
+    "Scan the code on your Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skanna koden på din Mac" } } }
+    },
+    "Settings": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inställningar" } } }
+    },
+    "Support": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Support" } } }
+    },
+    "These iPhone preferences are available before you connect a Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dessa iPhone-inställningar är tillgängliga innan du ansluter en Mac." } } }
+    },
+    "Threading": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading" } } }
+    },
+    "Unavailable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte tillgängligt" } } }
+    },
+    "Use a link": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd en länk" } } }
+    },
+    "Your Mac uses %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Din Mac använder %@" } } }
+    },
+    "https://…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "https://…" } } }
+    },
+    "iOS asks for confirmation when you change an app icon. Threading never changes it automatically.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "iOS ber om bekräftelse när du ändrar appikonen. Threading ändrar den aldrig automatiskt." } } }
+    },
+    "%lld comments": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld kommentarer" } } }
+    },
+    "%lld references": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld referenser" } } }
+    },
+    "1 comment": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 kommentar" } } }
+    },
+    "1 reference": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 referens" } } }
+    },
+    "%@ needs your response": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ behöver ditt svar" } } }
+    },
+    "Agent needs my response": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten behöver mitt svar" } } }
+    },
+    "Blocking questions and requests from people sound by default; routine updates stay quiet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Blockerande frågor och förfrågningar från personer har ljud som standard; rutinuppdateringar är tysta." } } }
+    },
+    "Control request sent.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollbegäran har skickats." } } }
+    },
+    "Input control updated.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inmatningskontrollen har uppdaterats." } } }
+    },
+    "Macs": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorer" } } }
+    },
+    "Newly shared chats": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nyligen delade chattar" } } }
+    },
+    "Open %@ to answer.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna %@ för att svara." } } }
+    },
+    "Play notification sounds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spela notisljud" } } }
+    },
+    "Requested agent updates": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Begärda agentuppdateringar" } } }
+    },
+    "Requests from people": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förfrågningar från personer" } } }
+    },
+    "Sending control request…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickar kontrollbegäran…" } } }
+    },
+    "Sounds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ljud" } } }
+    },
+    "That person is not available.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personen är inte tillgänglig." } } }
+    },
+    "The control request was not accepted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollbegäran godkändes inte." } } }
+    },
+    "Watching": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tittar" } } }
+    },
+    "%@ is controlling · your draft stays here": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ styr · ditt utkast finns kvar" } } }
+    },
+    "Another participant": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En annan deltagare" } } }
+    },
+    "Collaborative": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete" } } }
+    },
+    "Collaborative · everyone can send": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete · alla kan skicka" } } }
+    },
+    "Focus on me": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fokusera på mig" } } }
+    },
+    "Hand off to %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lämna över till %@" } } }
+    },
+    "Input control options": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alternativ för inmatningskontroll" } } }
+    },
+    "Reclaim control": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ta tillbaka kontrollen" } } }
+    },
+    "Request control": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Be om kontroll" } } }
+    },
+    "Send feedback": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka feedback" } } }
+    },
+    "You are controlling · others are watching": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Du styr · andra tittar" } } }
+    },
+    "%@ asked %@ for input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%1$@ bad %2$@ om synpunkter" } } }
+    },
+    "%@ asked for your input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ bad om dina synpunkter" } } }
+    },
+    "Ask": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fråga" } } }
+    },
+    "Ask a person for input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Be en person om synpunkter" } } }
+    },
+    "Ask for input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Be om synpunkter" } } }
+    },
+    "Away": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte här" } } }
+    },
+    "Get a quiet heads-up for permission requests, shared chats, human input requests, and updates you ask an agent to send.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Få en diskret avisering om behörighetsbegäranden, delade chattar, förfrågningar om synpunkter och uppdateringar som du ber en agent att skicka." } } }
+    },
+    "Here now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Här nu" } } }
+    },
+    "Open %@ to respond.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna %@ för att svara." } } }
+    },
+    "Optional note…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Valfri kommentar…" } } }
+    },
+    "Person": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Person" } } }
+    },
+    "Requests for my input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förfrågningar om mina synpunkter" } } }
+    },
+    "Sending attention request…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickar förfrågan…" } } }
+    },
+    "Sends a human-only notification": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickar en notis endast till en person" } } }
+    },
+    "That person is away and has input-request notifications turned off.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personen är inte här och har stängt av notiser om synpunkter." } } }
+    },
+    "The attention request could not be sent.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att skicka förfrågan." } } }
+    },
+    "They were just asked. Try again in a moment.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personen tillfrågades nyss. Försök igen om en stund." } } }
+    },
+    "This is a human-only notification. Nothing here is sent to Claude, Codex, or the terminal.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Detta är en notis endast till en person. Inget här skickas till Claude, Codex eller terminalen." } } }
+    },
+    "What do you need?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad behöver du?" } } }
+    },
+    "Connected · %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ansluten · %@" } } }
+    },
+    "Direct": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Direkt" } } }
+    },
+    "Relay": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Relä" } } }
+    },
+    "Tailscale": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale" } } }
+    },
+    " and ": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": " och " } } }
+    },
+    "%@ are here": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ är här" } } }
+    },
+    "%@ is here": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ är här" } } }
+    },
+    "%@ on %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%1$@ på %2$@" } } }
+    },
+    "%lld people are here": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld personer är här" } } }
+    },
+    "%lld people are typing…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld personer skriver…" } } }
+    },
+    "Another composer sent first. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En annan skrivyta skickade först. Ditt utkast finns kvar." } } }
+    },
+    "In-app collaboration": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete i appen" } } }
+    },
+    "Compose on this device…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skriv på den här enheten…" } } }
+    },
+    "Independent terminal drafts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Oberoende terminalutkast" } } }
+    },
+    "People in open chats": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personer i öppna chattar" } } }
+    },
+    "People in open sessions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personer i öppna sessioner" } } }
+    },
+    "Sending once…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickar en gång…" } } }
+    },
+    "Send terminal line": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka terminalrad" } } }
+    },
+    "Presence stays inside the live session and never creates push notifications. Independent drafts prevent devices from mixing keystrokes; turn them off for direct terminal typing.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen och skapar aldrig pushnotiser. Oberoende utkast hindrar enheter från att blanda tangenttryckningar; stäng av dem för att skriva direkt i terminalen." } } }
+    },
+    "The Mac rejected this line. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade raden. Ditt utkast finns kvar." } } }
+    },
+    "The Mac rejected this prompt. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade prompten. Ditt utkast finns kvar." } } }
+    },
+    "The session changed before this prompt could be sent. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan prompten kunde skickas. Ditt utkast finns kvar." } } }
+    },
+    "The session changed before this line could be sent. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan raden kunde skickas. Ditt utkast finns kvar." } } }
+    },
+    "These indicators stay inside the live chat and never create push notifications.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Indikatorerna stannar i den aktiva chatten och skapar aldrig pushnotiser." } } }
+    },
+    "This prompt could not be retried safely. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prompten kunde inte skickas igen säkert. Ditt utkast finns kvar." } } }
+    },
+    "This line could not be retried safely. Your draft is still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Raden kunde inte skickas igen säkert. Ditt utkast finns kvar." } } }
+    },
+    "Typing indicators": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivindikatorer" } } }
+    },
     " Start the chat first to create a view-only link.": {
       "localizations": {
         "sv": {
@@ -1282,6 +1591,18 @@
           }
         }
       }
+    },
+    "Couldn’t capture this turn’s starting state.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att spara turens starttillstånd." } } }
+    },
+    "No turn recorded yet. A baseline is captured before the agent starts working.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tur har registrerats ännu. En baslinje sparas innan agenten börjar arbeta." } } }
+    },
+    "This Turn": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen" } } }
+    },
+    "Uncommitted": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Okommittat" } } }
     },
     "Last Turn": {
       "localizations": {
@@ -3259,6 +3580,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mac-datorn kunde inte ta emot diagnostik."
+          }
+        }
+      }
+    },
+    "Browse commands and skills": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bläddra bland kommandon och färdigheter"
+          }
+        }
+      }
+    },
+    "Command": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommando"
+          }
+        }
+      }
+    },
+    "Skill": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Färdighet"
           }
         }
       }

@@ -7,9 +7,11 @@ struct RootView: View {
     @State private var showsShakeReportOptions = false
     @State private var issueReportRequest: MobileIssueReportRequest?
     @State private var isCapturingReportScreen = false
+    @State private var showsSettings = false
 #if DEBUG
     @StateObject private var demoConversation = RemoteSessionConnection.demoConversation()
     @StateObject private var demoPermission = RemoteSessionConnection.demoPermissionConversation()
+    @StateObject private var demoTerminal = RemoteSessionConnection.demoTerminal()
     @StateObject private var workspaceDemoActivity = MobileWorkspaceActivity(
         sessionID: "workspace-demo"
     )
@@ -18,7 +20,17 @@ struct RootView: View {
     var body: some View {
         Group {
 #if DEBUG
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "terminal-collaboration" {
+                NavigationStack {
+                    TerminalRemoteView(connection: demoTerminal)
+                        .navigationTitle(demoTerminal.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "attention-request" {
+                AttentionRequestSheet(connection: demoConversation)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
                 .hasPrefix("conversation") == true {
                 NavigationStack {
                     ConversationRemoteView(connection: demoConversation)
@@ -28,6 +40,22 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "pairing" {
                 PairingView()
                     .environmentObject(model)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "welcome" {
+                NavigationStack {
+                    WelcomeView(openSettings: { showsSettings = true })
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "settings" {
+                MobileSettingsView()
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "app-icon-settings" {
+                NavigationStack {
+                    MobileAppIconSettingsView()
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "collaboration-settings" {
+                NavigationStack {
+                    CollaborationSettingsView()
+                }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission" {
                 NavigationStack {
                     ConversationRemoteView(connection: demoPermission)
@@ -72,6 +100,7 @@ struct RootView: View {
         .environment(\.remoteTheme, theme)
         .preferredColorScheme(theme.colorScheme)
         .tint(theme.accent)
+        .toggleStyle(MobileThemedToggleStyle(theme: theme))
         .foregroundStyle(theme.label)
         .background(theme.ground.ignoresSafeArea())
         .background {
@@ -123,9 +152,16 @@ struct RootView: View {
 
     private var theme: RemoteThemePalette {
 #if DEBUG
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"] == "fallback" {
+            return RemoteThemePalette(nil)
+        }
         if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
             .hasPrefix("conversation") == true
-            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission" {
+            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "attention-request"
+            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission"
+            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "terminal-collaboration" {
             return RemoteThemePalette(demoConversation.theme ?? model.me?.theme)
         }
 #endif
@@ -216,9 +252,9 @@ struct RootView: View {
         NavigationStack(path: $model.navigationPath) {
             Group {
                 if model.hosts.isEmpty {
-                    WelcomeView()
+                    WelcomeView(openSettings: { showsSettings = true })
                 } else {
-                    SessionDashboard()
+                    SessionDashboard(openSettings: { showsSettings = true })
                 }
             }
             .navigationDestination(for: String.self) { sessionID in
@@ -237,45 +273,116 @@ struct RootView: View {
             PairingView()
                 .environmentObject(model)
         }
+        .sheet(isPresented: $showsSettings) {
+            MobileSettingsView()
+        }
     }
 }
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    let openSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "laptopcomputer.and.iphone")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.secondary)
+        ZStack {
+            theme.ground.ignoresSafeArea()
 
-            VStack(spacing: 8) {
-                Text("Your code, within reach")
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                Text("Pair your own Mac, or open a chat someone shared with you.")
-                    .font(.body)
+            ScrollView {
+                VStack(spacing: MobileDesign.Spacing.pane) {
+                    Image("ThreadingMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 88, height: 88)
+                        .padding(MobileDesign.Spacing.inset)
+                        .background(
+                            theme.panel,
+                            in: RoundedRectangle(cornerRadius: theme.panelRadius)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: theme.panelRadius)
+                                .stroke(theme.border, lineWidth: theme.borderWidth)
+                        }
+                        .remoteThemeGlow(theme)
+
+                    VStack(spacing: MobileDesign.Spacing.small) {
+                        Text("Your code, within reach")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .multilineTextAlignment(.center)
+                        Text("Pair your own Mac, or open a chat someone shared with you.")
+                            .font(.body)
+                            .foregroundStyle(theme.secondaryLabel)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    HStack(spacing: MobileDesign.Spacing.small) {
+                        WelcomeCapability(symbol: "bubble.left.and.bubble.right", title: "Chats")
+                        WelcomeCapability(symbol: "terminal", title: "Terminal")
+                        WelcomeCapability(symbol: "person.2", title: "Shared")
+                    }
+                }
+                .frame(maxWidth: 460)
+                .padding(.horizontal, MobileDesign.Spacing.pane)
+                .padding(.top, 54)
+                .padding(.bottom, MobileDesign.Spacing.large)
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: MobileDesign.Spacing.small) {
+                    Button {
+                        model.isPairing = true
+                    } label: {
+                        Label("Add a connection", systemImage: "qrcode.viewfinder")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                            .background(theme.accent, in: Capsule())
+                            .foregroundStyle(theme.ground)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: openSettings) {
+                        Label("Settings", systemImage: "gearshape")
+                            .font(.subheadline.weight(.medium))
+                            .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(theme.secondaryLabel)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 330)
+                }
+                .frame(maxWidth: 460)
+                .padding(.horizontal, MobileDesign.Spacing.pane)
+                .padding(.top, MobileDesign.Spacing.inset)
+                .padding(.bottom, MobileDesign.Spacing.small)
+                .background(.ultraThinMaterial)
             }
-
-            Button {
-                model.isPairing = true
-            } label: {
-                Label("Add a connection", systemImage: "qrcode.viewfinder")
-                    .font(.headline)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 14)
-                    .background(theme.accent, in: Capsule())
-                    .foregroundStyle(theme.ground)
-            }
-            Spacer()
         }
-        .padding(24)
-        .navigationTitle("Code")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Threading")
         .navigationBarTitleDisplayMode(.inline)
-        .background(theme.ground)
+        .toolbarBackground(theme.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+}
+
+private struct WelcomeCapability: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let title: LocalizedStringKey
+
+    var body: some View {
+        VStack(spacing: MobileDesign.Spacing.small) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(theme.accent)
+            Text(title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 74)
+        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.controlRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.controlRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
+        }
     }
 }

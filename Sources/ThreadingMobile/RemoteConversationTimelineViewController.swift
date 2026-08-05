@@ -7,9 +7,16 @@ import UIKit
 struct RemoteConversationTimelineView: UIViewControllerRepresentable {
     let connection: RemoteSessionConnection
     let theme: RemoteThemePalette
+    let initialViewport: (progress: Double?, followsBottom: Bool)?
+    let onViewportChange: (Double, Bool) -> Void
 
     func makeUIViewController(context: Context) -> RemoteConversationTimelineViewController {
-        RemoteConversationTimelineViewController(connection: connection, theme: theme)
+        RemoteConversationTimelineViewController(
+            connection: connection,
+            theme: theme,
+            initialViewport: initialViewport,
+            onViewportChange: onViewportChange
+        )
     }
 
     func updateUIViewController(
@@ -60,6 +67,10 @@ private actor RemoteMarkdownDocumentCache {
         let document = Self.parse(source)
         documents[source] = document
         return document
+    }
+
+    func documents(for sources: [String]) -> [RemoteMarkdownDocument] {
+        sources.map(document(for:))
     }
 
     private static func parse(_ source: String) -> RemoteMarkdownDocument {
@@ -152,6 +163,315 @@ private actor RemoteMarkdownDocumentCache {
 
 // MARK: - Collection controller
 
+private final class RemoteConversationLayoutInvalidationContext:
+    UICollectionViewLayoutInvalidationContext {
+    var isPreferredHeightUpdate = false
+    var clearsHeightCache = false
+}
+
+/// A conversation is one vertically stacked column. UIKit's general-purpose self-sizing layouts
+/// revisit large internal preferred-size maps whenever a visible row discovers its height. This
+/// layout stores discovered heights by stable diffable identifier and shifts the following cached
+/// frames directly, so scrolling work is proportional to mounted rows rather than total history.
+private final class RemoteConversationLayout: UICollectionViewLayout {
+    override class var invalidationContextClass: AnyClass {
+        RemoteConversationLayoutInvalidationContext.self
+    }
+
+    var itemIdentifier: ((IndexPath) -> AnyHashable?)?
+
+    private let estimatedRowHeight: CGFloat
+    private let spacing: CGFloat
+    private let sectionInsets: UIEdgeInsets
+    private var itemAttributes: [UICollectionViewLayoutAttributes] = []
+    private var identifiers: [AnyHashable] = []
+    private var baseOrigins: [CGFloat] = []
+    private var itemHeights: [CGFloat] = []
+    /// A Fenwick difference tree. A height change adds one suffix adjustment in O(log n), and
+    /// each requested frame resolves its current origin in O(log n).
+    private var suffixAdjustmentTree: [CGFloat] = []
+    private var heightByIdentifier: [AnyHashable: CGFloat] = [:]
+    private var calculatedContentSize = CGSize.zero
+    private var availableWidth: CGFloat = 0
+    private var needsFullRebuild = true
+
+    init(
+        estimatedRowHeight: CGFloat,
+        spacing: CGFloat = MobileDesign.Spacing.large,
+        sectionInsets: UIEdgeInsets = UIEdgeInsets(
+            top: MobileDesign.Spacing.large,
+            left: MobileDesign.Spacing.large,
+            bottom: MobileDesign.Spacing.large,
+            right: MobileDesign.Spacing.large
+        )
+    ) {
+        self.estimatedRowHeight = estimatedRowHeight
+        self.spacing = spacing
+        self.sectionInsets = sectionInsets
+        super.init()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepare() {
+        super.prepare()
+        guard let collectionView else { return }
+        let itemCount = collectionView.numberOfItems(inSection: 0)
+        let width = max(
+            1,
+            collectionView.bounds.width
+                - collectionView.adjustedContentInset.left
+                - collectionView.adjustedContentInset.right
+                - sectionInsets.left
+                - sectionInsets.right
+        )
+        if abs(availableWidth - width) > 0.5 {
+            availableWidth = width
+            heightByIdentifier.removeAll(keepingCapacity: true)
+            needsFullRebuild = true
+        }
+        guard needsFullRebuild || itemAttributes.count != itemCount else { return }
+
+        itemAttributes.removeAll(keepingCapacity: true)
+        identifiers.removeAll(keepingCapacity: true)
+        baseOrigins.removeAll(keepingCapacity: true)
+        itemHeights.removeAll(keepingCapacity: true)
+        itemAttributes.reserveCapacity(itemCount)
+        identifiers.reserveCapacity(itemCount)
+        baseOrigins.reserveCapacity(itemCount)
+        itemHeights.reserveCapacity(itemCount)
+        suffixAdjustmentTree = Array(repeating: 0, count: itemCount + 1)
+        var activeIdentifiers = Set<AnyHashable>()
+        activeIdentifiers.reserveCapacity(itemCount)
+        var y = sectionInsets.top
+        for item in 0..<itemCount {
+            let indexPath = IndexPath(item: item, section: 0)
+            let identifier = stableIdentifier(for: indexPath)
+            activeIdentifiers.insert(identifier)
+            identifiers.append(identifier)
+            let height = heightByIdentifier[identifier] ?? estimatedRowHeight
+            baseOrigins.append(y)
+            itemHeights.append(height)
+            let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+            attributes.frame = CGRect(
+                x: sectionInsets.left,
+                y: y,
+                width: width,
+                height: height
+            )
+            itemAttributes.append(attributes)
+            y += height + spacing
+        }
+        heightByIdentifier = heightByIdentifier.filter {
+            activeIdentifiers.contains($0.key)
+        }
+        calculatedContentSize = CGSize(
+            width: collectionView.bounds.width,
+            height: max(0, y - (itemCount == 0 ? 0 : spacing) + sectionInsets.bottom)
+        )
+        needsFullRebuild = false
+    }
+
+    override var collectionViewContentSize: CGSize {
+        calculatedContentSize
+    }
+
+    override func layoutAttributesForElements(
+        in rect: CGRect
+    ) -> [UICollectionViewLayoutAttributes]? {
+        guard !itemAttributes.isEmpty else { return [] }
+        var lower = 0
+        var upper = itemAttributes.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if itemFrame(at: middle).maxY < rect.minY {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        var result: [UICollectionViewLayoutAttributes] = []
+        var index = lower
+        while index < itemAttributes.count {
+            let attributes = itemAttributes[index]
+            let frame = itemFrame(at: index)
+            if frame.minY > rect.maxY { break }
+            attributes.frame = frame
+            if frame.intersects(rect) { result.append(attributes) }
+            index += 1
+        }
+        return result
+    }
+
+    override func layoutAttributesForItem(
+        at indexPath: IndexPath
+    ) -> UICollectionViewLayoutAttributes? {
+        guard indexPath.section == 0, itemAttributes.indices.contains(indexPath.item) else {
+            return nil
+        }
+        let attributes = itemAttributes[indexPath.item]
+        attributes.frame = itemFrame(at: indexPath.item)
+        return attributes
+    }
+
+    override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+        guard let collectionView else { return false }
+        return abs(collectionView.bounds.width - newBounds.width) > 0.5
+    }
+
+    override func invalidationContext(
+        forBoundsChange newBounds: CGRect
+    ) -> UICollectionViewLayoutInvalidationContext {
+        let context = super.invalidationContext(forBoundsChange: newBounds)
+        if let context = context as? RemoteConversationLayoutInvalidationContext,
+           let collectionView,
+           abs(collectionView.bounds.width - newBounds.width) > 0.5 {
+            context.clearsHeightCache = true
+        }
+        return context
+    }
+
+    override func shouldInvalidateLayout(
+        forPreferredLayoutAttributes preferredAttributes: UICollectionViewLayoutAttributes,
+        withOriginalAttributes originalAttributes: UICollectionViewLayoutAttributes
+    ) -> Bool {
+        abs(preferredAttributes.size.height - originalAttributes.size.height) > 0.5
+    }
+
+    override func invalidationContext(
+        forPreferredLayoutAttributes preferredAttributes: UICollectionViewLayoutAttributes,
+        withOriginalAttributes originalAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutInvalidationContext {
+        let context = super.invalidationContext(
+            forPreferredLayoutAttributes: preferredAttributes,
+            withOriginalAttributes: originalAttributes
+        )
+        guard let context = context as? RemoteConversationLayoutInvalidationContext else {
+            return context
+        }
+        context.isPreferredHeightUpdate = true
+        let index = originalAttributes.indexPath.item
+        guard itemAttributes.indices.contains(index) else { return context }
+        let newHeight = max(1, ceil(preferredAttributes.size.height))
+        let oldHeight = itemHeights[index]
+        let delta = newHeight - oldHeight
+        guard abs(delta) > 0.5 else { return context }
+
+        let identifier = identifiers[index]
+        heightByIdentifier[identifier] = newHeight
+        itemHeights[index] = newHeight
+        itemAttributes[index].frame = itemFrame(at: index)
+        addSuffixAdjustment(from: index + 1, delta: delta)
+        calculatedContentSize.height += delta
+        context.contentSizeAdjustment.height += delta
+        if let collectionView,
+           originalAttributes.frame.minY < collectionView.contentOffset.y {
+            context.contentOffsetAdjustment.y += delta
+        }
+        var invalidatedIndexPaths = [originalAttributes.indexPath]
+        if let collectionView {
+            invalidatedIndexPaths.append(contentsOf: collectionView.indexPathsForVisibleItems.filter {
+                $0.section == originalAttributes.indexPath.section && $0.item > index
+            })
+        }
+        context.invalidateItems(at: invalidatedIndexPaths)
+        return context
+    }
+
+    override func invalidateLayout(with context: UICollectionViewLayoutInvalidationContext) {
+        if let context = context as? RemoteConversationLayoutInvalidationContext {
+            if context.clearsHeightCache {
+                heightByIdentifier.removeAll(keepingCapacity: true)
+            }
+            if !context.isPreferredHeightUpdate {
+                needsFullRebuild = true
+            }
+        } else {
+            needsFullRebuild = true
+        }
+        super.invalidateLayout(with: context)
+    }
+
+    override func prepare(forCollectionViewUpdates updateItems: [UICollectionViewUpdateItem]) {
+        needsFullRebuild = true
+        super.prepare(forCollectionViewUpdates: updateItems)
+    }
+
+    func resetHeightCache() {
+        heightByIdentifier.removeAll(keepingCapacity: true)
+        needsFullRebuild = true
+        invalidateLayout()
+    }
+
+    func invalidateHeights(for invalidatedIdentifiers: [AnyHashable]) {
+        guard !invalidatedIdentifiers.isEmpty else { return }
+        for identifier in invalidatedIdentifiers {
+            heightByIdentifier[identifier] = nil
+        }
+        needsFullRebuild = true
+        invalidateLayout()
+    }
+
+    private func stableIdentifier(for indexPath: IndexPath) -> AnyHashable {
+        itemIdentifier?(indexPath) ?? AnyHashable(indexPath)
+    }
+
+    private func itemFrame(at index: Int) -> CGRect {
+        CGRect(
+            x: sectionInsets.left,
+            y: baseOrigins[index] + suffixAdjustment(at: index),
+            width: availableWidth,
+            height: itemHeights[index]
+        )
+    }
+
+    private func addSuffixAdjustment(from start: Int, delta: CGFloat) {
+        guard start < itemAttributes.count else { return }
+        var treeIndex = start + 1
+        while treeIndex < suffixAdjustmentTree.count {
+            suffixAdjustmentTree[treeIndex] += delta
+            treeIndex += treeIndex & -treeIndex
+        }
+    }
+
+    private func suffixAdjustment(at index: Int) -> CGFloat {
+        var result: CGFloat = 0
+        var treeIndex = index + 1
+        while treeIndex > 0 {
+            result += suffixAdjustmentTree[treeIndex]
+            treeIndex -= treeIndex & -treeIndex
+        }
+        return result
+    }
+
+#if DEBUG
+    func geometryFailureCount() -> Int {
+        var failures = 0
+        var previousMaxY: CGFloat?
+        for index in itemAttributes.indices {
+            let frame = itemFrame(at: index)
+            if !frame.minY.isFinite || !frame.height.isFinite || frame.height <= 0 {
+                failures += 1
+            }
+            if let previousMaxY,
+               abs(frame.minY - previousMaxY - spacing) > 0.5 {
+                failures += 1
+            }
+            previousMaxY = frame.maxY
+        }
+        let expectedHeight = previousMaxY.map { $0 + sectionInsets.bottom }
+            ?? sectionInsets.top + sectionInsets.bottom
+        if abs(expectedHeight - calculatedContentSize.height) > 0.5 {
+            failures += 1
+        }
+        return failures
+    }
+#endif
+}
+
 @MainActor
 final class RemoteConversationTimelineViewController: UIViewController {
     private enum Item: Hashable {
@@ -162,6 +482,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private let connection: RemoteSessionConnection
+    private let initialViewport: (progress: Double?, followsBottom: Bool)?
+    private let onViewportChange: (Double, Bool) -> Void
     private var theme: RemoteThemePalette
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
@@ -174,11 +496,21 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var hasStreamingItem = false
     private var permissionItemID: String?
     private var needsInitialBottomPosition = true
+    private var hasTimelineAppeared = false
     private var contentSizeObserver: NSObjectProtocol?
+    private var viewportSaveWorkItem: DispatchWorkItem?
+    private static let markdownPrefetchBatchSize = 64
 
-    init(connection: RemoteSessionConnection, theme: RemoteThemePalette) {
+    init(
+        connection: RemoteSessionConnection,
+        theme: RemoteThemePalette,
+        initialViewport: (progress: Double?, followsBottom: Bool)?,
+        onViewportChange: @escaping (Double, Bool) -> Void
+    ) {
         self.connection = connection
         self.theme = theme
+        self.initialViewport = initialViewport
+        self.onViewportChange = onViewportChange
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -197,9 +529,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.reconfigureVisibleContent() }
+            Task { @MainActor in
+                self?.conversationLayout.resetHeightCache()
+                self?.reconfigureVisibleContent()
+            }
         }
-        applySnapshot(scrollToBottom: true)
+        applySnapshot(scrollToBottom: initialViewport?.followsBottom != false)
         prefetchMarkdown()
     }
 
@@ -211,6 +546,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        saveViewport()
         connection.conversationStore.removeObserver(storeObserver)
         storeObserver = nil
     }
@@ -227,7 +563,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        hasTimelineAppeared = true
         positionInitialBottomAfterLayout()
+        reportPerformanceFirstPaintIfReady()
     }
 
     func updateTheme(_ theme: RemoteThemePalette) {
@@ -246,39 +584,23 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func configureCollectionView() {
-        let item = NSCollectionLayoutItem(layoutSize: .init(
-            widthDimension: .fractionalWidth(1),
-            heightDimension: .estimated(MobileDesign.Size.conversationEstimatedRowHeight)
-        ))
-        let group = NSCollectionLayoutGroup.vertical(
-            layoutSize: .init(
-                widthDimension: .fractionalWidth(1),
-                heightDimension: .estimated(MobileDesign.Size.conversationEstimatedRowHeight)
-            ),
-            subitems: [item]
-        )
-        let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = MobileDesign.Spacing.large
-        section.contentInsets = .init(
-            top: MobileDesign.Spacing.large,
-            leading: MobileDesign.Spacing.large,
-            bottom: MobileDesign.Spacing.large,
-            trailing: MobileDesign.Spacing.large
-        )
-
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: UICollectionViewCompositionalLayout(section: section)
+            collectionViewLayout: RemoteConversationLayout(
+                estimatedRowHeight: MobileDesign.Size.conversationEstimatedRowHeight
+            )
         )
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = theme.uiGround
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
         collectionView.delegate = self
-        collectionView.register(
-            RemoteConversationRowCell.self,
-            forCellWithReuseIdentifier: RemoteConversationRowCell.reuseIdentifier
-        )
+        for reuseIdentifier in RemoteConversationRowCell.reuseIdentifiers {
+            collectionView.register(
+                RemoteConversationRowCell.self,
+                forCellWithReuseIdentifier: reuseIdentifier
+            )
+        }
         collectionView.register(
             RemoteConversationPermissionCell.self,
             forCellWithReuseIdentifier: RemoteConversationPermissionCell.reuseIdentifier
@@ -318,7 +640,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
             case .row(let id):
                 guard let row = connection.conversationStore.row(withID: id) else { return nil }
                 let cell = collectionView.dequeueReusableCell(
-                    withReuseIdentifier: RemoteConversationRowCell.reuseIdentifier,
+                    withReuseIdentifier: RemoteConversationRowCell.reuseIdentifier(
+                        for: row.kind
+                    ),
                     for: indexPath
                 ) as! RemoteConversationRowCell
                 cell.configure(
@@ -335,7 +659,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
             case .streaming:
                 let cell = collectionView.dequeueReusableCell(
-                    withReuseIdentifier: RemoteConversationRowCell.reuseIdentifier,
+                    withReuseIdentifier: RemoteConversationRowCell.streamingReuseIdentifier,
                     for: indexPath
                 ) as! RemoteConversationRowCell
                 cell.configureStreaming(
@@ -362,12 +686,16 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 return cell
             }
         }
+        conversationLayout.itemIdentifier = { [weak self] indexPath in
+            self?.dataSource.itemIdentifier(for: indexPath).map(AnyHashable.init)
+        }
     }
 
     private func apply(_ change: RemoteConversationStore.Change) {
         let nearBottom = isNearBottom
         switch change {
         case .reset:
+            conversationLayout.resetHeightCache()
             parsedDocuments.removeAll(keepingCapacity: true)
             markdownSources.removeAll(keepingCapacity: true)
             expandedRows.removeAll(keepingCapacity: true)
@@ -379,6 +707,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             let updated,
             let streamingChanged,
             let permissionChanged,
+            _,
             let historyChanged
         ):
             for id in updated {
@@ -518,9 +847,53 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func prefetchMarkdown(ids: Set<String>? = nil) {
-        for row in connection.conversationStore.state.rows
-        where row.kind == "assistant" && (ids == nil || ids?.contains(row.id) == true) {
-            prepareMarkdown(for: row)
+        let candidates = connection.conversationStore.state.rows.reversed().compactMap {
+            row -> (id: String, source: String)? in
+            guard row.kind == "assistant", ids == nil || ids?.contains(row.id) == true else {
+                return nil
+            }
+            let source = row.text ?? ""
+            guard parsedDocuments[row.id] == nil, markdownSources[row.id] != source else {
+                return nil
+            }
+            markdownSources[row.id] = source
+            return (row.id, source)
+        }
+        guard !candidates.isEmpty else { return }
+
+        // Warm the newest content first, but amortize actor hops and main-actor resumptions. A
+        // task per historical response floods cold open with thousands of tiny completions before
+        // a long conversation has appeared.
+        Task { [weak self] in
+            for start in stride(
+                from: 0,
+                to: candidates.count,
+                by: Self.markdownPrefetchBatchSize
+            ) {
+                let end = min(start + Self.markdownPrefetchBatchSize, candidates.count)
+                let batch = Array(candidates[start..<end])
+                let documents = await RemoteMarkdownDocumentCache.shared.documents(
+                    for: batch.map(\.source)
+                )
+                guard let self else { return }
+                var changedItems: [Item] = []
+                for (candidate, document) in zip(batch, documents)
+                where self.markdownSources[candidate.id] == candidate.source {
+                    self.parsedDocuments[candidate.id] = document
+                    changedItems.append(.row(candidate.id))
+                }
+                let shouldFollowBottom = self.isNearBottom
+                let changedVisibleContent = self.reconfigure(changedItems)
+                if shouldFollowBottom, changedVisibleContent {
+                    // The first pass discovers the formatted height; the second consumes that
+                    // invalidation before resolving the final bottom offset.
+                    self.collectionView.layoutIfNeeded()
+                    self.scrollToBottom()
+                    self.collectionView.layoutIfNeeded()
+                    self.scrollToBottom()
+                }
+                await Task.yield()
+            }
         }
     }
 
@@ -533,8 +906,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
             guard let self, self.markdownSources[row.id] == source else { return }
             let shouldFollowBottom = self.isNearBottom
             self.parsedDocuments[row.id] = document
-            self.reconfigure([.row(row.id)])
-            if shouldFollowBottom {
+            let changedVisibleContent = self.reconfigure([.row(row.id)])
+            if shouldFollowBottom, changedVisibleContent {
                 self.collectionView.layoutIfNeeded()
                 self.scrollToBottom()
             }
@@ -548,8 +921,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
         permissionItemID = state.permission?.id
     }
 
-    private func reconfigure(_ items: [Item]) {
-        var changedVisibleHeight = false
+    @discardableResult
+    private func reconfigure(_ items: [Item]) -> Bool {
+        var changedVisibleItems: [AnyHashable] = []
         for item in items {
             guard let indexPath = dataSource.indexPath(for: item),
                   let cell = collectionView.cellForItem(at: indexPath) else {
@@ -575,7 +949,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     theme: theme,
                     toggleExpansion: { [weak self] in self?.toggleRow(id) }
                 )
-                changedVisibleHeight = true
+                changedVisibleItems.append(AnyHashable(item))
 
             case .streaming:
                 guard let cell = cell as? RemoteConversationRowCell else { continue }
@@ -583,7 +957,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     connection.conversationStore.state.streamingText,
                     theme: theme
                 )
-                changedVisibleHeight = true
+                changedVisibleItems.append(AnyHashable(item))
 
             case .permission:
                 guard let cell = cell as? RemoteConversationPermissionCell,
@@ -597,12 +971,15 @@ final class RemoteConversationTimelineViewController: UIViewController {
                         self?.connection.decidePermission(permission, allow: allow)
                     }
                 )
-                changedVisibleHeight = true
+                changedVisibleItems.append(AnyHashable(item))
             }
         }
-        if changedVisibleHeight {
-            collectionView.collectionViewLayout.invalidateLayout()
-        }
+        conversationLayout.invalidateHeights(for: changedVisibleItems)
+        return !changedVisibleItems.isEmpty
+    }
+
+    private var conversationLayout: RemoteConversationLayout {
+        collectionView.collectionViewLayout as! RemoteConversationLayout
     }
 
     private var isNearBottom: Bool {
@@ -621,15 +998,74 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private func positionInitialBottomAfterLayout() {
         guard needsInitialBottomPosition, hasAppliedInitialSnapshot else { return }
         collectionView.layoutIfNeeded()
-        scrollToBottom()
+        positionFromContinuity()
         // Self-sizing cells replace their estimated heights during the first layout pass.
         // Re-anchor once on the next pass; after this, normal near-bottom logic owns scrolling.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.needsInitialBottomPosition else { return }
             self.collectionView.layoutIfNeeded()
-            self.scrollToBottom()
+            self.positionFromContinuity()
+            // Positioning can expose one more estimated row at the viewport boundary. Consume
+            // that row's measured height before declaring the initial viewport settled.
+            self.collectionView.layoutIfNeeded()
+            self.positionFromContinuity()
             self.needsInitialBottomPosition = false
+            self.reportPerformanceFirstPaintIfReady()
         }
+    }
+
+    private func reportPerformanceFirstPaintIfReady() {
+#if DEBUG
+        guard hasTimelineAppeared, !needsInitialBottomPosition else { return }
+        MobileConversationPerformanceProbe.timelineDidAppear(collectionView)
+#endif
+    }
+
+    private func positionFromContinuity() {
+        guard initialViewport?.followsBottom == false,
+              let progress = initialViewport?.progress else {
+            scrollToBottom()
+            return
+        }
+        let minimumOffset = -collectionView.adjustedContentInset.top
+        let maximumOffset = max(
+            minimumOffset,
+            collectionView.contentSize.height
+                - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
+        collectionView.setContentOffset(
+            CGPoint(
+                x: collectionView.contentOffset.x,
+                y: minimumOffset + (maximumOffset - minimumOffset) * min(max(progress, 0), 1)
+            ),
+            animated: false
+        )
+    }
+
+    private func scheduleViewportSave() {
+        viewportSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveViewport() }
+        viewportSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    private func saveViewport() {
+        guard isViewLoaded, hasAppliedInitialSnapshot else { return }
+        viewportSaveWorkItem?.cancel()
+        viewportSaveWorkItem = nil
+        let minimumOffset = -collectionView.adjustedContentInset.top
+        let maximumOffset = max(
+            minimumOffset,
+            collectionView.contentSize.height
+                - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
+        let available = maximumOffset - minimumOffset
+        let progress = available > 0
+            ? Double(min(max((collectionView.contentOffset.y - minimumOffset) / available, 0), 1))
+            : 1
+        onViewportChange(progress, isNearBottom)
     }
 }
 
@@ -639,6 +1075,10 @@ extension RemoteConversationTimelineViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking {
+            needsInitialBottomPosition = false
+            scheduleViewportSave()
+        }
         guard scrollView.isDragging,
               scrollView.contentOffset.y < MobileDesign.Size.conversationHistoryTrigger else {
             return
@@ -647,17 +1087,294 @@ extension RemoteConversationTimelineViewController: UICollectionViewDelegate {
     }
 }
 
+#if DEBUG
+/// Simulator-only performance fixture plumbing. Production conversation code does not schedule
+/// synthetic scrolling; the probe is reachable only through the existing DEBUG demo launch gate.
+@MainActor
+enum MobileConversationPerformanceProbe {
+    private struct Fixture {
+        let mode: String
+        let sourceRows: Int
+        let mountedRows: Int
+        let startedAt: TimeInterval
+        let generationMilliseconds: Double
+        let storeMilliseconds: Double
+    }
+
+    private static var fixture: Fixture?
+    private static var didReportFirstPaint = false
+    private static var scrollDriver: ScrollDriver?
+
+    static func fixtureDidLoad(
+        mode: String,
+        sourceRows: Int,
+        mountedRows: Int,
+        startedAt: TimeInterval,
+        generationMilliseconds: Double,
+        storeMilliseconds: Double
+    ) {
+        // `simctl launch --stdout/--stderr` is not reliable for detached UIKit apps on every
+        // simulator runtime. Keep the machine-readable copy in the app container as well so the
+        // CLI harness can always collect it after sampling.
+        try? Data().write(to: reportURL, options: .atomic)
+        fixture = Fixture(
+            mode: mode,
+            sourceRows: sourceRows,
+            mountedRows: mountedRows,
+            startedAt: startedAt,
+            generationMilliseconds: generationMilliseconds,
+            storeMilliseconds: storeMilliseconds
+        )
+        didReportFirstPaint = false
+        scrollDriver?.stop()
+        scrollDriver = nil
+    }
+
+    static func timelineDidAppear(_ collectionView: UICollectionView) {
+        guard let fixture, !didReportFirstPaint else { return }
+        didReportFirstPaint = true
+
+        // Diffable application and self-sizing both settle asynchronously. Reporting on the next
+        // main turn includes that first real cell layout rather than only view-controller setup.
+        DispatchQueue.main.async {
+            collectionView.layoutIfNeeded()
+            let visibleIndices = collectionView.indexPathsForVisibleItems.map(\.item).sorted()
+            let lastItemIndex = collectionView.numberOfItems(inSection: 0) - 1
+            let bottomError = max(
+                0,
+                collectionView.contentSize.height
+                    - collectionView.contentOffset.y
+                    - collectionView.bounds.height
+            )
+            let firstPaintMilliseconds = (
+                ProcessInfo.processInfo.systemUptime - fixture.startedAt
+            ) * 1_000
+            report(
+                "THREADING_PERF ios-conversation-cold-open "
+                    + "mode=\(fixture.mode) source_rows=\(fixture.sourceRows) "
+                    + "mounted_rows=\(fixture.mountedRows) "
+                    + "visible_cells=\(collectionView.visibleCells.count) "
+                    + "first_visible_index=\(visibleIndices.first ?? -1) "
+                    + "last_visible_index=\(visibleIndices.last ?? -1) "
+                    + "last_item_index=\(lastItemIndex) "
+                    + "bottom_error=\(milliseconds(bottomError)) "
+                    + "fixture_ms=\(milliseconds(fixture.generationMilliseconds)) "
+                    + "store_ms=\(milliseconds(fixture.storeMilliseconds)) "
+                    + "first_paint_ms=\(milliseconds(firstPaintMilliseconds))"
+            )
+
+            guard fixture.mode == "conversation-scroll-stress" else { return }
+            let duration = ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_CONVERSATION_SCROLL_SECONDS"
+            ].flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 8
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(750))
+                guard scrollDriver == nil else { return }
+                let driver = ScrollDriver(
+                    collectionView: collectionView,
+                    sourceRows: fixture.sourceRows,
+                    duration: duration
+                )
+                scrollDriver = driver
+                driver.start()
+            }
+        }
+    }
+
+    private static func finished(_ driver: ScrollDriver) {
+        if scrollDriver === driver {
+            scrollDriver = nil
+        }
+    }
+
+    private static func milliseconds(_ value: Double) -> String {
+        String(format: "%.3f", value)
+    }
+
+    private static func report(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        FileHandle.standardError.write(data)
+        if let handle = try? FileHandle(forWritingTo: reportURL) {
+            defer { try? handle.close() }
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } catch {
+                // The stderr copy is still useful when running directly from Xcode.
+            }
+        } else {
+            try? data.write(to: reportURL, options: .atomic)
+        }
+    }
+
+    private static var reportURL: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-conversation-performance.log")
+    }
+
+    @MainActor
+    private final class ScrollDriver: NSObject {
+        private weak var collectionView: UICollectionView?
+        private let sourceRows: Int
+        private let duration: TimeInterval
+        private var displayLink: CADisplayLink?
+        private var startedAt: TimeInterval = 0
+        private var previousTick: TimeInterval?
+        private var frameGaps: [Double] = []
+        private var workDurations: [Double] = []
+        private var framesOver16Milliseconds = 0
+        private var framesOver33Milliseconds = 0
+        private var peakVisibleCells = 0
+        private var initialJumpMilliseconds = 0.0
+        private var initialTopIndex = -1
+
+        init(collectionView: UICollectionView, sourceRows: Int, duration: TimeInterval) {
+            self.collectionView = collectionView
+            self.sourceRows = sourceRows
+            self.duration = duration
+        }
+
+        func start() {
+            guard let collectionView else { return }
+            collectionView.layoutIfNeeded()
+            let jumpStarted = ProcessInfo.processInfo.systemUptime
+            collectionView.setContentOffset(
+                CGPoint(x: collectionView.contentOffset.x, y: 0),
+                animated: false
+            )
+            collectionView.layoutIfNeeded()
+            initialJumpMilliseconds = (
+                ProcessInfo.processInfo.systemUptime - jumpStarted
+            ) * 1_000
+            initialTopIndex = topVisibleIndex(in: collectionView)
+            peakVisibleCells = collectionView.visibleCells.count
+            startedAt = ProcessInfo.processInfo.systemUptime
+            previousTick = nil
+            let link = CADisplayLink(target: self, selector: #selector(tick))
+            displayLink = link
+            link.add(to: .main, forMode: .common)
+        }
+
+        func stop() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func tick() {
+            guard let collectionView else {
+                finish()
+                return
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = now - startedAt
+            if let previousTick {
+                let gap = (now - previousTick) * 1_000
+                frameGaps.append(gap)
+                if gap > 16.7 { framesOver16Milliseconds += 1 }
+                if gap > 33.3 { framesOver33Milliseconds += 1 }
+            }
+            previousTick = now
+            guard elapsed < duration else {
+                finish()
+                return
+            }
+
+            let progress = min(1, elapsed / duration)
+            let travel = progress <= 0.5 ? progress * 2 : (1 - progress) * 2
+            let maximumOffset = max(
+                0,
+                collectionView.contentSize.height - collectionView.bounds.height
+            )
+            let workStarted = ProcessInfo.processInfo.systemUptime
+            collectionView.setContentOffset(
+                CGPoint(x: collectionView.contentOffset.x, y: maximumOffset * travel),
+                animated: false
+            )
+            collectionView.layoutIfNeeded()
+            workDurations.append(
+                (ProcessInfo.processInfo.systemUptime - workStarted) * 1_000
+            )
+            peakVisibleCells = max(peakVisibleCells, collectionView.visibleCells.count)
+        }
+
+        private func finish() {
+            stop()
+            guard let collectionView else {
+                MobileConversationPerformanceProbe.finished(self)
+                return
+            }
+            collectionView.setContentOffset(
+                CGPoint(x: collectionView.contentOffset.x, y: 0),
+                animated: false
+            )
+            collectionView.layoutIfNeeded()
+            let finalTopIndex = topVisibleIndex(in: collectionView)
+            let geometryFailures = (
+                collectionView.collectionViewLayout as? RemoteConversationLayout
+            )?.geometryFailureCount() ?? -1
+            MobileConversationPerformanceProbe.report(
+                "THREADING_PERF ios-conversation-scroll "
+                    + "source_rows=\(sourceRows) frames=\(workDurations.count) "
+                    + "jump_to_top_ms=\(milliseconds(initialJumpMilliseconds)) "
+                    + "jump_top_index=\(initialTopIndex) "
+                    + "work_p50_ms=\(milliseconds(percentile(workDurations, 0.50))) "
+                    + "work_p95_ms=\(milliseconds(percentile(workDurations, 0.95))) "
+                    + "frame_gap_p95_ms=\(milliseconds(percentile(frameGaps, 0.95))) "
+                    + "frames_over_16_7=\(framesOver16Milliseconds) "
+                    + "frames_over_33_3=\(framesOver33Milliseconds) "
+                    + "peak_visible_cells=\(peakVisibleCells) "
+                    + "final_top_index=\(finalTopIndex) "
+                    + "geometry_failures=\(geometryFailures)"
+            )
+            MobileConversationPerformanceProbe.finished(self)
+        }
+
+        private func topVisibleIndex(in collectionView: UICollectionView) -> Int {
+            collectionView.indexPathsForVisibleItems.map(\.item).min() ?? -1
+        }
+
+        private func percentile(_ values: [Double], _ fraction: Double) -> Double {
+            guard !values.isEmpty else { return 0 }
+            let sorted = values.sorted()
+            let index = Int((Double(sorted.count - 1) * fraction).rounded(.up))
+            return sorted[min(max(index, 0), sorted.count - 1)]
+        }
+
+        private func milliseconds(_ value: Double) -> String {
+            String(format: "%.3f", value)
+        }
+    }
+}
+#endif
+
 // MARK: - Reusable row cell
 
 private final class RemoteConversationRowCell: UICollectionViewCell {
-    static let reuseIdentifier = "RemoteConversationRowCell"
+    private static let reuseIdentifierBase = "RemoteConversationRowCell"
+    static let streamingReuseIdentifier = "\(reuseIdentifierBase).streaming"
+    static let reuseIdentifiers = [
+        "\(reuseIdentifierBase).user",
+        "\(reuseIdentifierBase).assistant",
+        "\(reuseIdentifierBase).thinking",
+        "\(reuseIdentifierBase).tool",
+        "\(reuseIdentifierBase).notice",
+        streamingReuseIdentifier,
+    ]
+
+    static func reuseIdentifier(for kind: String) -> String {
+        switch kind {
+        case "user": return "\(reuseIdentifierBase).user"
+        case "assistant": return "\(reuseIdentifierBase).assistant"
+        case "thinking": return "\(reuseIdentifierBase).thinking"
+        case "tool": return "\(reuseIdentifierBase).tool"
+        default: return "\(reuseIdentifierBase).notice"
+        }
+    }
 
     private var hostedView: UIView?
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        hostedView?.removeFromSuperview()
-        hostedView = nil
     }
 
     func configure(
@@ -667,42 +1384,70 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         theme: RemoteThemePalette,
         toggleExpansion: @escaping () -> Void
     ) {
-        let view: UIView
         switch row.kind {
         case "user":
-            view = RemoteUserMessageView(text: row.text ?? "", theme: theme)
+            if let view = hostedView as? RemoteUserMessageView {
+                view.configure(
+                    text: row.text ?? "",
+                    context: row.contextAttachments ?? [],
+                    theme: theme
+                )
+            } else {
+                install(RemoteUserMessageView(
+                    text: row.text ?? "",
+                    context: row.contextAttachments ?? [],
+                    theme: theme
+                ))
+            }
         case "assistant":
-            view = RemoteAssistantMessageView(
-                source: row.text ?? "",
-                document: markdown,
-                theme: theme
-            )
+            if let view = hostedView as? RemoteAssistantMessageView {
+                view.configure(source: row.text ?? "", document: markdown, theme: theme)
+            } else {
+                install(RemoteAssistantMessageView(
+                    source: row.text ?? "",
+                    document: markdown,
+                    theme: theme
+                ))
+            }
         case "thinking":
-            view = RemoteExpandableMessageView(
+            install(RemoteExpandableMessageView(
                 title: "Reasoning",
                 text: row.text ?? "",
                 isExpanded: isExpanded,
                 theme: theme,
                 toggle: toggleExpansion
-            )
+            ))
         case "tool":
-            view = RemoteToolMessageView(
-                row: row,
-                isExpanded: isExpanded,
-                theme: theme,
-                toggle: toggleExpansion
-            )
+            if let view = hostedView as? RemoteToolMessageView {
+                view.configure(
+                    row: row,
+                    isExpanded: isExpanded,
+                    theme: theme,
+                    toggle: toggleExpansion
+                )
+            } else {
+                install(RemoteToolMessageView(
+                    row: row,
+                    isExpanded: isExpanded,
+                    theme: theme,
+                    toggle: toggleExpansion
+                ))
+            }
         default:
-            view = RemoteNoticeMessageView(row: row, theme: theme)
+            install(RemoteNoticeMessageView(row: row, theme: theme))
         }
-        install(view)
     }
 
     func configureStreaming(_ text: String, theme: RemoteThemePalette) {
-        install(RemoteStreamingMessageView(text: text, theme: theme))
+        if let view = hostedView as? RemoteStreamingMessageView {
+            view.configure(text: text, theme: theme)
+        } else {
+            install(RemoteStreamingMessageView(text: text, theme: theme))
+        }
     }
 
     private func install(_ view: UIView) {
+        if hostedView === view { return }
         hostedView?.removeFromSuperview()
         hostedView = view
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -719,20 +1464,32 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
 // MARK: - Row views
 
 private final class RemoteUserMessageView: UIView {
-    init(text: String, theme: RemoteThemePalette) {
+    private let bubble = UIView()
+    private var hasConfigured = false
+    private let contextStack = UIStackView()
+    private let messageTextView = RemoteUserMessageView.textView(
+        text: "",
+        font: .preferredFont(forTextStyle: .body),
+        color: .label
+    )
+
+    init(
+        text: String,
+        context: [RemoteConversationContextAttachmentDTO] = [],
+        theme: RemoteThemePalette
+    ) {
         super.init(frame: .zero)
-        let bubble = UIView()
+        contextStack.axis = .horizontal
+        contextStack.alignment = .center
+        contextStack.spacing = MobileDesign.Spacing.small
+
+        let content = UIStackView(arrangedSubviews: [contextStack, messageTextView])
+        content.axis = .vertical
+        content.alignment = .fill
+        content.spacing = MobileDesign.Spacing.small
+        content.translatesAutoresizingMaskIntoConstraints = false
         bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.applyRemoteSurface(
-            fill: theme.uiControlResting,
-            radius: theme.panelRadius
-        )
-        let textView = Self.textView(
-            text: text,
-            font: .preferredFont(forTextStyle: .body),
-            color: theme.uiLabel
-        )
-        bubble.addSubview(textView)
+        bubble.addSubview(content)
         addSubview(bubble)
         NSLayoutConstraint.activate([
             bubble.leadingAnchor.constraint(
@@ -742,27 +1499,112 @@ private final class RemoteUserMessageView: UIView {
             bubble.trailingAnchor.constraint(equalTo: trailingAnchor),
             bubble.topAnchor.constraint(equalTo: topAnchor),
             bubble.bottomAnchor.constraint(equalTo: bottomAnchor),
-            textView.leadingAnchor.constraint(
+            content.leadingAnchor.constraint(
                 equalTo: bubble.leadingAnchor,
                 constant: MobileDesign.Spacing.inset
             ),
-            textView.trailingAnchor.constraint(
+            content.trailingAnchor.constraint(
                 equalTo: bubble.trailingAnchor,
                 constant: -MobileDesign.Spacing.inset
             ),
-            textView.topAnchor.constraint(
+            content.topAnchor.constraint(
                 equalTo: bubble.topAnchor,
                 constant: MobileDesign.Spacing.medium
             ),
-            textView.bottomAnchor.constraint(
+            content.bottomAnchor.constraint(
                 equalTo: bubble.bottomAnchor,
                 constant: -MobileDesign.Spacing.medium
             ),
         ])
+        configure(text: text, context: context, theme: theme)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        text: String,
+        context: [RemoteConversationContextAttachmentDTO] = [],
+        theme: RemoteThemePalette
+    ) {
+        if hasConfigured {
+            // Recycled rows benefit from TextKit's contiguous compatibility path during rapid
+            // scrolling. Leave newly created rows on TextKit 2 so large cold mounts stay cheap.
+            _ = messageTextView.layoutManager
+        }
+        hasConfigured = true
+        bubble.applyRemoteSurface(
+            fill: theme.uiControlResting,
+            radius: theme.panelRadius
+        )
+        configureContext(context, theme: theme)
+        messageTextView.font = .preferredFont(forTextStyle: .body)
+        messageTextView.textColor = theme.uiLabel
+        if messageTextView.text != text {
+            messageTextView.text = text
+            messageTextView.selectedRange = NSRange(location: 0, length: 0)
+        }
+    }
+
+    private func configureContext(
+        _ context: [RemoteConversationContextAttachmentDTO],
+        theme: RemoteThemePalette
+    ) {
+        contextStack.arrangedSubviews.forEach {
+            contextStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let references = context.filter { $0.kind == "reference" }.count
+        let comments = context.filter { $0.kind == "comment" }.count
+        if references > 0 {
+            contextStack.addArrangedSubview(contextPill(
+                symbol: "quote.bubble",
+                text: references == 1
+                    ? MobileL10n.string("1 reference")
+                    : MobileL10n.string("%lld references", Int64(references)),
+                theme: theme
+            ))
+        }
+        if comments > 0 {
+            contextStack.addArrangedSubview(contextPill(
+                symbol: "text.bubble",
+                text: comments == 1
+                    ? MobileL10n.string("1 comment")
+                    : MobileL10n.string("%lld comments", Int64(comments)),
+                theme: theme
+            ))
+        }
+        contextStack.isHidden = contextStack.arrangedSubviews.isEmpty
+    }
+
+    private func contextPill(
+        symbol: String,
+        text: String,
+        theme: RemoteThemePalette
+    ) -> UIView {
+        let icon = UIImageView(image: UIImage(systemName: symbol))
+        icon.tintColor = theme.uiSecondaryLabel
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = theme.uiLabel
+        label.text = text
+        let stack = UIStackView(arrangedSubviews: [icon, label])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = MobileDesign.Spacing.small
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.layoutMargins = UIEdgeInsets(
+            top: MobileDesign.Spacing.small,
+            left: MobileDesign.Spacing.medium,
+            bottom: MobileDesign.Spacing.small,
+            right: MobileDesign.Spacing.medium
+        )
+        stack.applyRemoteSurface(fill: theme.uiSurface, radius: theme.controlRadius)
+        stack.accessibilityLabel = text
+        return stack
+    }
 
     fileprivate static func textView(
         text: String,
@@ -786,6 +1628,8 @@ private final class RemoteUserMessageView: UIView {
 }
 
 private final class RemoteAssistantMessageView: UIStackView {
+    private var hasConfigured = false
+
     init(
         source: String,
         document: RemoteMarkdownDocument?,
@@ -795,11 +1639,49 @@ private final class RemoteAssistantMessageView: UIStackView {
         axis = .vertical
         alignment = .fill
         spacing = MobileDesign.Spacing.inset
+        configure(source: source, document: document, theme: theme)
+    }
 
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        source: String,
+        document: RemoteMarkdownDocument?,
+        theme: RemoteThemePalette
+    ) {
+        let isReused = hasConfigured
+        hasConfigured = true
         guard let document else {
-            addArrangedSubview(RemoteStreamingMessageView(text: source, theme: theme))
+            if arrangedSubviews.count == 1,
+               let streaming = arrangedSubviews[0] as? RemoteStreamingMessageView {
+                streaming.configure(text: source, theme: theme)
+            } else {
+                removeArrangedContent()
+                addArrangedSubview(RemoteStreamingMessageView(text: source, theme: theme))
+            }
             return
         }
+
+        let canReuseProse = document.blocks.count == arrangedSubviews.count
+            && document.blocks.allSatisfy {
+                if case .prose = $0.kind { return true }
+                return false
+            }
+            && arrangedSubviews.allSatisfy { $0 is UITextView }
+        if canReuseProse {
+            for (block, view) in zip(document.blocks, arrangedSubviews) {
+                guard case .prose(let runs) = block.kind,
+                      let textView = view as? UITextView else { continue }
+                if isReused {
+                    _ = textView.layoutManager
+                }
+                configure(textView, runs: runs, theme: theme)
+            }
+            return
+        }
+
+        removeArrangedContent()
         for block in document.blocks {
             switch block.kind {
             case .prose(let runs):
@@ -808,8 +1690,7 @@ private final class RemoteAssistantMessageView: UIStackView {
                     font: Self.proseFont(),
                     color: theme.uiLabel
                 )
-                textView.attributedText = Self.attributed(runs, theme: theme)
-                textView.accessibilityLabel = runs.map(\.text).joined()
+                configure(textView, runs: runs, theme: theme)
                 addArrangedSubview(textView)
             case .code(let language, let body):
                 addArrangedSubview(RemoteCodeBlockView(
@@ -821,8 +1702,23 @@ private final class RemoteAssistantMessageView: UIStackView {
         }
     }
 
-    @available(*, unavailable)
-    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    private func configure(
+        _ textView: UITextView,
+        runs: [RemoteMarkdownDocument.Run],
+        theme: RemoteThemePalette
+    ) {
+        textView.textColor = theme.uiLabel
+        textView.attributedText = Self.attributed(runs, theme: theme)
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        textView.accessibilityLabel = runs.map(\.text).joined()
+    }
+
+    private func removeArrangedContent() {
+        for view in arrangedSubviews {
+            removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
 
     private static func proseFont() -> UIFont {
         let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
@@ -1018,6 +1914,13 @@ private final class RemoteExpandableMessageView: UIView {
 }
 
 private final class RemoteToolMessageView: UIView {
+    private static let toggleActionIdentifier = UIAction.Identifier(
+        "RemoteToolMessageView.toggle"
+    )
+    private let stack = UIStackView()
+    private let button = UIButton(type: .system)
+    private var resultTextView: UITextView?
+
     init(
         row: RemoteConversationRowDTO,
         isExpanded: Bool,
@@ -1025,42 +1928,11 @@ private final class RemoteToolMessageView: UIView {
         toggle: @escaping () -> Void
     ) {
         super.init(frame: .zero)
-        applyRemoteSurface(
-            fill: theme.uiPanel,
-            radius: theme.panelRadius,
-            border: theme.uiBorder,
-            borderWidth: theme.borderWidth,
-            glow: theme.glow
-        )
-        let stack = UIStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .vertical
         stack.spacing = MobileDesign.Spacing.small
-
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = row.summary ?? MobileL10n.string("Working…")
-        configuration.subtitle = row.toolName ?? MobileL10n.string("Tool")
-        configuration.image = UIImage(systemName: Self.symbol(for: row.toolName))
-        configuration.imagePadding = MobileDesign.Spacing.medium
-        configuration.titleAlignment = .leading
-        configuration.baseForegroundColor = theme.uiLabel
-        configuration.contentInsets = .zero
-        let button = UIButton(configuration: configuration)
         button.contentHorizontalAlignment = .leading
-        button.accessibilityHint = MobileL10n.string(
-            row.result == nil ? "Tool is running" : "Shows tool output"
-        )
-        button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
-        button.addAction(UIAction { _ in toggle() }, for: .touchUpInside)
         stack.addArrangedSubview(button)
-
-        if isExpanded, let result = row.result, !result.isEmpty {
-            stack.addArrangedSubview(RemoteUserMessageView.textView(
-                text: result,
-                font: Self.codeFont(),
-                color: row.isError ? theme.uiNegative : theme.uiSecondaryLabel
-            ))
-        }
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(
@@ -1083,10 +1955,72 @@ private final class RemoteToolMessageView: UIView {
                 greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
             ),
         ])
+        configure(row: row, isExpanded: isExpanded, theme: theme, toggle: toggle)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        row: RemoteConversationRowDTO,
+        isExpanded: Bool,
+        theme: RemoteThemePalette,
+        toggle: @escaping () -> Void
+    ) {
+        applyRemoteSurface(
+            fill: theme.uiPanel,
+            radius: theme.panelRadius,
+            border: theme.uiBorder,
+            borderWidth: theme.borderWidth,
+            glow: theme.glow
+        )
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = row.summary ?? MobileL10n.string("Working…")
+        configuration.subtitle = row.toolName ?? MobileL10n.string("Tool")
+        configuration.image = UIImage(systemName: Self.symbol(for: row.toolName))
+        configuration.imagePadding = MobileDesign.Spacing.medium
+        configuration.titleAlignment = .leading
+        configuration.baseForegroundColor = theme.uiLabel
+        configuration.contentInsets = .zero
+        button.configuration = configuration
+        button.accessibilityHint = MobileL10n.string(
+            row.result == nil ? "Tool is running" : "Shows tool output"
+        )
+        button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
+        button.removeAction(
+            identifiedBy: Self.toggleActionIdentifier,
+            for: .touchUpInside
+        )
+        button.addAction(UIAction(identifier: Self.toggleActionIdentifier) { _ in
+            toggle()
+        }, for: .touchUpInside)
+
+        if isExpanded, let result = row.result, !result.isEmpty {
+            let textView: UITextView
+            if let resultTextView {
+                textView = resultTextView
+            } else {
+                textView = RemoteUserMessageView.textView(
+                    text: "",
+                    font: Self.codeFont(),
+                    color: theme.uiSecondaryLabel
+                )
+                resultTextView = textView
+            }
+            textView.font = Self.codeFont()
+            textView.textColor = row.isError ? theme.uiNegative : theme.uiSecondaryLabel
+            if textView.text != result {
+                textView.text = result
+                textView.selectedRange = NSRange(location: 0, length: 0)
+            }
+            if textView.superview == nil {
+                stack.addArrangedSubview(textView)
+            }
+        } else if let resultTextView, resultTextView.superview != nil {
+            stack.removeArrangedSubview(resultTextView)
+            resultTextView.removeFromSuperview()
+        }
+    }
 
     private static func codeFont() -> UIFont {
         let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .caption1)
@@ -1143,13 +2077,15 @@ private final class RemoteNoticeMessageView: UIView {
 }
 
 private final class RemoteStreamingMessageView: UIView {
+    private var hasConfigured = false
+    private let textView = RemoteUserMessageView.textView(
+        text: "",
+        font: RemoteAssistantMessageView.proseFontForStreaming,
+        color: .secondaryLabel
+    )
+
     init(text: String, theme: RemoteThemePalette) {
         super.init(frame: .zero)
-        let textView = RemoteUserMessageView.textView(
-            text: text,
-            font: RemoteAssistantMessageView.proseFontForStreaming,
-            color: theme.uiSecondaryLabel
-        )
         addSubview(textView)
         NSLayoutConstraint.activate([
             textView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1158,10 +2094,24 @@ private final class RemoteStreamingMessageView: UIView {
             textView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         accessibilityLabel = MobileL10n.string("Agent is responding")
+        configure(text: text, theme: theme)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(text: String, theme: RemoteThemePalette) {
+        if hasConfigured {
+            _ = textView.layoutManager
+        }
+        hasConfigured = true
+        textView.font = RemoteAssistantMessageView.proseFontForStreaming
+        textView.textColor = theme.uiSecondaryLabel
+        if textView.text != text {
+            textView.text = text
+            textView.selectedRange = NSRange(location: 0, length: 0)
+        }
+    }
 }
 
 private extension RemoteAssistantMessageView {

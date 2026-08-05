@@ -61,10 +61,9 @@ struct SessionDashboard: View {
     @State private var actionError: String?
     @State private var pendingActionSessionID: String?
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
-    @State private var showsNotificationSettings = false
-    @State private var showsDiagnostics = false
     @State private var sharingSession: RemoteSessionSummaryDTO?
     @State private var sharedLink: SharedSessionLink?
+    let openSettings: () -> Void
 
     private var organization: SessionOrganization {
         SessionOrganization(rawValue: organizationRaw) ?? .project
@@ -102,10 +101,6 @@ struct SessionDashboard: View {
             LazyVStack(alignment: .leading, spacing: 24) {
                 deviceSection
 
-                if notifications.shouldOfferOnboarding {
-                    NotificationOnboardingCard()
-                }
-
                 HStack {
                     Text(MobileL10n.string(showsArchived ? "Archived" : "Sessions"))
                         .font(.title3.weight(.medium))
@@ -113,6 +108,20 @@ struct SessionDashboard: View {
                     Text("\(sessions.count)")
                         .font(.subheadline)
                         .foregroundStyle(theme.secondaryLabel)
+                    if model.canManageSessions, !showsArchived {
+                        Button {
+                            showsNewSession = true
+                        } label: {
+                            Label("New session", systemImage: "plus")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .frame(height: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(theme.ground)
+                        .background(theme.accent, in: Capsule())
+                        .accessibilityHint("Starts an agent on the selected Mac")
+                    }
                 }
 
                 if model.me == nil {
@@ -143,9 +152,13 @@ struct SessionDashboard: View {
                         }
                     }
                 }
+
+                if notifications.shouldOfferOnboarding {
+                    NotificationOnboardingCard()
+                }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, model.canManageSessions && !showsArchived ? 104 : 36)
+            .padding(.bottom, 36)
         }
     }
 
@@ -156,25 +169,6 @@ struct SessionDashboard: View {
         .navigationTitle("Code")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
-        .safeAreaInset(edge: .bottom, alignment: .trailing) {
-            if model.canManageSessions, !showsArchived {
-                Button {
-                    showsNewSession = true
-                } label: {
-                    Label("New session", systemImage: "plus")
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .frame(height: 54)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.ground)
-                .background(theme.accent, in: Capsule())
-                .shadow(color: theme.ground.opacity(0.28), radius: 16, y: 8)
-                .padding(.trailing, 20)
-                .padding(.bottom, 10)
-                .accessibilityHint("Starts an agent on the selected Mac")
-            }
-        }
         .task(id: model.activeHostID) { await model.poll() }
     }
 
@@ -182,18 +176,6 @@ struct SessionDashboard: View {
         dashboardNavigation
         .sheet(isPresented: $showsNewSession) {
             NewRemoteSessionView()
-                .environmentObject(model)
-                .environment(\.remoteTheme, theme)
-        }
-        .sheet(isPresented: $showsNotificationSettings) {
-            NotificationSettingsView()
-                .environmentObject(notifications)
-                .environmentObject(model)
-                .environment(\.remoteTheme, theme)
-        }
-        .sheet(isPresented: $showsDiagnostics) {
-            RemoteDiagnosticsView()
-                .environmentObject(notifications)
                 .environmentObject(model)
                 .environment(\.remoteTheme, theme)
         }
@@ -408,14 +390,9 @@ struct SessionDashboard: View {
                 }
 
                 Button {
-                    showsNotificationSettings = true
+                    openSettings()
                 } label: {
-                    Label("Notifications", systemImage: "bell")
-                }
-                Button {
-                    showsDiagnostics = true
-                } label: {
-                    Label("Diagnostics", systemImage: "stethoscope")
+                    Label("Settings", systemImage: "gearshape")
                 }
 
                 Divider()
@@ -553,7 +530,13 @@ struct SessionDashboard: View {
 
     private var deviceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Devices").font(.title3.weight(.medium))
+            HStack {
+                Text("Macs").font(.title3.weight(.medium))
+                Spacer()
+                Text("\(model.hosts.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(theme.secondaryLabel)
+            }
 
             HStack(spacing: 16) {
                 Image(systemName: "laptopcomputer")
@@ -591,7 +574,35 @@ struct SessionDashboard: View {
                     .stroke(theme.border, lineWidth: theme.borderWidth)
             )
             .remoteThemeGlow(theme)
+
+            if !alternateHosts.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(alternateHosts) { host in
+                            Button {
+                                model.selectHost(host.id)
+                            } label: {
+                                Label(host.menuTitle, systemImage: "laptopcomputer")
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 38)
+                                    .background(theme.panel, in: Capsule())
+                                    .overlay(
+                                        Capsule().stroke(theme.border, lineWidth: theme.borderWidth)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint(MobileL10n.string("Choose Mac"))
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    private var alternateHosts: [PairedRemoteHost] {
+        model.hosts.filter { $0.id != model.activeHostID }
     }
 
     private var statusColor: Color {
@@ -604,7 +615,11 @@ struct SessionDashboard: View {
         switch model.phase {
         case .idle: return MobileL10n.string("Not connected")
         case .connecting: return MobileL10n.string("Connecting…")
-        case .online: return MobileL10n.string("Connected securely")
+        case .online:
+            return MobileL10n.string(
+                "Connected · %@",
+                model.activeHost?.connectionLabel ?? MobileL10n.string("Direct")
+            )
         case .offline(let message): return message
         }
     }
@@ -682,9 +697,7 @@ private struct SessionListItem: View {
             if isArchived {
                 SessionRow(session: session, showsChevron: false)
             } else {
-                NavigationLink {
-                    SessionDetailView(session: session)
-                } label: {
+                NavigationLink(value: session.id) {
                     SessionRow(session: session, showsChevron: false)
                 }
                 .buttonStyle(.plain)
@@ -862,15 +875,18 @@ private struct SessionRow: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(session.title)
+                        .font(.body.weight(.medium))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
                     if session.isPinned {
                         Image(systemName: "pin.fill")
                             .font(.caption2)
                             .foregroundStyle(theme.accent)
                     }
-                    Text(session.title)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
                 }
                 HStack(spacing: 5) {
                     Image(systemName: session.isAvailable

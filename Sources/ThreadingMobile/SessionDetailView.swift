@@ -266,7 +266,14 @@ struct SessionDetailView: View {
                 throw RemoteClientError.invalidResponse
             }
             let current = model.me?.sessions.first(where: { $0.id == session.id }) ?? session
-            let made = RemoteSessionConnection(session: current, client: client)
+            let made = RemoteSessionConnection(
+                session: current,
+                client: client,
+                reconnectClient: {
+                    await model.refresh()
+                    return model.client
+                }
+            )
             made.onWorkspaceChanged = { [weak workspaceActivity] event in
                 workspaceActivity?.receive(event)
             }
@@ -463,18 +470,25 @@ private struct RemoteNavigationTitle: View {
         switch connection.phase {
         case .connecting: return MobileL10n.string("Connecting to Mac…")
         case .connected:
-            return MobileL10n.string(
-                connection.capability == .interact ? "Remote control" : "View only"
-            )
+            if connection.capability != .interact { return MobileL10n.string("View only") }
+            if let control = connection.inputControl,
+               control.mode == .focused, !control.canWrite {
+                return MobileL10n.string("Watching")
+            }
+            return MobileL10n.string("Remote control")
         case .ended(let reason): return reason
         case .failed(let reason): return reason
         }
     }
 }
 
-private struct TerminalRemoteView: View {
+struct TerminalRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
+    @EnvironmentObject private var model: RemoteAppModel
+    @EnvironmentObject private var continuity: MobileSessionContinuityStore
+    @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var inheritedTheme
+    @State private var showsAttentionRequest = false
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -488,13 +502,31 @@ private struct TerminalRemoteView: View {
         return Color(color)
     }
 
+    private var usesIndependentComposer: Bool {
+        notifications.independentTerminalDraftsEnabled
+            && connection.supportsAtomicTerminalSubmission
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             TerminalViewRepresentable(
                 connection: connection,
-                theme: connection.terminalTheme
+                theme: connection.terminalTheme,
+                allowsDirectInput: !usesIndependentComposer
+                    && connection.inputControl?.canWrite != false,
+                initialScrollProgress: terminalContinuity?.terminalViewportProgress,
+                onScrollProgress: saveTerminalViewport
             )
             .background(terminalBackground)
+            TerminalCollaborationBar(
+                connection: connection,
+                askForInput: { showsAttentionRequest = true }
+            )
+            InputControlBar(connection: connection)
+            AttentionActivityBanner(connection: connection)
+            if usesIndependentComposer {
+                TerminalLineComposer(connection: connection)
+            }
             TerminalKeyBar(connection: connection)
         }
         .toolbar {
@@ -504,6 +536,232 @@ private struct TerminalRemoteView: View {
         }
         .environment(\.remoteTheme, theme)
         .preferredColorScheme(theme.colorScheme)
+        .sheet(isPresented: $showsAttentionRequest) {
+            AttentionRequestSheet(connection: connection)
+        }
+    }
+
+    private var terminalContinuity: MobileSessionContinuityStore.SessionState? {
+        guard let hostID = model.activeHostID else { return nil }
+        return continuity.state(hostID: hostID, sessionID: connection.session.id)
+    }
+
+    private func saveTerminalViewport(_ progress: Double) {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setTerminalViewport(
+            progress: progress,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+}
+
+private struct TerminalCollaborationBar: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    let askForInput: () -> Void
+    @EnvironmentObject private var notifications: RemoteNotificationManager
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        let people = Array(connection.presence.values)
+        let typing = uniqueNames(people.filter { $0.state == "typing" })
+        let viewing = uniqueNames(people)
+        let label = notifications.typingIndicatorsEnabled && !typing.isEmpty
+            ? label(for: typing, action: "typing")
+            : notifications.peoplePresenceEnabled && !viewing.isEmpty
+                ? label(for: viewing, action: "viewing")
+                : nil
+        if label != nil || canAskForInput {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                if let label {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Spacer(minLength: 0)
+                }
+                if canAskForInput {
+                    AttentionTriggerButton(action: askForInput)
+                }
+            }
+            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.vertical, MobileDesign.Spacing.small)
+            .background(theme.surface)
+        }
+    }
+
+    private var canAskForInput: Bool {
+        connection.phase == .connected
+            && connection.capability == .interact
+            && connection.supportsAttentionRequests
+            && !connection.attentionRecipients.isEmpty
+    }
+
+    private func uniqueNames(_ people: [RemotePresenceDTO]) -> [String] {
+        Array(Set(people.map(remotePresenceLabel))).sorted()
+    }
+
+    private func label(for names: [String], action: String) -> String {
+        if names.count == 1 {
+            return action == "typing"
+                ? MobileL10n.string("%@ is typing…", names[0])
+                : MobileL10n.string("%@ is here", names[0])
+        }
+        if names.count == 2 {
+            let joined = names.joined(separator: MobileL10n.string(" and "))
+            return action == "typing"
+                ? MobileL10n.string("%@ are typing…", joined)
+                : MobileL10n.string("%@ are here", joined)
+        }
+        return action == "typing"
+            ? MobileL10n.string("%lld people are typing…", Int64(names.count))
+            : MobileL10n.string("%lld people are here", Int64(names.count))
+    }
+}
+
+private struct TerminalLineComposer: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    @EnvironmentObject private var model: RemoteAppModel
+    @EnvironmentObject private var continuity: MobileSessionContinuityStore
+    @Environment(\.remoteTheme) private var theme
+    @State private var draft = ""
+    @State private var pendingSubmissionID: String?
+    @State private var submissionNotice: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if connection.isPromptSubmissionPending, pendingSubmissionID != nil {
+                statusLabel("Sending once…", showsProgress: true)
+            } else if let submissionNotice {
+                statusLabel(submissionNotice, isWarning: true)
+            }
+
+            HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
+                TextField("Compose on this device…", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.send)
+                    .onSubmit(submit)
+
+                Button(action: submit) {
+                    Image(systemName: "arrow.up")
+                        .font(.headline)
+                        .frame(
+                            width: MobileDesign.Size.minimumTapTarget,
+                            height: MobileDesign.Size.minimumTapTarget
+                        )
+                        .background(
+                            canSubmit ? theme.accent : theme.controlResting,
+                            in: Circle()
+                        )
+                        .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
+                }
+                .disabled(!canSubmit)
+                .accessibilityLabel(MobileL10n.string("Send terminal line"))
+            }
+            .padding(.horizontal, MobileDesign.Spacing.inset)
+            .padding(.vertical, MobileDesign.Spacing.small)
+        }
+        .background(theme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+        }
+        .onChange(of: draft) { _, value in
+            submissionNotice = nil
+            connection.reportTyping(!value.isEmpty)
+            saveDraft(value)
+        }
+        .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
+            handle(feedback)
+        }
+        .onAppear(perform: restoreDraft)
+    }
+
+    private var canSubmit: Bool {
+        connection.phase == .connected
+            && connection.capability == .interact
+            && connection.inputControl?.canWrite != false
+            && !connection.isPromptSubmissionPending
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func statusLabel(
+        _ text: String,
+        showsProgress: Bool = false,
+        isWarning: Bool = false
+    ) -> some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            if showsProgress {
+                ProgressView().controlSize(.small)
+            }
+            Text(text)
+        }
+        .font(.caption)
+        .foregroundStyle(isWarning ? theme.warning : theme.secondaryLabel)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, MobileDesign.Spacing.large)
+        .padding(.top, MobileDesign.Spacing.small)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func submit() {
+        if let requestID = connection.submitTerminalLine(draft) {
+            pendingSubmissionID = requestID
+        }
+    }
+
+    private func restoreDraft() {
+        guard draft.isEmpty, let hostID = model.activeHostID else { return }
+        draft = continuity.draft(
+            surface: .terminal,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func saveDraft(_ value: String) {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setDraft(
+            value,
+            surface: .terminal,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func handle(_ feedback: RemotePromptSubmissionFeedback?) {
+        guard let feedback, feedback.requestID == pendingSubmissionID else { return }
+        pendingSubmissionID = nil
+        if feedback.status == .accepted {
+            if draft.trimmingCharacters(in: .newlines) == feedback.text {
+                draft = ""
+            }
+            submissionNotice = nil
+            return
+        }
+        switch feedback.status {
+        case .busy:
+            submissionNotice = MobileL10n.string(
+                "Another composer sent first. Your draft is still here."
+            )
+        case .rejected:
+            submissionNotice = MobileL10n.string(
+                "The Mac rejected this line. Your draft is still here."
+            )
+        case .unavailable:
+            submissionNotice = MobileL10n.string(
+                "The session changed before this line could be sent. Your draft is still here."
+            )
+        case .conflict:
+            submissionNotice = MobileL10n.string(
+                "This line could not be retried safely. Your draft is still here."
+            )
+        case .accepted:
+            break
+        }
     }
 }
 
@@ -544,38 +802,89 @@ private struct TerminalKeyBar: View {
         .overlay(alignment: .top) {
             Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
         }
-        .disabled(connection.capability != .interact || connection.phase != .connected)
+        .disabled(
+            connection.capability != .interact
+                || connection.phase != .connected
+                || connection.inputControl?.canWrite == false
+        )
     }
 }
 
-struct ConversationRemoteView: View {
+private struct LegacyConversationRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
+    @EnvironmentObject private var model: RemoteAppModel
+    @EnvironmentObject private var continuity: MobileSessionContinuityStore
+    @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var inheritedTheme
     @State private var draft = ""
     @State private var keyboardOverlap: CGFloat = 0
+    @State private var showsCapabilityCatalog = false
+    @State private var capabilityKindFilter: String?
+    @State private var preservedSkillArguments: String?
+    @State private var pendingSubmissionID: String?
+    @State private var submissionNotice: String?
+    @State private var showsAttentionRequest = false
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
     }
 
     var body: some View {
-        RemoteConversationTimelineView(connection: connection, theme: theme)
+        RemoteConversationTimelineView(
+            connection: connection,
+            theme: theme,
+            initialViewport: conversationContinuity.map {
+                ($0.conversationViewportProgress, $0.conversationFollowsBottom)
+            },
+            onViewportChange: saveConversationViewport
+        )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
+                    if !completionItems.isEmpty {
+                        ConversationCapabilityList(
+                            items: completionItems,
+                            onChoose: chooseCapability
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
                     presenceBanner
+
+                    InputControlBar(connection: connection)
+
+                    AttentionActivityBanner(connection: connection)
+
+                    submissionBanner
 
                     ConversationComposer(
                         text: $draft,
                         isEnabled: connection.phase == .connected
                             && connection.capability == .interact
-                            && connection.conversationCanSend,
-                        isInitiallyFocused: initiallyFocusesComposer
-                    ) {
-                        if connection.submit(draft) { draft = "" }
-                    }
+                            && connection.inputControl?.canWrite != false
+                            && connection.conversationCanSend
+                            && !connection.isPromptSubmissionPending,
+                        isInitiallyFocused: initiallyFocusesComposer,
+                        hasCapabilities: connection.capability == .interact
+                            && !connection.composerCapabilities.isEmpty,
+                        toggleCapabilities: toggleCapabilityCatalog,
+                        canAskForInput: connection.phase == .connected
+                            && connection.capability == .interact
+                            && connection.supportsAttentionRequests
+                            && !connection.attentionRecipients.isEmpty,
+                        askForInput: { showsAttentionRequest = true },
+                        submit: submitDraft
+                    )
                     .onChange(of: draft) { _, value in
+                        submissionNotice = nil
                         connection.reportTyping(!value.isEmpty)
+                        saveDraft(value)
+                        if RemoteComposerCompletionQuery.parse(value) == nil,
+                           !value.isEmpty {
+                            showsCapabilityCatalog = false
+                            capabilityKindFilter = nil
+                            preservedSkillArguments = nil
+                        }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 }
@@ -613,35 +922,237 @@ struct ConversationRemoteView: View {
             ) { notification in
                 updateKeyboardOverlap(from: notification, hiding: true)
             }
+            .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
+                handleSubmissionFeedback(feedback)
+            }
+            .onAppear(perform: restoreDraft)
+            .sheet(isPresented: $showsAttentionRequest) {
+                AttentionRequestSheet(connection: connection)
+            }
+    }
+
+    private var completionItems: [RemoteComposerCapabilityDTO] {
+        let items: [RemoteComposerCapabilityDTO]
+        if let query = RemoteComposerCompletionQuery.parse(draft) {
+            items = query.suggestions(
+                from: connection.composerCapabilities,
+                matchingKind: capabilityKindFilter
+            )
+        } else if showsCapabilityCatalog {
+            items = connection.composerCapabilities.sorted {
+                if $0.kind != $1.kind { return $0.kind == "command" }
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                    == .orderedAscending
+            }
+        } else {
+            return []
+        }
+        guard let capabilityKindFilter else { return items }
+        if capabilityKindFilter == "skill" {
+            return items.filter(\.canBrowseAsSkill)
+        }
+        return items.filter { $0.kind == capabilityKindFilter }
+    }
+
+    private func toggleCapabilityCatalog() {
+        capabilityKindFilter = nil
+        preservedSkillArguments = nil
+        withAnimation(.easeInOut(duration: 0.16)) {
+            showsCapabilityCatalog.toggle()
+        }
+    }
+
+    private func chooseCapability(_ capability: RemoteComposerCapabilityDTO) {
+        guard capability.isEnabled else { return }
+        if capability.id == RemoteComposerCatalog.skillsCommandID {
+            let existing = RemoteComposerCompletionQuery.parse(draft) == nil
+                ? draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
+            openSkillCatalog(preserving: existing.isEmpty ? nil : existing)
+            return
+        }
+
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let arguments = preservedSkillArguments ?? (
+            RemoteComposerCompletionQuery.parse(draft) == nil ? trimmed : ""
+        )
+        if arguments.isEmpty {
+            draft = capability.invocationText + " "
+        } else {
+            draft = capability.invocationText + " " + arguments
+        }
+        showsCapabilityCatalog = false
+        capabilityKindFilter = nil
+        preservedSkillArguments = nil
+    }
+
+    private func submitDraft() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.caseInsensitiveCompare("/skills") == .orderedSame,
+           connection.composerCapabilities.contains(where: {
+               $0.id == RemoteComposerCatalog.skillsCommandID
+           }) {
+            openSkillCatalog(preserving: nil)
+            return
+        }
+        if let requestID = connection.submit(draft) {
+            pendingSubmissionID = requestID
+            showsCapabilityCatalog = false
+            capabilityKindFilter = nil
+            preservedSkillArguments = nil
+        }
+    }
+
+    private func openSkillCatalog(preserving arguments: String?) {
+        guard let skill = connection.composerCapabilities.first(where: \.canBrowseAsSkill)
+        else { return }
+        preservedSkillArguments = arguments
+        draft = skill.trigger == "dollar" ? "$" : "/"
+        showsCapabilityCatalog = true
+        capabilityKindFilter = "skill"
     }
 
     @ViewBuilder
     private var presenceBanner: some View {
-        if !connection.presence.isEmpty {
-            let names = connection.presence.values
-                .map(\.displayName)
-                .sorted()
-            Text(names.count == 1
-                ? MobileL10n.string("%@ is typing…", names[0])
-                : MobileL10n.string(
-                    "%@ are typing…",
-                    names.joined(separator: ", ")
-                ))
+        let people = Array(connection.presence.values)
+        let typingNames = uniqueNames(people.filter { $0.state == "typing" })
+        let viewingNames = uniqueNames(people)
+        if notifications.typingIndicatorsEnabled, !typingNames.isEmpty {
+            let label = presenceLabel(names: typingNames, action: "typing")
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.large)
+                .padding(.vertical, MobileDesign.Spacing.small)
+                .background(theme.surface)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(label.replacingOccurrences(of: "…", with: ""))
+        } else if notifications.peoplePresenceEnabled, !viewingNames.isEmpty {
+            let label = presenceLabel(names: viewingNames, action: "viewing")
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.large)
+                .padding(.vertical, MobileDesign.Spacing.small)
+                .background(theme.surface)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(label)
+        }
+    }
+
+    @ViewBuilder
+    private var submissionBanner: some View {
+        if connection.isPromptSubmissionPending,
+           pendingSubmissionID != nil {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Sending once…")
+            }
             .font(.caption)
             .foregroundStyle(theme.secondaryLabel)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.vertical, MobileDesign.Spacing.small)
             .background(theme.surface)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(
-                names.count == 1
-                    ? MobileL10n.string("%@ is typing", names[0])
-                    : MobileL10n.string(
-                        "%@ are typing",
-                        names.joined(separator: ", ")
-                    )
+        } else if let submissionNotice {
+            Text(submissionNotice)
+                .font(.caption)
+                .foregroundStyle(theme.warning)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.large)
+                .padding(.vertical, MobileDesign.Spacing.small)
+                .background(theme.surface)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func uniqueNames(_ people: [RemotePresenceDTO]) -> [String] {
+        Array(Set(people.map(remotePresenceLabel))).sorted()
+    }
+
+    private var conversationContinuity: MobileSessionContinuityStore.SessionState? {
+        guard let hostID = model.activeHostID else { return nil }
+        return continuity.state(hostID: hostID, sessionID: connection.session.id)
+    }
+
+    private func restoreDraft() {
+        guard draft.isEmpty, let hostID = model.activeHostID else { return }
+        draft = continuity.draft(
+            surface: .conversation,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func saveDraft(_ value: String) {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setDraft(
+            value,
+            surface: .conversation,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func saveConversationViewport(_ progress: Double, _ followsBottom: Bool) {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setConversationViewport(
+            progress: progress,
+            followsBottom: followsBottom,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func presenceLabel(names: [String], action: String) -> String {
+        if names.count == 1 {
+            return action == "typing"
+                ? MobileL10n.string("%@ is typing…", names[0])
+                : MobileL10n.string("%@ is here", names[0])
+        }
+        if names.count == 2 {
+            let joined = names.joined(separator: MobileL10n.string(" and "))
+            return action == "typing"
+                ? MobileL10n.string("%@ are typing…", joined)
+                : MobileL10n.string("%@ are here", joined)
+        }
+        return action == "typing"
+            ? MobileL10n.string("%lld people are typing…", Int64(names.count))
+            : MobileL10n.string("%lld people are here", Int64(names.count))
+    }
+
+    private func handleSubmissionFeedback(_ feedback: RemotePromptSubmissionFeedback?) {
+        guard let feedback, feedback.requestID == pendingSubmissionID else { return }
+        pendingSubmissionID = nil
+        if feedback.status == .accepted {
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines) == feedback.text {
+                draft = ""
+            }
+            submissionNotice = nil
+            return
+        }
+        switch feedback.status {
+        case .busy:
+            submissionNotice = MobileL10n.string(
+                "Another composer sent first. Your draft is still here."
             )
+        case .rejected:
+            submissionNotice = MobileL10n.string(
+                "The Mac rejected this prompt. Your draft is still here."
+            )
+        case .unavailable:
+            submissionNotice = MobileL10n.string(
+                "The session changed before this prompt could be sent. Your draft is still here."
+            )
+        case .conflict:
+            submissionNotice = MobileL10n.string(
+                "This prompt could not be retried safely. Your draft is still here."
+            )
+        case .accepted:
+            break
         }
     }
 
@@ -681,17 +1192,30 @@ struct ConversationRemoteView: View {
     }
 }
 
+private func remotePresenceLabel(_ presence: RemotePresenceDTO) -> String {
+    guard let deviceName = presence.deviceName,
+          !deviceName.isEmpty,
+          deviceName != presence.displayName else {
+        return presence.displayName
+    }
+    return MobileL10n.string("%@ on %@", presence.displayName, deviceName)
+}
+
 private struct ConversationComposer: View {
     @Binding var text: String
     let isEnabled: Bool
     let isInitiallyFocused: Bool
+    let hasCapabilities: Bool
+    let toggleCapabilities: () -> Void
+    let canAskForInput: Bool
+    let askForInput: () -> Void
     let submit: () -> Void
     @Environment(\.remoteTheme) private var theme
     @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
-            Button {} label: {
+            Button(action: toggleCapabilities) {
                 Image(systemName: "plus")
                     .frame(
                         width: MobileDesign.Size.minimumTapTarget,
@@ -699,7 +1223,12 @@ private struct ConversationComposer: View {
                     )
                     .background(theme.controlResting, in: Circle())
             }
-            .disabled(true)
+            .disabled(!hasCapabilities)
+            .accessibilityLabel(MobileL10n.string("Browse commands and skills"))
+
+            if canAskForInput {
+                AttentionTriggerButton(action: askForInput)
+            }
 
             TextField("Add feedback…", text: $text, axis: .vertical)
                 .lineLimit(1...6)
@@ -741,5 +1270,408 @@ private struct ConversationComposer: View {
                 isFocused = true
             }
         }
+    }
+}
+
+private struct AttentionTriggerButton: View {
+    let action: () -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            // localization-ignore: universal mention/action glyph, not language copy.
+            Text("@")
+                .font(.headline.weight(.semibold))
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+                .background(theme.controlResting, in: Circle())
+        }
+        .accessibilityLabel(MobileL10n.string("Ask a person for input"))
+        .accessibilityHint(MobileL10n.string("Sends a human-only notification"))
+    }
+}
+
+private struct InputControlBar: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    @Environment(\.remoteTheme) private var theme
+    @State private var pendingRequestID: String?
+    @State private var resultNotice: String?
+
+    var body: some View {
+        if connection.supportsFocusedInputControl, let state = connection.inputControl {
+            VStack(spacing: 0) {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                Image(systemName: state.mode == .collaborative ? "person.2" : "hand.raised")
+                    .foregroundStyle(state.canWrite ? theme.positive : theme.warning)
+                Text(status(state))
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if state.mode == .focused, !state.canWrite, !state.canManage {
+                    Button(MobileL10n.string("Request control")) {
+                        send(action: "request")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.semibold))
+                }
+
+                if state.canManage || state.canHandOff {
+                    Menu {
+                        if state.canManage, state.mode != .collaborative {
+                            Button(MobileL10n.string("Collaborative")) {
+                                send(action: "collaborative")
+                            }
+                        }
+                        if state.canManage, !state.canWrite {
+                            Button(MobileL10n.string("Reclaim control")) {
+                                send(action: "reclaim")
+                            }
+                        }
+                        if state.mode == .collaborative, state.canManage {
+                            Button(MobileL10n.string("Focus on me")) {
+                                send(
+                                    action: "focused",
+                                    targetID: state.currentParticipantID
+                                )
+                            }
+                        }
+                        if state.mode == .focused {
+                            ForEach(
+                                state.participants.filter {
+                                    $0.id != state.controllerID && $0.isOnline
+                                }
+                            ) { participant in
+                                Button(
+                                    MobileL10n.string("Hand off to %@", participant.displayName)
+                                ) {
+                                    send(
+                                        action: "handoff",
+                                        targetID: participant.id
+                                    )
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(
+                                width: MobileDesign.Size.minimumTapTarget,
+                                height: MobileDesign.Size.minimumTapTarget
+                            )
+                    }
+                    .accessibilityLabel(MobileL10n.string("Input control options"))
+                }
+                }
+                .disabled(pendingRequestID != nil)
+                if pendingRequestID != nil {
+                    Text(MobileL10n.string("Sending control request…"))
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, MobileDesign.Spacing.large)
+                        .padding(.bottom, MobileDesign.Spacing.tight)
+                } else if let resultNotice {
+                    Text(resultNotice)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, MobileDesign.Spacing.large)
+                        .padding(.bottom, MobileDesign.Spacing.tight)
+                }
+            }
+            .padding(.leading, MobileDesign.Spacing.large)
+            .padding(.trailing, MobileDesign.Spacing.small)
+            .padding(.vertical, MobileDesign.Spacing.tight)
+            .background(theme.surface)
+            .overlay(alignment: .top) {
+                Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+            }
+            .onChange(of: connection.inputControlResult) { _, result in
+                guard let result, result.requestID == pendingRequestID else { return }
+                pendingRequestID = nil
+                switch result.status {
+                case .applied: resultNotice = MobileL10n.string("Input control updated.")
+                case .delivered: resultNotice = MobileL10n.string("Control request sent.")
+                case .unavailable:
+                    resultNotice = MobileL10n.string("That person is not available.")
+                case .forbidden, .rejected:
+                    resultNotice = MobileL10n.string("The control request was not accepted.")
+                }
+            }
+        }
+    }
+
+    private func send(action: String, targetID: String? = nil) {
+        resultNotice = nil
+        pendingRequestID = connection.changeInputControl(
+            action: action,
+            targetID: targetID
+        )
+    }
+
+    private func status(_ state: RemoteInputControlStateDTO) -> String {
+        if state.mode == .collaborative {
+            return MobileL10n.string("Collaborative · everyone can send")
+        }
+        if state.canWrite {
+            return MobileL10n.string("You are controlling · others are watching")
+        }
+        return MobileL10n.string(
+            "%@ is controlling · your draft stays here",
+            state.controllerDisplayName ?? MobileL10n.string("Another participant")
+        )
+    }
+}
+
+private struct AttentionActivityBanner: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 10)) { context in
+            if let event = connection.attentionEvents.last,
+               context.date.timeIntervalSince1970 - event.createdAt < 90 {
+            HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
+                Image(systemName: "person.wave.2")
+                    .foregroundStyle(theme.accent)
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                    Text(MobileL10n.string(
+                        "%@ asked %@ for input",
+                        event.senderDisplayName,
+                        event.recipientDisplayName
+                    ))
+                    .font(.caption.weight(.medium))
+                    if let note = event.note, !note.isEmpty {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(theme.secondaryLabel)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.vertical, MobileDesign.Spacing.small)
+            .background(theme.accentMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct AttentionRequestSheet: View {
+    @ObservedObject var connection: RemoteSessionConnection
+    @Environment(\.remoteTheme) private var theme
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedRecipientID: String?
+    @State private var note = ""
+    @State private var requestID: String?
+    @State private var notice: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(connection.attentionRecipients) { participant in
+                        Button {
+                            selectedRecipientID = participant.id
+                            notice = nil
+                        } label: {
+                            HStack(spacing: MobileDesign.Spacing.medium) {
+                                Text("@\(participant.displayName)")
+                                    .foregroundStyle(theme.label)
+                                Spacer()
+                                Text(participant.isOnline
+                                    ? MobileL10n.string("Here now")
+                                    : MobileL10n.string("Away"))
+                                    .font(.caption)
+                                    .foregroundStyle(participant.isOnline
+                                        ? theme.positive
+                                        : theme.tertiaryLabel)
+                                if selectedRecipientID == participant.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(theme.accent)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Person")
+                }
+
+                Section {
+                    TextField("Optional note…", text: $note, axis: .vertical)
+                        .lineLimit(2...4)
+                        .onChange(of: note) { _, value in
+                            note = Self.truncatedNote(value)
+                            notice = nil
+                        }
+                } header: {
+                    Text("What do you need?")
+                } footer: {
+                    Text(
+                        "This is a human-only notification. Nothing here is sent to Claude, "
+                            + "Codex, or the terminal."
+                    )
+                }
+
+                if connection.isAttentionRequestPending, requestID != nil {
+                    Section {
+                        HStack(spacing: MobileDesign.Spacing.small) {
+                            ProgressView().controlSize(.small)
+                            Text("Sending attention request…")
+                        }
+                        .foregroundStyle(theme.secondaryLabel)
+                    }
+                } else if let notice {
+                    Section {
+                        Label(notice, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(theme.warning)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(theme.ground)
+            .navigationTitle("Ask for input")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Ask") { send() }
+                        .disabled(selectedRecipientID == nil
+                            || connection.isAttentionRequestPending)
+                }
+            }
+            .task {
+                if selectedRecipientID == nil {
+                    selectedRecipientID = connection.attentionRecipients.first?.id
+                }
+            }
+            .onChange(of: connection.attentionRecipients) { _, recipients in
+                if !recipients.contains(where: { $0.id == selectedRecipientID }) {
+                    selectedRecipientID = recipients.first?.id
+                }
+            }
+            .onChange(of: connection.attentionRequestFeedback) { _, feedback in
+                handle(feedback)
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func send() {
+        guard let selectedRecipientID else { return }
+        requestID = connection.requestAttention(
+            recipientID: selectedRecipientID,
+            note: note.isEmpty ? nil : note
+        )
+        if requestID == nil {
+            notice = MobileL10n.string("The attention request could not be sent.")
+        }
+    }
+
+    private func handle(_ feedback: RemoteAttentionRequestFeedback?) {
+        guard let feedback, feedback.requestID == requestID else { return }
+        requestID = nil
+        switch feedback.status {
+        case .delivered:
+            dismiss()
+        case .unavailable:
+            notice = MobileL10n.string(
+                "That person is away and has input-request notifications turned off."
+            )
+        case .rateLimited:
+            notice = MobileL10n.string("They were just asked. Try again in a moment.")
+        case .rejected:
+            notice = MobileL10n.string("The attention request could not be sent.")
+        }
+    }
+
+    private static func truncatedNote(_ value: String) -> String {
+        guard value.utf8.count > RemoteAttentionDefaults.maximumNoteUTF8Bytes else {
+            return value
+        }
+        var bytes = value.utf8.prefix(RemoteAttentionDefaults.maximumNoteUTF8Bytes)
+        while String(bytes: bytes, encoding: .utf8) == nil, !bytes.isEmpty {
+            bytes = bytes.dropLast()
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+private struct ConversationCapabilityList: View {
+    let items: [RemoteComposerCapabilityDTO]
+    let onChoose: (RemoteComposerCapabilityDTO) -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: MobileDesign.Spacing.hairline) {
+                ForEach(items) { item in
+                    Button {
+                        onChoose(item)
+                    } label: {
+                        HStack(alignment: .top, spacing: MobileDesign.Spacing.medium) {
+                            VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(item.invocationText)
+                                        .font(.body.monospaced().weight(.semibold))
+                                    if !item.argumentHint.isEmpty {
+                                        Text(item.argumentHint)
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(theme.secondaryLabel)
+                                    }
+                                    Spacer(minLength: MobileDesign.Spacing.small)
+                                    // localization-ignore: `skill` is a wire enum discriminator.
+                                    Text(item.kind == "skill"
+                                        ? MobileL10n.string("Skill")
+                                        : MobileL10n.string("Command"))
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(theme.tertiaryLabel)
+                                }
+
+                                let detail = item.presentationDetail
+                                if !detail.isEmpty {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(theme.secondaryLabel)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                        .padding(.vertical, MobileDesign.Spacing.medium)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!item.isEnabled)
+                    .opacity(item.isEnabled ? 1 : 0.55)
+                    .accessibilityLabel(
+                        [item.invocationText, item.displayName, item.presentationDetail]
+                            .filter { !$0.isEmpty }
+                            .joined(separator: ", ")
+                    )
+                }
+            }
+        }
+        .frame(maxHeight: 260)
+        .background(
+            theme.elevated,
+            in: RoundedRectangle(cornerRadius: theme.panelRadius)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: theme.panelRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
+        )
+        .remoteThemeGlow(theme)
+        .padding(.horizontal, MobileDesign.Spacing.inset)
+        .padding(.top, MobileDesign.Spacing.small)
     }
 }

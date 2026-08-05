@@ -20,6 +20,9 @@ enum MobileDesign {
 
     enum Size {
         static let minimumTapTarget: CGFloat = 44
+        static let toggleTrackWidth: CGFloat = 52
+        static let toggleTrackHeight: CGFloat = 32
+        static let toggleThumb: CGFloat = 26
         static let navigationStatusIndicator: CGFloat = 6
         static let dialogActionHeight: CGFloat = 52
         static let conversationEstimatedRowHeight: CGFloat = 88
@@ -38,6 +41,10 @@ enum MobileDesign {
 
     enum Typography {
         static let messageLineSpacing: CGFloat = 4
+    }
+
+    enum Motion {
+        static let controlResponse: Double = 0.18
     }
 }
 
@@ -80,10 +87,13 @@ struct RemoteThemePalette: Equatable {
     var uiElevated: UIColor { uiColor("elevated", fallback: "#292D35") }
     var uiControlResting: UIColor { uiColor("control_resting", fallback: "#FFFFFF12") }
     var uiBorder: UIColor { uiColor("border", fallback: "#FFFFFF14") }
+    var uiDivider: UIColor { uiColor("divider", fallback: "#FFFFFF0C") }
     var uiLabel: UIColor { uiColor("label", fallback: "#F3F4F6") }
     var uiSecondaryLabel: UIColor { uiColor("secondary_label", fallback: "#A7ABB4") }
     var uiTertiaryLabel: UIColor { uiColor("tertiary_label", fallback: "#747983") }
     var uiAccent: UIColor { uiColor("accent", fallback: "#FFFFFF") }
+    var uiAccentMuted: UIColor { uiColor("accent_muted", fallback: "#FFFFFF24") }
+    var uiPositive: UIColor { uiColor("status_positive", fallback: "#55B978") }
     var uiWarning: UIColor { uiColor("status_warning", fallback: "#D9A441") }
     var uiNegative: UIColor { uiColor("status_negative", fallback: "#D87878") }
     var uiDiffAdded: UIColor { uiColor("diff_added", fallback: "#55B978") }
@@ -128,6 +138,80 @@ extension View {
             )
         } else {
             self
+        }
+    }
+}
+
+/// A theme-safe mobile switch whose state stays legible when the theme accent is white.
+///
+/// The native switch uses a white thumb over the accent track. That collapses into a blank
+/// capsule for Threading's default white accent, so the phone owns both surfaces here. Position
+/// and the thumb glyph carry state independently of colour.
+struct MobileThemedToggleStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let theme: RemoteThemePalette
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: MobileDesign.Spacing.medium) {
+                configuration.label
+                    .foregroundStyle(theme.label)
+
+                Spacer(minLength: MobileDesign.Spacing.medium)
+
+                track(isOn: configuration.isOn)
+            }
+            .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: MobileDesign.Motion.controlResponse),
+            value: configuration.isOn
+        )
+        .accessibilityRepresentation {
+            Toggle(
+                isOn: Binding(
+                    get: { configuration.isOn },
+                    set: { configuration.isOn = $0 }
+                )
+            ) {
+                configuration.label
+            }
+            .toggleStyle(.switch)
+        }
+    }
+
+    private func track(isOn: Bool) -> some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(isOn ? theme.accent : theme.controlHover)
+
+            Circle()
+                .fill(isOn ? theme.ground : theme.label)
+                .frame(
+                    width: MobileDesign.Size.toggleThumb,
+                    height: MobileDesign.Size.toggleThumb
+                )
+                .overlay {
+                    Image(systemName: isOn ? "checkmark" : "minus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isOn ? theme.accent : theme.ground)
+                }
+                .padding((MobileDesign.Size.toggleTrackHeight - MobileDesign.Size.toggleThumb) / 2)
+        }
+        .frame(
+            width: MobileDesign.Size.toggleTrackWidth,
+            height: MobileDesign.Size.toggleTrackHeight
+        )
+        .overlay {
+            Capsule()
+                .stroke(theme.border, lineWidth: max(theme.borderWidth, 1))
         }
     }
 }

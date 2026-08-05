@@ -29,7 +29,7 @@ struct RemoteGitReviewView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteTheme) private var theme
-    @State private var mode = RemoteGitReviewMode.unstaged
+    @State private var mode = RemoteGitReviewMode.uncommitted
     @State private var section: RemoteGitReviewSection
     @State private var snapshot: RemoteGitReviewSnapshotDTO?
     @State private var repositoryFiles: RemoteRepositoryFilesDTO?
@@ -43,6 +43,11 @@ struct RemoteGitReviewView: View {
     @State private var isAllFilesAtBottom = true
 
     private let allFilesScrollEndID = "git-review-all-files-end"
+
+    private var isTurnInFlight: Bool {
+        // localization-ignore: remote activity wire discriminators, not user-facing copy.
+        session.state == "working" || session.state == "awaitingUser"
+    }
 
     init(
         session: RemoteSessionSummaryDTO,
@@ -101,16 +106,16 @@ struct RemoteGitReviewView: View {
                             mode = candidate
                         } label: {
                             if candidate == mode {
-                                Label(candidate.title, systemImage: "checkmark")
+                                Label(candidate.title(isTurnInFlight: isTurnInFlight), systemImage: "checkmark")
                             } else {
-                                Text(candidate.title)
+                                Text(candidate.title(isTurnInFlight: isTurnInFlight))
                             }
                         }
                     }
                 } label: {
                     VStack(spacing: 1) {
                         HStack(spacing: 4) {
-                            Text(mode.title)
+                            Text(mode.title(isTurnInFlight: isTurnInFlight))
                                 .font(.headline)
                             Image(systemName: "chevron.down")
                                 .font(.caption2.weight(.bold))
@@ -127,7 +132,9 @@ struct RemoteGitReviewView: View {
                     }
                     .foregroundStyle(theme.label)
                 }
-                .accessibilityLabel("Review comparison, \(mode.title)")
+                .accessibilityLabel(
+                    "Review comparison, \(mode.title(isTurnInFlight: isTurnInFlight))"
+                )
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -849,12 +856,16 @@ private struct RemoteRepositoryFileView: View {
 }
 
 private extension RemoteGitReviewMode {
-    var title: String {
+    func title(isTurnInFlight: Bool) -> String {
         switch self {
+        case .uncommitted: return MobileL10n.string("Uncommitted")
         case .unstaged: return MobileL10n.string("Unstaged")
         case .staged: return MobileL10n.string("Staged")
         case .branch: return MobileL10n.string("Branch")
-        case .lastTurn: return MobileL10n.string("Last Turn")
+        case .lastTurn:
+            return isTurnInFlight
+                ? MobileL10n.string("This Turn")
+                : MobileL10n.string("Last Turn")
         }
     }
 }

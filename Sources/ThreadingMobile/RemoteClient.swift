@@ -50,6 +50,12 @@ enum RemoteClientError: LocalizedError {
 
 struct RemoteClient {
     let link: RemoteConnectionLink
+    let requestTimeout: TimeInterval?
+
+    init(link: RemoteConnectionLink, requestTimeout: TimeInterval? = nil) {
+        self.link = link
+        self.requestTimeout = requestTimeout
+    }
 
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -60,108 +66,159 @@ struct RemoteClient {
         return URLSession(configuration: configuration)
     }()
 
-    func fetchMe() async throws -> RemoteMeDTO {
-        let (data, response) = try await Self.session.data(for: request(url: link.meURL))
+    func fetchMe(timeout: TimeInterval? = nil) async throws -> RemoteMeDTO {
+        var request = request(url: link.meURL)
+        if let timeout { request.timeoutInterval = timeout }
+        let (data, response) = try await Self.session.data(for: request)
         return try decodeMe(data: data, response: response)
     }
 
     func acceptInvitation(
-        displayName: String
+        displayName: String,
+        requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteAcceptInvitationResponseDTO {
         try await postResponse(
             RemoteAcceptInvitationRequestDTO(displayName: displayName),
-            to: link.invitationAcceptanceURL
+            to: link.invitationAcceptanceURL,
+            requestID: requestID
         )
     }
 
-    func resume(sessionID: String) async throws {
+    func resume(
+        sessionID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws {
         var request = request(url: link.resumeURL(sessionID: sessionID))
         request.httpMethod = "POST"
-        let (data, response) = try await Self.session.data(for: request)
+        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
     }
 
-    func setAppTheme(themeID: String) async throws -> RemoteMeDTO {
+    func setAppTheme(
+        themeID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteSetAppThemeRequestDTO(themeID: themeID),
-            to: link.appThemeURL
+            to: link.appThemeURL,
+            requestID: requestID
         )
     }
 
-    func setSessionTheme(sessionID: String, themeID: String?) async throws -> RemoteMeDTO {
+    func setSessionTheme(
+        sessionID: String,
+        themeID: String?,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteSetTerminalThemeRequestDTO(themeID: themeID),
-            to: link.sessionThemeURL(sessionID: sessionID)
+            to: link.sessionThemeURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
     func createSession(
-        _ creation: RemoteCreateSessionRequestDTO
+        _ creation: RemoteCreateSessionRequestDTO,
+        requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteCreateSessionResponseDTO {
-        try await postResponse(creation, to: link.createSessionURL)
+        try await postResponse(creation, to: link.createSessionURL, requestID: requestID)
     }
 
-    func renameSession(sessionID: String, title: String) async throws -> RemoteMeDTO {
+    func renameSession(
+        sessionID: String,
+        title: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteRenameSessionRequestDTO(title: title),
-            to: link.renameSessionURL(sessionID: sessionID)
+            to: link.renameSessionURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
-    func setSessionPinned(sessionID: String, isPinned: Bool) async throws -> RemoteMeDTO {
+    func setSessionPinned(
+        sessionID: String,
+        isPinned: Bool,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteSetSessionPinnedRequestDTO(isPinned: isPinned),
-            to: link.pinnedSessionURL(sessionID: sessionID)
+            to: link.pinnedSessionURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
-    func setSessionArchived(sessionID: String, isArchived: Bool) async throws -> RemoteMeDTO {
+    func setSessionArchived(
+        sessionID: String,
+        isArchived: Bool,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteSetSessionArchivedRequestDTO(isArchived: isArchived),
-            to: link.archivedSessionURL(sessionID: sessionID)
+            to: link.archivedSessionURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
-    func setSessionSurface(sessionID: String, surface: String) async throws -> RemoteMeDTO {
+    func setSessionSurface(
+        sessionID: String,
+        surface: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteSetSessionSurfaceRequestDTO(surface: surface),
-            to: link.sessionSurfaceURL(sessionID: sessionID)
+            to: link.sessionSurfaceURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
     func registerNotifications(
-        _ registration: RemoteNotificationRegistrationDTO
+        _ registration: RemoteNotificationRegistrationDTO,
+        requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteNotificationRegistrationResponseDTO {
-        try await postResponse(registration, to: link.notificationRegistrationURL)
+        try await postResponse(
+            registration,
+            to: link.notificationRegistrationURL,
+            requestID: requestID
+        )
     }
 
     func uploadDiagnostics(
-        _ records: [RemoteDiagnosticRecord]
+        _ records: [RemoteDiagnosticRecord],
+        requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteDiagnosticUploadResponseDTO {
         try await postResponse(
             RemoteDiagnosticUploadRequestDTO(source: .iOSClient, records: records),
-            to: link.diagnosticUploadURL
+            to: link.diagnosticUploadURL,
+            requestID: requestID
         )
     }
 
     func createShare(
         sessionID: String,
         capability: String,
-        canApprovePermissions: Bool
+        canApprovePermissions: Bool,
+        requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteCreateShareResponseDTO {
         try await postResponse(
             RemoteCreateShareRequestDTO(
                 capability: capability,
                 canApprovePermissions: canApprovePermissions
             ),
-            to: link.sessionShareURL(sessionID: sessionID)
+            to: link.sessionShareURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
-    func revokeShares(sessionID: String) async throws -> RemoteMeDTO {
+    func revokeShares(
+        sessionID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
         try await post(
             RemoteRevokeSharesRequestDTO(),
-            to: link.sessionUnshareURL(sessionID: sessionID)
+            to: link.sessionUnshareURL(sessionID: sessionID),
+            requestID: requestID
         )
     }
 
@@ -246,11 +303,16 @@ struct RemoteClient {
         request.setValue("Threading-iOS", forHTTPHeaderField: "X-Threading-Client")
         request.setValue(RemoteDeviceIdentity.current, forHTTPHeaderField: "X-Threading-Device")
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        if let requestTimeout { request.timeoutInterval = requestTimeout }
         return request
     }
 
-    private func post<Body: Encodable>(_ body: Body, to url: URL) async throws -> RemoteMeDTO {
-        try await postResponse(body, to: url)
+    private func post<Body: Encodable>(
+        _ body: Body,
+        to url: URL,
+        requestID: String
+    ) async throws -> RemoteMeDTO {
+        try await postResponse(body, to: url, requestID: requestID)
     }
 
     private func get<Response: Decodable>(
@@ -264,15 +326,32 @@ struct RemoteClient {
 
     private func postResponse<Body: Encodable, Response: Decodable>(
         _ body: Body,
-        to url: URL
+        to url: URL,
+        requestID: String
     ) async throws -> Response {
         var request = request(url: url)
         request.httpMethod = "POST"
         request.httpBody = try JSONEncoder().encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, response) = try await Self.session.data(for: request)
+        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
         return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    /// A lost response is ambiguous: the Mac may already have applied the mutation. Retrying
+    /// the same immutable request once is safe because the request id is replayed verbatim and
+    /// the Mac coalesces or returns the original response for that id.
+    private func dataReplayingNetworkFailure(
+        for request: URLRequest
+    ) async throws -> (Data, URLResponse) {
+        do {
+            return try await Self.session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code != .cancelled {
+            return try await Self.session.data(for: request)
+        }
     }
 
     private func decodeMe(data: Data, response: URLResponse) throws -> RemoteMeDTO {
