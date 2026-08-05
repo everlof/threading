@@ -734,7 +734,9 @@ restarting or shutting down — a dialog there would stall the system rather tha
 conversations are kept either way and resume on the next launch; only the turn in flight is
 lost. The alert says which of the two you are about to do: it counts the **turns in flight**
 when any agent is mid-answer or stopped on a question, and otherwise counts the **sessions
-open**, because closing a row of idle agents costs you nothing but their processes.
+open**, because closing a row of idle agents costs you nothing but their processes. Closing the
+window is quitting and asks the same question: decline it, and the window stays open with
+everything still running.
 
 Nothing else offers the checkbox. Anything that deletes for good — removing a project,
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
@@ -2755,7 +2757,8 @@ day, kept for two weeks:
 Each line is one event — the app launching and quitting, a session being started from the
 composer (including the prompt), the command line each agent was launched with, and the exit
 code it came back with. It is written as things happen rather than buffered, so the last line
-before an unexpected quit is on disk.
+before an unexpected quit is on disk. The quit line says how many sessions were running and
+therefore handed to the next launch, and that launch says how many of them it brought back.
 
 A launch that never reaches its quit leaves its marker behind, and the next launch records
 `Previous launch did not quit cleanly`, pointing at the macOS crash report from that run in

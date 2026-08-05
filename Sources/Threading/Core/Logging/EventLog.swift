@@ -125,9 +125,9 @@ final class EventLog: @unchecked Sendable {
 
     /// Closes a launch. The marker's *absence* is what tells the next launch this one ended
     /// on purpose rather than by dying.
-    func endLaunch() {
+    func endLaunch(detail: [String: String] = [:]) {
         queue.sync {
-            append(line(category: .app, message: "Quit", detail: [:]))
+            append(line(category: .app, message: "Quit", detail: detail))
             try? FileManager.default.removeItem(at: markerURL)
         }
     }
@@ -156,20 +156,32 @@ final class EventLog: @unchecked Sendable {
         openHandle = nil
         openDay = nil
 
-        let url = journalURL(forDay: day)
         ensureDirectoryExists()
 
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-        }
+        guard let handle = openForAppending(journalURL(forDay: day)) else { return nil }
 
-        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-
-        handle.seekToEndOfFile()
         openHandle = handle
         openDay = day
 
         return handle
+    }
+
+    /// A descriptor whose every write lands at the end *as one operation*, rather than at an
+    /// offset this process is remembering.
+    ///
+    /// `FileHandle(forWritingTo:)` plus `seekToEndOfFile` records where the end was when the
+    /// journal was opened, and more than one process writes this file: a hosted XCTest bundle
+    /// runs inside the real application, so a test run uses this same type against this same
+    /// directory. Two handles then hold two offsets over one file and write straight through
+    /// each other's records — measured on the 5 August 2026 journal, 23 lines were left
+    /// unparseable and a quit's own record was overwritten mid-line by a concurrent test run,
+    /// which reads as "the quit never happened" to anyone reconstructing the failure
+    /// afterwards. `O_APPEND` moves the seek into the kernel, where it is atomic with the
+    /// write, and `O_CREAT` is also what makes the file on a first launch.
+    private func openForAppending(_ url: URL) -> FileHandle? {
+        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT, EventLogDefaults.fileMode)
+        guard descriptor >= 0 else { return nil }
+        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
     private func line(
@@ -362,6 +374,10 @@ enum EventLogDefaults {
 
     static let markerFileName = "launch.json"
     static let queueLabel = "codes.threading.eventlog"
+
+    /// The journal's permissions when `O_CREAT` makes it: the owner's to read and write, and
+    /// readable by anyone the user hands a support report to.
+    static let fileMode: mode_t = 0o644
 
     /// Long enough to cover "it happened some time last week", short enough that the folder
     /// never needs managing.

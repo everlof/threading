@@ -234,7 +234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // What is live right now, recorded for the next launch to bring back — necessarily
         // ahead of `terminateAll`, after which nothing is. `AppRelaunch.discardingState()`
         // exits without running this on purpose: a reset comes back to nothing running.
-        StateManager.shared.saveRunningSessionIDs(Array(AgentRuntime.shared.runningSessionIDs))
+        let runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
+        StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
@@ -244,10 +245,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         MCPServer.shared.stop()
 
         // Last, and only on this path: the marker it removes is what distinguishes a quit
-        // from a launch that never came back.
+        // from a launch that never came back. The count it carries is the one number that says
+        // whether the next launch has anything to bring back — a quit that recorded nothing and
+        // a launch that relaunched nothing are indistinguishable from either side otherwise,
+        // which is how a whole feature stayed invisibly broken.
         MainThreadStallMonitor.shared.stop()
         MetricKitDiagnostics.shared.stop()
-        EventLog.shared.endLaunch()
+        EventLog.shared.endLaunch(detail: [
+            "runningSessions": String(runningSessionIDs.count)
+        ])
 
         return .terminateNow
     }

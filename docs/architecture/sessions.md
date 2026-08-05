@@ -637,6 +637,26 @@ The rules, each of which is the answer to a way this goes wrong:
   that ends at the first look or the first reported turn; see
   [`session-activity.md`](session-activity.md).
 
+- **Closing the window is a quit, and takes the quit's path** (`MainWindowController`
+  `windowShouldClose` asks the application to terminate and returns false). This is the bug
+  the feature shipped with, and it made the whole thing look inert: `windowWillClose` called
+  `AgentRuntime.terminateAll()`, and with
+  `applicationShouldTerminateAfterLastWindowClosed` answering true, the close ran *before*
+  the quit. `applicationShouldTerminate` then read an emptied runtime — so it warned about no
+  running agents, killed a dozen mid-turn without asking, and recorded an empty list for a
+  launch that duly relaunched nothing. Nothing in the plan above was wrong; it never received
+  a candidate. Both close affordances (`WindowChromeButton`'s close role and the window
+  menu's Close) consult `windowShouldClose` and close only on true, so a declined quit leaves
+  the window untouched. `windowWillClose` keeps its teardown for a `close()` called in code,
+  which never consults the delegate.
+- **Both ends of the handshake are journalled**, because neither was, and that is why the
+  above stayed invisible: the `Quit` record carries `runningSessions`, and the launch records
+  `recorded` beside `relaunching`. The pair is what separates the three ways this comes to
+  nothing — a quit that recorded none, a launch that read none, and a record whose only
+  session was the selected one that `restoreSelectedSession` is already bringing back (the
+  ordinary "recorded 1, relaunching 0", and the reason a one-session test of this feature
+  looks like it did nothing).
+
 Everything else is deliberately the ordinary machinery: the background launch uses the same
 `AgentRuntime` caches and the same container delegate as a click, so the sidebar's dot, exit
 handling and the eventual attach (`show` finds the surface cached and only attaches) cannot

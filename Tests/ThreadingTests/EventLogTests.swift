@@ -95,6 +95,39 @@ final class EventLogTests: XCTestCase {
         XCTAssertNotNil(detail["startedAt"])
     }
 
+    /// Two writers, one journal, no lost lines.
+    ///
+    /// A hosted XCTest bundle runs inside the real application, so a test run journals into the
+    /// developer's own directory while the app is running: two `EventLog`s, one file. Held at an
+    /// offset each remembers, the second writer's records land on top of the first's — the
+    /// journal for 5 August 2026 had 23 unparseable lines and lost a quit's own record that way,
+    /// which is what made a working feature look like it had never run.
+    ///
+    /// The interleaving matters: the second log opens its handle while the first has already
+    /// written, and both then keep writing.
+    func testTwoLogsWritingOneJournalLoseNothing() throws {
+        let first = EventLog(directory: testDirectory)
+        let second = EventLog(directory: testDirectory)
+
+        first.record(.app, "first-opens")
+        second.record(.app, "second-opens")
+        for index in 0..<50 {
+            first.record(.session, "first-\(index)", ["writer": "first"])
+            second.record(.session, "second-\(index)", ["writer": "second"])
+        }
+
+        let messages = try journalRecords().compactMap { $0["message"] as? String }
+        XCTAssertEqual(
+            messages.count,
+            102,
+            "every line must parse: a clobbered record is a line neither writer can read back"
+        )
+        for index in 0..<50 {
+            XCTAssertTrue(messages.contains("first-\(index)"))
+            XCTAssertTrue(messages.contains("second-\(index)"))
+        }
+    }
+
     func testPerformanceTraceExportsCompletedAndActiveSpans() throws {
         var configuration = PerformanceRecorder.Configuration()
         configuration.slowMainThreadMilliseconds = .greatestFiniteMagnitude

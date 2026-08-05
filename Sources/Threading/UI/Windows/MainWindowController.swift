@@ -99,6 +99,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Retained for the stagger's duration; it retires its own timer when the plan is spent.
     private var startupRelauncher: StartupSessionRelauncher?
 
+    /// How closing the window asks the application to quit. See `windowShouldClose`.
+    ///
+    /// Injectable because the real request ends the process: a hosted test that exercised the
+    /// close would take the test host down with it, which reads as an unrelated later test
+    /// crashing rather than as this one.
+    var requestsApplicationQuit: () -> Void = { NSApp.terminate(nil) }
+
     /// Exchanges the window's frame with a takeover theme's own chrome and back. Optional
     /// because it needs the real window; every consumer asks with `?.` and reads nil as
     /// "native frame", which is also what it means.
@@ -1004,11 +1011,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 ? ProjectStore.shared.selectedSessionID
                 : nil
         )
-        guard !planned.isEmpty else { return }
-
+        // Both counts, before the plan is allowed to be empty: "recorded 1, relaunching 0" is
+        // the ordinary answer when the only session running at the quit was the selected one,
+        // which `plan` leaves to `restoreSelectedSession`. Logging only the launches made that
+        // case look exactly like a record that was never written.
         EventLog.shared.record(.session, "Relaunching sessions from last quit", [
-            "count": String(planned.count)
+            "recorded": String(recorded.count),
+            "relaunching": String(planned.count)
         ])
+
+        guard !planned.isEmpty else { return }
 
         let relauncher = StartupSessionRelauncher(sessionIDs: planned) { [weak self] sessionID in
             self?.containerViewController.launchInBackground(sessionID: sessionID)
@@ -2655,6 +2667,29 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
 extension MainWindowController: NSWindowDelegate {
 
+    /// Closing the only window *is* quitting — `applicationShouldTerminateAfterLastWindowClosed`
+    /// answers true — so the close asks the application to quit and closes nothing itself.
+    ///
+    /// The order was the bug. Closing first ran `windowWillClose`, which terminated every agent
+    /// and emptied `AgentRuntime`; the quit that followed a moment later therefore saw nothing
+    /// running, so it neither warned that agents were mid-turn nor recorded anything for
+    /// `relaunchSessionsFromLastQuit` to bring back — the setting was on, the record was empty,
+    /// and the next launch came up with the same empty sidebar as before the feature existed.
+    /// Routed this way there is one quit, and it reads the live runtime before anything has
+    /// touched it.
+    ///
+    /// Returning false is what keeps the declined quit harmless: both close affordances — the
+    /// chrome button and the window menu's Close — ask this first and close only on true, so a
+    /// cancelled confirmation leaves the window exactly as it was.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        requestsApplicationQuit()
+        return false
+    }
+
+    /// The teardown for a window that closes without going through the quit — code calling
+    /// `close()` directly, which never consults `windowShouldClose`. On the ordinary quit this
+    /// runs after `applicationShouldTerminate` has already recorded and terminated, and both
+    /// calls are no-ops on an empty runtime.
     func windowWillClose(_ notification: Notification) {
         AgentRuntime.shared.terminateAll()
         ProjectTerminalRuntime.shared.terminateAll()

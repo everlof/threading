@@ -136,10 +136,21 @@ The two stay separate rather than becoming one wrapper. `Logger`'s privacy annot
 (`\(id, privacy: .public)`) live inside the `OSLogMessage` literal and cannot be rendered
 back out as a string, so a type feeding both would have to drop them at every call site.
 
+**The journal's descriptor is opened `O_APPEND`, not seeked to the end.** More than one
+process writes this file: a hosted XCTest bundle runs inside the real application, so a test
+run journals into the developer's own `Logs` directory while the app is running. Two
+`FileHandle`s then hold two offsets over one file, and each writes straight through what the
+other appended after it opened. Measured on the 5 August 2026 journal: 23 lines unparseable,
+and a quit's own `Quit` record overwritten mid-line by a concurrent `scripts/test.sh` — which
+read as "the quit never ran" and cost a debugging session, since the whole point of this file
+is to be believed after the fact. `O_APPEND` moves the seek into the kernel, where it is
+atomic with the write.
+
 A launch writes a marker that only `endLaunch` removes, so the *next* launch is what reports
 `Previous launch did not quit cleanly` — consumed on read, so one death is one record rather
 than a standing complaint, and it carries the path of the matching `.ips` from
-`~/Library/Logs/DiagnosticReports/`.
+`~/Library/Logs/DiagnosticReports/`. The `Quit` record carries `runningSessions`, the count
+handed to the next launch's relaunch; see [`sessions.md`](sessions.md).
 
 `DraftStore` keeps composer text per project. That text is the one thing in the app that
 exists nowhere else while it is being written: no transcript (the agent has not launched), no

@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Threading
 
@@ -114,5 +115,60 @@ final class StartupSessionRelaunchTests: XCTestCase {
         }
 
         XCTAssertEqual(launched, [first, second])
+    }
+}
+
+// MARK: - Quit Path
+
+/// What the relaunch record depends on: that closing the window does not tear the agents down
+/// before the quit has looked at them.
+///
+/// This is the bug the feature shipped with. Closing the window ran `windowWillClose`, which
+/// terminated every agent and emptied `AgentRuntime`; the quit that followed found nothing
+/// running, so it warned about nothing and recorded nothing, and the next launch relaunched
+/// nothing — with the setting on and the plan above perfectly correct. The window is built and
+/// never shown, and the close is asked rather than performed, so nothing here can close a
+/// window under the test host.
+@MainActor
+final class WindowCloseQuitPathTests: XCTestCase {
+
+    /// Asserted through the affordance the user actually presses, not just the delegate method:
+    /// the themed close button is the app's only close control, and it is the caller that has
+    /// to honour the answer.
+    func testTheCloseButtonAsksTheApplicationToQuitAndClosesNothingItself() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        var quitRequests = 0
+        controller.requestsApplicationQuit = { quitRequests += 1 }
+
+        var didClose = false
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: nil
+        ) { _ in didClose = true }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let close = WindowChromeButton(role: .close)
+        window.contentView?.addSubview(close)
+        _ = close.performPrimaryAction()
+
+        XCTAssertEqual(quitRequests, 1, "closing the only window is quitting, and takes that path")
+        XCTAssertFalse(
+            didClose,
+            "the window must outlive the request: the quit reads the live runtime, and a "
+                + "declined quit has to leave the window exactly as it was"
+        )
+    }
+
+    /// The delegate's own answer, so the contract holds for any future close affordance.
+    func testTheDelegateDeclinesTheCloseItself() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        var quitRequests = 0
+        controller.requestsApplicationQuit = { quitRequests += 1 }
+
+        XCTAssertFalse(controller.windowShouldClose(window))
+        XCTAssertEqual(quitRequests, 1)
     }
 }
