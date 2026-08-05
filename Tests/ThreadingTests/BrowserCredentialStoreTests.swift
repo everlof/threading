@@ -266,3 +266,47 @@ final class BrowserSubmissionExemptionTests: XCTestCase {
         }
     }
 }
+
+// MARK: - 1Password References
+
+/// The reference validator, which is the security-relevant half of the 1Password provider.
+///
+/// Nothing here shells out: `op` may not be installed, and a test that depended on the user's own
+/// vault would be untrustworthy in both directions. What is worth pinning is the parse.
+final class OnePasswordReferenceTests: XCTestCase {
+
+    func testAVaultAndItemReferenceIsAccepted() {
+        XCTAssertTrue(OnePasswordCLI.isValidItemReference("op://Private/staging-admin"))
+        XCTAssertTrue(OnePasswordCLI.isValidItemReference("  op://Team Vault/app login  "))
+    }
+
+    /// The item is what gets stored and the field names are appended by Threading. A reference
+    /// that already names a field would let one entry read `.../password` where a username is
+    /// expected — which is the whole reason this is checked where it is typed rather than at fill
+    /// time, weeks later, as a sign-in that quietly hands back to the user.
+    func testAReferenceThatNamesAFieldIsRefused() {
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op://Private/staging-admin/password"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op://Private/staging-admin/username"))
+    }
+
+    func testAnIncompleteOrForeignReferenceIsRefused() {
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op://Private"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op://"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op://Private/"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("op:///item"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("https://Private/item"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference("Private/item"))
+        XCTAssertFalse(OnePasswordCLI.isValidItemReference(""))
+    }
+
+    /// References are stored under the same origin-and-account key the built-in vault uses, so
+    /// the two providers need one lookup rather than one each.
+    func testAReferenceIsKeyedByOriginAndAccountLikeTheVault() throws {
+        let url = try XCTUnwrap(URL(string: "https://staging.example.com"))
+        let origin = try XCTUnwrap(BrowserOrigin(url: url))
+        let identity = BrowserCredentialIdentity(originKey: origin.key, label: "admin")
+
+        XCTAssertEqual(identity.account, "https://staging.example.com|admin")
+        XCTAssertEqual(BrowserCredentialIdentity(account: identity.account)?.label, "admin")
+    }
+}
