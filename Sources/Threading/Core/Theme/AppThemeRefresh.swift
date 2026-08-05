@@ -21,6 +21,9 @@ private final class RecordedSurface {
     /// keeps whatever radius it was last given.
     let radius: SurfaceRadius
     let glow: Bool
+    let controlGlow: Bool
+    /// Recorded as participation because the next theme decides whether a pattern exists.
+    let pattern: SurfacePattern
     /// Recorded as participation rather than result, like the radius: whether an edge is
     /// actually drawn is the *next* theme's material to decide.
     let bevel: SurfaceBevel
@@ -31,6 +34,8 @@ private final class RecordedSurface {
         borderWidth: CGFloat?,
         radius: SurfaceRadius,
         glow: Bool,
+        controlGlow: Bool,
+        pattern: SurfacePattern,
         bevel: SurfaceBevel
     ) {
         self.fill = fill
@@ -38,6 +43,8 @@ private final class RecordedSurface {
         self.borderWidth = borderWidth
         self.radius = radius
         self.glow = glow
+        self.controlGlow = controlGlow
+        self.pattern = pattern
         self.bevel = bevel
     }
 }
@@ -54,6 +61,17 @@ private final class RecordedLayerColors {
     var background: NSColor?
     var border: NSColor?
     var shadow: NSColor?
+    var companionShadows: [ObjectIdentifier: RecordedCompanionShadow] = [:]
+}
+
+private final class RecordedCompanionShadow {
+    weak var layer: CALayer?
+    var color: NSColor
+
+    init(layer: CALayer, color: NSColor) {
+        self.layer = layer
+        self.color = color
+    }
 }
 
 extension NSView {
@@ -108,6 +126,8 @@ extension NSView {
             border: recorded.border,
             borderWidth: recorded.borderWidth,
             glow: recorded.glow,
+            controlGlow: recorded.controlGlow,
+            pattern: recorded.pattern,
             bevel: recorded.bevel
         )
     }
@@ -121,6 +141,11 @@ extension NSView {
         if let background = recorded.background { layer?.backgroundColor = background.cgColor }
         if let border = recorded.border { layer?.borderColor = border.cgColor }
         if let shadow = recorded.shadow { layer?.shadowColor = shadow.cgColor }
+        recorded.companionShadows = recorded.companionShadows.filter { _, entry in
+            guard let layer = entry.layer else { return false }
+            layer.shadowColor = entry.color.cgColor
+            return true
+        }
     }
 
     /// Assigns a layer fill while retaining the `NSColor` that produced the frozen `CGColor`.
@@ -155,6 +180,19 @@ extension NSView {
         recordedLayerColors.shadow = color
     }
 
+    /// The companion-layer form of `applyLayerShadow(_:)`, used when a material carries a
+    /// second cast (for example Clay's pale upper-left lift). The layer is held weakly so
+    /// replacing a material cannot strand detached artwork, while the colour remains available
+    /// to the ordinary theme/appearance refresh sweep.
+    func applyLayerShadow(_ color: NSColor, to companion: CALayer) {
+        wantsLayer = true
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            companion.shadowColor = color.cgColor
+        }
+        recordedLayerColors.companionShadows[ObjectIdentifier(companion)] =
+            RecordedCompanionShadow(layer: companion, color: color)
+    }
+
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
     func recordSurface(
@@ -163,6 +201,8 @@ extension NSView {
         borderWidth: CGFloat?,
         radius: SurfaceRadius,
         glow: Bool,
+        controlGlow: Bool = false,
+        pattern: SurfacePattern = .none,
         bevel: SurfaceBevel = .automatic
     ) {
         recordedSurface = RecordedSurface(
@@ -171,6 +211,8 @@ extension NSView {
             borderWidth: borderWidth,
             radius: radius,
             glow: glow,
+            controlGlow: controlGlow,
+            pattern: pattern,
             bevel: bevel
         )
     }
@@ -230,6 +272,34 @@ extension NSView {
     func reapplyRecordedLayerColorsForTesting() {
         reapplyRecordedLayerColors()
     }
+}
+
+// MARK: - Derived Content
+
+/// A view holding content **baked** from a theme rather than drawn from it.
+///
+/// The sweep below re-resolves recorded surfaces, layer colours and fonts, then marks the view
+/// dirty — which covers everything resolved *at draw time*. An `NSImage` composed against a role
+/// is not: the pixels were decided when the image was made, and no amount of redrawing revisits
+/// them. A session row's agent mark is plated or not by measuring the mark against the sidebar it
+/// sits on; a project tile is composed the same way. Both were baked once and left.
+///
+/// It survived review because it *appeared* to work: `AppThemeLibrary.apply` pins
+/// `NSApp.appearance` to the theme's mode, so switching between a light theme and a dark one fires
+/// `viewDidChangeEffectiveAppearance` and every row re-derives by accident. Only a light→light or
+/// dark→dark switch — Windows 98 arriving from any other light theme — left the plates deciding
+/// against the previous theme's surface, until something else happened to re-derive the row.
+/// Selecting it did, which is what the report described: *the icon fixes itself once you click it*.
+///
+/// Stated as a hook on the sweep rather than as a notification each view subscribes to, for the
+/// reason the sweep gives for existing at all: the failure mode of a subscription is one view in
+/// the corner keeping the old theme, and that is precisely the bug this is.
+@MainActor
+protocol ThemeDerivedContent: AnyObject {
+
+    /// Bake again against the theme now in force. Called by the app-theme sweep, and by the
+    /// view's own `viewDidChangeEffectiveAppearance` for a system light/dark flip.
+    func rederiveThemedContent()
 }
 
 // MARK: - Refresh
@@ -419,6 +489,10 @@ enum AppThemeRefresh {
             // role it asked for, so the role is resolved again here. Controls that draw their own
             // text ask `Design.Typography` inside `draw(_:)` and need nothing.
             view.reapplyRecordedFont()
+            // Content baked against a role rather than resolved from one — see
+            // `ThemeDerivedContent`. Inside the appearance block, because what it bakes against
+            // is a themed colour and the answer differs per appearance.
+            (view as? ThemeDerivedContent)?.rederiveThemedContent()
             view.needsDisplay = true
 
             // Effect views and anything else deriving from the appearance need their own nudge,

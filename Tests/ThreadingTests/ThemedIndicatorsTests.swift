@@ -33,6 +33,20 @@ final class ThemedIndicatorsTests: XCTestCase {
         return try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
     }
 
+    /// Samples in view points rather than backing pixels. The cache representation is Retina on
+    /// the test host, so a literal pixel coordinate can accidentally inspect a neighbouring
+    /// segment even when the requested point lies in the classic bar's gap.
+    private func colour(of view: NSView, atPointX x: CGFloat, y: CGFloat) throws -> NSColor {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds),
+                                "the view has no drawable bounds")
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scaleX = CGFloat(rep.pixelsWide) / max(1, view.bounds.width)
+        let scaleY = CGFloat(rep.pixelsHigh) / max(1, view.bounds.height)
+        return try XCTUnwrap(
+            rep.colorAt(x: Int(x * scaleX), y: Int(y * scaleY))?.usingColorSpace(.sRGB)
+        )
+    }
+
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
@@ -169,7 +183,7 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// the token live, but AppKit caches the answer until it is told the answer moved — so
     /// repainting alone left every rule in the window ruling for the theme that had just left,
     /// while anything built after the switch took the new weight. Arriving at Editorial (1) from
-    /// Neo Brutalism (3), one window drew both.
+    /// Neo Brutalism (4), one window drew both.
     ///
     /// The same staleness as the split seam's, one view along: see
     /// `AppThemeTests.testTheSeamIsRelaidOutWhenTheThemeChangesUnderIt`.
@@ -178,7 +192,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         let header = try hostedPaneHeader()
         XCTAssertEqual(
             try ruleThickness(in: header),
-            3,
+            AppThemeStyles.neoBrutalism.material.borderWidth,
             "the header did not start at Neo Brutalism's weight"
         )
 
@@ -186,7 +200,7 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         XCTAssertEqual(
             try ruleThickness(in: header),
-            1,
+            AppThemeStyles.editorial.material.borderWidth,
             "the rule kept the weight of the theme that just left"
         )
     }
@@ -435,6 +449,22 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         XCTAssertEqual(try colour(of: bar(at: -1), atX: 1, y: 2).hexString, track.hexString,
                        "a negative fraction still drew a fill")
+    }
+
+    func testSegmentedProgressUsesAClassicSunkenControl() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+        let bar = ThemedProgressBar(frame: NSRect(x: 0, y: 0, width: 100, height: 14))
+        bar.progress = 0.5
+
+        XCTAssertEqual(bar.intrinsicContentSize.height, 14)
+        let segment = try colour(of: bar, atPointX: 5, y: 7)
+        let gap = try colour(of: bar, atPointX: 10, y: 7)
+        let unfilled = try colour(of: bar, atPointX: 70, y: 7)
+        XCTAssertNotEqual(segment.hexString, gap.hexString, "the classic bar became one smooth slab")
+        XCTAssertEqual(gap.hexString, unfilled.hexString, "the gap did not reveal the sunken track")
+
+        AppThemePalette.set(.system)
+        XCTAssertEqual(ThemedProgressBar().intrinsicContentSize.height, 3)
     }
 
     /// Setting the fraction is what asks for the redraw; without it the bar would only move when
@@ -777,9 +807,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// A run promotes the card's first line; it does not put a *third* spinner on screen.
     ///
     /// A terminal session's CLI draws its own a few lines below the card, and a native
-    /// conversation animates one beside its status. The card's copy was the only one sitting on
-    /// the terminal's palette, where an accent the theme never chose reads as a stray colour
-    /// rather than as a state.
+    /// conversation animates one beside its status. The card's copy repeated either one without
+    /// adding another state.
     func testTheRunReceiptCarriesNoSpinnerOfItsOwn() {
         let card = GitStatusOverlayView()
         card.update(with: GitChangeMonitor.Reading(
@@ -796,7 +825,9 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
         // The mark is still there — it says which kind of line this is, which is the job the
         // spinner was doing badly.
-        let marks = everything.compactMap { ($0 as? NSImageView)?.image?.accessibilityDescription }
+        let marks = everything.compactMap {
+            ($0 as? ThemedFloatingGlyphView)?.semanticDescription
+        }
         XCTAssertTrue(marks.contains("Plan"), "the promoted line lost its mark with the spinner")
     }
 
@@ -817,7 +848,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         // Only the marks actually drawn: the card keeps a row per fact in its hierarchy and hides
         // the ones it has nothing to say for, so an undrawn mark has no column to be in.
         let marks = descendants(of: card)
-            .compactMap { $0 as? NSImageView }
+            .compactMap { $0 as? ThemedFloatingGlyphView }
             .filter { !$0.isHiddenOrHasHiddenAncestor }
             .map { card.convert($0.bounds, from: $0).minX }
         XCTAssertEqual(marks.count, 2, "the branch and counters marks should both be drawn")
@@ -1003,9 +1034,9 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
 
         let marks = descendants(of: card)
-            .compactMap { $0 as? NSImageView }
+            .compactMap { $0 as? ThemedFloatingGlyphView }
             .filter { !$0.isHiddenOrHasHiddenAncestor }
-            .compactMap { $0.image?.accessibilityDescription }
+            .compactMap(\.semanticDescription)
         XCTAssertTrue(marks.contains("Model"), "the agent line lost its mark")
     }
 
@@ -1092,32 +1123,30 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
     }
 
-    /// The card carries its colours inside attributed strings, which cannot be re-inked in place —
-    /// so an ink arriving after the row was built has to rebuild it.
-    ///
-    /// **Switched by backdrop, not by app theme.** This card is a `BackdropOverlay`: it floats on
-    /// the *terminal's* ground and takes its ink from there, so an app palette change leaves its
-    /// label colours exactly where they were. Written against `AppThemePalette` first, this test
-    /// passed nothing and proved nothing — both readings were white at 70% and 50%.
-    func testTheAgentLineRestylesWhenTheInkChanges() throws {
+    /// The card carries its colours inside attributed strings, which cannot be re-inked in place;
+    /// a theme change therefore has to rebuild the model row as well as repaint the surface.
+    func testTheAgentLineRestylesWhenTheFloatingChromeChanges() throws {
         WindowBackdrop.set(.terminal(NSColor(srgbRed: 0.05, green: 0.05, blue: 0.07, alpha: 1)))
         defer { WindowBackdrop.set(.chrome) }
+        AppThemePalette.set(AppThemeStyles.win98)
         let card = GitStatusOverlayView()
         card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5", effort: "Extra High"))
         card.applyInk(WindowBackdrop.ink)
 
-        func modelRowColours() -> [NSColor] {
+        func modelRowColours() -> [String] {
             descendants(of: card)
                 .compactMap { $0 as? NSTextField }
                 .filter { !$0.isHiddenOrHasHiddenAncestor }
                 .compactMap { $0.attributedStringValue }
-                .flatMap { string -> [NSColor] in
-                    var found: [NSColor] = []
+                .flatMap { string -> [String] in
+                    var found: [String] = []
                     string.enumerateAttribute(
                         .foregroundColor,
                         in: NSRange(location: 0, length: string.length)
                     ) { value, _, _ in
-                        if let colour = value as? NSColor { found.append(colour) }
+                        guard let colour = value as? NSColor,
+                              let frozen = colour.usingColorSpace(.sRGB) else { return }
+                        found.append(frozen.hexString)
                     }
                     return found
                 }
@@ -1126,21 +1155,27 @@ final class ThemedIndicatorsTests: XCTestCase {
         let before = modelRowColours()
         XCTAssertFalse(before.isEmpty, "the agent line drew no coloured run")
 
-        // A near-white ground has to flip the label ink the dark one produced.
-        WindowBackdrop.set(.terminal(NSColor(srgbRed: 0.97, green: 0.97, blue: 0.95, alpha: 1)))
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
         card.applyInk(WindowBackdrop.ink)
 
         XCTAssertNotEqual(
-            before.map(\.description),
-            modelRowColours().map(\.description),
-            "the agent line kept the ink measured against the previous ground"
+            before,
+            modelRowColours(),
+            "the agent line kept the previous theme's floating-surface ink"
         )
     }
 
     func testRunReceiptRendersUnderSystemAndContrastingThemes() throws {
         Design.Motion.reduceMotionOverrideForTesting = true
 
-        for theme in [AppTheme.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+        for theme in [
+            AppTheme.system,
+            AppThemeStyles.win98,
+            AppThemeStyles.cyberpunk,
+            AppThemeStyles.swissMinimalist,
+            AppThemeStyles.neoBrutalism,
+            AppThemeStyles.claymorphism
+        ] {
             AppThemePalette.set(theme)
             WindowBackdrop.set(.chrome)
 
@@ -1167,16 +1202,11 @@ final class ThemedIndicatorsTests: XCTestCase {
         }
     }
 
-    /// The card floats over the pane's own content, so it has to occlude it. It did not: the
-    /// surface role is the base tone at 14% and the whole view sat at 85%, so under a native
-    /// conversation the agent's text ran straight through the branch name.
-    ///
-    /// Opaque, but *the same colour* — flattening keeps what the role asked for over this
-    /// ground and drops only the see-through, which is why the second half of this test matters
-    /// as much as the first.
-    func testTheGitCardOccludesThePaneTextItFloatsOver() throws {
+    /// The card floats over pane content but belongs to the active chrome. Windows 98 therefore
+    /// keeps its information-yellow surface even over an unrelated green terminal palette.
+    func testTheGitCardUsesOpaqueThemeChromeAboveThePane() throws {
         let ground = NSColor(srgbRed: 0.05, green: 0.12, blue: 0.09, alpha: 1)
-        AppThemePalette.set(.system)
+        AppThemePalette.set(AppThemeStyles.win98)
         WindowBackdrop.set(.terminal(ground))
         defer { WindowBackdrop.set(.chrome) }
 
@@ -1195,16 +1225,57 @@ final class ThemedIndicatorsTests: XCTestCase {
                        "the card's border let the text behind it through")
         XCTAssertEqual(card.alphaValue, 1,
                        "a view-level alpha thins the fill along with what it is quieting")
+        XCTAssertEqual(card.layer?.cornerRadius, 0, "Windows 98 grew modern rounded corners")
+        XCTAssertEqual(card.layer?.shadowOpacity, 0, "Windows 98 gained an ambient shadow")
 
-        // Same colour as the translucent role would have produced over this ground.
-        let expected = try XCTUnwrap(
-            WindowBackdrop.ink.surface.composited(over: ground).usingColorSpace(.sRGB)
-        )
         let painted = try XCTUnwrap(NSColor(cgColor: fill)?.usingColorSpace(.sRGB))
-        for channel in [\NSColor.redComponent, \NSColor.greenComponent, \NSColor.blueComponent] {
-            XCTAssertEqual(painted[keyPath: channel], expected[keyPath: channel], accuracy: 0.001,
-                           "flattening changed the card's colour rather than only its opacity")
-        }
+        XCTAssertEqual(painted.hexString, "#FFFFE1")
+        XCTAssertEqual(
+            descendants(of: card).compactMap { $0 as? ThemedFloatingGlyphView }.count,
+            3,
+            "the themed card lost one of its semantic marks"
+        )
+    }
+
+    /// The floating-surface grammar carries more than colour. Period chrome uses its hard bevel
+    /// instead of a flat rule, while authored modern materials keep the depth construction they
+    /// use on every other panel.
+    func testTheGitCardConsumesTheThemesAuthoredEdgeAndDepth() throws {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "surface-grammar",
+            summary: GitChangeSummary(files: 3, added: 21, removed: 8)
+        ))
+
+        AppThemePalette.set(AppThemeStyles.platinum)
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertNotNil(
+            card.layer?.sublayers?.first { $0.name == "threading.bevel" },
+            "a period card did not consume its material bevel"
+        )
+        XCTAssertEqual(card.layer?.borderWidth, 0,
+                       "the flat border was left on underneath the period bevel")
+        XCTAssertEqual(card.layer?.shadowOpacity, 0,
+                       "the period card gained a modern ambient shadow")
+
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertNil(card.layer?.sublayers?.first { $0.name == "threading.bevel" })
+        XCTAssertGreaterThan(card.layer?.shadowOpacity ?? 0, 0,
+                             "Neo Brutalism lost its hard offset depth")
+
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertNotNil(
+            card.layer?.sublayers?.first { $0.name == "threading.bevel" },
+            "Claymorphism lost its soft inner relief"
+        )
+        XCTAssertGreaterThan(card.layer?.shadowOpacity ?? 0, 0,
+                             "Claymorphism lost its soft outer depth")
+        XCTAssertNotNil(
+            card.layer?.sublayers?.first { $0.name == "threading.glow.highlight" },
+            "Claymorphism lost the authored light half of its paired shadow"
+        )
     }
 
     /// The branch mark and the branch name have to sit on one line, and the pair has to sit in
@@ -1235,7 +1306,9 @@ final class ThemedIndicatorsTests: XCTestCase {
         // counters are a line of their own below it.
         let content = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
         let summary = try XCTUnwrap(content.arrangedSubviews.compactMap { $0 as? NSStackView }.first)
-        let mark = try XCTUnwrap(summary.arrangedSubviews.compactMap { $0 as? NSImageView }.first)
+        let mark = try XCTUnwrap(
+            summary.arrangedSubviews.compactMap { $0 as? ThemedFloatingGlyphView }.first
+        )
         let words = try XCTUnwrap(summary.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
         let markFrame = card.convert(mark.bounds, from: mark)
         let wordsFrame = card.convert(words.bounds, from: words)
@@ -1267,7 +1340,8 @@ final class ThemedIndicatorsTests: XCTestCase {
         }
     }
 
-    /// Draws the card in the states that add and remove a row, light and dark.
+    /// Draws the card in the states that add and remove a row across each floating-surface
+    /// construction: native light/dark, a Windows infotip, a period bevel, hard depth, soft depth.
     ///
     /// One row per fact is a decision a picture settles and an assertion cannot: whether four
     /// facts at the corner of a pane still read as a card rather than as a panel, and whether
@@ -1317,10 +1391,24 @@ final class ThemedIndicatorsTests: XCTestCase {
         ]
 
         Design.Motion.reduceMotionOverrideForTesting = true
+        let variants: [(
+            name: String,
+            theme: AppTheme,
+            appearance: NSAppearance.Name,
+            background: NSColor?
+        )] = [
+            ("system-light", .system, .aqua, nil),
+            ("system-dark", .system, .darkAqua, nil),
+            ("win98-on-terminal", AppThemeStyles.win98, .aqua,
+             NSColor(srgbRed: 0, green: 0.33, blue: 0, alpha: 1)),
+            ("platinum", AppThemeStyles.platinum, .aqua, nil),
+            ("neo-brutalism", AppThemeStyles.neoBrutalism, .aqua, nil),
+            ("claymorphism", AppThemeStyles.claymorphism, .aqua, nil)
+        ]
         var written = 0
-        for (appearanceName, appearanceID) in [("light", NSAppearance.Name.aqua),
-                                               ("dark", NSAppearance.Name.darkAqua)] {
-            let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+        for variant in variants {
+            AppThemePalette.set(variant.theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: variant.appearance))
             var data: Data?
 
             appearance.performAsCurrentDrawingAppearance {
@@ -1341,7 +1429,10 @@ final class ThemedIndicatorsTests: XCTestCase {
 
                     let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: height))
                     host.appearance = appearance
-                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+                    host.applySurface(
+                        fill: variant.background ?? Design.Surface.background,
+                        radius: .fixed(0)
+                    )
 
                     // Laid out from the top down, the way the pane's corner stacks them.
                     var top = Design.Spacing.inset
@@ -1384,12 +1475,12 @@ final class ThemedIndicatorsTests: XCTestCase {
             }
 
             try XCTUnwrap(data).write(
-                to: directory.appendingPathComponent("git-card-\(appearanceName).png")
+                to: directory.appendingPathComponent("git-card-\(variant.name).png")
             )
             written += 1
         }
 
-        XCTAssertEqual(written, 2)
+        XCTAssertEqual(written, variants.count)
         print("Rendered the git card storybook to \(directory.path)")
     }
 
@@ -1533,10 +1624,10 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(opened, 1)
     }
 
-    /// Both button rows are inked for the backdrop they float on, which is what gives them a
+    /// Both button rows are inked for the floating surface they sit on, which is what gives them a
     /// hover at all. The audience row was given neither colour, so it drew in AppKit's own label
     /// tier and lifted to nothing — inert by omission rather than by design.
-    func testBothButtonRowsAreInkedForTheBackdropTheyFloatOn() throws {
+    func testBothButtonRowsAreInkedForTheFloatingSurfaceTheySitOn() throws {
         let card = GitStatusOverlayView()
         card.updateSubagents(workingCount: 1, doneCount: 0)
         card.updateAudience(GitStatusOverlayView.AudienceReading(following: 0, isShared: true))
@@ -1550,10 +1641,10 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(buttons.count, 2, "the card drew \(buttons.count) button rows, not two")
 
         for button in buttons {
-            XCTAssertEqual(button.hoverFill, WindowBackdrop.ink.surfaceHover,
+            XCTAssertEqual(button.hoverFill, Design.Ink.chrome.surfaceHover,
                            "\(button.title) raises nothing under the pointer")
-            XCTAssertEqual(button.contentTintColor, WindowBackdrop.ink.secondary,
-                           "\(button.title) is not inked for the backdrop it floats on")
+            XCTAssertEqual(button.contentTintColor, Design.Ink.chrome.secondary,
+                           "\(button.title) is not inked for the floating chrome it sits on")
         }
     }
 

@@ -23,14 +23,19 @@ extension AppThemeStyles {
                 .ground: hex("#C0C0C0"),
                 .surface: hex("#C0C0C0"),
                 .panel: hex("#C0C0C0"),
+                .fieldSurface: hex("#FFFFFF"),
                 .elevated: hex("#D4D0C8"),
+                .floatingSurface: hex("#FFFFE1"),
                 .border: hex("#808080"),
                 .divider: hex("#808080"),
                 .label: hex("#000000"),
                 .accent: hex("#000080"),
                 .accentMuted: hex("#000080").withAlphaComponent(0.16),
                 .controlResting: hex("#C0C0C0"),
-                .controlHover: hex("#D0D0D0"),
+                // Win32 pushbuttons did not recolour on pointer hover; state lived in focus and
+                // the pressed bevel. Keeping the same face also prevents classic dropdowns from
+                // acquiring a modern rollover wash.
+                .controlHover: hex("#C0C0C0"),
                 .selection: hex("#000080").withAlphaComponent(0.9),
                 .statusPositive: hex("#008000"),
                 .statusWarning: hex("#808000"),
@@ -73,8 +78,10 @@ extension AppThemeStyles {
             ),
             // Square everything — validation requires it of a bevel material — one-point
             // rules, no halo (light came from the top-left in 1998, not from behind), and
-            // Tahoma when the machine has it, degrading to the system face per
-            // `Material.fontFamily`'s contract. Nothing is bundled.
+            // Windows 98's English shell used 8-point MS Sans Serif. The original bitmap face is
+            // rarely installed on a current Mac; Microsoft Sans Serif is its metric-compatible
+            // TrueType successor, then Tahoma is the last Windows-era substitute. Nothing is
+            // bundled — installing the original automatically moves it to the front.
             material: AppTheme.Material(
                 panelRadius: 0,
                 controlRadius: 0,
@@ -83,9 +90,20 @@ extension AppThemeStyles {
                 // that density throughout the chrome instead of shrinking one title label.
                 textScale: 0.72,
                 glow: nil,
+                popoverStyle: windowsInfotipStyle,
+                buttonStyle: AppTheme.Material.ButtonStyle(
+                    fontWeight: .regular,
+                    primaryTreatment: .raised,
+                    primaryRole: .label,
+                    pressedOffsetX: 1,
+                    pressedOffsetY: 1
+                ),
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
-                fontFamily: "Tahoma"
+                fontFamily: "MS Sans Serif",
+                fontFallbacks: ["Microsoft Sans Serif", "Tahoma"],
+                progressStyle: .segmented,
+                choiceStyle: .dropdown
             ),
             sidebar: SidebarStyle(
                 // Explorer separates its white work area from the surrounding button-face

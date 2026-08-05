@@ -68,9 +68,19 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.92,
                 glow: nil,
+                popoverStyle: periodPopoverStyle,
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .monospaced,
-                fontFamily: "Monaco",
+                // Workbench 3.1's ROM face is Topaz 8. The maintained multi-platform port names
+                // its 2.x face for the A600/A1200/A4000 family; keep the shorter names too for
+                // other ports, then Monaco as the safe installed monospaced fallback.
+                fontFamily: "Topaz",
+                fontFallbacks: [
+                    "Topaz a600a1200a4000",
+                    "TopazPlus a600a1200a4000",
+                    "TopazPlus",
+                    "Monaco"
+                ],
                 scrollerPlacement: .trailing,
                 scrollerTrackStyle: .stippled
             ),

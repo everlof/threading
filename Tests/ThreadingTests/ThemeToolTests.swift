@@ -249,7 +249,14 @@ final class ThemeToolTests: XCTestCase {
                         "radius": 8,
                         "opacity": 0.25,
                         "offset_x": 3,
-                        "offset_y": -4
+                        "offset_y": -4,
+                        "highlight": {
+                          "role": "bevel_highlight",
+                          "radius": 7,
+                          "opacity": 0.4,
+                          "offset_x": -3,
+                          "offset_y": 4
+                        }
                       }
                     },
                     "terminal_colors": {"bright_magenta": "#DD99FF"}
@@ -272,6 +279,10 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(dark.material?.glow?.radius, 8)
         XCTAssertEqual(dark.material?.glow?.offsetX, 3)
         XCTAssertEqual(dark.material?.glow?.offsetY, -4)
+        XCTAssertEqual(dark.material?.glow?.highlight?.role, "bevel_highlight")
+        XCTAssertEqual(dark.material?.glow?.highlight?.radius, 7)
+        XCTAssertEqual(dark.material?.glow?.highlight?.offsetX, -3)
+        XCTAssertEqual(dark.material?.glow?.highlight?.offsetY, 4)
         XCTAssertEqual(dark.terminalColors?["bright_magenta"], "#DD99FF")
         XCTAssertEqual(arguments.apply, true)
     }
@@ -672,6 +683,233 @@ final class ThemeToolTests: XCTestCase {
         ] {
             XCTAssertNotNil(sidebarProperties[field], "sidebar schema lost \(field)")
         }
+    }
+
+    // MARK: - Chrome
+
+    func testUpdateAppThemeDecodesAChromePatch() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-x",
+                "variants": {
+                  "light": {
+                    "material": {"bevel": {"width": 2, "style": "soft"}},
+                    "chrome": {
+                      "title_bar": {
+                        "active_gradient": {
+                          "angle_degrees": 90,
+                          "stops": [
+                            {"color": "#000080", "position": 0},
+                            {"color": "#1084D0", "position": 1}
+                          ]
+                        },
+                        "ink": "#FFFFFF",
+                        "height": 30,
+                        "button_glyph_style": "squares"
+                      },
+                      "frame": {"width": 4}
+                    }
+                  }
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let variant = try XCTUnwrap(arguments.variants?["light"])
+        let chrome = try XCTUnwrap(variant.chrome)
+        XCTAssertEqual(chrome.titleBar?.activeGradient?.angleDegrees, 90)
+        XCTAssertEqual(chrome.titleBar?.activeGradient?.stops?.count, 2)
+        XCTAssertEqual(chrome.titleBar?.ink, "#FFFFFF")
+        XCTAssertEqual(chrome.titleBar?.height, 30)
+        XCTAssertEqual(chrome.titleBar?.buttonGlyphStyle, "squares")
+        XCTAssertEqual(chrome.frame?.width, 4)
+        XCTAssertEqual(variant.material?.bevel?.width, 2)
+        XCTAssertEqual(variant.material?.bevel?.style, "soft")
+    }
+
+    /// The whole loop an agent runs on the frame: create a takeover theme, read the block
+    /// back in the same vocabulary, prove an unrelated patch inherits it untouched, and hand
+    /// the frame back with `remove`.
+    func testAgentCanTakeOverReadAndReturnTheWindowFrame() throws {
+        let name = "Chrome Tool Theme \(UUID().uuidString)"
+        let kind = AppThemeStyles.cyberpunk.availableVariants[0]
+
+        let chrome = AppThemeChromeArguments(
+            titleBar: AppThemeChromeTitleBarArguments(
+                activeGradient: AppThemeGradientArguments(
+                    angleDegrees: 90,
+                    stops: [
+                        AppThemeGradientStopArguments(color: "#000080", position: 0),
+                        AppThemeGradientStopArguments(color: "#1084D0", position: 1)
+                    ]
+                ),
+                inactiveGradient: nil,
+                removeInactiveGradient: nil,
+                ink: "#FFFFFF",
+                inactiveInk: nil,
+                titleAlignment: "leading",
+                height: 30,
+                buttonGlyphStyle: "squares"
+            ),
+            frame: AppThemeChromeFrameArguments(width: 4),
+            removeFrame: nil,
+            remove: nil
+        )
+        let create = CreateAppThemeArguments(
+            name: name,
+            baseID: AppThemeStyles.cyberpunk.id.rawValue,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(chrome: chrome)],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let created = coordinator().createAppTheme(create)
+        XCTAssertFalse(created.isError, created.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+        XCTAssertTrue(theme.takesOverWindowChrome)
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let variantDocument = try XCTUnwrap(variants[kind.rawValue] as? [String: Any])
+        let chromeDocument = try XCTUnwrap(variantDocument["chrome"] as? [String: Any])
+        let titleBar = try XCTUnwrap(chromeDocument["title_bar"] as? [String: Any])
+        XCTAssertEqual(titleBar["ink"] as? String, "#FFFFFF")
+        XCTAssertEqual(titleBar["height"] as? Double, 30)
+        XCTAssertEqual(titleBar["button_glyph_style"] as? String, "squares")
+        let frame = try XCTUnwrap(chromeDocument["frame"] as? [String: Any])
+        XCTAssertEqual(frame["width"] as? Double, 4)
+
+        // An unrelated patch says nothing about chrome, so the frame stays taken over —
+        // the inherit rule the ChromeChange type exists for.
+        let recolor = UpdateAppThemeArguments(
+            themeID: theme.id.rawValue,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(
+                roles: ["accent": "#FF8800"]
+            )],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let recolored = coordinator().updateAppTheme(recolor)
+        XCTAssertFalse(recolored.isError, recolored.text)
+        let kept = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
+        XCTAssertNotNil(kept.variant(kind)?.chrome, "an unrelated patch stripped the chrome")
+
+        let handBack = UpdateAppThemeArguments(
+            themeID: theme.id.rawValue,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(
+                chrome: AppThemeChromeArguments(
+                    titleBar: nil, frame: nil, removeFrame: nil, remove: true
+                )
+            )],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let returned = coordinator().updateAppTheme(handBack)
+        XCTAssertFalse(returned.isError, returned.text)
+        let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
+        XCTAssertNil(bare.variant(kind)?.chrome)
+        XCTAssertFalse(bare.takesOverWindowChrome)
+    }
+
+    /// The band's gate travels the tool path: ink the band swallows is refused verbatim.
+    func testAnUnreadableBandIsRefusedThroughTheTool() throws {
+        let name = "Unreadable Chrome \(UUID().uuidString)"
+        let kind = AppThemeStyles.cyberpunk.availableVariants[0]
+
+        let create = CreateAppThemeArguments(
+            name: name,
+            baseID: AppThemeStyles.cyberpunk.id.rawValue,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(
+                chrome: AppThemeChromeArguments(
+                    titleBar: AppThemeChromeTitleBarArguments(
+                        activeGradient: AppThemeGradientArguments(
+                            angleDegrees: nil,
+                            stops: [
+                                AppThemeGradientStopArguments(color: "#FFFFFF", position: 0),
+                                AppThemeGradientStopArguments(color: "#FFFFFF", position: 1)
+                            ]
+                        ),
+                        inactiveGradient: nil,
+                        removeInactiveGradient: nil,
+                        ink: "#FFFFFF",
+                        inactiveInk: nil,
+                        titleAlignment: nil,
+                        height: nil,
+                        buttonGlyphStyle: nil
+                    ),
+                    frame: nil,
+                    removeFrame: nil,
+                    remove: nil
+                )
+            )],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let result = coordinator().createAppTheme(create)
+        XCTAssertTrue(result.isError, "white ink on a white band was accepted")
+        XCTAssertTrue(result.text.contains("contrast"), result.text)
+        XCTAssertNil(AppThemeLibrary.all.first { $0.name == name })
+    }
+
+    func testTheVariantSchemaDescribesTheChromeBlock() throws {
+        let schema = try schema(for: MCPTools.createAppTheme)
+        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
+        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
+        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
+        let light = try XCTUnwrap(variantProperties["light"] as? [String: Any])
+        let lightProperties = try XCTUnwrap(light["properties"] as? [String: Any])
+        let chrome = try XCTUnwrap(
+            lightProperties["chrome"] as? [String: Any],
+            "the variant schema does not describe the chrome block"
+        )
+        let chromeProperties = try XCTUnwrap(chrome["properties"] as? [String: Any])
+        for field in ["title_bar", "frame", "remove_frame", "remove"] {
+            XCTAssertNotNil(chromeProperties[field], "chrome schema lost \(field)")
+        }
+        let material = try XCTUnwrap(lightProperties["material"] as? [String: Any])
+        let materialProperties = try XCTUnwrap(material["properties"] as? [String: Any])
+        let bevel = try XCTUnwrap(materialProperties["bevel"] as? [String: Any])
+        let bevelProperties = try XCTUnwrap(bevel["properties"] as? [String: Any])
+        XCTAssertNotNil(bevelProperties["style"], "material schema lost soft-bevel style")
+        XCTAssertNotNil(materialProperties["remove_bevel"], "material schema lost remove_bevel")
     }
 
     // MARK: - Window Chrome
@@ -1179,6 +1417,43 @@ final class ThemeToolTests: XCTestCase {
 
         XCTAssertNotNil(glowProperties["offset_x"])
         XCTAssertNotNil(glowProperties["offset_y"])
+        let highlight = try XCTUnwrap(glowProperties["highlight"] as? [String: Any])
+        let highlightProperties = try XCTUnwrap(highlight["properties"] as? [String: Any])
+        XCTAssertNotNil(highlightProperties["role"])
+        XCTAssertNotNil(highlightProperties["radius"])
+        XCTAssertNotNil(highlightProperties["opacity"])
+        XCTAssertNotNil(highlightProperties["offset_x"])
+        XCTAssertNotNil(highlightProperties["offset_y"])
+        XCTAssertNotNil(glowProperties["remove_highlight"])
+        let controlGlow = try XCTUnwrap(materialProperties["control_glow"] as? [String: Any])
+        let controlGlowProperties = try XCTUnwrap(
+            controlGlow["properties"] as? [String: Any]
+        )
+        XCTAssertNotNil(controlGlowProperties["highlight"])
+        XCTAssertNotNil(controlGlowProperties["remove_highlight"])
+        XCTAssertNotNil(materialProperties["remove_control_glow"])
+        let popoverStyle = try XCTUnwrap(
+            materialProperties["popover_style"] as? [String: Any]
+        )
+        let popoverProperties = try XCTUnwrap(
+            popoverStyle["properties"] as? [String: Any]
+        )
+        for field in ["arrow", "surface_role", "edge", "shadow", "density", "glyph_style"] {
+            XCTAssertNotNil(popoverProperties[field], "popover_style lost \(field)")
+        }
+        XCTAssertNotNil(materialProperties["remove_popover_style"])
+        XCTAssertNotNil(materialProperties["control_border_width"])
+        XCTAssertNotNil(materialProperties["remove_control_border_width"])
+        let backdropPattern = try XCTUnwrap(
+            materialProperties["backdrop_pattern"] as? [String: Any]
+        )
+        let backdropProperties = try XCTUnwrap(
+            backdropPattern["properties"] as? [String: Any]
+        )
+        for field in ["kind", "role", "opacity", "spacing", "line_width"] {
+            XCTAssertNotNil(backdropProperties[field], "backdrop_pattern lost \(field)")
+        }
+        XCTAssertNotNil(materialProperties["remove_backdrop_pattern"])
 
         // A theme states a typeface as plainly as it states a palette, so the vocabulary an
         // agent reads has to offer both — and the named family beside them, for a theme whose
@@ -1187,8 +1462,33 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNotNil(materialProperties["text_scale"])
         XCTAssertNotNil(materialProperties["font_family"])
         XCTAssertNotNil(materialProperties["remove_font_family"])
+        XCTAssertNotNil(materialProperties["font_fallbacks"])
+        XCTAssertNotNil(materialProperties["remove_font_fallbacks"])
         XCTAssertNotNil(materialProperties["scroller_placement"])
         XCTAssertNotNil(materialProperties["scroller_track_style"])
+        XCTAssertNotNil(materialProperties["progress_style"])
+        XCTAssertNotNil(materialProperties["choice_style"])
+        let buttonStyle = try XCTUnwrap(materialProperties["button_style"] as? [String: Any])
+        let buttonProperties = try XCTUnwrap(buttonStyle["properties"] as? [String: Any])
+        for field in [
+            "text_transform", "font_weight", "typeface", "font_family", "tracking",
+            "primary_treatment", "primary_role", "primary_border_role", "remove_primary_border",
+            "hover_offset_x", "hover_offset_y", "pressed_offset_x", "pressed_offset_y",
+            "collapse_shadow_on_hover"
+        ] {
+            XCTAssertNotNil(buttonProperties[field], "button_style lost \(field)")
+        }
+        XCTAssertNotNil(materialProperties["remove_button_style"])
+        let headingStyle = try XCTUnwrap(
+            materialProperties["heading_style"] as? [String: Any]
+        )
+        let headingProperties = try XCTUnwrap(
+            headingStyle["properties"] as? [String: Any]
+        )
+        for field in ["typeface", "font_family", "font_weight", "italic"] {
+            XCTAssertNotNil(headingProperties[field], "heading_style lost \(field)")
+        }
+        XCTAssertNotNil(materialProperties["remove_heading_style"])
         XCTAssertNil(materialProperties["fontFamily"], "the wire vocabulary is snake_case")
 
         // The accepted values travel in the description: an agent reading a style brief that
@@ -1210,7 +1510,51 @@ final class ThemeToolTests: XCTestCase {
               "arguments": {
                 "theme_id": "custom-violet",
                 "variants": {
-                  "light": {"material": {"text_scale": 0.85, "typeface": "serif", "font_family": "Baskerville"}}
+                  "light": {"material": {
+                    "control_border_width": 2,
+                    "font_family": "Baskerville",
+                    "font_fallbacks": ["Palatino"],
+                    "backdrop_pattern": {
+                      "kind": "diagonal_grid",
+                      "role": "accent",
+                      "opacity": 0.03,
+                      "spacing": 40,
+                      "line_width": 1
+                    },
+                    "text_scale": 0.85,
+                    "popover_style": {
+                      "arrow": "none",
+                      "surface_role": "floating_surface",
+                      "edge": "material",
+                      "shadow": "none",
+                      "density": "compact",
+                      "glyph_style": "classic"
+                    },
+                    "typeface": "serif",
+                    "font_family": "Baskerville",
+                    "font_fallbacks": ["Palatino"],
+                    "heading_style": {
+                      "typeface": "serif",
+                      "font_family": "Baskerville",
+                      "font_weight": "regular",
+                      "italic": true
+                    },
+                    "button_style": {
+                      "text_transform": "uppercase",
+                      "font_weight": "bold",
+                      "typeface": "serif",
+                      "font_family": "Baskerville",
+                      "tracking": 0.75,
+                      "primary_treatment": "outlined",
+                      "primary_role": "syntax_type",
+                      "primary_border_role": "label",
+                      "hover_offset_x": 4,
+                      "hover_offset_y": 4,
+                      "pressed_offset_x": 2,
+                      "pressed_offset_y": 2,
+                      "collapse_shadow_on_hover": true
+                    }
+                  }}
                 }
               }
             }
@@ -1222,7 +1566,312 @@ final class ThemeToolTests: XCTestCase {
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.typeface, "serif")
         XCTAssertEqual(material.fontFamily, "Baskerville")
+        XCTAssertEqual(material.fontFallbacks, ["Palatino"])
+        XCTAssertEqual(material.controlBorderWidth, 2)
         XCTAssertEqual(material.textScale, 0.85)
+        let popover = try XCTUnwrap(material.popoverStyle)
+        XCTAssertEqual(popover.arrow, "none")
+        XCTAssertEqual(popover.surfaceRole, "floating_surface")
+        XCTAssertEqual(popover.edge, "material")
+        XCTAssertEqual(popover.shadow, "none")
+        XCTAssertEqual(popover.density, "compact")
+        XCTAssertEqual(popover.glyphStyle, "classic")
+        let heading = try XCTUnwrap(material.headingStyle)
+        XCTAssertEqual(heading.typeface, "serif")
+        XCTAssertEqual(heading.fontFamily, "Baskerville")
+        XCTAssertEqual(heading.fontWeight, "regular")
+        XCTAssertEqual(heading.italic, true)
+        let pattern = try XCTUnwrap(material.backdropPattern)
+        XCTAssertEqual(pattern.kind, "diagonal_grid")
+        XCTAssertEqual(pattern.role, "accent")
+        XCTAssertEqual(pattern.opacity, 0.03)
+        XCTAssertEqual(pattern.spacing, 40)
+        XCTAssertEqual(pattern.lineWidth, 1)
+        let button = try XCTUnwrap(material.buttonStyle)
+        XCTAssertEqual(button.textTransform, "uppercase")
+        XCTAssertEqual(button.fontWeight, "bold")
+        XCTAssertEqual(button.typeface, "serif")
+        XCTAssertEqual(button.fontFamily, "Baskerville")
+        XCTAssertEqual(button.tracking, 0.75)
+        XCTAssertEqual(button.primaryTreatment, "outlined")
+        XCTAssertEqual(button.primaryRole, "syntax_type")
+        XCTAssertEqual(button.primaryBorderRole, "label")
+        XCTAssertEqual(button.hoverOffsetX, 4)
+        XCTAssertEqual(button.hoverOffsetY, 4)
+        XCTAssertEqual(button.pressedOffsetX, 2)
+        XCTAssertEqual(button.pressedOffsetY, 2)
+        XCTAssertEqual(button.collapseShadowOnHover, true)
+    }
+
+    func testMaterialPatchCanRestoreInheritedControlBorderWidth() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-violet",
+                "variants": {
+                  "light": {"material": {"remove_control_border_width": true}}
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let material = try XCTUnwrap(arguments.variants?["light"]?.material)
+        XCTAssertEqual(material.removeControlBorderWidth, true)
+        XCTAssertNil(material.controlBorderWidth)
+    }
+
+    func testMaterialPatchCanRemoveBackdropPattern() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-violet",
+                "variants": {
+                  "light": {"material": {"remove_backdrop_pattern": true}}
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let material = try XCTUnwrap(arguments.variants?["light"]?.material)
+        XCTAssertEqual(material.removeBackdropPattern, true)
+        XCTAssertNil(material.backdropPattern)
+    }
+
+    func testMaterialPatchCanRemoveHeadingStyle() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-violet",
+                "variants": {
+                  "light": {"material": {"remove_heading_style": true}}
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let material = try XCTUnwrap(arguments.variants?["light"]?.material)
+        XCTAssertEqual(material.removeHeadingStyle, true)
+        XCTAssertNil(material.headingStyle)
+    }
+
+    func testAgentCanAuthorAndReadPopoverMaterial() throws {
+        let name = "Popover Material \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "system",
+                "appearance": "light",
+                "variants": {"light": {"material": {"popover_style": {
+                  "arrow": "none",
+                  "surface_role": "panel",
+                  "edge": "flat",
+                  "shadow": "none",
+                  "density": "compact",
+                  "glyph_style": "classic"
+                }}}},
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let arguments) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+        let result = coordinator().createAppTheme(arguments)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer { _ = AppThemeLibrary.delete(theme) }
+
+        let style = try XCTUnwrap(theme.variant(.light)?.material.popoverStyle)
+        XCTAssertEqual(style.arrow, .none)
+        XCTAssertEqual(style.surfaceRole, .panel)
+        XCTAssertEqual(style.edge, .flat)
+        XCTAssertEqual(style.shadow, .none)
+        XCTAssertEqual(style.density, .compact)
+        XCTAssertEqual(style.glyphStyle, .classic)
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let material = try XCTUnwrap(light["material"] as? [String: Any])
+        let popover = try XCTUnwrap(material["popover_style"] as? [String: Any])
+        XCTAssertEqual(popover["surface_role"] as? String, "panel")
+        XCTAssertEqual(popover["glyph_style"] as? String, "classic")
+    }
+
+    func testAgentCanAuthorAnUnavailableHistoricalFaceWithAnInstalledFallback() throws {
+        let name = "Historical Font Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "system",
+                "appearance": "light",
+                "variants": {"light": {"material": {
+                  "font_family": "Definitely Missing Historical Face",
+                  "font_fallbacks": ["Also Missing Historical Face", "Helvetica"]
+                }}},
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let arguments) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+
+        let result = coordinator().createAppTheme(arguments)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer { _ = AppThemeLibrary.delete(theme) }
+
+        let material = try XCTUnwrap(theme.variant(.light)?.material)
+        XCTAssertEqual(material.fontFamily, "Definitely Missing Historical Face")
+        XCTAssertEqual(material.fontFallbacks, ["Also Missing Historical Face", "Helvetica"])
+    }
+
+    func testAgentCanAuthorAndReadAReferenceButtonStyle() throws {
+        let name = "Reference Button Theme \(UUID().uuidString)"
+        let createCall = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "\(name)",
+                "base_id": "neo-brutalism",
+                "appearance": "light",
+                "variants": {
+                  "light": {"material": {
+                    "control_border_width": 2,
+                    "font_family": "Baskerville",
+                    "font_fallbacks": ["Palatino"],
+                    "backdrop_pattern": {
+                      "kind": "diagonal_grid",
+                      "role": "accent",
+                      "opacity": 0.04,
+                      "spacing": 36,
+                      "line_width": 1
+                    },
+                    "button_style": {
+                      "text_transform": "uppercase",
+                      "font_weight": "bold",
+                      "typeface": "serif",
+                      "font_family": "Baskerville",
+                      "tracking": 0.8,
+                      "primary_treatment": "outlined",
+                      "primary_role": "syntax_type",
+                      "primary_border_role": "label",
+                      "hover_offset_x": 3,
+                      "hover_offset_y": 3,
+                      "pressed_offset_x": 1,
+                      "pressed_offset_y": 2,
+                      "collapse_shadow_on_hover": true
+                    },
+                    "heading_style": {
+                      "typeface": "serif",
+                      "font_family": "Baskerville",
+                      "font_weight": "regular",
+                      "italic": true
+                    }
+                  }}
+                },
+                "apply": false
+              }
+            }
+            """)
+        guard case .createAppTheme(let create) = createCall else {
+            return XCTFail("decoded as \(createCall.name)")
+        }
+
+        let result = coordinator().createAppTheme(create)
+        XCTAssertFalse(result.isError, result.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(.light)?.material.buttonStyle)
+        XCTAssertEqual(theme.variant(.light)?.material.controlBorderWidth, 2)
+        XCTAssertEqual(theme.variant(.light)?.material.fontFamily, "Baskerville")
+        XCTAssertEqual(theme.variant(.light)?.material.fontFallbacks, ["Palatino"])
+        let storedPattern = try XCTUnwrap(theme.variant(.light)?.material.backdropPattern)
+        XCTAssertEqual(storedPattern.kind, .diagonalGrid)
+        XCTAssertEqual(storedPattern.role, .accent)
+        XCTAssertEqual(storedPattern.opacity, 0.04)
+        XCTAssertEqual(storedPattern.spacing, 36)
+        XCTAssertEqual(storedPattern.lineWidth, 1)
+        XCTAssertEqual(stored.textTransform, .uppercase)
+        XCTAssertEqual(stored.fontWeight, .bold)
+        XCTAssertEqual(stored.typeface, .serif)
+        XCTAssertEqual(stored.fontFamily, "Baskerville")
+        XCTAssertEqual(stored.tracking, 0.8)
+        XCTAssertEqual(stored.primaryTreatment, .outlined)
+        XCTAssertEqual(stored.primaryRole, .syntaxType)
+        XCTAssertEqual(stored.primaryBorderRole, .label)
+        XCTAssertEqual(stored.hoverOffsetX, 3)
+        XCTAssertEqual(stored.hoverOffsetY, 3)
+        XCTAssertEqual(stored.pressedOffsetX, 1)
+        XCTAssertEqual(stored.pressedOffsetY, 2)
+        XCTAssertTrue(stored.collapseShadowOnHover)
+        let storedHeading = try XCTUnwrap(theme.variant(.light)?.material.headingStyle)
+        XCTAssertEqual(storedHeading.typeface, .serif)
+        XCTAssertEqual(storedHeading.fontFamily, "Baskerville")
+        XCTAssertEqual(storedHeading.fontWeight, .regular)
+        XCTAssertTrue(storedHeading.italic)
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let material = try XCTUnwrap(light["material"] as? [String: Any])
+        XCTAssertEqual(material["control_border_width"] as? Double, 2)
+        XCTAssertEqual(material["font_family"] as? String, "Baskerville")
+        XCTAssertEqual(material["font_fallbacks"] as? [String], ["Palatino"])
+        let pattern = try XCTUnwrap(material["backdrop_pattern"] as? [String: Any])
+        XCTAssertEqual(pattern["kind"] as? String, "diagonal_grid")
+        XCTAssertEqual(pattern["role"] as? String, "accent")
+        XCTAssertEqual(pattern["opacity"] as? Double, 0.04)
+        XCTAssertEqual(pattern["spacing"] as? Double, 36)
+        XCTAssertEqual(pattern["line_width"] as? Double, 1)
+        let button = try XCTUnwrap(material["button_style"] as? [String: Any])
+        XCTAssertEqual(button["text_transform"] as? String, "uppercase")
+        XCTAssertEqual(button["typeface"] as? String, "serif")
+        XCTAssertEqual(button["font_family"] as? String, "Baskerville")
+        XCTAssertEqual(button["primary_treatment"] as? String, "outlined")
+        XCTAssertEqual(button["primary_role"] as? String, "syntax_type")
+        XCTAssertEqual(button["primary_border_role"] as? String, "label")
+        XCTAssertEqual(button["pressed_offset_y"] as? Double, 2)
+        XCTAssertEqual(button["collapse_shadow_on_hover"] as? Bool, true)
+        let heading = try XCTUnwrap(material["heading_style"] as? [String: Any])
+        XCTAssertEqual(heading["typeface"] as? String, "serif")
+        XCTAssertEqual(heading["font_family"] as? String, "Baskerville")
+        XCTAssertEqual(heading["font_weight"] as? String, "regular")
+        XCTAssertEqual(heading["italic"] as? Bool, true)
     }
 
     func testAgentCanAuthorAndReadOpenStepScrollerMaterial() throws {
@@ -1238,7 +1887,9 @@ final class ThemeToolTests: XCTestCase {
                   "light": {
                     "material": {
                       "scroller_placement": "leading",
-                      "scroller_track_style": "stippled"
+                      "scroller_track_style": "stippled",
+                      "progress_style": "segmented",
+                      "choice_style": "dropdown"
                     },
                     "chrome": {
                       "title_bar": {
@@ -1266,6 +1917,8 @@ final class ThemeToolTests: XCTestCase {
         let materialPatch = try XCTUnwrap(create.variants?["light"]?.material)
         XCTAssertEqual(materialPatch.scrollerPlacement, "leading")
         XCTAssertEqual(materialPatch.scrollerTrackStyle, "stippled")
+        XCTAssertEqual(materialPatch.progressStyle, "segmented")
+        XCTAssertEqual(materialPatch.choiceStyle, "dropdown")
 
         let result = coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
@@ -1279,6 +1932,8 @@ final class ThemeToolTests: XCTestCase {
         let stored = try XCTUnwrap(theme.variant(.light))
         XCTAssertEqual(stored.material.scrollerPlacement, .leading)
         XCTAssertEqual(stored.material.scrollerTrackStyle, .stippled)
+        XCTAssertEqual(stored.material.progressStyle, .segmented)
+        XCTAssertEqual(stored.material.choiceStyle, .dropdown)
         XCTAssertEqual(stored.chrome?.titleBar.buttonGlyphStyle, .openStep)
         XCTAssertEqual(stored.chrome?.titleBar.buttonPlacement, .bookends)
         XCTAssertEqual(stored.chrome?.titleBar.visibleButtons, [.minimize, .close])
@@ -1295,6 +1950,8 @@ final class ThemeToolTests: XCTestCase {
         let material = try XCTUnwrap(light["material"] as? [String: Any])
         XCTAssertEqual(material["scroller_placement"] as? String, "leading")
         XCTAssertEqual(material["scroller_track_style"] as? String, "stippled")
+        XCTAssertEqual(material["progress_style"] as? String, "segmented")
+        XCTAssertEqual(material["choice_style"] as? String, "dropdown")
         let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
         let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
         XCTAssertEqual(title["button_glyph_style"] as? String, "openstep")
@@ -1317,6 +1974,36 @@ final class ThemeToolTests: XCTestCase {
             material["typeface"] as? String, "serif",
             "Newsprint is a serif brief and the document should say so"
         )
+    }
+
+    func testGetAppThemeReportsBothHalvesOfAPairedGlow() throws {
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: "claymorphism")
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let material = try XCTUnwrap(light["material"] as? [String: Any])
+        let glow = try XCTUnwrap(material["glow"] as? [String: Any])
+        let highlight = try XCTUnwrap(glow["highlight"] as? [String: Any])
+        let controlGlow = try XCTUnwrap(material["control_glow"] as? [String: Any])
+        let controlHighlight = try XCTUnwrap(controlGlow["highlight"] as? [String: Any])
+
+        XCTAssertEqual(glow["role"] as? String, "divider")
+        XCTAssertEqual(glow["offset_x"] as? Double, 16)
+        XCTAssertEqual(glow["offset_y"] as? Double, -16)
+        XCTAssertEqual(highlight["role"] as? String, "bevel_highlight")
+        XCTAssertEqual(highlight["offset_x"] as? Double, -10)
+        XCTAssertEqual(highlight["offset_y"] as? Double, 10)
+        XCTAssertEqual(controlGlow["role"] as? String, "accent")
+        XCTAssertEqual(controlGlow["offset_x"] as? Double, 6)
+        XCTAssertEqual(controlGlow["offset_y"] as? Double, -6)
+        XCTAssertEqual(controlHighlight["role"] as? String, "bevel_highlight")
+        XCTAssertEqual(controlHighlight["offset_x"] as? Double, -4)
+        XCTAssertEqual(controlHighlight["offset_y"] as? Double, 4)
     }
 
     func testAppThemeSchemaMakesOptionalVariantsAndAdaptiveAppearanceExplicit() throws {

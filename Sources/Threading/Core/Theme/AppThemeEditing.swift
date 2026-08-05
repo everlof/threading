@@ -364,8 +364,8 @@ enum AppThemeEditing {
         }
 
         let material = variant.material
-        guard (0...24).contains(material.panelRadius) else {
-            throw AppThemeEditingError.invalid("panel_radius must be between 0 and 24.")
+        guard (0...40).contains(material.panelRadius) else {
+            throw AppThemeEditingError.invalid("panel_radius must be between 0 and 40.")
         }
         guard (0...24).contains(material.controlRadius) else {
             throw AppThemeEditingError.invalid("control_radius must be between 0 and 24.")
@@ -373,51 +373,162 @@ enum AppThemeEditing {
         guard (0.5...4).contains(material.borderWidth) else {
             throw AppThemeEditingError.invalid("border_width must be between 0.5 and 4.")
         }
+        if let width = material.controlBorderWidth,
+           !(0.5...4).contains(width) {
+            throw AppThemeEditingError.invalid(
+                "control_border_width must be between 0.5 and 4."
+            )
+        }
         guard (0.65...1.5).contains(material.textScale) else {
             throw AppThemeEditingError.invalid("text_scale must be between 0.65 and 1.5.")
+        }
+
+        let popover = material.popoverStyle
+        guard popover.edge != .material || popover.arrow == .none else {
+            throw AppThemeEditingError.invalid(
+                "popover_style.edge \"material\" requires arrow \"none\" so the bevel owns "
+                    + "one coherent silhouette."
+            )
+        }
+        // Ground, surface, and panel were checked above. Derived roles intentionally inherit
+        // those guarantees, so only separately-authored popover colours need another gate.
+        // This keeps old sparse documents valid now that every material has a default style.
+        if variant.roles[popover.surfaceRole] != nil {
+            let popoverFill = composite(
+                resolved.resolved(popover.surfaceRole, appearance: appearance),
+                over: ground
+            )
+            let popoverLabel = composite(
+                resolved.resolved(.label, appearance: appearance),
+                over: popoverFill
+            )
+            let popoverContrast = ThemeContrast.ratio(popoverLabel, popoverFill)
+            guard popoverContrast >= ThemeContrast.minimumRatio else {
+                throw AppThemeEditingError.invalid(
+                    "popover_style.surface_role \"\(popover.surfaceRole.wireName)\" leaves label "
+                        + "text at only \(formatted(popoverContrast)):1; at least "
+                        + "\(ThemeContrast.minimumRatio):1 is required."
+                )
+            }
+        }
+
+        if let pattern = material.backdropPattern {
+            guard (0...1).contains(pattern.opacity) else {
+                throw AppThemeEditingError.invalid(
+                    "backdrop_pattern.opacity must be between 0 and 1."
+                )
+            }
+            guard (8...64).contains(pattern.spacing) else {
+                throw AppThemeEditingError.invalid(
+                    "backdrop_pattern.spacing must be between 8 and 64 points."
+                )
+            }
+            guard (0.5...6).contains(pattern.lineWidth) else {
+                throw AppThemeEditingError.invalid(
+                    "backdrop_pattern.line_width must be between 0.5 and 6 points."
+                )
+            }
+            guard pattern.lineWidth <= pattern.spacing / 2 else {
+                throw AppThemeEditingError.invalid(
+                    "backdrop_pattern.line_width must be no more than half its spacing."
+                )
+            }
+        }
+
+        let button = material.buttonStyle
+        guard (-1...4).contains(button.tracking) else {
+            throw AppThemeEditingError.invalid(
+                "button_style.tracking must be between -1 and 4 points."
+            )
+        }
+        for (field, value) in [
+            ("hover_offset_x", button.hoverOffsetX),
+            ("hover_offset_y", button.hoverOffsetY),
+            ("pressed_offset_x", button.pressedOffsetX),
+            ("pressed_offset_y", button.pressedOffsetY)
+        ] {
+            guard (-8...8).contains(value) else {
+                throw AppThemeEditingError.invalid(
+                    "button_style.\(field) must be between -8 and 8 points."
+                )
+            }
         }
 
         if let bevel = material.bevel {
             guard (1...3).contains(bevel.width) else {
                 throw AppThemeEditingError.invalid("bevel.width must be between 1 and 3.")
             }
-            // A bevel only draws on square corners (a rectilinear edge has no honest offset
-            // curve for a rounded one), so a material stating both would author a treatment
-            // that never appears. Refused rather than silently ignored.
-            guard material.panelRadius == 0, material.controlRadius == 0 else {
+            // The classic hard edge is rectilinear and has no honest offset curve for a
+            // rounded corner. Soft relief is the rounded counterpart and deliberately follows
+            // that curve, so only the hard construction carries the square-corner requirement.
+            guard bevel.style == .soft
+                    || (material.panelRadius == 0 && material.controlRadius == 0) else {
                 throw AppThemeEditingError.invalid(
-                    "A bevelled material must state panel_radius 0 and control_radius 0 — "
-                        + "bevels draw only on square corners."
+                    "A hard-bevelled material must state panel_radius 0 and control_radius 0 — "
+                        + "use bevel.style \"soft\" for rounded relief."
                 )
             }
         }
 
-        if let glow = material.glow {
+        func validateGlow(_ glow: AppTheme.Glow, field: String) throws {
             // Layout reserves a constant gutter, so a tool-authored shadow may not silently
             // spill beyond it and become clipped by every scroll view. A directed shadow uses
             // part of that budget merely reaching its offset, before its blur begins.
-            guard (0...Design.Size.glowGutter / 2).contains(glow.radius) else {
-                throw AppThemeEditingError.invalid(
-                    "glow.radius must be between 0 and \(Int(Design.Size.glowGutter / 2))."
+            func validateShadow(
+                radius: CGFloat,
+                opacity: Double,
+                offsetX: CGFloat,
+                offsetY: CGFloat,
+                field: String
+            ) throws {
+                guard (0...Design.Size.glowGutter / 2).contains(radius) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field).radius must be between 0 and "
+                            + "\(Int(Design.Size.glowGutter / 2))."
+                    )
+                }
+                guard (0...1).contains(opacity) else {
+                    throw AppThemeEditingError.invalid("\(field).opacity must be between 0 and 1.")
+                }
+                let offsetLimit = Design.Size.glowGutter / 2
+                guard (-offsetLimit...offsetLimit).contains(offsetX),
+                      (-offsetLimit...offsetLimit).contains(offsetY) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field) offsets must be between -\(Int(offsetLimit)) "
+                            + "and \(Int(offsetLimit)) points."
+                    )
+                }
+                let horizontalExtent = abs(offsetX) + radius * 2
+                let verticalExtent = abs(offsetY) + radius * 2
+                guard horizontalExtent <= Design.Size.glowGutter,
+                      verticalExtent <= Design.Size.glowGutter else {
+                    throw AppThemeEditingError.invalid(
+                        "\(field) radius plus offset exceeds the "
+                            + "\(Int(Design.Size.glowGutter))-point panel-shadow gutter."
+                    )
+                }
+            }
+
+            try validateShadow(
+                radius: glow.radius,
+                opacity: glow.opacity,
+                offsetX: glow.offsetX,
+                offsetY: glow.offsetY,
+                field: field
+            )
+            if let highlight = glow.highlight {
+                try validateShadow(
+                    radius: highlight.radius,
+                    opacity: highlight.opacity,
+                    offsetX: highlight.offsetX,
+                    offsetY: highlight.offsetY,
+                    field: "\(field).highlight"
                 )
             }
-            guard (0...1).contains(glow.opacity) else {
-                throw AppThemeEditingError.invalid("glow.opacity must be between 0 and 1.")
-            }
-            guard (-10...10).contains(glow.offsetX), (-10...10).contains(glow.offsetY) else {
-                throw AppThemeEditingError.invalid(
-                    "glow offsets must be between -10 and 10 points."
-                )
-            }
-            let horizontalExtent = abs(glow.offsetX) + glow.radius * 2
-            let verticalExtent = abs(glow.offsetY) + glow.radius * 2
-            guard horizontalExtent <= Design.Size.glowGutter,
-                  verticalExtent <= Design.Size.glowGutter else {
-                throw AppThemeEditingError.invalid(
-                    "glow radius plus offset exceeds the \(Int(Design.Size.glowGutter))-point "
-                        + "panel-shadow gutter."
-                )
-            }
+        }
+        if let glow = material.glow { try validateGlow(glow, field: "glow") }
+        if let glow = material.controlGlow {
+            try validateGlow(glow, field: "control_glow")
         }
 
         if let sidebar = variant.sidebar {

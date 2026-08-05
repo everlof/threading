@@ -15,6 +15,10 @@ is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its
 colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
 alpha instead (`SessionRowView.applyAgentIcon`).
 
+Grok and OpenCode currently use `bolt.circle` and `curlybraces.square` SF Symbol fallbacks.
+`AgentKind.icon` is the
+shared seam, so adding a vetted bundled brand mark later changes neither rows nor menus.
+
 A mark that keeps its own colour can also *vanish* — coral on a holly-red selected row — so
 the row re-decides an `IconBackplate` against the ground it is actually drawn on, per
 selection change. **The plate never resizes the ink**: the mark draws at 13pt (`iconSize`,
@@ -77,12 +81,31 @@ losing instance's quit path skips store teardown for the same reason.
 
 The sidebar draws the *composed* rendition (`ProjectIconStore.displayImage`): rounded-rect
 clipped, and set on a small **backplate** of the opposing tone when the icon's own
-alpha-weighted mean luminance would vanish against the current appearance — a dark mark on
-the dark sidebar gets a light plate, measured from the icon's pixels rather than guessed
+alpha-weighted mean luminance would vanish against the ground it is drawn on — a dark mark on
+a dark sidebar gets a light plate, measured from the icon's pixels rather than guessed
 from its source. The plate colours are fixed neutrals *on purpose*, an exception to the
-system-colours rule: a plate exists to oppose the appearance, and every system colour
-follows it. Rows retain the `ProjectIcon` and re-compose on
-`viewDidChangeEffectiveAppearance`, since the decision is per-appearance.
+system-colours rule: a plate exists to oppose its ground, and every system colour follows it.
+
+**The ground is handed over, never inferred** (`IconBackplate.Ground`, constructible only from
+an `NSColor`). This took a `darkAppearance: Bool` and turned it into one of two constants — the
+tones of the *system* light and dark sidebars, 0.97 and 0.13 — which is the right answer for
+exactly one of the app's twenty-one themes. Windows 98's sidebar is `#C0C0C0`, tone 0.75;
+Claude's coral starburst measures 0.53. Against the constant the separation came out 0.44 and
+against the surface actually painted 0.22, on either side of the 0.24 threshold — so every
+favicon whose own tone fell roughly between 0.51 and 0.73 lost its plate under half the themes
+in the app. The constants are deleted rather than deprecated, and the rendition cache is keyed
+on the ground's quantized tone (`Ground.cacheKey`) instead of on a light/dark flag. Both the
+project tile and the agent mark beside it now go through one rule; `ProjectIconStore` used to
+carry its own luminance thresholds and its own copy of the two plate colours.
+
+**A plate is baked, so it has to be baked again.** Rows retain the `ProjectIcon` and the
+unplated mark and re-compose on `viewDidChangeEffectiveAppearance`, on selection — the ground
+moves when a row is filled with accent — and on an app-theme change, through
+`ThemeDerivedContent`. That last one was missing, and it hid behind the first: `AppThemeLibrary
+.apply` pins `NSApp.appearance` to the theme's mode, so a light→dark switch re-derives every row
+by accident and only a **light→light or dark→dark** switch left the plates deciding against the
+previous theme's surface. It surfaced as *"the icon only fixes itself once you click the row"*,
+because clicking it is the other thing that re-derives.
 
 **The clip rounds a tile, and only a tile** (`fillsItsBounds`: the mean alpha around the
 border of a small render, against `tileEdgeOpacity`). A mark that arrives on transparency
@@ -235,19 +258,21 @@ is exactly what an id-keyed cache serves stale. The same diff posts `AppThemeDid
 new artwork under an unchanged theme id is invisible to the id comparison the registry already
 made.
 
-**The phone cannot do any of this.** iOS has no API that accepts an image: `setAlternateIconName`
-selects from icons compiled into the bundle at build time, and nothing else changes an app icon.
-So `ThreadingMobile` gets one icon copied by `scripts/generate_mobile_app_icon.swift` from
-`Brand/ThreadingMark-Navy-1024.png` — full-bleed and unrounded, because iOS masks the icon itself,
-which is the exact opposite of what the Dock needs.
-`AppIconRenderTests.testThePhoneIconMatchesTheCanonicalBrandExport` pins the asset catalogue to
-that canonical export byte-for-byte, so the website and phone cannot drift by hand.
+**The phone cannot generate an icon at runtime.** iOS has no API that accepts an image:
+`setAlternateIconName` selects from icons compiled into the bundle. The primary icon therefore
+remains the canonical full-bleed `Brand/ThreadingMark-Navy-1024.png`, copied by
+`scripts/generate_mobile_app_icon.swift`; `AppIconRenderTests` pins that copy byte-for-byte.
 
-Per-theme alternates on the phone were considered and are **not** worth it as an auto-follow.
-`RemoteThemeDTO` already carries the theme's id and resolved mode, so the trigger exists — but
-every `setAlternateIconName` call shows a system alert that no public API suppresses, and the
-old present-a-view-controller workaround stopped working in iOS 26.1. A phone tracking its Mac's
-theme would nag on every change. Two further limits, if it is ever revisited: only the stock
-library could be covered, because the wire carries arbitrary resolved colours including
-user-authored themes, and iOS 18's dark and tinted variants are a separate axis driven by the
-user's Home Screen setting, so each alternate is three assets rather than one.
+The built-in Mac styles are also compiled as **manually selected alternate icons**. Run
+`scripts/generate_mobile_theme_icons.sh`: the existing `GeneratedAppIcon` render test draws every
+stock style, then `package_mobile_app_icons.swift` makes each theme ground full-bleed for the iOS
+mask and writes its app-icon and Settings-preview asset sets. The iOS target registers those names
+with `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`; **Settings → App icon** calls
+`setAlternateIconName` only when the user taps one. The picker can recommend the connected Mac's
+current stock style, but it never follows automatically because every change presents an
+unsuppressible system confirmation.
+
+This intentionally covers only the stock library. A custom or extension-contributed Mac theme
+can contain arbitrary colours and marks that were not available when the phone bundle was built.
+An adaptive stock theme may ship light and dark luminosity assets in one alternate set; Home
+Screen tint remains the user's separate system treatment rather than another Threading setting.

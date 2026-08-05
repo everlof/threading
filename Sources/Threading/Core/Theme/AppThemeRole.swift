@@ -21,8 +21,15 @@ enum AppThemeRole: String, CaseIterable, Codable {
     case surface
     /// A container holding content: a card, the prompt box, a settings group.
     case panel
+    /// The writable/value well inside chrome. Derived from `panel` unless a theme states the
+    /// period-specific answer — classic Windows, for example, uses white edit fields on its
+    /// button-face gray.
+    case fieldSurface
     /// A container that sits above `panel` — a popover, a menu-like sheet.
     case elevated
+    /// An anchored floating surface. Derived from `elevated` unless a theme needs a distinct
+    /// period answer, such as the pale information ground used by Windows 98 infotips.
+    case floatingSurface
     /// A control at rest, below full opacity so a row of them stays quiet.
     case controlResting
     /// The same control under the pointer.
@@ -93,7 +100,9 @@ enum AppThemeRole: String, CaseIterable, Codable {
         // of the label's ink is the same recipe styled themes derive their control fills from,
         // and it is visibly a surface on both appearances.
         case .panel: return .labelColor.withAlphaComponent(0.05)
+        case .fieldSurface: return .textBackgroundColor
         case .elevated: return .controlBackgroundColor
+        case .floatingSurface: return .controlBackgroundColor
         case .controlResting: return .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
         case .controlHover: return .unemphasizedSelectedContentBackgroundColor
         case .border: return .separatorColor

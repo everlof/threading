@@ -153,6 +153,12 @@ extension NSColor {
     ///
     /// Terminates because the extremes always pass: at lightness 0 and 1 the gamut mapping has
     /// taken the chroma with it, leaving black and white.
+    ///
+    /// **The answer sits on the boundary.** The bisection converges on the exact lightness where
+    /// the ratio is met, so a caller who needs the floor to hold in *rendered pixels* has to ask
+    /// for a hair more than the floor: the colour goes through an 8-bit channel and a colour
+    /// space on its way to a raster, and either can spend a margin this thin. `GeneratedAppIcon`
+    /// states its own — see the note there.
     func legible(
         on ground: NSColor,
         ratio minimum: CGFloat = ThemeContrast.minimumRatio

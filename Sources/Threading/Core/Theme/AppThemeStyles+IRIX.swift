@@ -67,6 +67,7 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.84,
                 glow: nil,
+                popoverStyle: periodPopoverStyle,
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
                 fontFamily: "Helvetica"

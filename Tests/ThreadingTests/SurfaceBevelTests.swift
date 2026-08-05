@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// The bevel vocabulary: a material states one, `applySurface` and `ThemedSurface.draw`
-/// interpret it, and every theme written before the field existed draws exactly what it
-/// always drew.
+/// The bevel vocabulary: a material states a hard period edge or rounded soft relief,
+/// `applySurface` and `ThemedSurface.draw` interpret it, and every theme written before the
+/// field existed draws exactly what it always drew.
 @MainActor
 final class SurfaceBevelTests: XCTestCase {
 
@@ -38,6 +38,31 @@ final class SurfaceBevelTests: XCTestCase {
                 roles: [
                     .bevelHighlight: NSColor(hex: "#FFFFFF")!,
                     .bevelShadow: NSColor(hex: "#404040")!
+                ],
+                material: material
+            )]
+        )
+    }
+
+    /// The same role vocabulary interpreted as the antialiased inset relief used by clay UI.
+    private func makeSoftBevelTheme(width: CGFloat = 3) throws -> AppTheme {
+        let base = AppThemeStyles.cyberpunk
+        let kind = base.availableVariants[0]
+        var material = base.variant(kind)?.material ?? .system
+        material.glow = nil
+        material.bevel = AppTheme.Bevel(width: width, style: .soft)
+        return try AppThemeEditing.assemble(
+            id: Self.themeID,
+            name: "Soft Bevel Fixture",
+            mode: kind == .dark ? .dark : .light,
+            summary: nil,
+            variants: [kind: AppThemeEditing.makeVariant(
+                named: "Soft Bevel Fixture",
+                from: base,
+                kind: kind,
+                roles: [
+                    .bevelHighlight: NSColor(hex: "#FFFFFFE6")!,
+                    .bevelShadow: NSColor(hex: "#7048C84D")!
                 ],
                 material: material
             )]
@@ -87,6 +112,32 @@ final class SurfaceBevelTests: XCTestCase {
                        "the bevel replaces the flat border, it does not join it")
     }
 
+    /// A large field must keep the hard edge at its authored width. The old nine-patch path
+    /// stretched a sampled cap into wide gray side bands, which made the Win98 prompt look like
+    /// a soft modern inset shadow even though the material requested a two-point hard bevel.
+    func testAHardAppliedBevelDoesNotStretchItsEdgeAcrossALargeField() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 80))
+        view.applySurface(fill: Design.Surface.field, radius: .control, bevel: .sunken)
+        view.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        func sample(_ x: CGFloat, _ y: CGFloat) throws -> NSColor {
+            try XCTUnwrap(rep.colorAt(
+                x: Int((x * scale).rounded(.down)),
+                y: Int(((view.bounds.maxY - y) * scale).rounded(.down))
+            )?.usingColorSpace(.sRGB))
+        }
+
+        let nearLeading = try sample(8, view.bounds.midY)
+        let middle = try sample(view.bounds.midX, view.bounds.midY)
+        XCTAssertEqual(nearLeading.redComponent, middle.redComponent, accuracy: 2.0 / 255.0)
+        XCTAssertEqual(nearLeading.greenComponent, middle.greenComponent, accuracy: 2.0 / 255.0)
+        XCTAssertEqual(nearLeading.blueComponent, middle.blueComponent, accuracy: 2.0 / 255.0)
+    }
+
     /// Switching away must strip the edge — the applyThemeGlow "cleared rather than
     /// skipped" rule — and the sweep's re-application is what carries the decision.
     func testSwitchingAwayFromABevelThemeStripsTheEdge() throws {
@@ -119,6 +170,115 @@ final class SurfaceBevelTests: XCTestCase {
 
         XCTAssertNil(bevelLayer(of: view))
         XCTAssertGreaterThan(view.layer?.borderWidth ?? 0, 0)
+    }
+
+    func testASoftBevelFollowsARoundedSurfaceAndReplacesItsBorder() throws {
+        AppThemePalette.set(try makeSoftBevelTheme())
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 40))
+        view.applySurface(
+            fill: Design.Surface.panel,
+            radius: .fixed(18),
+            border: Design.Surface.border
+        )
+
+        let edge = try XCTUnwrap(bevelLayer(of: view))
+        XCTAssertEqual(view.layer?.borderWidth, 0)
+        XCTAssertNotNil(edge.contents, "soft relief must use the resize-safe layer path")
+        XCTAssertGreaterThan(edge.contentsCenter.minX, 0)
+        XCTAssertLessThan(edge.contentsCenter.maxX, 1)
+    }
+
+    /// Soft relief is a fade, not a translucent hard rule. The inverse caster used to share the
+    /// visible silhouette exactly, which let its opaque antialiased edge leak through as a dark
+    /// one-pixel border before the blur began.
+    func testSoftBevelArtworkHasADiffuseEdgeAndAClearMiddle() throws {
+        let image = try XCTUnwrap(SoftBevelArtwork.ninePatch(
+            radius: 18,
+            edgeWidth: 3,
+            highlight: NSColor(hex: "#FFFFFFE6")!,
+            shadow: NSColor(hex: "#8B5CF64D")!,
+            sunken: true,
+            broad: true
+        ))
+        let data = try XCTUnwrap(image.dataProvider?.data) as Data
+
+        func alpha(x: Int, y: Int) -> UInt8 {
+            data[y * image.bytesPerRow + x * 4 + 3]
+        }
+
+        let middle = image.width / 2
+        XCTAssertLessThanOrEqual(alpha(x: middle, y: middle), 2)
+
+        let edgeAlpha = (0..<image.width).flatMap { x in
+            [alpha(x: x, y: 1), alpha(x: x, y: image.height - 2)]
+        }
+        XCTAssertGreaterThan(edgeAlpha.max() ?? 0, 0, "the inset fade disappeared")
+        XCTAssertLessThan(edgeAlpha.max() ?? 255, 240, "the caster leaked as an opaque border")
+    }
+
+    func testAPairedGlowAddsAndRemovesItsOpposingHighlightShadow() throws {
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 60))
+        view.applySurface(
+            fill: Design.Surface.panel,
+            radius: .panel,
+            border: Design.Surface.border,
+            glow: true
+        )
+
+        let highlight = try XCTUnwrap(
+            view.layer?.sublayers?.first { $0.name == "threading.glow.highlight" }
+        )
+        XCTAssertEqual(view.layer?.shadowOffset.width, 16)
+        XCTAssertEqual(view.layer?.shadowOffset.height, -16)
+        XCTAssertEqual(highlight.shadowOffset.width, -10)
+        XCTAssertEqual(highlight.shadowOffset.height, 10)
+        XCTAssertNotNil(highlight.shadowPath)
+
+        view.frame.size.width = 240
+        view.layoutSubtreeIfNeeded()
+        highlight.layoutIfNeeded()
+        XCTAssertEqual(highlight.shadowPath?.boundingBox.width, highlight.bounds.width)
+
+        AppThemePalette.set(.system)
+        view.reapplyRecordedSurfaceForTesting()
+        XCTAssertNil(
+            view.layer?.sublayers?.first { $0.name == "threading.glow.highlight" }
+        )
+        XCTAssertEqual(view.layer?.shadowOpacity, 0)
+    }
+
+    func testClayControlsUseTheirOwnTighterPairedShadow() throws {
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        let button = ThemedButton(frame: NSRect(x: 0, y: 0, width: 100, height: 26))
+        button.title = "Continue"
+        let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+        button.cacheDisplay(in: button.bounds, to: rep)
+
+        let primary = try XCTUnwrap(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.primary" }
+        )
+        let highlight = try XCTUnwrap(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.highlight" }
+        )
+        XCTAssertEqual(primary.shadowOffset.width, 6)
+        XCTAssertEqual(primary.shadowOffset.height, -6)
+        XCTAssertNotNil(primary.shadowPath, "the control face lost its isolated shadow caster")
+        XCTAssertEqual(button.layer?.shadowOpacity, 0,
+                       "the button title became part of its shadow")
+        XCTAssertEqual(highlight.shadowOffset.width, -4)
+        XCTAssertEqual(highlight.shadowOffset.height, 4)
+
+        AppThemePalette.set(.system)
+        button.needsDisplay = true
+        button.cacheDisplay(in: button.bounds, to: rep)
+        XCTAssertEqual(button.layer?.shadowOpacity, 0)
+        XCTAssertNil(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.primary" }
+        )
+        XCTAssertNil(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.highlight" }
+        )
     }
 
     func testAComponentMayDeclineTheBevelOutright() throws {
@@ -234,5 +394,25 @@ final class SurfaceBevelTests: XCTestCase {
                 named: "Rounded Bevel", from: base, kind: kind, material: rounded
             )]
         ), "a bevel on a rounded material authors a treatment that never draws")
+    }
+
+    func testValidationAllowsSoftReliefOnRoundedCorners() throws {
+        XCTAssertNoThrow(try makeSoftBevelTheme())
+        XCTAssertThrowsError(try makeSoftBevelTheme(width: 4),
+                             "soft relief keeps the same edge-width budget")
+    }
+
+    func testBevelDocumentsDefaultOldPayloadsToTheHardStyle() throws {
+        let old = try JSONDecoder().decode(
+            AppTheme.Bevel.self,
+            from: Data("{\"width\":2}".utf8)
+        )
+        XCTAssertEqual(old.style, .hard)
+
+        let encoded = try JSONEncoder().encode(AppTheme.Bevel(width: 3, style: .soft))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["style"] as? String, "soft")
     }
 }

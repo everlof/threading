@@ -269,6 +269,63 @@ final class AppIconRenderTests: XCTestCase {
         )
     }
 
+    func testEveryStockStyleHasASelectablePhoneIcon() throws {
+        let suffixByThemeID: [String: String] = [
+            "editorial": "Editorial",
+            "cyberpunk": "Cyberpunk",
+            "swiss-minimalist": "SwissMinimalist",
+            "bauhaus": "Bauhaus",
+            "art-deco": "ArtDeco",
+            "neo-brutalism": "NeoBrutalism",
+            "claymorphism": "Claymorphism",
+            "vaporwave": "Vaporwave",
+            "newsprint": "Newsprint",
+            "botanical": "Botanical",
+            "industrial": "Industrial",
+            "platinum-9": "Platinum",
+            "beos-r5": "BeOS",
+            "openstep-42": "OpenStep",
+            "irix-indigo-magic": "IRIX",
+            "amiga-workbench-31": "Amiga",
+            "retro-98": "Windows98",
+            "christmas": "Christmas",
+        ]
+        let stockIDs = Set(
+            AppThemeLibrary.stock.filter { $0.id != .system }.map(\.id.rawValue)
+        )
+        XCTAssertEqual(stockIDs, Set(suffixByThemeID.keys))
+
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let assets = repository.appendingPathComponent(
+            "Sources/ThreadingMobile/Assets.xcassets",
+            isDirectory: true
+        )
+        let project = try String(contentsOf: repository.appendingPathComponent(
+            "Threading.xcodeproj/project.pbxproj"
+        ))
+
+        for (themeID, suffix) in suffixByThemeID {
+            let assetName = "AppIconTheme\(suffix)"
+            let icon = assets
+                .appendingPathComponent("\(assetName).appiconset")
+                .appendingPathComponent("AppIcon-1024.png")
+            let preview = assets
+                .appendingPathComponent("AppIconPreview\(suffix).imageset")
+                .appendingPathComponent("AppIconPreview\(suffix)-256.png")
+            let iconRaster = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: icon)))
+            let previewRaster = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: preview)))
+
+            XCTAssertEqual(iconRaster.pixelsWide, 1024, themeID)
+            XCTAssertEqual(iconRaster.pixelsHigh, 1024, themeID)
+            XCTAssertEqual(previewRaster.pixelsWide, 256, themeID)
+            XCTAssertEqual(previewRaster.pixelsHigh, 256, themeID)
+            XCTAssertTrue(project.contains(assetName), "\(assetName) is not registered")
+        }
+    }
+
     // MARK: - Render
 
     func testRendersTheIconUnderEveryStockStyle() throws {

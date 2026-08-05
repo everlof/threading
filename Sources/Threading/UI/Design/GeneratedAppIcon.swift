@@ -140,10 +140,21 @@ enum GeneratedAppIcon {
                 // A theme whose accent sits too close to its own ground would draw an invisible
                 // mark. `legible(on:)` moves it along its own lightness axis and leaves a
                 // palette that already passes completely alone, so this is a floor rather than a
-                // correction — no theme in the stock library is touched by it.
+                // correction.
+                //
+                // Asked for with `inkContrastMargin` on top, because this ink is measured where
+                // it lands rather than where it was chosen. `legible(on:)` returns the colour
+                // sitting exactly on the ratio, and the trip to a raster — eight bits a channel,
+                // through the bitmap's own colour space — costs about a hundredth of a ratio
+                // point. IRIX Indigo Magic is the theme thin enough to show it: its accent is
+                // floored from 2.46 up to the boundary and rendered back at 2.9929:1, failing a
+                // floor of 3 that it had in fact been given.
                 let ink = (theme.resolved(.accent, appearance: appearance)
                     .usingColorSpace(.sRGB) ?? .white)
-                    .legible(on: ground)
+                    .legible(
+                        on: ground,
+                        ratio: ThemeContrast.minimumRatio + Layout.inkContrastMargin
+                    )
 
                 resolvedGround = ground
                 resolvedInk = ink
@@ -457,6 +468,15 @@ extension GeneratedAppIcon {
 
         /// A theme that rounds its controls rounds the mark.
         static let roundedControlThreshold: CGFloat = 6
+
+        /// Asked for on top of `ThemeContrast.minimumRatio` when flooring the mark's ink.
+        ///
+        /// `legible(on:)` answers with the colour sitting *exactly* on the ratio, and this ink
+        /// is then judged where it lands: rounded to eight bits a channel and converted into
+        /// whatever colour space the raster keeps. That trip costs a hundredth of a ratio point
+        /// or so, which is enough to put a boundary answer under the floor it was given.
+        /// A twentieth is far more than the loss and far less than a visible change of colour.
+        static let inkContrastMargin: CGFloat = 0.05
 
         /// The margin a contributed mark keeps inside the plate, per edge.
         ///

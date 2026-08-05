@@ -36,7 +36,26 @@ enum AppThemeStyles {
         christmas
     ]
 
-    /// High-contrast neon on near-black.
+    /// Shared period transient chrome: a stemless compact card, raised by the material's own
+    /// edge and never by a modern ambient window shadow. Individual systems may refine it —
+    /// Windows 98 does, because its infotip is a flat dark rule on pale information yellow.
+    static let periodPopoverStyle = AppTheme.Material.PopoverStyle(
+        arrow: .none,
+        edge: .material,
+        shadow: .none,
+        density: .compact,
+        glyphStyle: .classic
+    )
+
+    static let windowsInfotipStyle = AppTheme.Material.PopoverStyle(
+        arrow: .none,
+        edge: .flat,
+        shadow: .none,
+        density: .compact,
+        glyphStyle: .classic
+    )
+
+    /// High-contrast terminal chrome on the live reference's near-black violet stack.
     ///
     /// States its own `controlResting`/`controlHover` rather than letting them derive from the
     /// label: the derivation is `label` at 8%, which is a grey, and a grey control on a neon
@@ -49,17 +68,19 @@ enum AppThemeStyles {
         mode: .dark,
         summary: "Neon on black, high contrast, terminal-forward.",
         roles: [
-            .ground: hex("#07070B"),
-            .surface: hex("#0D0D14"),
-            .panel: hex("#14142A"),
-            .elevated: hex("#1B1B36"),
-            .border: hex("#2E2E5A"),
-            .divider: hex("#1F1F3A"),
-            .label: hex("#E6FFF4"),
+            // Measured from the rendered page: #0A0A0F canvas, #12121A secondary planes,
+            // and #1C1C2E modules divided by the same #2A2A3A construction line.
+            .ground: hex("#0A0A0F"),
+            .surface: hex("#12121A"),
+            .panel: hex("#1C1C2E"),
+            .elevated: hex("#24243A"),
+            .border: hex("#2A2A3A"),
+            .divider: hex("#2A2A3A"),
+            .label: hex("#E0E0E0"),
             .accent: hex("#00FF88"),
-            .accentMuted: hex("#00FF88").withAlphaComponent(0.18),
-            .controlResting: hex("#00FF88").withAlphaComponent(0.10),
-            .controlHover: hex("#00FF88").withAlphaComponent(0.20),
+            .accentMuted: hex("#00FF88").withAlphaComponent(0.10),
+            .controlResting: hex("#1C1C2E"),
+            .controlHover: hex("#00FF88").withAlphaComponent(0.14),
             .selection: hex("#00FF88").withAlphaComponent(0.30),
             .statusPositive: hex("#00FF88"),
             .statusWarning: hex("#FFB000"),
@@ -76,11 +97,11 @@ enum AppThemeStyles {
         terminalPalette: TerminalTheme(
             id: TerminalThemeID("app-cyberpunk-terminal"),
             name: "Cyberpunk",
-            foreground: hex("#E6FFF4"),
-            background: hex("#07070B"),
-            cursor: hex("#E6FFF4"),
+            foreground: hex("#E0E0E0"),
+            background: hex("#0A0A0F"),
+            cursor: hex("#E0E0E0"),
             selection: hex("#103D2C"),
-            black: hex("#14142A"),
+            black: hex("#12121A"),
             red: hex("#FF3366"),
             green: hex("#00FF88"),
             yellow: hex("#FFB000"),
@@ -88,22 +109,53 @@ enum AppThemeStyles {
             magenta: hex("#FF00FF"),
             cyan: hex("#00D4FF"),
             white: hex("#B9C6C0"),
-            brightBlack: hex("#2E2E5A"),
+            brightBlack: hex("#2A2A3A"),
             brightRed: hex("#FF6B93"),
             brightGreen: hex("#7CFFC4"),
             brightYellow: hex("#FFD166"),
             brightBlue: hex("#7AB4FF"),
             brightMagenta: hex("#FF7AFF"),
             brightCyan: hex("#7CE9FF"),
-            brightWhite: hex("#E6FFF4")
+            brightWhite: hex("#E0E0E0")
         ),
         // Tight corners, a neon halo behind every panel, and mono type — the brief's own
         // trio; without the mono this read as "a dark theme", not as Cyberpunk.
         material: AppTheme.Material(
-            panelRadius: 3,
+            panelRadius: 2,
             controlRadius: 2,
             borderWidth: 1,
-            glow: AppTheme.Glow(role: .accent, radius: 10, opacity: 0.28),
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .grid, role: .accent, opacity: 0.20, spacing: 40, lineWidth: 1
+            ),
+            // The reference repeats two concentric green glows: a crisp 5px light and a
+            // 10px quarter-strength halo. Core Animation's radius is half CSS's blur.
+            glow: AppTheme.Glow(
+                role: .accent,
+                radius: 5,
+                opacity: 0.25,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .accent,
+                    radius: 2.5,
+                    opacity: 1
+                )
+            ),
+            controlGlow: AppTheme.Glow(
+                role: .accent,
+                radius: 5,
+                opacity: 0.25,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .accent,
+                    radius: 2.5,
+                    opacity: 1
+                )
+            ),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .medium,
+                tracking: 0.6,
+                primaryTreatment: .outlined
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold),
             typeface: .monospaced
         )
     )
@@ -118,27 +170,28 @@ enum AppThemeStyles {
         summary: "Paper white, black type, a single red accent.",
         roles: [
             .ground: hex("#FFFFFF"),
-            .surface: hex("#FFFFFF"),
-            .panel: hex("#FAFAFA"),
+            .surface: hex("#F2F2F2"),
+            .panel: hex("#FFFFFF"),
             .elevated: hex("#FFFFFF"),
             // A rule you can actually see. The style is built from black lines on white, so a
             // pale system-grey hairline is the one thing it cannot have.
             .border: hex("#111111"),
             .divider: hex("#111111").withAlphaComponent(0.18),
             .label: hex("#111111"),
-            .accent: hex("#D6180B"),
-            .accentMuted: hex("#D6180B").withAlphaComponent(0.14),
+            // The live composition's only chromatic ink is international orange.
+            .accent: hex("#FF3000"),
+            .accentMuted: hex("#FF3000").withAlphaComponent(0.14),
             .controlResting: hex("#111111").withAlphaComponent(0.05),
             .controlHover: hex("#111111").withAlphaComponent(0.10),
-            .selection: hex("#D6180B").withAlphaComponent(0.22),
+            .selection: hex("#FF3000").withAlphaComponent(0.22),
             .statusPositive: hex("#0F7A34"),
             .statusWarning: hex("#B45309"),
-            .statusNegative: hex("#D6180B"),
+            .statusNegative: hex("#FF3000"),
             // Type over colour: the International Style sets information in weight and
             // position, not in six hues, so code is black with one red for strings.
             .syntaxKeyword: hex("#111111"),
             .syntaxType: hex("#4A4A4A"),
-            .syntaxString: hex("#D6180B"),
+            .syntaxString: hex("#FF3000"),
             .syntaxNumber: hex("#4A4A4A")
         ],
         // Square. The grid is the whole idea, and a 12pt radius rounds it away.
@@ -161,7 +214,7 @@ enum AppThemeStyles {
             cursor: hex("#111111"),
             selection: hex("#FAD5D1"),
             black: hex("#111111"),
-            red: hex("#D6180B"),
+            red: hex("#FF3000"),
             green: hex("#2E6B4F"),
             yellow: hex("#A67C00"),
             blue: hex("#24408E"),
@@ -177,7 +230,23 @@ enum AppThemeStyles {
             brightCyan: hex("#2E8C99"),
             brightWhite: hex("#A8A8A8")
         ),
-        material: AppTheme.Material(panelRadius: 0, controlRadius: 0, borderWidth: 1, glow: nil)
+        // The reference's framing system alternates 2px dividers and 4px structural borders.
+        // Two points is the honest weight at application scale; the former hairline read grey.
+        material: AppTheme.Material(
+            panelRadius: 0,
+            controlRadius: 0,
+            borderWidth: 2,
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .grid, role: .label, opacity: 0.03, spacing: 24, lineWidth: 1
+            ),
+            glow: nil,
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .medium,
+                tracking: 0.3
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold)
+        )
     )
 
     /// Force-unwrapped deliberately: these are literals in this file, so a bad one is a build

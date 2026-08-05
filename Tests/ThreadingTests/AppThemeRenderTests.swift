@@ -130,6 +130,59 @@ final class AppThemeRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+    /// The sidebar's arrangement menu — two toggles and a chosen order — under every stock theme.
+    ///
+    /// This is the shape that showed a checked row must not also be a *filled* row. Three of its
+    /// five rows carry a check, and while a check drew the theme's `selection` under it the menu
+    /// opened three-quarters painted: at Win98's near-opaque navy and the System theme's accent
+    /// it read as three highlighted rows arguing with the one the pointer was on. Only a sweep
+    /// says whether the check alone still carries in every palette.
+    func testRendersACheckHeavyMenuUnderEveryStockTheme() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "Group Sessions by Branch", isSelected: true)),
+            .item(ThemedMenuItem(title: "Headings for Lone Branches", isSelected: true)),
+            .separator,
+            .item(ThemedMenuItem(title: "Sort by Order Added", isSelected: true)),
+            .item(ThemedMenuItem(title: "Sort by Recent Activity")),
+            .item(ThemedMenuItem(title: "Sort by Name"))
+        ]
+
+        var written: [String] = []
+        for theme in AppThemeLibrary.stock {
+            AppThemePalette.set(theme)
+
+            let modes: [(String, NSAppearance)] = try theme.isAdaptive
+                ? [
+                    ("-light", try XCTUnwrap(NSAppearance(named: .aqua))),
+                    ("-dark", try XCTUnwrap(NSAppearance(named: .darkAqua)))
+                ]
+                : [("", try XCTUnwrap(theme.mode.appearance))]
+
+            for (suffix, appearance) in modes {
+                var data: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    data = menuImage(
+                        entries: entries,
+                        appearance: appearance,
+                        highlightsTheChecked: false
+                    )
+                }
+                let url = directory.appendingPathComponent(
+                    "menu-arrangement-\(theme.id.rawValue)\(suffix).png"
+                )
+                try XCTUnwrap(data, "Failed to render \(theme.name)\(suffix)").write(to: url)
+                written.append(url.lastPathComponent)
+            }
+        }
+
+        print("Rendered \(written.count) arrangement menus to \(directory.path)")
+        let expected = AppThemeLibrary.stock.reduce(0) { $0 + ($1.isAdaptive ? 2 : 1) }
+        XCTAssertEqual(written.count, expected)
+    }
+
     /// The dropdown with a submenu open beside it — the panel pair is a composition no single
     /// panel's render can vouch for: the overlap, the aligned first row, the parent row's
     /// menu-path highlight, and the chevron column all only exist between the two.
@@ -229,7 +282,15 @@ final class AppThemeRenderTests: XCTestCase {
         )
     }
 
-    private func menuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
+    /// `highlightsTheChecked` reproduces how a menu actually opens: a pop-up lands its highlight
+    /// on the value it is showing, while a menu of toggles has no single value and opens with the
+    /// highlight on its first row instead. Which of the two is being drawn decides what a checked
+    /// row has to carry on its own.
+    private func menuImage(
+        entries: [ThemedMenuEntry],
+        appearance: NSAppearance,
+        highlightsTheChecked: Bool = true
+    ) -> Data? {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
         root.appearance = appearance
         let source = NSView(frame: NSRect(x: 24, y: 250, width: 160, height: 26))
@@ -246,10 +307,12 @@ final class AppThemeRenderTests: XCTestCase {
         window.contentView = root
         defer { window.close() }
 
-        let selected = entries.firstIndex {
-            guard case .item(let item) = $0 else { return false }
-            return item.isSelected
-        }
+        let selected = highlightsTheChecked
+            ? entries.firstIndex {
+                guard case .item(let item) = $0 else { return false }
+                return item.isSelected
+            }
+            : nil
         let token = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: source.bounds.width),
             from: source,

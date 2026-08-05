@@ -12,49 +12,70 @@ extension AppThemeStyles {
         id: AppThemeID("bauhaus"),
         name: "Bauhaus",
         mode: .light,
-        summary: "Primary geometry on warm paper, with hard black construction lines.",
+        summary: "Primary geometry on cool paper, with heavy ink and hard printed lift.",
         roles: [
-            .ground: hex("#F4EBDD"),
-            .surface: hex("#E7DCC8"),
-            .panel: hex("#FFF9EC"),
+            // The live rendering is cool #F0F0F0 rather than parchment. White modules carry
+            // the black construction lines; red, yellow, and blue are the only strong planes.
+            .ground: hex("#F0F0F0"),
+            .surface: hex("#FFFFFF"),
+            .panel: hex("#FFFFFF"),
             .elevated: hex("#FFFFFF"),
-            .border: hex("#171717"),
-            .divider: hex("#171717"),
-            .label: hex("#171717"),
-            .accent: hex("#D62828"),
-            .accentMuted: hex("#D6282838"),
-            .controlResting: hex("#F2C23055"),
-            .controlHover: hex("#1E5AA855"),
-            .selection: hex("#D628284A"),
+            .border: hex("#000000"),
+            .divider: hex("#121212"),
+            .label: hex("#121212"),
+            .accent: hex("#D02020"),
+            .accentMuted: hex("#D0202038"),
+            .controlResting: hex("#F0C02055"),
+            .controlHover: hex("#1040C055"),
+            .selection: hex("#D020204A"),
             .statusPositive: hex("#197149"),
             .statusWarning: hex("#B56A00"),
-            .statusNegative: hex("#D62828"),
-            .syntaxKeyword: hex("#D62828"),
-            .syntaxType: hex("#1E5AA8"),
+            .statusNegative: hex("#D02020"),
+            .syntaxKeyword: hex("#D02020"),
+            .syntaxType: hex("#1040C0"),
             .syntaxString: hex("#197149"),
             .syntaxNumber: hex("#B56A00")
         ],
         terminalPalette: terminal(
             id: "app-bauhaus-terminal",
             name: "Bauhaus",
-            foreground: "#171717",
-            background: "#F4EBDD",
-            cursor: "#171717",
+            foreground: "#121212",
+            background: "#F0F0F0",
+            cursor: "#121212",
             selection: "#E7C9B5",
             ansi: [
-                "#171717", "#B42318", "#197149", "#9A6700",
-                "#1E5AA8", "#7A3E9D", "#16717A", "#6B655B",
-                "#4A4741", "#D62828", "#238B5B", "#C88900",
+                "#121212", "#B42318", "#197149", "#9A6700",
+                "#1040C0", "#7A3E9D", "#16717A", "#6B655B",
+                "#4A4741", "#D02020", "#238B5B", "#C88900",
                 "#2B6FC0", "#9B51B8", "#218B95", "#918A7D"
             ]
         ),
         material: AppTheme.Material(
             panelRadius: 0,
             controlRadius: 0,
-            borderWidth: 2,
+            // Cards on the reference use 4px ink with an 8px hard shadow. Compact controls
+            // use the same construction at half scale: 2px ink and their own 4px lift.
+            borderWidth: 4,
+            controlBorderWidth: 2,
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .dots, role: .panel, opacity: 0.20, spacing: 20, lineWidth: 4
+            ),
             glow: AppTheme.Glow(
-                role: .label, radius: 0, opacity: 0.72, offsetX: 4, offsetY: -4
-            )
+                role: .label, radius: 0, opacity: 1, offsetX: 8, offsetY: -8
+            ),
+            controlGlow: AppTheme.Glow(
+                role: .label, radius: 0, opacity: 1, offsetX: 4, offsetY: -4
+            ),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                tracking: 0.6,
+                primaryBorderRole: .label,
+                pressedOffsetX: 2,
+                pressedOffsetY: 2
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold),
+            fontFamily: "Futura"
         )
     )
 
@@ -64,22 +85,22 @@ extension AppThemeStyles {
         mode: .dark,
         summary: "Midnight lacquer, brass rules, and restrained jewel tones.",
         roles: [
-            .ground: hex("#070A10"),
-            .surface: hex("#0D1320"),
-            .panel: hex("#151D2B"),
-            .elevated: hex("#1B2638"),
-            .border: hex("#C7A665"),
-            .divider: hex("#C7A66566"),
-            .label: hex("#F4E8CC"),
-            .accent: hex("#D7B56D"),
-            .accentMuted: hex("#D7B56D2E"),
-            .controlResting: hex("#D7B56D18"),
-            .controlHover: hex("#D7B56D32"),
+            .ground: hex("#0A0A0F"),
+            .surface: hex("#050505"),
+            .panel: hex("#141414"),
+            .elevated: hex("#0A0A0A"),
+            .border: hex("#D4AF37"),
+            .divider: hex("#D4AF374D"),
+            .label: hex("#F2F0E4"),
+            .accent: hex("#D4AF37"),
+            .accentMuted: hex("#D4AF372E"),
+            .controlResting: hex("#D4AF3718"),
+            .controlHover: hex("#D4AF3732"),
             .selection: hex("#0F8B8D66"),
             .statusPositive: hex("#4EB59D"),
             .statusWarning: hex("#E2B95F"),
             .statusNegative: hex("#D45B6B"),
-            .syntaxKeyword: hex("#D7B56D"),
+            .syntaxKeyword: hex("#D4AF37"),
             .syntaxType: hex("#71B7C4"),
             .syntaxString: hex("#8EC9A9"),
             .syntaxNumber: hex("#D98CB3")
@@ -87,25 +108,40 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-art-deco-terminal",
             name: "Art Deco",
-            foreground: "#F4E8CC",
-            background: "#070A10",
-            cursor: "#F4E8CC",
-            selection: "#29404D",
+            foreground: "#F2F0E4",
+            background: "#0A0A0F",
+            cursor: "#F2F0E4",
+            selection: "#2F2916",
             ansi: [
-                "#151D2B", "#C45564", "#56A98F", "#C9A451",
+                "#141414", "#C45564", "#56A98F", "#C9A451",
                 "#568FA8", "#A975A2", "#4BA0A5", "#C9BEA4",
                 "#596273", "#E27482", "#77C7AA", "#E8C46E",
-                "#79B2CC", "#C997C0", "#71C6CB", "#F4E8CC"
+                "#79B2CC", "#C997C0", "#71C6CB", "#F2F0E4"
             ]
         ),
         material: AppTheme.Material(
-            panelRadius: 1,
-            controlRadius: 1,
-            borderWidth: 1.5,
-            glow: AppTheme.Glow(
-                role: .accent, radius: 4, opacity: 0.18, offsetX: 0, offsetY: -2
+            panelRadius: 0,
+            controlRadius: 0,
+            borderWidth: 1,
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .diagonalGrid, role: .accent, opacity: 0.03, spacing: 40, lineWidth: 1
             ),
-            typeface: .serif
+            glow: AppTheme.Glow(
+                // Gold elements use centred 10–15px halos, never a drop shadow.
+                role: .accent, radius: 7.5, opacity: 0.10
+            ),
+            controlGlow: AppTheme.Glow(role: .accent, radius: 5, opacity: 0.10),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .medium,
+                fontFamily: "Avenir Next",
+                tracking: 1.2,
+                primaryTreatment: .outlined
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(
+                fontFamily: "Avenir Next",
+                fontWeight: .regular
+            )
         )
     )
 
@@ -113,38 +149,38 @@ extension AppThemeStyles {
         id: AppThemeID("neo-brutalism"),
         name: "Neo Brutalism",
         mode: .light,
-        summary: "Cream stock, loud blocks, thick ink, and unapologetic hard shadows.",
+        summary: "Halftone stock, loud blocks, four-point ink, and unapologetic hard shadows.",
         roles: [
-            .ground: hex("#FFF4D6"),
-            .surface: hex("#FFD84D"),
-            .panel: hex("#FFFDF6"),
-            .elevated: hex("#C7B8FF"),
-            .border: hex("#101010"),
-            .divider: hex("#101010"),
-            .label: hex("#101010"),
-            .accent: hex("#0057FF"),
-            .accentMuted: hex("#0057FF35"),
-            .controlResting: hex("#FF5C5C55"),
-            .controlHover: hex("#00C2A855"),
-            .selection: hex("#0057FF4D"),
+            .ground: hex("#FFFDF5"),
+            .surface: hex("#C4B5FD"),
+            .panel: hex("#FFFFFF"),
+            .elevated: hex("#FFD93D"),
+            .border: hex("#000000"),
+            .divider: hex("#000000"),
+            .label: hex("#000000"),
+            .accent: hex("#FF6B6B"),
+            .accentMuted: hex("#FF6B6B35"),
+            .controlResting: hex("#FFD93D80"),
+            .controlHover: hex("#C4B5FD80"),
+            .selection: hex("#FF6B6B4D"),
             .statusPositive: hex("#087F5B"),
             .statusWarning: hex("#A85D00"),
             .statusNegative: hex("#D92D20"),
             .syntaxKeyword: hex("#D92D20"),
-            .syntaxType: hex("#0057FF"),
+            .syntaxType: hex("#3159C7"),
             .syntaxString: hex("#087F5B"),
             .syntaxNumber: hex("#7A36C2")
         ],
         terminalPalette: terminal(
             id: "app-neo-brutalism-terminal",
             name: "Neo Brutalism",
-            foreground: "#101010",
-            background: "#FFF4D6",
-            cursor: "#101010",
+            foreground: "#000000",
+            background: "#FFFDF5",
+            cursor: "#000000",
             selection: "#C8D6FF",
             ansi: [
-                "#101010", "#D92D20", "#087F5B", "#A85D00",
-                "#0057FF", "#7A36C2", "#007A78", "#6B6250",
+                "#000000", "#D92D20", "#087F5B", "#A85D00",
+                "#3159C7", "#7A36C2", "#007A78", "#6B6250",
                 "#4A4438", "#FF3B30", "#0FA779", "#D57A00",
                 "#397CFF", "#9D5CE0", "#00A3A0", "#948A76"
             ]
@@ -152,10 +188,36 @@ extension AppThemeStyles {
         material: AppTheme.Material(
             panelRadius: 0,
             controlRadius: 0,
-            borderWidth: 3,
+            borderWidth: 4,
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .dots, role: .label, opacity: 1, spacing: 20, lineWidth: 3
+            ),
             glow: AppTheme.Glow(
-                role: .label, radius: 0, opacity: 0.9, offsetX: 5, offsetY: -5
-            )
+                // The large modules overwhelmingly use a 12px hard offset; compact controls
+                // and badges repeat it at 4px. Keeping those scales separate avoids the old
+                // halfway 5px shadow that matched neither.
+                role: .label, radius: 0, opacity: 1, offsetX: 12, offsetY: -12
+            ),
+            popoverStyle: AppTheme.Material.PopoverStyle(
+                arrow: .none,
+                edge: .material,
+                shadow: .material
+            ),
+            controlGlow: AppTheme.Glow(
+                role: .label, radius: 0, opacity: 1, offsetX: 4, offsetY: -4
+            ),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                tracking: 0.3,
+                primaryBorderRole: .label,
+                hoverOffsetX: 4,
+                hoverOffsetY: 4,
+                pressedOffsetX: 2,
+                pressedOffsetY: 2,
+                collapseShadowOnHover: true
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold)
         )
     )
 
@@ -163,49 +225,95 @@ extension AppThemeStyles {
         id: AppThemeID("claymorphism"),
         name: "Claymorphism",
         mode: .light,
-        summary: "Lavender clay, generous curves, and softly lifted candy controls.",
+        summary: "Lavender clay, pill-soft curves, and directional light over violet shade.",
         roles: [
-            .ground: hex("#F2E9FF"),
-            .surface: hex("#E7D8FA"),
-            .panel: hex("#FFF8FF"),
+            // The reference keeps its canvas almost white. The volume comes from light and
+            // shade around each object, not from filling every pane saturated purple.
+            .ground: hex("#F5F3FF"),
+            .surface: hex("#EEEAF7"),
+            .panel: hex("#FBFAFF"),
             .elevated: hex("#FFFFFF"),
-            .border: hex("#8A63B833"),
-            .divider: hex("#76549A35"),
-            .label: hex("#352743"),
-            .accent: hex("#7048C8"),
-            .accentMuted: hex("#7048C82E"),
-            .controlResting: hex("#E7C9FF"),
-            .controlHover: hex("#D8B4FE"),
-            .selection: hex("#7048C83D"),
+            .border: hex("#9B8AB81F"),
+            // The measured card shadow on the live reference: neutral lavender at 20%, kept
+            // separate from the more violet inset shade below.
+            .divider: hex("#A096B433"),
+            .label: hex("#332F3A"),
+            .accent: hex("#7C3AED"),
+            .accentMuted: hex("#A78BFA33"),
+            .controlResting: hex("#F5F3FF"),
+            .controlHover: hex("#EDE9FE"),
+            .selection: hex("#A78BFA4D"),
             .statusPositive: hex("#287A55"),
             .statusWarning: hex("#A65F00"),
             .statusNegative: hex("#C2415D"),
-            .syntaxKeyword: hex("#7048C8"),
+            .syntaxKeyword: hex("#7C3AED"),
             .syntaxType: hex("#3274A8"),
             .syntaxString: hex("#287A55"),
-            .syntaxNumber: hex("#B44B7A")
+            .syntaxNumber: hex("#B44B7A"),
+            // A soft bevel reads these as a diagonal inset gradient rather than as the hard
+            // pixel rings used by Windows 98: white catches the upper-left, violet settles
+            // into the lower-right. Their alpha is part of the material's softness.
+            .bevelHighlight: hex("#FFFFFFE6"),
+            .bevelShadow: hex("#8B5CF60D")
         ],
         terminalPalette: terminal(
             id: "app-claymorphism-terminal",
             name: "Claymorphism",
-            foreground: "#352743",
-            background: "#F2E9FF",
-            cursor: "#352743",
-            selection: "#DCC8F3",
+            foreground: "#332F3A",
+            background: "#F5F3FF",
+            cursor: "#332F3A",
+            selection: "#DDD6FE",
             ansi: [
-                "#352743", "#B43E57", "#287A55", "#956000",
-                "#3274A8", "#7048C8", "#307F86", "#756A7E",
+                "#332F3A", "#B43E57", "#287A55", "#956000",
+                "#3274A8", "#7C3AED", "#307F86", "#756A7E",
                 "#5D5068", "#D75870", "#3D9970", "#BB7B0B",
                 "#4E92C7", "#9169E0", "#49A0A6", "#9B8FA3"
             ]
         ),
         material: AppTheme.Material(
-            panelRadius: 22,
-            controlRadius: 14,
-            borderWidth: 1.5,
+            panelRadius: 32,
+            controlRadius: 20,
+            borderWidth: 1,
             glow: AppTheme.Glow(
-                role: .accent, radius: 7, opacity: 0.20, offsetX: 0, offsetY: -5
+                // Measured from the live Design Prompts rendering. CSS's 32px blur maps to a
+                // 16-point Core Animation radius; the object travels 16 points lower-right.
+                // The pale half is the source's separate -10/-10, 24px white lift.
+                role: .divider,
+                radius: 16,
+                opacity: 1,
+                offsetX: 16,
+                offsetY: -16,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .bevelHighlight,
+                    radius: 12,
+                    opacity: 1,
+                    offsetX: -10,
+                    offsetY: 10
+                )
             ),
+            popoverStyle: AppTheme.Material.PopoverStyle(
+                arrow: .none,
+                edge: .material,
+                shadow: .material
+            ),
+            controlGlow: AppTheme.Glow(
+                // The source's button shadow scaled to Threading's 26-point controls (the
+                // reference buttons are 56 points tall): violet depth down-right and a smaller
+                // white lift up-left. This is intentionally not the neutral panel shadow.
+                role: .accent,
+                radius: 6,
+                opacity: 0.3,
+                offsetX: 6,
+                offsetY: -6,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .bevelHighlight,
+                    radius: 4,
+                    opacity: 0.45,
+                    offsetX: -4,
+                    offsetY: 4
+                )
+            ),
+            bevel: AppTheme.Bevel(width: 3, style: .soft),
             typeface: .rounded
         )
     )
@@ -214,49 +322,67 @@ extension AppThemeStyles {
         id: AppThemeID("vaporwave"),
         name: "Vaporwave",
         mode: .dark,
-        summary: "Ultraviolet night, hot pink signal, and cyan afterglow.",
+        summary: "Black ultraviolet grid, full-magenta signal, and cyan terminal afterglow.",
         roles: [
-            .ground: hex("#120826"),
-            .surface: hex("#1D0E3D"),
-            .panel: hex("#2A1553"),
-            .elevated: hex("#382069"),
-            .border: hex("#8A5CF6"),
-            .divider: hex("#56DFFC55"),
-            .label: hex("#FFF1FF"),
-            .accent: hex("#FF5FD2"),
-            .accentMuted: hex("#FF5FD233"),
-            .controlResting: hex("#56DFFC1F"),
-            .controlHover: hex("#FF5FD238"),
-            .selection: hex("#56DFFC45"),
+            .ground: hex("#090014"),
+            .surface: hex("#000000"),
+            .panel: hex("#1A103C"),
+            .elevated: hex("#1A103CCC"),
+            .border: hex("#00FFFF"),
+            .divider: hex("#00FFFF66"),
+            .label: hex("#E0E0E0"),
+            .accent: hex("#FF00FF"),
+            .accentMuted: hex("#FF00FF1A"),
+            .controlResting: hex("#1A103CCC"),
+            .controlHover: hex("#FF00FF1A"),
+            .selection: hex("#00FFFF33"),
             .statusPositive: hex("#5EF2C2"),
             .statusWarning: hex("#FFD166"),
             .statusNegative: hex("#FF5F7E"),
-            .syntaxKeyword: hex("#FF5FD2"),
-            .syntaxType: hex("#56DFFC"),
+            .syntaxKeyword: hex("#FF00FF"),
+            .syntaxType: hex("#00FFFF"),
             .syntaxString: hex("#5EF2C2"),
             .syntaxNumber: hex("#FFD166")
         ],
         terminalPalette: terminal(
             id: "app-vaporwave-terminal",
             name: "Vaporwave",
-            foreground: "#FFF1FF",
-            background: "#120826",
-            cursor: "#FFF1FF",
-            selection: "#403168",
+            foreground: "#E0E0E0",
+            background: "#090014",
+            cursor: "#E0E0E0",
+            selection: "#1A103C",
             ansi: [
-                "#2A1553", "#FF5F7E", "#5EF2C2", "#FFD166",
-                "#5A8CFF", "#FF5FD2", "#56DFFC", "#C9B8D8",
+                "#1A103C", "#FF5F7E", "#5EF2C2", "#FFD166",
+                "#5A8CFF", "#FF00FF", "#00FFFF", "#C9B8D8",
                 "#735A91", "#FF86A0", "#88FFD8", "#FFE39A",
-                "#85ACFF", "#FF8DDF", "#8BEAFF", "#FFF1FF"
+                "#85ACFF", "#FF8DDF", "#8BEAFF", "#E0E0E0"
             ]
         ),
         material: AppTheme.Material(
-            panelRadius: 10,
-            controlRadius: 8,
+            // The page is a grid of square terminal modules. Its only rounded shapes are
+            // status pills; the former 10/8 material made the whole theme generic neon SaaS.
+            panelRadius: 0,
+            controlRadius: 0,
             borderWidth: 1,
-            glow: AppTheme.Glow(
-                role: .accent, radius: 9, opacity: 0.30
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .perspectiveGrid,
+                role: .accent,
+                opacity: 0.30,
+                spacing: 40,
+                lineWidth: 2
             ),
+            glow: AppTheme.Glow(
+                role: .accent, radius: 7.5, opacity: 0.22
+            ),
+            controlGlow: AppTheme.Glow(role: .syntaxType, radius: 10, opacity: 0.30),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .regular,
+                tracking: 0.6,
+                primaryTreatment: .outlined,
+                primaryRole: .syntaxType
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold),
             typeface: .monospaced
         )
     )
@@ -265,24 +391,24 @@ extension AppThemeStyles {
         id: AppThemeID("newsprint"),
         name: "Newsprint",
         mode: .light,
-        summary: "Warm stock, dense ink, editorial red, and offset presswork.",
+        summary: "Near-white stock, dense ink, editorial red, and rule-driven presswork.",
         roles: [
-            .ground: hex("#EFE8D5"),
-            .surface: hex("#E4DCC7"),
-            .panel: hex("#FAF5E8"),
-            .elevated: hex("#FFFDF7"),
-            .border: hex("#282621"),
-            .divider: hex("#28262166"),
-            .label: hex("#1D1B18"),
-            .accent: hex("#982F2F"),
-            .accentMuted: hex("#982F2F28"),
-            .controlResting: hex("#28262112"),
-            .controlHover: hex("#982F2F22"),
-            .selection: hex("#B85C4240"),
+            .ground: hex("#F9F9F7"),
+            .surface: hex("#F2F2F0"),
+            .panel: hex("#FFFFFF"),
+            .elevated: hex("#FFFFFF"),
+            .border: hex("#111111"),
+            .divider: hex("#11111173"),
+            .label: hex("#111111"),
+            .accent: hex("#CC0000"),
+            .accentMuted: hex("#CC000028"),
+            .controlResting: hex("#1111110D"),
+            .controlHover: hex("#CC00001A"),
+            .selection: hex("#CC000033"),
             .statusPositive: hex("#386641"),
             .statusWarning: hex("#9C5A16"),
-            .statusNegative: hex("#982F2F"),
-            .syntaxKeyword: hex("#982F2F"),
+            .statusNegative: hex("#CC0000"),
+            .syntaxKeyword: hex("#CC0000"),
             .syntaxType: hex("#345B77"),
             .syntaxString: hex("#386641"),
             .syntaxNumber: hex("#7D4E57")
@@ -290,12 +416,12 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-newsprint-terminal",
             name: "Newsprint",
-            foreground: "#1D1B18",
-            background: "#EFE8D5",
-            cursor: "#1D1B18",
-            selection: "#D8CBB4",
+            foreground: "#111111",
+            background: "#F9F9F7",
+            cursor: "#111111",
+            selection: "#E2D7D3",
             ansi: [
-                "#1D1B18", "#982F2F", "#386641", "#8A5A16",
+                "#111111", "#CC0000", "#386641", "#8A5A16",
                 "#345B77", "#7D4E57", "#3D6B6D", "#6C675C",
                 "#4D4941", "#B64646", "#4E7E57", "#A77329",
                 "#4D7895", "#986878", "#568486", "#938C7C"
@@ -304,11 +430,20 @@ extension AppThemeStyles {
         material: AppTheme.Material(
             panelRadius: 0,
             controlRadius: 0,
-            borderWidth: 1.5,
-            glow: AppTheme.Glow(
-                role: .label, radius: 0, opacity: 0.18, offsetX: 2, offsetY: -2
+            borderWidth: 1,
+            // The reference is completely shadowless. Hierarchy comes from black rules and
+            // white/near-white stock, not the old offset shadow.
+            glow: nil,
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                fontFamily: "Baskerville",
+                tracking: 1,
+                primaryRole: .label
             ),
-            typeface: .serif
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold),
+            typeface: .serif,
+            fontFamily: "Baskerville"
         )
     )
 
@@ -316,24 +451,24 @@ extension AppThemeStyles {
         id: AppThemeID("botanical"),
         name: "Botanical",
         mode: .light,
-        summary: "Herbarium greens, quiet parchment, and softly rounded natural forms.",
+        summary: "Warm ivory, charcoal green, muted clay, and broad organic forms.",
         roles: [
-            .ground: hex("#EDF2E7"),
-            .surface: hex("#DFE8D9"),
-            .panel: hex("#F8FAF3"),
+            .ground: hex("#F9F8F4"),
+            .surface: hex("#F2F0EB"),
+            .panel: hex("#FFFFFF"),
             .elevated: hex("#FFFFFF"),
-            .border: hex("#58705B"),
-            .divider: hex("#58705B55"),
-            .label: hex("#203124"),
-            .accent: hex("#356B46"),
-            .accentMuted: hex("#356B4630"),
-            .controlResting: hex("#8FAF7D30"),
-            .controlHover: hex("#6F966044"),
-            .selection: hex("#5C8A6040"),
+            .border: hex("#DCCFC2"),
+            .divider: hex("#DCCFC2"),
+            .label: hex("#2D3A31"),
+            .accent: hex("#C27B66"),
+            .accentMuted: hex("#C27B6633"),
+            .controlResting: hex("#8C9A8433"),
+            .controlHover: hex("#C27B6633"),
+            .selection: hex("#8C9A8440"),
             .statusPositive: hex("#2E7D4F"),
             .statusWarning: hex("#9B671A"),
             .statusNegative: hex("#A5413F"),
-            .syntaxKeyword: hex("#356B46"),
+            .syntaxKeyword: hex("#C27B66"),
             .syntaxType: hex("#4F6F88"),
             .syntaxString: hex("#6A7338"),
             .syntaxNumber: hex("#8A5B45")
@@ -341,10 +476,10 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-botanical-terminal",
             name: "Botanical",
-            foreground: "#203124",
-            background: "#EDF2E7",
-            cursor: "#203124",
-            selection: "#CEDCC8",
+            foreground: "#2D3A31",
+            background: "#F9F8F4",
+            cursor: "#2D3A31",
+            selection: "#DDD9D1",
             ansi: [
                 "#203124", "#A5413F", "#2E7D4F", "#8A651F",
                 "#4F6F88", "#7D5472", "#477779", "#6D786C",
@@ -353,13 +488,26 @@ extension AppThemeStyles {
             ]
         ),
         material: AppTheme.Material(
-            panelRadius: 18,
-            controlRadius: 10,
+            // Forty-pixel cards and pill controls are the dominant silhouette across the live
+            // page. The 18/10 version was neither the source's organic volume nor a compact UI.
+            panelRadius: 40,
+            controlRadius: 24,
             borderWidth: 1,
             glow: AppTheme.Glow(
-                role: .accent, radius: 7, opacity: 0.12, offsetX: 0, offsetY: -3
+                // Shadows are neutral black at roughly ten percent, never green halos.
+                role: .label, radius: 6, opacity: 0.10, offsetX: 0, offsetY: -4
             ),
-            typeface: .serif
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                tracking: 1.2,
+                primaryRole: .label
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(
+                typeface: .serif,
+                fontFamily: "Iowan Old Style",
+                fontWeight: .regular
+            )
         )
     )
 
@@ -420,50 +568,91 @@ extension AppThemeStyles {
     static let industrial = AppTheme(
         id: AppThemeID("industrial"),
         name: "Industrial",
-        mode: .dark,
-        summary: "Gunmetal structure, safety amber, and compact machined edges.",
+        mode: .light,
+        summary: "Cool machine enamel, coral signal controls, and paired neumorphic relief.",
         roles: [
-            .ground: hex("#101315"),
-            .surface: hex("#181D20"),
-            .panel: hex("#23292D"),
-            .elevated: hex("#2C3439"),
-            .border: hex("#7B858B"),
-            .divider: hex("#7B858B55"),
-            .label: hex("#E8E3D8"),
-            .accent: hex("#F5A623"),
-            .accentMuted: hex("#F5A62330"),
-            .controlResting: hex("#AAB2B71A"),
-            .controlHover: hex("#F5A62330"),
-            .selection: hex("#F5A62345"),
-            .statusPositive: hex("#65B87A"),
-            .statusWarning: hex("#F5A623"),
-            .statusNegative: hex("#E35D5B"),
-            .syntaxKeyword: hex("#F5A623"),
+            // Despite its name, the current Design Prompts rendering is a light industrial
+            // neumorphism: #E0E5EC enamel, #D1D9E6 recesses, and #FF4757 signal red.
+            .ground: hex("#E0E5EC"),
+            .surface: hex("#D1D9E6"),
+            .panel: hex("#E0E5EC"),
+            .elevated: hex("#F0F2F5"),
+            .border: hex("#FFFFFF80"),
+            .divider: hex("#BABECC"),
+            .label: hex("#2D3436"),
+            .accent: hex("#FF4757"),
+            .accentMuted: hex("#FF475733"),
+            .controlResting: hex("#E0E5EC"),
+            .controlHover: hex("#F0F2F5"),
+            .selection: hex("#FF47574D"),
+            .statusPositive: hex("#3E7A4F"),
+            .statusWarning: hex("#A66B13"),
+            // These two reds double as the paired control-shadow colours below.
+            .statusNegative: hex("#A6323C"),
+            .syntaxKeyword: hex("#FF646E"),
             .syntaxType: hex("#78A7B8"),
-            .syntaxString: hex("#8DBD75"),
-            .syntaxNumber: hex("#D88A6A")
+            .syntaxString: hex("#3E7A4F"),
+            .syntaxNumber: hex("#D88A6A"),
+            .bevelHighlight: hex("#FFFFFF"),
+            .bevelShadow: hex("#BABECC")
         ],
         terminalPalette: terminal(
             id: "app-industrial-terminal",
             name: "Industrial",
-            foreground: "#E8E3D8",
-            background: "#101315",
-            cursor: "#E8E3D8",
-            selection: "#3C3526",
+            foreground: "#2D3436",
+            background: "#E0E5EC",
+            cursor: "#2D3436",
+            selection: "#F4B6BC",
             ansi: [
-                "#23292D", "#D65351", "#65A977", "#C58A2C",
-                "#638D9D", "#9B718E", "#5F9997", "#B8B3AA",
-                "#5F686D", "#EF7472", "#83C894", "#F5B84D",
-                "#82ADBD", "#BA91AE", "#7BB8B6", "#E8E3D8"
+                "#2D3436", "#A6323C", "#4F8F61", "#A66B13",
+                "#527C8C", "#855E7A", "#4F8583", "#697277",
+                "#566066", "#D94B58", "#65A977", "#C98922",
+                "#6A98A8", "#9F7895", "#68A3A1", "#879096"
             ]
         ),
         material: AppTheme.Material(
-            panelRadius: 2,
-            controlRadius: 2,
-            borderWidth: 2,
+            panelRadius: 16,
+            controlRadius: 24,
+            borderWidth: 1,
             glow: AppTheme.Glow(
-                role: .label, radius: 0, opacity: 0.45, offsetX: 3, offsetY: -3
-            )
+                // The dominant raised module is 8/8/16 grey plus -8/-8/16 white.
+                role: .bevelShadow,
+                radius: 8,
+                opacity: 1,
+                offsetX: 8,
+                offsetY: -8,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .bevelHighlight,
+                    radius: 8,
+                    opacity: 1,
+                    offsetX: -8,
+                    offsetY: 8
+                )
+            ),
+            controlGlow: AppTheme.Glow(
+                // Coral CTAs use their own tighter paired relief instead of grey panel depth.
+                role: .statusNegative,
+                radius: 4,
+                opacity: 0.4,
+                offsetX: 4,
+                offsetY: -4,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .syntaxKeyword,
+                    radius: 4,
+                    opacity: 0.4,
+                    offsetX: -4,
+                    offsetY: 4
+                )
+            ),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                tracking: 0.6,
+                primaryBorderRole: .border,
+                pressedOffsetY: 2
+            ),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .bold),
+            bevel: AppTheme.Bevel(width: 2, style: .soft)
         )
     )
 

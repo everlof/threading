@@ -256,10 +256,25 @@ font designs (`NSFontDescriptor.SystemDesign`), so **nothing is bundled**, every
 and rendering is the platform's.
 
 `material.fontFamily` sits above it for a theme whose identity is a *particular face* rather
-than a class: "Newsprint, set in Baskerville" is not one of four. It wins where it resolves and
-degrades to `typeface` where it does not, which is the same rule a dangling terminal-theme name
-already follows — a family lives on the machine, not in the document, so a theme authored
-elsewhere names something this machine may not have, and that is not an error.
+than a class: "Newsprint, set in Baskerville" is not one of four. `fontFallbacks` is the ordered
+chain behind it. The first installed family wins, then the recipe degrades to `typeface`; this
+lets a retro theme preserve Charcoal, MS Sans Serif, Swis721 BT, or Topaz as its real answer
+without redistributing a proprietary face or pretending a modern substitute is historically
+exact. Installing the preferred face later promotes it automatically. Custom-theme tools expose
+the same chain as `font_family` and `font_fallbacks`, and require at least one authored family to
+resolve on the machine doing the authoring so a misspelled chain cannot silently ship.
+
+`Material.headingStyle` is the semantic exception inside that prose answer. The source styles
+often pair faces rather than choosing one globally: Botanical's display type is serif over a
+sans reading face, Newsprint's display serif is much heavier than its body, and Art Deco's
+headings are lighter than its controls. The optional block can state a heading-only `typeface`,
+`fontFamily`, `fontWeight`, and italic flag; every unstated field inherits the ordinary material
+recipe and a missing named family falls through in the same order. It reaches `.heading` and
+`.markdownHeading`, not body, controls, code, numerics, or the terminal. The user family override
+still wins — the theme authors the display grammar, not the reader's installed-face choice.
+Custom and contributed themes get the identical vocabulary through
+`material.heading_style`/`remove_heading_style` in create, update, and get; stock themes do not
+receive private branches in `Design.Typography`.
 
 **The user outranks the theme**, through two slots in `AppSettings`: `chromeFontFamily` for the
 app and `conversationFontFamily` for the thread. Four layers resolve in `Design.Typography`'s
@@ -379,7 +394,7 @@ changes came from looking at a render rather than from reasoning about a control
 light and dark — the same fixture-to-PNG idea as the conversation and git-review renders, for
 the same reason: no assertion anyone would write catches "these twenty chips read as a smear".
 
-**A theme's glow is a layer shadow, and a shadow spills past the panel that casts it** — so a
+**A theme's glow is one or two layer shadows, and a shadow spills past the panel that casts it** — so a
 clipping ancestor whose edge coincides with a panel's edge cuts the halo off flat on that
 side, invisibly to the code that set the shadow. Found on the settings pages, where the scroll
 view's edges sat exactly at the cards': the halo faded vertically (the spill landed in the
@@ -393,10 +408,73 @@ seam: themes state specs (`AppTheme.Material`), one interpreter draws them
 (`applySurface`/`applyThemeGlow`), and feature code says only what a surface *is* — never
 `if` on a theme's identity.
 
+The optional `glow.highlight` is the second outer shadow, not another halo blended into the
+first. It has its own role, radius, opacity and offset, is subject to the same gutter gate, and
+is drawn by a transparent shadow-only companion layer. This keeps the primary lower-right shade
+diffuse while the upper-left light travels the other way — the paired construction the
+Claymorphism source actually uses. Documents without it decode exactly as before; theme tools
+can set it, remove it independently, and read it back.
+
+`material.controlGlow` is the same paired vocabulary at control scale. It is separate rather
+than an automatic fraction of `glow` because the live Clay source makes a semantic distinction:
+white cards cast broad neutral-lavender depth, while buttons cast a tighter violet shadow. Drawn
+controls opt into that spec without freezing their state; applied control surfaces record the
+same participation for the theme sweep. A compact control that is pressed drops its outer lift,
+and tertiary marks cast nothing. Custom-theme tools expose `control_glow`,
+`remove_control_glow`, and the nested highlight with the same partial-update and validation rules
+as panel glow. Older documents decode it as nil and keep flat controls.
+
+`material.popoverStyle` is the floating-surface grammar shared by every product popover. It
+states whether the anchor has a triangle stem, which semantic role fills it, whether its edge is
+flat, absent, or interpreted through `material.bevel`, whether depth is the native window shadow,
+the authored panel shadow, automatic, or absent, and whether geometry and semantic glyphs are
+regular/System or compact/classic. The default is the historical modern speech bubble; automatic
+depth uses `glow` when the material authors one and the native shadow otherwise. A material edge
+requires a stemless surface, because the bevel interpreter owns one coherent silhouette rather
+than guessing how a hard or soft edge turns around a speech-bubble junction. Authored shadows get
+the same 48-point gutter as panels, now inside the popover's transparent child window, so hard
+Neo Brutalist offsets and Claymorphism's paired soft light are not clipped to the card. The full
+block round-trips through `popover_style`/`remove_popover_style` in the app-theme tools.
+
+`floatingSurface` is the colour role paired with that grammar. It derives from `elevated`, so old
+and sparse documents keep their previous surface exactly; a theme can state it independently when
+the period component genuinely differs. Windows 98 does: its compact, square, stemless,
+shadowless infotip uses pale information yellow (`#FFFFE1`) behind a thin dark rule and classic
+folder/branch/status marks. Platinum, BeOS, OPENSTEP, IRIX, and Amiga use the same stemless compact
+language but consume their hard material bevels. Claymorphism and Neo Brutalism use stemless
+material edges and their authored shadow construction instead of the unconditional macOS one.
+
+`material.buttonStyle` carries the action language that palette and geometry cannot express:
+title transform, weight, a button-only typeface class or installed family, and tracking; filled
+versus outlined primary actions; the semantic roles for their fill and optional border; and the
+small hover/press translation used by hard-shadow styles. The face is sparse: nil inherits prose,
+a missing named family falls through to its class and then prose, and the user's chrome-family
+override still wins. This is what lets Art Deco and Newsprint pair their action labels with their
+display face without refonting every field and toggle. `ThemedButton` is the sole interpreter, so
+the visible title may be uppercase while the authored and accessibility title remains unchanged.
+Every field is available through the custom theme tools and older documents decode to `.system`,
+preserving the historical control behavior.
+
+`material.borderWidth` remains the structural weight for cards, separators and pane rules.
+`material.controlBorderWidth` optionally gives compact controls their own edge weight; nil inherits
+the structural value, so older and sparse custom documents preserve their existing appearance.
+This is the measured Bauhaus split: four-point structural ink around cards and two-point ink around
+buttons, with the control's four-point lift remaining independent in `controlGlow`.
+
+`material.backdropPattern` carries the repeating ink used by the source styles' broad page
+surfaces: dots, an orthogonal grid, a diagonal grid, or the converging perspective grid used by
+Vaporwave, each with a semantic colour role, opacity, spacing and mark width. Participation is
+explicit at the component seam
+(`pattern: .backdrop`); it is never inferred from a ground colour or a zero radius, because a
+compact find bar can legitimately share both and must not become wallpaper. The pattern is a
+resizing layer below child content rather than a raster baked into the fill, so it does not
+stretch and it re-resolves on theme and appearance changes. Custom-theme tools can set, remove,
+partially update and read the full block; older documents decode it as nil and remain flat.
+
 **`material.borderWidth` is a rule weight, and every rule in the window obeys it — including the
 one AppKit draws.** `SeparatorView`, the shell drawer's grab strip and a table's column rules all
 take `Design.Radius.border`; `NSSplitView.dividerStyle = .thin` is a fixed point and does not.
-Under Bauhaus (2) and Neo Brutalism (3) the window therefore drew heavy pane-header rules meeting
+Under heavily ruled Bauhaus and Neo Brutalism, the window therefore drew pane-header rules meeting
 a hairline seam between the very same panes, and the sidebar's rule visibly stepped down where it
 crossed the split — one stated decision rendered at two weights. `ThemedSplitView` overrides
 `dividerThickness` (floored at a point, because that seam is also the drag handle) and invalidates
@@ -410,7 +488,7 @@ in the window — a pane header's rule, a footer's, the drawer's, the display pa
 against the size the constraint system last *asked* for, and `intrinsicContentSize` reading the
 token live does not make AppKit re-ask. Repainting alone left every rule ruling for the theme that
 had just left while anything built after the switch took the new weight, so arriving at Editorial
-(1) from Neo Brutalism (3) drew hairlines, 3-point rules and a 1-point seam at once — and the three
+from Neo Brutalism drew hairlines, heavy rules and a hairline seam at once — and the three
 styles the seam's own fix was checked against all happened to be entered from themselves.
 `ThemeRedraw` now invalidates the intrinsic size beside asking for the redraw, which is the one
 place that already knows a theme changed; a view that states no intrinsic size is unaffected, and
@@ -689,20 +767,44 @@ carrying less ink (the authentic 1998 inactive pair sits at 2.6:1). An adaptive 
 chrome in both variants or neither: band colours may differ by appearance, whether the window
 wears its own frame may not.
 
-**`Material.bevel` and the two edge roles.** A bevel material
-(`bevel: {width: 1...3}`, square radii required by validation) turns every applied or drawn
-surface's flat border into the classic two-tone edge: `bevelHighlight` on top and leading,
-`bevelShadow` on bottom and trailing, mitred diagonally, swapped for surfaces that state
+**`Material.bevel` and the two edge roles.** A hard bevel material
+(`bevel: {width: 1...3, style: "hard"}`, square radii required by validation) turns every
+applied or drawn surface's flat border into the classic two-tone edge: `bevelHighlight` on top
+and leading, `bevelShadow` on bottom and trailing, swapped for surfaces that state
 `SurfaceBevel.sunken` (text wells: `ThemedTextField`, the composer's `PromptView`). The two
 roles are *roles* — not `.authored`, deriving from `surface` at ±0.45 — precisely so
 `applySurface` records participation rather than colours and the theme sweep re-resolves both
 directions of a live switch: arriving raises every automatic surface, leaving strips every
 edge (the glow's "cleared rather than skipped" rule). The layer path hangs a nine-part
 stretched bitmap (`BevelArtwork`) so resizing never rebuilds a path; the draw path
-(`ThemedSurface.draw`) draws the same construction live. A rounded shape under a bevel
+(`ThemedSurface.draw`) draws the same construction live. A rounded shape under a hard bevel
 material keeps its flat border — a rectilinear edge has no honest offset curve — which is the
-rule that lets discs and pills coexist with the material. `SurfaceBevelTests` pins all of it,
-including that every pre-existing stock theme draws byte-identically.
+rule that lets discs and pills coexist with that construction. `SurfaceBevelTests` pins all of
+it, including that every pre-existing stock theme draws byte-identically.
+
+The later Claymorphism pass added the second construction without adding a theme branch:
+`bevel.style` is `hard` by default, preserving that entire contract, while `soft` follows the
+rounded silhouette with two blurred inset shadows. A narrow antialiased ring was still a border:
+at 32-point corners it made a continuous lavender outline the live reference does not have. The
+inverse rounded caster now sits outside the clipped surface, so only its diffuse shadow enters
+and naturally fades around the offset curve. Raised controls put light at top-leading and shade
+at bottom-trailing; wells and broad panels reverse that inner pair, matching the source's mixed
+button/card recipes while their outer shadow still raises them. The same nine-patch/live-draw
+split keeps layer-backed panels and drawn controls identical. Soft relief may therefore coexist
+with rounded radii. The finished clay construction combines all three depths measured from the
+live source rendering: the primary `glow` supplies the neutral-
+lavender lower-right shade (16-point travel and a 16-point Core Animation radius, matching the
+source's `16px 16px 32px` CSS shadow), `glow.highlight` supplies the opposing white
+`-10px -10px 24px` lift, and the soft bevel supplies the much quieter inset white-facing edge
+and violet shade. `controlGlow` carries the source's violet button depth, scaled from its
+56-point web buttons to Threading's 26-point controls. The larger source-faithful panel shadow
+is why `glowGutter` is 48 rather than an
+ordinary spacing token; the settings and onboarding hosts budget it explicitly, while general
+page spacing remains unchanged. On a large-radius toast the countdown strokes the lower half of
+each bottom corner and the edge between them, so it follows the panel without climbing far enough
+up either side to read as a partial border. That choice follows panel geometry rather than the
+bevel capability: radii at the `large` spacing threshold or above get the contour; ordinary and
+square corners keep the compact straight edge rail.
 
 Both blocks have full MCP parity (`create_app_theme`/`update_app_theme`/`get_app_theme`
 round-trip them; `chrome.remove` hands the frame back live) and are deliberately **not**
@@ -749,6 +851,31 @@ geometry, tracking, dragging and fade policy with AppKit. Both material fields r
 through create/update/get and decode old documents to trailing/solid. They are macOS chrome and
 are deliberately not projected by `RemoteThemeBridge`.
 
+**Determinate progress is its own material decision.** A hard bevel is not synonymous with
+Windows: BeOS, Platinum, and several workstation themes use hard relief with different progress
+languages. `progress_style` is therefore `continuous` by default and `segmented` only when the
+theme asks. Windows 98 does, producing a sunken trough with discrete accent blocks in both shared
+progress indicators, usage meters, and the toast dwell clock; old documents decode to continuous. The field
+round-trips through create/update/get so a custom nineties theme can opt in without a stock-theme
+identity check.
+
+**Compact controls carry period anatomy, not only period colours.** `fieldSurface` is an optional
+semantic role that derives from `panel` for every older theme, while Windows 98 states the white
+edit/value well used on its `#C0C0C0` button face. `choice_style` defaults to `chip`; `dropdown`
+turns `ChipView` into a square sunken value well with a separately raised, filled-triangle arrow
+and removes SF-symbol ornament from the closed control. `button_style.primary_treatment` adds
+`raised`: the primary keeps the ordinary gray face, gains the default-action outer frame, and
+uses the inset dotted focus indicator instead of a modern accent ring. The prompt, chooser, and
+button consume these roles and recipes without identifying Windows 98, and create/update/get
+round-trip both enum choices so a contributed retro theme can use the same control grammar.
+
+Hard bevels are drawn at the destination size rather than stretching a nine-patch. The sampled
+cap had expanded its fixed one-pixel edge into broad gray side bands across large wells, creating
+an inset fade that belonged to none of the pixel-era systems. Soft bevel materials retain their
+linearly sampled blur; the crisp hard-edge correction therefore benefits Windows 98, Platinum,
+BeOS, OPENSTEP, IRIX, and Amiga without giving them Windows-specific dropdowns or button
+hierarchy.
+
 **IRIX Indigo Magic** (`irix-indigo-magic`) adds the pieces 4Dwm actually needs rather than
 approximating it as purple Motif. `title_font_style` is `upright` or `italic`; texture kind
 `dither` draws a one-bit checker stipple; glyph family `irix` draws the black-outlined SGI
@@ -764,8 +891,10 @@ the stock theme id.
 **Amiga Workbench 3.1** (`amiga-workbench-31`) is based on the unmodified Workbench 3.1
 palette, not the more colourful MagicWB setup commonly shown in retrospectives. The frame uses
 the screenshot's exact `#6688BB` active title, `#AAAAAA` application gray, black rules and
-white highlights. A monospaced Monaco fallback and stippled legacy scroller carry the
-pixel-era rhythm through the application panes. Glyph family `amiga` renders the original
+white highlights. Topaz is the preferred UI face; the installable multi-platform recreation's
+actual `Topaz a600a1200a4000` family name and its TopazPlus counterpart precede Monaco in the
+fallback chain. A stippled legacy scroller carries the pixel-era rhythm through the application
+panes. Glyph family `amiga` renders the original
 Intuition Close, Zoom, and overlapping-window Depth figures; semantic operation `depth`
 orders the window behind its peers. `[close, zoom, depth]` plus `split` reproduces the
 historical left/right gadget order without teaching the stock theme a private code path. Both

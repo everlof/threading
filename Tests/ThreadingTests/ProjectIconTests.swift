@@ -104,17 +104,47 @@ final class ProjectIconTests: XCTestCase {
 
     // MARK: - Backplate
 
-    func testBackplateDecisionFollowsToneAndAppearance() {
-        // A dark mark vanishes on the dark sidebar; a light one on the light sidebar.
-        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.1, darkAppearance: true))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.1, darkAppearance: false))
-        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.95, darkAppearance: false))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.95, darkAppearance: true))
+    /// A ground of a stated tone, written in sRGB so the number here is the number measured.
+    private func ground(_ tone: CGFloat) -> IconBackplate.Ground {
+        IconBackplate.Ground(NSColor(srgbRed: tone, green: tone, blue: tone, alpha: 1))
+    }
 
-        // Mid-tones read against either appearance; an undecodable icon never plates.
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, darkAppearance: true))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, darkAppearance: false))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: nil, darkAppearance: true))
+    func testBackplateDecisionFollowsToneAndGround() {
+        let dark = ground(0.13)
+        let light = ground(0.97)
+
+        // A dark mark vanishes on a dark sidebar; a light one on a light sidebar.
+        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.1, on: dark))
+        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.1, on: light))
+        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.95, on: light))
+        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.95, on: dark))
+
+        // Mid-tones read against either of those; an undecodable icon never plates.
+        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, on: dark))
+        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, on: light))
+        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: nil, on: dark))
+    }
+
+    /// The bug the `Bool` hid: a mid-tone mark reads against the *system* light sidebar and
+    /// vanishes into a mid-tone one, and half the app's themes ship a mid-tone sidebar. Windows 98
+    /// is `#C0C0C0`, tone 0.75; Claude's coral starburst measures about 0.53. Told only "this is a
+    /// light appearance" the rule answered for 0.97 and left the mark to disappear.
+    func testAMidToneSidebarPlatesAMarkTheSystemSidebarDoesNot() {
+        let claudeMarkTone: CGFloat = 0.53
+
+        XCTAssertFalse(
+            ProjectIconStore.needsBackplate(luminance: claudeMarkTone, on: ground(0.97)),
+            "the system light sidebar has separation to spare and should plate nothing"
+        )
+        XCTAssertTrue(
+            ProjectIconStore.needsBackplate(
+                luminance: claudeMarkTone,
+                on: IconBackplate.Ground(
+                    AppThemeStyles.win98.resolved(.surface, appearance: .init(named: .aqua)!)
+                )
+            ),
+            "a mark half a tone from the silver sidebar it sits on was judged legible"
+        )
     }
 
     func testLuminanceReflectsIconTone() throws {

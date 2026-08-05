@@ -8,6 +8,12 @@ import XCTest
 /// wherever it is drawn, and a holly-red selected row is coral-coloured too. The project icons
 /// have answered this since the sidebar started drawing favicons, but they answered it against
 /// the *appearance*, which is only the right question while the ground never moves.
+///
+/// `ProjectIconStore.needsBackplate` — the appearance-based rule this generalises — is pinned by
+/// `ProjectIconTests.testBackplateDecisionFollowsToneAndAppearance`, and only there. A copy of
+/// those seven assertions stood here to show the generalisation had not changed the old answer,
+/// but being character-for-character the same call it could only ever fail alongside the
+/// original, so it reported nothing the original did not.
 @MainActor
 final class IconBackplateTests: XCTestCase {
 
@@ -19,6 +25,13 @@ final class IconBackplateTests: XCTestCase {
             bounds.fill()
             return true
         }
+    }
+
+    /// A ground of a stated tone. Written as an sRGB grey rather than `NSColor(white:)` so the
+    /// number in the test is the number the rule measures: a calibrated grey is converted before
+    /// it is read, and the conversion is not the identity.
+    private func ground(_ tone: CGFloat) -> IconBackplate.Ground {
+        IconBackplate.Ground(NSColor(srgbRed: tone, green: tone, blue: tone, alpha: 1))
     }
 
     // MARK: - Measuring
@@ -53,25 +66,33 @@ final class IconBackplateTests: XCTestCase {
     // MARK: - Deciding
 
     func testAMarkIsPlatedOnlyWhenItsGroundIsTooCloseToIt() {
-        XCTAssertTrue(IconBackplate.isNeeded(markTone: 0.5, groundTone: 0.5))
-        XCTAssertTrue(IconBackplate.isNeeded(markTone: 0.1, groundTone: 0.13))
-        XCTAssertFalse(IconBackplate.isNeeded(markTone: 0.1, groundTone: 0.9))
-        XCTAssertFalse(IconBackplate.isNeeded(markTone: 0.95, groundTone: 0.13))
+        XCTAssertTrue(IconBackplate.isNeeded(markTone: 0.5, ground: ground(0.5)))
+        XCTAssertTrue(IconBackplate.isNeeded(markTone: 0.1, ground: ground(0.13)))
+        XCTAssertFalse(IconBackplate.isNeeded(markTone: 0.1, ground: ground(0.9)))
+        XCTAssertFalse(IconBackplate.isNeeded(markTone: 0.95, ground: ground(0.13)))
     }
 
     /// A rescue for something whose shape cannot be measured would put a plate behind every
     /// icon in the list.
     func testAnUnmeasurableMarkNeverPlates() {
-        XCTAssertFalse(IconBackplate.isNeeded(markTone: nil, groundTone: 0.5))
-        XCTAssertFalse(IconBackplate.isNeeded(markTone: nil, groundTone: 0.0))
+        XCTAssertFalse(IconBackplate.isNeeded(markTone: nil, ground: ground(0.5)))
+        XCTAssertFalse(IconBackplate.isNeeded(markTone: nil, ground: ground(0)))
     }
 
     func testThePlateOpposesItsGround() {
-        let onDark = IconBackplate.plateColor(againstTone: 0.1)
-        let onLight = IconBackplate.plateColor(againstTone: 0.9)
+        let onDark = IconBackplate.plateColor(against: ground(0.1))
+        let onLight = IconBackplate.plateColor(against: ground(0.9))
 
         XCTAssertGreaterThan(IconBackplate.tone(of: onDark), 0.8, "a dark ground got a dark plate")
         XCTAssertLessThan(IconBackplate.tone(of: onLight), 0.3, "a light ground got a light plate")
+    }
+
+    /// Two grounds a thousandth apart are the same ground, and a rendition composed against one
+    /// serves the other: the cache is keyed on this, and a key that followed the raw measurement
+    /// would mint an entry per read.
+    func testGroundsThatCannotDisagreeShareACacheKey() {
+        XCTAssertEqual(ground(0.750).cacheKey, ground(0.7503).cacheKey)
+        XCTAssertNotEqual(ground(0.75).cacheKey, ground(0.97).cacheKey)
     }
 
     // MARK: - Composing
@@ -82,13 +103,13 @@ final class IconBackplateTests: XCTestCase {
         let template = swatch(.black)
         template.isTemplate = true
 
-        let result = IconBackplate.plated(template, againstTone: 0.02)
+        let result = IconBackplate.plated(template, against: ground(0.02))
         XCTAssertTrue(result === template)
     }
 
     func testAMarkThatReadsAgainstItsGroundIsReturnedUnchanged() {
         let mark = swatch(.white)
-        let result = IconBackplate.plated(mark, againstTone: 0.05)
+        let result = IconBackplate.plated(mark, against: ground(0.05))
         XCTAssertTrue(result === mark)
     }
 
@@ -101,7 +122,7 @@ final class IconBackplateTests: XCTestCase {
         let mark = swatch(.black, size: inkSide)
 
         // Black ink on a near-black ground vanishes, so this composes a light plate.
-        let plated = IconBackplate.plated(mark, againstTone: 0.1, size: plateSide)
+        let plated = IconBackplate.plated(mark, against: ground(0.1), size: plateSide)
         XCTAssertFalse(plated === mark, "black on a black ground was left to disappear")
         XCTAssertEqual(plated.size.width, plateSide)
 
@@ -126,32 +147,18 @@ final class IconBackplateTests: XCTestCase {
 
     func testAVanishingMarkComesBackOnAPlate() throws {
         let mark = swatch(NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: 1))
-        let groundTone = IconBackplate.tone(of: NSColor(srgbRed: 1, green: 0.3, blue: 0.35, alpha: 1))
+        let hollyRed = IconBackplate.Ground(NSColor(srgbRed: 1, green: 0.3, blue: 0.35, alpha: 1))
 
-        let result = IconBackplate.plated(mark, againstTone: groundTone)
+        let result = IconBackplate.plated(mark, against: hollyRed)
         XCTAssertFalse(result === mark, "coral on holly red was left to disappear")
 
         // The plate is what the ground now sees, and it opposes it.
         let composedTone = try XCTUnwrap(IconBackplate.tone(of: result))
         XCTAssertGreaterThan(
-            abs(composedTone - groundTone),
-            abs(try XCTUnwrap(IconBackplate.tone(of: mark)) - groundTone),
+            abs(composedTone - hollyRed.tone),
+            abs(try XCTUnwrap(IconBackplate.tone(of: mark)) - hollyRed.tone),
             "the plated mark is no easier to find than the bare one"
         )
-    }
-
-    // MARK: - The Project Icons' Own Rule
-
-    /// The appearance-based rule the project tiles have always used is now expressed as a
-    /// ground, and must still answer exactly as it did.
-    func testTheProjectIconRuleIsUnchangedByTheGeneralisation() {
-        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.1, darkAppearance: true))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.1, darkAppearance: false))
-        XCTAssertTrue(ProjectIconStore.needsBackplate(luminance: 0.95, darkAppearance: false))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.95, darkAppearance: true))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, darkAppearance: true))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: 0.5, darkAppearance: false))
-        XCTAssertFalse(ProjectIconStore.needsBackplate(luminance: nil, darkAppearance: true))
     }
 
     // MARK: - The Reported Case
@@ -179,14 +186,14 @@ final class IconBackplateTests: XCTestCase {
         XCTAssertTrue(
             IconBackplate.isNeeded(
                 markTone: IconBackplate.tone(of: mark),
-                groundTone: IconBackplate.tone(of: selectedGround)
+                ground: IconBackplate.Ground(selectedGround)
             ),
             "the coral mark on the accent-filled selected row was judged legible"
         )
         XCTAssertFalse(
             IconBackplate.isNeeded(
                 markTone: IconBackplate.tone(of: mark),
-                groundTone: IconBackplate.tone(of: restingGround)
+                ground: IconBackplate.Ground(restingGround)
             ),
             "an unselected fir-green row plates a mark that reads perfectly well on it"
         )
@@ -254,7 +261,7 @@ final class IconBackplateTests: XCTestCase {
         sized.size = NSSize(width: inkSide, height: inkSide)
         let plated = IconBackplate.plated(
             sized,
-            againstTone: IconBackplate.tone(of: ground),
+            against: IconBackplate.Ground(ground),
             size: plateSide
         )
 

@@ -66,9 +66,13 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.84,
                 glow: nil,
+                popoverStyle: periodPopoverStyle,
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
-                fontFamily: "Swiss 721"
+                // BeOS exposed this family as Swis721 BT. Keep the common expanded spelling in
+                // the chain for third-party ports, then fall to its closest installed relative.
+                fontFamily: "Swis721 BT",
+                fontFallbacks: ["Swiss 721", "Helvetica"]
             ),
             sidebar: SidebarStyle(
                 navigatorWell: .init(fill: hex("#FFFFFF"), bevel: .sunken)

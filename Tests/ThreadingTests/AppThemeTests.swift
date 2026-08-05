@@ -62,8 +62,8 @@ final class AppThemeTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "conversationFontFamily")
     }
 
-    /// A copy of a stock theme that names a family, which no stock theme does.
-    private func themeNaming(family: String, on theme: AppTheme) -> AppTheme {
+    /// A copy of a stock theme that replaces (or clears) its named family.
+    private func themeNaming(family: String?, on theme: AppTheme) -> AppTheme {
         var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
         for (kind, variant) in theme.variants {
             var material = variant.material
@@ -214,6 +214,34 @@ final class AppThemeTests: XCTestCase {
         XCTAssertTrue(
             Design.Typography.body().fontDescriptor.symbolicTraits.contains(.monoSpace),
             "Cyberpunk is a mono brief; its prose should be monospaced"
+        )
+    }
+
+    /// Reference styles may set display typography independently from their reading face.
+    /// Botanical is the load-bearing example: serif headings over sans body copy.
+    func testHeadingStyleChangesHeadingsWithoutRefontingBodyCopy() throws {
+        AppThemePalette.set(AppThemeStyles.botanical)
+
+        let heading = Design.Typography.heading()
+        let body = Design.Typography.body()
+        XCTAssertNotEqual(
+            heading.familyName,
+            body.familyName,
+            "Botanical collapsed its measured serif-display/sans-body pairing"
+        )
+
+        AppThemePalette.set(AppThemeStyles.artDeco)
+        let decoHeading = Design.Typography.heading()
+        let decoBody = Design.Typography.body()
+        XCTAssertNotEqual(
+            decoHeading.familyName,
+            decoBody.familyName,
+            "Art Deco's display face leaked into the reference's plain sans body copy"
+        )
+        XCTAssertEqual(decoHeading.familyName, "Avenir Next")
+        XCTAssertFalse(
+            decoHeading.fontDescriptor.symbolicTraits.contains(.bold),
+            "Art Deco's regular display weight became heavier than its reference"
         )
     }
 
@@ -368,7 +396,13 @@ final class AppThemeTests: XCTestCase {
         // authored on one machine and read on another.
         AppThemePalette.set(themeNaming(family: "NoSuchFamilyXYZ123", on: AppThemeStyles.newsprint))
         clearFontOverrides()
-        XCTAssertEqual(Design.Typography.body().familyName, serif)
+        let fallback = Design.Typography.body().familyName
+
+        // Newsprint intentionally names Baskerville. Once that name is replaced by an invalid
+        // portable family, the next layer is its serif *design*, not the replaced Baskerville
+        // string. Compare with the same material after explicitly clearing the family.
+        AppThemePalette.set(themeNaming(family: nil, on: AppThemeStyles.newsprint))
+        XCTAssertEqual(fallback, Design.Typography.body().familyName)
     }
 
     /// A theme may be more specific than the four classes its brief states.
@@ -533,12 +567,20 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.panelRadius, 18)
         XCTAssertEqual(material.typeface, .serif)
         XCTAssertNil(material.fontFamily)
+        XCTAssertTrue(material.fontFallbacks.isEmpty)
+        XCTAssertNil(material.controlGlow)
+        XCTAssertNil(material.controlBorderWidth)
+        XCTAssertEqual(material.resolvedControlBorderWidth, material.borderWidth)
         XCTAssertEqual(material.textScale, 1)
+        XCTAssertEqual(material.buttonStyle, .system)
+        XCTAssertNil(material.headingStyle)
+        XCTAssertEqual(material.popoverStyle, .system)
 
         let named = AppTheme.Material(
             textScale: 0.8,
             typeface: .serif,
-            fontFamily: "Baskerville"
+            fontFamily: "Baskerville",
+            fontFallbacks: ["Palatino"]
         )
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -546,6 +588,344 @@ final class AppThemeTests: XCTestCase {
             ),
             named
         )
+    }
+
+    func testAnUnavailableHistoricalFamilyUsesItsFirstInstalledFallback() {
+        let base = AppThemeStyles.newsprint
+        var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
+        for (kind, variant) in base.variants {
+            var material = variant.material
+            material.fontFamily = "Definitely Not An Installed Family"
+            material.fontFallbacks = [Self.chromeTestFamily, Self.conversationTestFamily]
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: material,
+                sidebar: variant.sidebar,
+                chrome: variant.chrome
+            )
+        }
+        AppThemePalette.set(AppTheme(
+            id: AppThemeID("historical-face-fallback"),
+            name: "Historical face fallback",
+            mode: base.mode,
+            summary: nil,
+            variants: variants
+        ))
+
+        XCTAssertEqual(Design.Typography.body().familyName, Self.chromeTestFamily)
+    }
+
+    func testRetroThemesKeepExactFontsAheadOfSafeInstalledSubstitutes() throws {
+        let win98 = try XCTUnwrap(AppThemeStyles.win98.variant(.light)?.material)
+        XCTAssertEqual(Array(win98.fontFamilies.prefix(3)), [
+            "MS Sans Serif", "Microsoft Sans Serif", "Tahoma"
+        ])
+        XCTAssertEqual(win98.progressStyle, .segmented)
+        XCTAssertEqual(win98.choiceStyle, .dropdown)
+        XCTAssertEqual(win98.buttonStyle.primaryTreatment, .raised)
+        XCTAssertEqual(win98.buttonStyle.fontWeight, .regular)
+        XCTAssertEqual(AppThemeStyles.win98.resolved(.fieldSurface).hexString, "#FFFFFF")
+
+        let platinum = try XCTUnwrap(AppThemeStyles.platinum.variant(.light)?.material)
+        XCTAssertEqual(platinum.fontFamilies, ["Charcoal", "Geneva"])
+
+        let beOS = try XCTUnwrap(AppThemeStyles.beOS.variant(.light)?.material)
+        XCTAssertEqual(beOS.fontFamilies, ["Swis721 BT", "Swiss 721", "Helvetica"])
+
+        let amiga = try XCTUnwrap(AppThemeStyles.amiga.variant(.light)?.material)
+        XCTAssertEqual(amiga.fontFamilies, [
+            "Topaz",
+            "Topaz a600a1200a4000",
+            "TopazPlus a600a1200a4000",
+            "TopazPlus",
+            "Monaco"
+        ])
+    }
+
+    func testControlGlowRoundTripsWithoutChangingOlderMaterials() throws {
+        let authored = AppTheme.Material(
+            controlGlow: AppTheme.Glow(
+                role: .accent,
+                radius: 6,
+                opacity: 0.3,
+                offsetX: 6,
+                offsetY: -6,
+                highlight: AppTheme.Glow.Highlight(
+                    role: .bevelHighlight,
+                    radius: 4,
+                    opacity: 0.45,
+                    offsetX: -4,
+                    offsetY: 4
+                )
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+    }
+
+    func testPopoverStyleRoundTripsAndSparseDocumentsKeepSystemDefaults() throws {
+        let authored = AppTheme.Material(
+            popoverStyle: AppTheme.Material.PopoverStyle(
+                arrow: .none,
+                surfaceRole: .panel,
+                edge: .material,
+                shadow: .none,
+                density: .compact,
+                glyphStyle: .classic
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+
+        let sparse = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"popoverStyle":{"arrow":"none"}}"#.utf8)
+        )
+        XCTAssertEqual(sparse.popoverStyle.arrow, .none)
+        XCTAssertEqual(sparse.popoverStyle.surfaceRole, .floatingSurface)
+        XCTAssertEqual(sparse.popoverStyle.edge, .flat)
+        XCTAssertEqual(sparse.popoverStyle.shadow, .automatic)
+        XCTAssertEqual(sparse.popoverStyle.density, .regular)
+        XCTAssertEqual(sparse.popoverStyle.glyphStyle, .system)
+    }
+
+    func testPeriodAndConstructedMaterialsStateTheirPopoverLanguage() {
+        XCTAssertEqual(AppThemeStyles.win98.material.popoverStyle, .init(
+            arrow: .none,
+            edge: .flat,
+            shadow: .none,
+            density: .compact,
+            glyphStyle: .classic
+        ))
+        for theme in [
+            AppThemeStyles.platinum,
+            AppThemeStyles.beOS,
+            AppThemeStyles.openStep,
+            AppThemeStyles.irix,
+            AppThemeStyles.amiga
+        ] {
+            XCTAssertEqual(theme.material.popoverStyle, AppThemeStyles.periodPopoverStyle)
+        }
+        for theme in [AppThemeStyles.neoBrutalism, AppThemeStyles.claymorphism] {
+            XCTAssertEqual(theme.material.popoverStyle.arrow, .none)
+            XCTAssertEqual(theme.material.popoverStyle.edge, .material)
+            XCTAssertEqual(theme.material.popoverStyle.shadow, .material)
+        }
+    }
+
+    func testControlBorderRoundTripsWithoutChangingOlderMaterials() throws {
+        let authored = AppTheme.Material(borderWidth: 4, controlBorderWidth: 2)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+
+        let legacy = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"borderWidth":3}"#.utf8)
+        )
+        XCTAssertNil(legacy.controlBorderWidth)
+        XCTAssertEqual(legacy.resolvedControlBorderWidth, 3)
+    }
+
+    func testBackdropPatternRoundTripsWithoutChangingOlderMaterials() throws {
+        let authored = AppTheme.Material(
+            backdropPattern: AppTheme.Material.BackdropPattern(
+                kind: .diagonalGrid,
+                role: .accent,
+                opacity: 0.03,
+                spacing: 40,
+                lineWidth: 1
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+
+        let legacy = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"borderWidth":2}"#.utf8)
+        )
+        XCTAssertNil(legacy.backdropPattern)
+
+        let sparse = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"backdropPattern":{"kind":"grid"}}"#.utf8)
+        )
+        XCTAssertEqual(sparse.backdropPattern?.kind, .grid)
+        XCTAssertEqual(sparse.backdropPattern?.role, .border)
+        XCTAssertEqual(sparse.backdropPattern?.opacity, 0.08)
+        XCTAssertEqual(sparse.backdropPattern?.spacing, 20)
+        XCTAssertEqual(sparse.backdropPattern?.lineWidth, 1)
+    }
+
+    func testHeadingStyleRoundTripsAndSparseDocumentsInheritProse() throws {
+        let authored = AppTheme.Material(
+            headingStyle: AppTheme.Material.HeadingStyle(
+                typeface: .serif,
+                fontFamily: "Baskerville",
+                fontWeight: .regular,
+                italic: true
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+
+        let sparse = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"headingStyle":{"fontWeight":"bold"}}"#.utf8)
+        )
+        XCTAssertNil(sparse.headingStyle?.typeface)
+        XCTAssertNil(sparse.headingStyle?.fontFamily)
+        XCTAssertEqual(sparse.headingStyle?.fontWeight, .bold)
+        XCTAssertEqual(sparse.headingStyle?.italic, false)
+
+        let legacy = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: Data(#"{"typeface":"serif"}"#.utf8)
+        )
+        XCTAssertNil(legacy.headingStyle)
+    }
+
+    func testButtonStyleRoundTripsAndSparseDocumentsKeepSystemDefaults() throws {
+        let authored = AppTheme.Material(
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                textTransform: .uppercase,
+                fontWeight: .bold,
+                typeface: .serif,
+                fontFamily: "Baskerville",
+                tracking: 0.75,
+                primaryTreatment: .outlined,
+                primaryRole: .syntaxType,
+                primaryBorderRole: .label,
+                hoverOffsetX: 4,
+                hoverOffsetY: 4,
+                pressedOffsetX: 2,
+                pressedOffsetY: 2,
+                collapseShadowOnHover: true
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self,
+                from: JSONEncoder().encode(authored)
+            ),
+            authored
+        )
+
+        let sparse = Data(#"{"buttonStyle":{"textTransform":"uppercase"}}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppTheme.Material.self, from: sparse)
+        XCTAssertEqual(decoded.buttonStyle.textTransform, .uppercase)
+        XCTAssertEqual(decoded.buttonStyle.fontWeight, .medium)
+        XCTAssertNil(decoded.buttonStyle.typeface)
+        XCTAssertNil(decoded.buttonStyle.fontFamily)
+        XCTAssertEqual(decoded.buttonStyle.primaryTreatment, .filled)
+        XCTAssertEqual(decoded.buttonStyle.primaryRole, .accent)
+        XCTAssertEqual(decoded.buttonStyle.tracking, 0)
+        XCTAssertEqual(decoded.buttonStyle.hoverOffsetX, 0)
+        XCTAssertFalse(decoded.buttonStyle.collapseShadowOnHover)
+
+        let classic = AppTheme.Material(
+            buttonStyle: .init(primaryTreatment: .raised),
+            choiceStyle: .dropdown
+        )
+        let classicRoundTrip = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: JSONEncoder().encode(classic)
+        )
+        XCTAssertEqual(classicRoundTrip.buttonStyle.primaryTreatment, .raised)
+        XCTAssertEqual(classicRoundTrip.choiceStyle, .dropdown)
+    }
+
+    func testDesignPromptsThemesAuthorTheirMeasuredActionLanguage() {
+        let themes = [
+            AppThemeStyles.bauhaus,
+            AppThemeStyles.newsprint,
+            AppThemeStyles.swissMinimalist,
+            AppThemeStyles.artDeco,
+            AppThemeStyles.neoBrutalism,
+            AppThemeStyles.cyberpunk,
+            AppThemeStyles.botanical,
+            AppThemeStyles.vaporwave,
+            AppThemeStyles.industrial
+        ]
+        for theme in themes {
+            XCTAssertEqual(
+                theme.material.buttonStyle.textTransform,
+                .uppercase,
+                "\(theme.name) lost the uppercase action convention measured on its reference"
+            )
+            XCTAssertNotNil(
+                theme.material.headingStyle,
+                "\(theme.name) lost the display typography measured on its reference"
+            )
+        }
+
+        XCTAssertEqual(AppThemeStyles.artDeco.material.buttonStyle.primaryTreatment, .outlined)
+        XCTAssertEqual(AppThemeStyles.cyberpunk.material.buttonStyle.primaryTreatment, .outlined)
+        XCTAssertEqual(AppThemeStyles.vaporwave.material.buttonStyle.primaryTreatment, .outlined)
+        XCTAssertEqual(AppThemeStyles.newsprint.material.buttonStyle.primaryRole, .label)
+        XCTAssertEqual(AppThemeStyles.botanical.material.buttonStyle.primaryRole, .label)
+        XCTAssertEqual(AppThemeStyles.vaporwave.material.buttonStyle.primaryRole, .syntaxType)
+        XCTAssertEqual(AppThemeStyles.neoBrutalism.material.buttonStyle.hoverOffsetX, 4)
+        XCTAssertTrue(AppThemeStyles.neoBrutalism.material.buttonStyle.collapseShadowOnHover)
+        XCTAssertEqual(AppThemeStyles.industrial.material.buttonStyle.pressedOffsetY, 2)
+        XCTAssertEqual(AppThemeStyles.artDeco.material.buttonStyle.fontFamily, "Avenir Next")
+        XCTAssertEqual(AppThemeStyles.newsprint.material.buttonStyle.fontFamily, "Baskerville")
+
+        AppThemePalette.set(AppThemeStyles.artDeco)
+        XCTAssertEqual(
+            Design.Typography.button(style: AppThemeStyles.artDeco.material.buttonStyle).familyName,
+            "Avenir Next"
+        )
+        XCTAssertNotEqual(
+            Design.Typography.button(style: AppThemeStyles.artDeco.material.buttonStyle).familyName,
+            Design.Typography.body().familyName,
+            "Art Deco's display action face leaked into body copy"
+        )
+
+        XCTAssertEqual(AppThemeStyles.bauhaus.material.borderWidth, 4)
+        XCTAssertEqual(AppThemeStyles.bauhaus.material.controlBorderWidth, 2)
+        XCTAssertEqual(AppThemeStyles.bauhaus.material.resolvedControlBorderWidth, 2)
+        XCTAssertNil(AppThemeStyles.neoBrutalism.material.controlBorderWidth)
+        XCTAssertEqual(AppThemeStyles.neoBrutalism.material.resolvedControlBorderWidth, 4)
+
+        XCTAssertEqual(AppThemeStyles.bauhaus.material.backdropPattern?.kind, .dots)
+        XCTAssertEqual(AppThemeStyles.swissMinimalist.material.backdropPattern?.kind, .grid)
+        XCTAssertEqual(AppThemeStyles.artDeco.material.backdropPattern?.kind, .diagonalGrid)
+        XCTAssertEqual(AppThemeStyles.neoBrutalism.material.backdropPattern?.kind, .dots)
+        XCTAssertEqual(AppThemeStyles.cyberpunk.material.backdropPattern?.kind, .grid)
+        XCTAssertEqual(AppThemeStyles.vaporwave.material.backdropPattern?.kind, .perspectiveGrid)
+        XCTAssertNil(AppThemeStyles.newsprint.material.backdropPattern)
+        XCTAssertNil(AppThemeStyles.botanical.material.backdropPattern)
+        XCTAssertNil(AppThemeStyles.industrial.material.backdropPattern)
+        XCTAssertEqual(AppThemeStyles.artDeco.material.headingStyle?.fontWeight, .regular)
+        XCTAssertEqual(AppThemeStyles.botanical.material.headingStyle?.typeface, .serif)
+        XCTAssertEqual(AppThemeStyles.botanical.material.headingStyle?.fontWeight, .regular)
+        XCTAssertEqual(AppThemeStyles.newsprint.material.headingStyle?.fontWeight, .bold)
     }
 
     /// Why the role is recorded on the **view** and not tagged onto the font.
@@ -583,9 +963,15 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.panelRadius, 18)
         XCTAssertEqual(material.controlRadius, 10)
         XCTAssertEqual(material.borderWidth, 2)
+        XCTAssertNil(material.controlBorderWidth)
+        XCTAssertEqual(material.resolvedControlBorderWidth, 2)
+        XCTAssertNil(material.backdropPattern)
+        XCTAssertNil(material.headingStyle)
         XCTAssertEqual(material.typeface, .standard)
         XCTAssertEqual(material.scrollerPlacement, .trailing)
         XCTAssertEqual(material.scrollerTrackStyle, .solid)
+        XCTAssertEqual(material.progressStyle, .continuous)
+        XCTAssertEqual(material.choiceStyle, .chip)
 
         let sparse = Data(#"{}"#.utf8)
         XCTAssertEqual(
@@ -601,12 +987,15 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(round.typeface, .serif)
         XCTAssertEqual(round.scrollerPlacement, .trailing)
         XCTAssertEqual(round.scrollerTrackStyle, .solid)
+        XCTAssertEqual(round.progressStyle, .continuous)
+        XCTAssertEqual(round.choiceStyle, .chip)
     }
 
     func testScrollerMaterialRoundTrips() throws {
         let authored = AppTheme.Material(
             scrollerPlacement: .leading,
-            scrollerTrackStyle: .stippled
+            scrollerTrackStyle: .stippled,
+            progressStyle: .segmented
         )
         let roundTrip = try JSONDecoder().decode(
             AppTheme.Material.self,
@@ -615,6 +1004,7 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(roundTrip.scrollerPlacement, .leading)
         XCTAssertEqual(roundTrip.scrollerTrackStyle, .stippled)
+        XCTAssertEqual(roundTrip.progressStyle, .segmented)
     }
 
     /// The paired terminal's cursor is the palette's own ink, never its accent.
@@ -664,6 +1054,56 @@ final class AppThemeTests: XCTestCase {
                 error.localizedDescription.contains("syntax_keyword"),
                 "the refusal must name the role that vanished: \(error.localizedDescription)"
             )
+        }
+    }
+
+    func testControlBorderOverrideMustStayInsideTheMaterialContract() throws {
+        let base = AppThemeStyles.bauhaus
+        let source = try XCTUnwrap(base.variant(.light))
+        var material = source.material
+        material.controlBorderWidth = 5
+        let broken = AppTheme(
+            id: AppThemeID("broken-control-border"),
+            name: "Broken Control Border",
+            mode: .light,
+            summary: nil,
+            variants: [.light: AppTheme.Variant(
+                roles: source.roles,
+                terminalPalette: source.terminalPalette,
+                material: material
+            )]
+        )
+
+        XCTAssertThrowsError(try AppThemeEditing.validate(broken)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("control_border_width"))
+        }
+    }
+
+    func testBackdropPatternMustStayInsideTheMaterialContract() throws {
+        let base = AppThemeStyles.bauhaus
+        let source = try XCTUnwrap(base.variant(.light))
+        var material = source.material
+        material.backdropPattern = AppTheme.Material.BackdropPattern(
+            kind: .dots,
+            role: .label,
+            opacity: 1.1,
+            spacing: 20,
+            lineWidth: 1
+        )
+        let broken = AppTheme(
+            id: AppThemeID("broken-backdrop-pattern"),
+            name: "Broken Backdrop Pattern",
+            mode: .light,
+            summary: nil,
+            variants: [.light: AppTheme.Variant(
+                roles: source.roles,
+                terminalPalette: source.terminalPalette,
+                material: material
+            )]
+        )
+
+        XCTAssertThrowsError(try AppThemeEditing.validate(broken)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("backdrop_pattern.opacity"))
         }
     }
 
@@ -811,6 +1251,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(Design.Radius.panel, 12)
         XCTAssertEqual(Design.Radius.control, 8)
         XCTAssertEqual(Design.Radius.border, 1)
+        XCTAssertEqual(Design.Radius.controlBorder, 1)
         XCTAssertEqual(Design.Radius.pill(height: 26), 13, "a System pill is still fully rounded")
     }
 
@@ -847,22 +1288,31 @@ final class AppThemeTests: XCTestCase {
     /// clip. The blur's visible extent is about twice its radius, after travelling its offset.
     func testGlowGutterCoversEveryStockGlow() {
         for theme in AppThemeLibrary.stock {
-            guard let glow = theme.material.glow else { continue }
-            XCTAssertGreaterThanOrEqual(
-                Design.Size.glowGutter,
-                abs(glow.offsetX) + glow.radius * 2,
-                "\(theme.name)'s horizontal shadow spills past its gutter"
-            )
-            XCTAssertGreaterThanOrEqual(
-                Design.Size.glowGutter,
-                abs(glow.offsetY) + glow.radius * 2,
-                "\(theme.name)'s vertical shadow spills past its gutter"
-            )
+            let glows = [("panel", theme.material.glow), ("control", theme.material.controlGlow)]
+            for (kind, glow) in glows {
+                guard let glow else { continue }
+                var shadows: [(name: String, radius: CGFloat, x: CGFloat, y: CGFloat)] = [
+                    ("shadow", glow.radius, glow.offsetX, glow.offsetY)
+                ]
+                if let highlight = glow.highlight {
+                    shadows.append(
+                        ("highlight", highlight.radius, highlight.offsetX, highlight.offsetY)
+                    )
+                }
+                for shadow in shadows {
+                    XCTAssertGreaterThanOrEqual(
+                        Design.Size.glowGutter,
+                        abs(shadow.x) + shadow.radius * 2,
+                        "\(theme.name)'s horizontal \(kind) \(shadow.name) spills past its gutter"
+                    )
+                    XCTAssertGreaterThanOrEqual(
+                        Design.Size.glowGutter,
+                        abs(shadow.y) + shadow.radius * 2,
+                        "\(theme.name)'s vertical \(kind) \(shadow.name) spills past its gutter"
+                    )
+                }
+            }
         }
-
-        // The settings column's top and bottom padding double as the first and last card's
-        // gutter (`SettingsUI.page`), so the page padding must cover the spill too.
-        XCTAssertGreaterThanOrEqual(Design.Spacing.large, Design.Size.glowGutter)
     }
 
     func testDirectedPanelShadowsFitTheMaterialContract() {
@@ -1151,7 +1601,7 @@ final class AppThemeTests: XCTestCase {
     ///
     /// `dividerStyle = .thin` is a fixed point, while every other rule in the window — the pane
     /// headers' and footers' `SeparatorView`s, the shell drawer's grab strip — is
-    /// `Design.Radius.border` thick. On Bauhaus (2) and Neo Brutalism (3) the window therefore
+    /// `Design.Radius.border` thick. On Bauhaus and Neo Brutalism (both 4) the window therefore
     /// drew heavy horizontal rules and a hairline vertical seam between the very same panes:
     /// the sidebar's header rule stepped down exactly where it crossed the split.
     func testTheSplitSeamWeighsWhatTheThemesOtherRulesWeigh() {
@@ -1216,7 +1666,7 @@ final class AppThemeTests: XCTestCase {
         let split = controller.splitViewController.splitView
         split.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(split.dividerThickness, 2, "Bauhaus rules at 2; the window's seam did not")
+        XCTAssertEqual(split.dividerThickness, 4, "Bauhaus rules at 4; the window's seam did not")
 
         // A collapsed pane has no seam beside it. It keeps the width it had before collapsing
         // and loses its height, so "on screen" means an area rather than a width.
@@ -1249,7 +1699,7 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(
             try seamWidth(in: split),
-            3,
+            4,
             "the panes stayed spaced for the theme that just left"
         )
     }

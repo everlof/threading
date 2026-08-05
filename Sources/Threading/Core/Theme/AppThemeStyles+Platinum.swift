@@ -68,9 +68,13 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.82,
                 glow: nil,
+                popoverStyle: periodPopoverStyle,
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
-                fontFamily: "Charcoal"
+                fontFamily: "Charcoal",
+                // Geneva is the period Mac small-screen face available on current macOS when
+                // Charcoal itself is absent.
+                fontFallbacks: ["Geneva"]
             ),
             sidebar: SidebarStyle(
                 navigatorWell: .init(fill: hex("#FFFFFF"), bevel: .sunken)
