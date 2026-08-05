@@ -24,6 +24,15 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!--
+		The release channel, injected like the version: scripts/release.sh passes
+		THREADING_CHANNEL to xcodebuild archive, and a build made without it expands this to
+		the empty string, which AppInfo.buildChannel reads as the dev channel. Deliberate —
+		a local build must not be able to claim it is a release. See BuildChannel and
+		docs/architecture/releasing.md.
+	-->
+	<key>ThreadingBuildChannel</key>
+	<string>$(THREADING_CHANNEL)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMainNibFile</key>

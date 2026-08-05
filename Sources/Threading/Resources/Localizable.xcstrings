@@ -7,6 +7,12 @@
     "%lld explicit redactions": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld uttryckliga maskeringar" } } }
     },
+    "%lld files is more than a zip archive can hold.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld filer är fler än vad ett zip-arkiv rymmer." } } }
+    },
+    "%lld more lines are not shown.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld rader till visas inte." } } }
+    },
     "%lld retained events": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld sparade händelser" } } }
     },
@@ -37,8 +43,14 @@
     "Completed": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slutförd" } } }
     },
+    "Could Not Export Comparison": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte exportera jämförelsen" } } }
+    },
     "Denied": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nekad" } } }
+    },
+    "Drag the seam, or press the arrow keys to move it.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dra i skarven, eller flytta den med piltangenterna." } } }
     },
     "EVENTS": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HÄNDELSER" } } }
@@ -61,8 +73,26 @@
     "Execution events": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Körningshändelser" } } }
     },
+    "Export Comparison…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exportera jämförelse…" } } }
+    },
+    "Export comparison": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exportera jämförelsen" } } }
+    },
+    "Export this comparison as a page anyone can open.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exportera jämförelsen som en sida vem som helst kan öppna." } } }
+    },
+    "Exported from %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Exporterad från %@" } } }
+    },
     "Filesystem": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filsystem" } } }
+    },
+    "Folder in a Zip (.zip)": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mapp i ett zip-arkiv (.zip)" } } }
+    },
+    "Format:": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Format:" } } }
     },
     "Integrity failure": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Integritetsfel" } } }
@@ -90,6 +120,9 @@
     },
     "Requested": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Begärd" } } }
+    },
+    "Single Page (.html)": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En enda sida (.html)" } } }
     },
     "Updated": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad" } } }
@@ -778,6 +811,16 @@
     "Native Finder artwork under System; semantic, theme-owned file kinds under authored themes.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Inbyggd Finder-grafik med System; semantiska, temaägda filtyper med skapade teman." } }
+      }
+    },
+    "ThemedFloatingGlyphView": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ThemedFloatingGlyphView" } }
+      }
+    },
+    "The marks app-owned floating content names semantically. Switch to a period theme: every one of them drops its SF Symbol for the one-bit mark that material draws instead.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Märkena som appägt flytande innehåll namnger semantiskt. Byt till ett tidstypiskt tema: var och en av dem släpper sin SF Symbol för enbitsmärket som materialet ritar i stället." } }
       }
     },
     "Presentation": {
@@ -2892,6 +2935,18 @@
           }
         }
       }
+    },
+    "A continuation path across runtimes: the direct source is offered as an action, the older stops stay as provenance.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En fortsättningsväg mellan körtider: den direkta källan erbjuds som en åtgärd, de äldre stoppen står kvar som proveniens." } } }
+    },
+    "ConversationHandoffView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ConversationHandoffView" } } }
+    },
+    "ExecutionAuditEventView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ExecutionAuditEventView" } } }
+    },
+    "One audit row per source, resting and selected: the ledger's fixed grid of category, phase, operation and fidelity.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En granskningsrad per källa, vilande och markerad: liggarens fasta rutnät av kategori, fas, operation och trohet." } } }
     },
     "Archive “%@”?": {
       "extractionState": "stale",
@@ -8672,6 +8727,16 @@
         }
       }
     },
+    "Inspect…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspektera…"
+          }
+        }
+      }
+    },
     "Inspect Geometry": {
       "extractionState": "stale",
       "localizations": {
@@ -13060,16 +13125,6 @@
         }
       }
     },
-    "Relaunch sessions that were running at quit": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Starta om konversationer som kördes när appen avslutades"
-          }
-        }
-      }
-    },
     "Render a bounded semantic visualization using Threading’s native UI.": {
       "localizations": {
         "sv": {
@@ -16042,13 +16097,13 @@
         }
       }
     },
-    "The agent wants to %@ this website in Threading's browser. This browser may contain signed-in sessions and cookies that are not available to the agent's shell.\n\nPage content is untrusted. Allow access only when this host is relevant to your task.": {
+    "The agent wants to %@ %@ in Threading's browser. This browser may contain signed-in sessions and cookies that are not available to the agent's shell.\n\nPage content is untrusted. Allow access only when %@ is relevant to your task.": {
       "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agenten vill %@ den här webbplatsen i Threadings webbläsare. Webbläsaren kan innehålla inloggade sessioner och cookies som inte är tillgängliga för agentens skal.\n\nSidans innehåll är inte betrott. Tillåt bara åtkomst när den här värden är relevant för din uppgift."
+            "value": "Agenten vill %@ %@ i Threadings webbläsare. Webbläsaren kan innehålla inloggade sessioner och cookies som inte är tillgängliga för agentens skal.\n\nSidans innehåll är inte betrott. Tillåt bara åtkomst när %@ är relevant för din uppgift."
           }
         }
       }
@@ -17341,16 +17396,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "De förlorar chatten omedelbart och allt de har öppet stängs. Deras inbjudan var för engångsbruk, så att släppa in dem igen innebär att dela chatten på nytt."
-          }
-        }
-      }
-    },
-    "They resume in the background, one at a time, and are already running when you open them.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "De återupptas i bakgrunden, en i taget, och är redan igång när du öppnar dem."
           }
         }
       }
@@ -21296,6 +21341,9 @@
         }
       }
     },
+    "“%@” is too large to put in a zip archive.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "”%@” är för stor för ett zip-arkiv." } } }
+    },
     "“%@” is unavailable because %@ is not running or no longer registers this panel.": {
       "extractionState": "stale",
       "localizations": {
@@ -21336,6 +21384,56 @@
           "stringUnit": {
             "state": "translated",
             "value": "⌃ hierarki · ⌥ avstånd"
+          }
+        }
+      }
+    },
+    "⇧ point": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⇧ punkt"
+          }
+        }
+      }
+    },
+    "⌃ hierarchy": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌃ hierarki"
+          }
+        }
+      }
+    },
+    "⌥ spacing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌥ avstånd"
+          }
+        }
+      }
+    },
+    "drag region": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "dra område"
+          }
+        }
+      }
+    },
+    "esc exits": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "esc avslutar"
           }
         }
       }
@@ -22910,6 +23008,946 @@
           "stringUnit": {
             "state": "translated",
             "value": "Byt projekt"
+          }
+        }
+      }
+    },
+    "Ask AI": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fråga AI"
+          }
+        }
+      }
+    },
+    "Ask AI about settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fråga AI om inställningarna"
+          }
+        }
+      }
+    },
+    "Asking %@…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frågar %@…"
+          }
+        }
+      }
+    },
+    "Suggestions for “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förslag för ”%@”"
+          }
+        }
+      }
+    },
+    "Settings directory": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inställningskatalog"
+          }
+        }
+      }
+    },
+    "Let agents read which Settings pages exist, to point you at the right one.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låter agenter läsa vilka inställningssidor som finns, för att peka dig till rätt sida."
+          }
+        }
+      }
+    },
+    "List settings pages": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista inställningssidor"
+          }
+        }
+      }
+    },
+    "Read the Settings pages, their sidebar groups, and their vocabulary.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs inställningssidorna, deras grupper i sidofältet och deras vokabulär."
+          }
+        }
+      }
+    },
+    "%d earlier handoff stops omitted": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d tidigare handoffsteg utelämnade"
+          }
+        }
+      }
+    },
+    "%lld approvals": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld godkännanden"
+          }
+        }
+      }
+    },
+    "%lld checks failed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld kontroller misslyckades"
+          }
+        }
+      }
+    },
+    "%lld checks passed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld kontroller godkända"
+          }
+        }
+      }
+    },
+    "%lld checks pending": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld kontroller väntar"
+          }
+        }
+      }
+    },
+    "%lld requested changes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld begärda ändringar"
+          }
+        }
+      }
+    },
+    "%lld reviewers requested": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld granskare begärda"
+          }
+        }
+      }
+    },
+    "A pull request draft is already being written.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ett utkast till pull request skrivs redan."
+          }
+        }
+      }
+    },
+    "Agent Session ID": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agentens sessions-ID"
+          }
+        }
+      }
+    },
+    "Branch pushed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grenen pushad"
+          }
+        }
+      }
+    },
+    "Browse committed changes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bläddra bland incheckade ändringar"
+          }
+        }
+      }
+    },
+    "Close All Tabs": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng alla flikar"
+          }
+        }
+      }
+    },
+    "Codex could not be launched.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex kunde inte startas."
+          }
+        }
+      }
+    },
+    "Codex exited with status %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex avslutades med status %lld."
+          }
+        }
+      }
+    },
+    "Codex is drafting…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex skriver ett utkast…"
+          }
+        }
+      }
+    },
+    "Codex may draft the title and description. You review them and press Publish.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex kan skriva ett utkast till titel och beskrivning. Du granskar dem och trycker på Publicera."
+          }
+        }
+      }
+    },
+    "Codex returned no pull request draft.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex returnerade inget utkast till pull request."
+          }
+        }
+      }
+    },
+    "Context handoff": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontextöverlämning"
+          }
+        }
+      }
+    },
+    "Context handoff, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontextöverlämning, %@"
+          }
+        }
+      }
+    },
+    "Continue with…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt med…"
+          }
+        }
+      }
+    },
+    "Couldn’t capture this turn’s starting state.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att spara turens starttillstånd."
+          }
+        }
+      }
+    },
+    "Create as draft": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa som utkast"
+          }
+        }
+      }
+    },
+    "Create draft pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa utkast till pull request"
+          }
+        }
+      }
+    },
+    "Create pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa pull request"
+          }
+        }
+      }
+    },
+    "Create pull request…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa pull request…"
+          }
+        }
+      }
+    },
+    "Create ready pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa pull request redo för granskning"
+          }
+        }
+      }
+    },
+    "Created pull request #%lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapade pull request #%lld."
+          }
+        }
+      }
+    },
+    "Default branch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardgren"
+          }
+        }
+      }
+    },
+    "Draft ready — review it before publishing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utkastet är klart — granska det före publicering."
+          }
+        }
+      }
+    },
+    "Draft with Codex": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriv utkast med Codex"
+          }
+        }
+      }
+    },
+    "Draft": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utkast"
+          }
+        }
+      }
+    },
+    "Drafting the pull request timed out.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidsgränsen överskreds när pull requesten skrevs."
+          }
+        }
+      }
+    },
+    "Empty Tree": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tomt träd"
+          }
+        }
+      }
+    },
+    "Git Review may push this project's branch, but never creates a pull request.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning kan pusha projektets gren, men skapar aldrig en pull request."
+          }
+        }
+      }
+    },
+    "GitHub could not find this repository for any available sign-in.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub kunde inte hitta arkivet med någon tillgänglig inloggning."
+          }
+        }
+      }
+    },
+    "GitHub created the pull request, but Threading could not read its response.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub skapade pull requesten, men Threading kunde inte läsa svaret."
+          }
+        }
+      }
+    },
+    "GitHub refused the pull request (%lld).": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub avvisade pull requesten (%lld)."
+          }
+        }
+      }
+    },
+    "GitHub refused the pull request (%lld): %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub avvisade pull requesten (%lld): %@"
+          }
+        }
+      }
+    },
+    "GitHub returned a response Threading could not read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub returnerade ett svar som Threading inte kunde läsa."
+          }
+        }
+      }
+    },
+    "GitHub would not accept this Mac's sign-in, so this opens the pull request form in your browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub accepterade inte inloggningen på denna Mac, så formuläret för pull requests öppnas i webbläsaren."
+          }
+        }
+      }
+    },
+    "HEAD → Index": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEAD → index"
+          }
+        }
+      }
+    },
+    "HEAD → Working Tree · staged, unstaged, and untracked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEAD → arbetskopia · indexerade, oindexerade och ospårade"
+          }
+        }
+      }
+    },
+    "Index → Working Tree · includes untracked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Index → arbetskopia · inkluderar ospårade"
+          }
+        }
+      }
+    },
+    "Loading…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in…"
+          }
+        }
+      }
+    },
+    "Merge Base → Working Tree": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sammanslagningsbas → arbetskopia"
+          }
+        }
+      }
+    },
+    "Never create pull requests": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa aldrig pull requests"
+          }
+        }
+      }
+    },
+    "No checks": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga kontroller"
+          }
+        }
+      }
+    },
+    "No turn recorded yet.\nThe baseline is captured before the agent starts working.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen tur har registrerats ännu.\nBaslinjen sparas innan agenten börjar arbeta."
+          }
+        }
+      }
+    },
+    "No turn recorded yet. A baseline is captured before the agent starts working.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen tur har registrerats ännu. En baslinje sparas innan agenten börjar arbeta."
+          }
+        }
+      }
+    },
+    "Open pull request on GitHub": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna pull request på GitHub"
+          }
+        }
+      }
+    },
+    "Open pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna pull request"
+          }
+        }
+      }
+    },
+    "Open source conversation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna källkonversation"
+          }
+        }
+      }
+    },
+    "Open source conversation, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna källkonversation, %@"
+          }
+        }
+      }
+    },
+    "Preparing turn…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förbereder tur…"
+          }
+        }
+      }
+    },
+    "Pressing Create publishes a draft pull request with the proposed title and description.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "När du trycker på Skapa publiceras ett utkast till pull request med den föreslagna titeln och beskrivningen."
+          }
+        }
+      }
+    },
+    "Pressing Create publishes a ready-for-review pull request with the proposed title and description.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "När du trycker på Skapa publiceras en pull request redo för granskning med den föreslagna titeln och beskrivningen."
+          }
+        }
+      }
+    },
+    "Publish %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publicera %@"
+          }
+        }
+      }
+    },
+    "Publish pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publicera pull request"
+          }
+        }
+      }
+    },
+    "Pull Requests": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pull requests"
+          }
+        }
+      }
+    },
+    "Pull request description": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beskrivning av pull request"
+          }
+        }
+      }
+    },
+    "Pull request title": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titel för pull request"
+          }
+        }
+      }
+    },
+    "Pull request · %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pull request · %@"
+          }
+        }
+      }
+    },
+    "Pull request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pull request"
+          }
+        }
+      }
+    },
+    "Pull requests need a checked-out branch.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pull requests kräver en utcheckad gren."
+          }
+        }
+      }
+    },
+    "Push branch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pusha gren"
+          }
+        }
+      }
+    },
+    "Push update": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pusha uppdatering"
+          }
+        }
+      }
+    },
+    "Pushed %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pushade %@."
+          }
+        }
+      }
+    },
+    "Reading GitHub…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser GitHub…"
+          }
+        }
+      }
+    },
+    "Relaunch sessions that were running at quit": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta om konversationer som kördes när appen avslutades"
+          }
+        }
+      }
+    },
+    "Retry": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Försök igen"
+          }
+        }
+      }
+    },
+    "Review before publishing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granska före publicering"
+          }
+        }
+      }
+    },
+    "Review what will be published from %@ into %@. Codex can edit these fields but cannot publish them.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granska det som publiceras från %@ till %@. Codex kan redigera fälten men kan inte publicera dem."
+          }
+        }
+      }
+    },
+    "Source conversation is no longer available": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Källkonversationen är inte längre tillgänglig"
+          }
+        }
+      }
+    },
+    "Source conversation unavailable, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Källkonversation inte tillgänglig, %@"
+          }
+        }
+      }
+    },
+    "The origin remote is not a github.com repository.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärren origin är inte ett arkiv på github.com."
+          }
+        }
+      }
+    },
+    "They resume in the background, one at a time, and are already running when you open them.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De återupptas i bakgrunden, en i taget, och är redan igång när du öppnar dem."
+          }
+        }
+      }
+    },
+    "This Turn": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här turen"
+          }
+        }
+      }
+    },
+    "This branch has no commit to describe.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här grenen har ingen incheckning att beskriva."
+          }
+        }
+      }
+    },
+    "This repository has no origin remote.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivet har ingen origin-fjärr."
+          }
+        }
+      }
+    },
+    "Threading ID": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading-ID"
+          }
+        }
+      }
+    },
+    "Threading could not prepare the pull request.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte förbereda pull requesten."
+          }
+        }
+      }
+    },
+    "Threading has no GitHub sign-in, so this opens the pull request form in your browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading har ingen GitHub-inloggning, så formuläret för pull requests öppnas i webbläsaren."
+          }
+        }
+      }
+    },
+    "Transcript Path": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkriptets sökväg"
+          }
+        }
+      }
+    },
+    "Turn Start → Working Tree": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turstart → arbetskopia"
+          }
+        }
+      }
+    },
+    "Worktree Path": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arbetskopians sökväg"
+          }
+        }
+      }
+    },
+    "uncommitted changes stay local": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "oincheckade ändringar stannar lokalt"
           }
         }
       }
