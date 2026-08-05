@@ -80,7 +80,6 @@ final class UsageBarRow: NSView {
         // rendering failure rather than as a small number.
         bar.fraction = max(min(fraction, 1), UsageBarRowDefaults.minimumFraction)
         bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.heightAnchor.constraint(equalToConstant: UsageBarRowDefaults.height).isActive = true
         return bar
     }
 

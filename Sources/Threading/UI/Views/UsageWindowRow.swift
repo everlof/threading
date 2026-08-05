@@ -3,39 +3,45 @@ import AppKit
 /// One rate-limit window, written out: its name and percentage on a line, a bar beneath, and
 /// the reset countdown under that.
 ///
-/// Shared by the toolbar's popover and the composer's usage panel. The two ask the same
-/// question — how much of this window is left, and am I ahead of the clock — so they draw the
-/// same answer rather than each inventing a layout for it.
+/// Drawn wherever a window is written out at length: the toolbar pill's popover, and the usage
+/// settings page.
 ///
 /// The bar carries a **time mark**: where the clock stands in the window. Fill short of the
 /// mark is under pace; fill past it is spending faster than the window refills, which is the
 /// thing a percentage alone cannot tell you.
 final class UsageWindowRow: NSView {
 
+    // MARK: - Properties
+
+    /// Which window this row stands for.
+    let windowID: String
+
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let valueLabel = NSTextField(labelWithString: "")
+    private let resetLabel = NSTextField(labelWithString: "")
+    private let bar = UsageBarView()
+
     // MARK: - Initialization
 
     init(window: AccountUsage.Window, now: Date = Date()) {
+        windowID = window.id
         super.init(frame: .zero)
-        setupViews(window: window, now: now)
+        setupViews()
+        // A row that has just been built is drawing nothing, so there is no travel to ask for.
+        apply(window: window, now: now, animated: false)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    // MARK: - Setup
+    // MARK: - Private Methods
 
-    private func setupViews(window: AccountUsage.Window, now: Date) {
-        let expired = window.isExpired(at: now)
-        let severity = UsageSeverity.from(fraction: expired ? nil : window.fraction)
-
-        let nameLabel = NSTextField(labelWithString: window.label)
+    private func setupViews() {
         nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.secondary
 
-        let valueLabel = NSTextField(labelWithString: Self.value(for: window, expired: expired))
         valueLabel.applyFont(.control)
-        valueLabel.textColor = severity == .normal ? Design.Text.label : severity.glyphColor
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -44,13 +50,8 @@ final class UsageWindowRow: NSView {
         titleRow.orientation = .horizontal
         titleRow.alignment = .firstBaseline
 
-        let bar = UsageBarView()
-        bar.fraction = expired ? 0 : (window.fraction ?? 0)
-        bar.tint = severity.barColor
-        bar.timeMark = expired ? nil : window.elapsedFraction(at: now)
         bar.translatesAutoresizingMaskIntoConstraints = false
 
-        let resetLabel = NSTextField(labelWithString: Self.reset(for: window, expired: expired))
         resetLabel.applyFont(.caption)
         resetLabel.textColor = Design.Text.tertiary
 
@@ -69,12 +70,29 @@ final class UsageWindowRow: NSView {
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
 
             titleRow.widthAnchor.constraint(equalTo: column.widthAnchor),
-            bar.widthAnchor.constraint(equalTo: column.widthAnchor),
-            bar.heightAnchor.constraint(equalToConstant: UsageBarDefaults.height)
+            bar.widthAnchor.constraint(equalTo: column.widthAnchor)
         ])
     }
 
-    // MARK: - Private Methods
+    private func apply(window: AccountUsage.Window, now: Date, animated: Bool) {
+        let expired = window.isExpired(at: now)
+        let severity = UsageSeverity.from(fraction: expired ? nil : window.fraction)
+
+        nameLabel.stringValue = window.label
+        valueLabel.stringValue = Self.value(for: window, expired: expired)
+        valueLabel.textColor = severity == .normal ? Design.Text.label : severity.glyphColor
+        resetLabel.stringValue = Self.reset(for: window, expired: expired)
+
+        // The words state the new reading outright while the bar travels to it. A percentage
+        // counting up is a number nobody can read mid-count, and the label is the exact answer
+        // the bar is only ever the shape of.
+        bar.apply(
+            fraction: expired ? 0 : (window.fraction ?? 0),
+            tint: severity.barColor,
+            timeMark: expired ? nil : window.elapsedFraction(at: now),
+            animated: animated
+        )
+    }
 
     private static func value(for window: AccountUsage.Window, expired: Bool) -> String {
         guard !expired, let percent = window.percent else { return UsageDefaults.unknownValue }

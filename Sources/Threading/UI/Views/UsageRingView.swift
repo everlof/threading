@@ -59,7 +59,18 @@ final class UsageRingView: NSView {
 // MARK: - Account Usage Item Defaults
 
 enum AccountUsageItemDefaults {
-    static let height: CGFloat = 20
+    /// The header row's height, not the pill's own contents.
+    ///
+    /// It shares a strip with the page tab and the action buttons, which are all
+    /// `Design.Size.tabHeight`/`toolbarButtonHeight` — the same 28. Sized to fit a 12pt ring and
+    /// one line of text, the pill came out at 20 and read as a smaller thing dropped into the
+    /// row: shorter than its neighbours, with its own corner radius on a shorter side, so the
+    /// strip's shared silhouette broke at exactly the control that sits between the tab and the
+    /// buttons. Height is the same argument the radius already won (see `design-system.md`,
+    /// "One silhouette per strip"). Width stays its contents' business.
+    @MainActor
+    static let height = Design.Size.toolbarButtonHeight
+
     static let horizontalPadding: CGFloat = 8
     static let ringSize: CGFloat = 12
     static let ringLineWidth: CGFloat = 1.5
