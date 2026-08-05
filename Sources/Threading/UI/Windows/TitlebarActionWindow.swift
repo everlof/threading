@@ -52,6 +52,29 @@ final class TitlebarActionWindow: NSWindow {
         styleMask.contains(.titled) ? super.canBecomeMain : true
     }
 
+    /// Holds the window on its screen while it wears the theme's own chrome.
+    ///
+    /// `super`'s answer *is* this, for a titled window: sized down to the visible frame, then
+    /// moved inside it. For a frameless one it is the argument, unchanged — so under a takeover
+    /// theme a window may be set to any size, anywhere, including two thousand points below the
+    /// bottom of the display where its composer cannot be read or dragged back. The titled case
+    /// keeps AppKit's answer, for the same reason `canBecomeKey` does: it consults state the
+    /// documentation does not name, and this override only exists to fill in for a default that
+    /// declines to act at all.
+    ///
+    /// Fullscreen is left alone. AppKit sizes a fullscreen window to the screen's *full* frame,
+    /// menu bar included, and holding that inside `visibleFrame` would shrink the window the
+    /// platform had just sized on purpose.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        guard !styleMask.contains(.titled),
+              !styleMask.contains(.fullScreen),
+              let bounds = (screen ?? self.screen ?? NSScreen.main)?.visibleFrame else {
+            return super.constrainFrameRect(frameRect, to: screen)
+        }
+
+        return MainWindowFrame.held(frameRect, within: bounds)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == TitlebarDoubleClick.clickCount,
               isInTitlebarStrip(event.locationInWindow) else {

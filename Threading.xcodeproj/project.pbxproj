@@ -226,6 +226,7 @@
 		9A040A0CC45A0F3ADBF4BC1A /* SelectionSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */; };
 		FB109FE898A0299570931640 /* ThemeDerivedContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */; };
 		E72A7AF284752BC985388027 /* BrowserCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */; };
+		9AF5A8C7D0A71CFA5D860D4D /* MainWindowSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE19016A5DC0F3C71DF105E5 /* MainWindowSizingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -496,6 +497,7 @@
 		266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionSurfaceTests.swift; sourceTree = "<group>"; };
 		32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeDerivedContentTests.swift; sourceTree = "<group>"; };
 		47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserCredentialStoreTests.swift; sourceTree = "<group>"; };
+		DE19016A5DC0F3C71DF105E5 /* MainWindowSizingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainWindowSizingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -829,6 +831,7 @@
 				266CFE3CFE181311CD30B5D5 /* SelectionSurfaceTests.swift */,
 				32EA2115FAD0A55FEE0BEA68 /* ThemeDerivedContentTests.swift */,
 				47A2FFBBEDAAE2FED6E21D9F /* BrowserCredentialStoreTests.swift */,
+				DE19016A5DC0F3C71DF105E5 /* MainWindowSizingTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1406,6 +1409,7 @@
 				9A040A0CC45A0F3ADBF4BC1A /* SelectionSurfaceTests.swift in Sources */,
 				FB109FE898A0299570931640 /* ThemeDerivedContentTests.swift in Sources */,
 				E72A7AF284752BC985388027 /* BrowserCredentialStoreTests.swift in Sources */,
+				9AF5A8C7D0A71CFA5D860D4D /* MainWindowSizingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

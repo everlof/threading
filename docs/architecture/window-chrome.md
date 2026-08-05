@@ -446,6 +446,26 @@ draws/names itself Restore while zoomed. `WindowChromeFrameView` draws the borde
 draws nothing at all in native dress, where the terminal-palette backdrop showing through the
 titlebar strip is load-bearing.
 
+**Nothing holds a frameless window on the screen.** `constrainFrameRect(_:to:)` — where AppKit
+keeps a frame inside the screen's `visibleFrame` — returns its argument untouched the moment
+`.titled` leaves the mask. Measured against a 1728×1084 visible frame: a titled window asked for
+`{{0, -2302}, {1728, 3386}}` is given `{{0, 0}, {1728, 1084}}`; the same window frameless keeps
+every point of it. A saved frame arrives through the one door that is never policed for *any*
+window — `setFrameUsingName` does not call `constrainFrameRect` at all — so a frame written once
+oversized is restored verbatim on every launch after it. That shipped: the window came back 3386
+points tall on a 1084-point screen with its composer 2302 points below the bottom of the display,
+and came back that way again after a relaunch. It was reported as a window stuck too tall that
+would not resize, which is what it looks like from outside — dragging the top edge down does
+shrink it, but the bottom edge is off screen and the composer never returns, and the frameless
+window has no clamp to put it back. Nothing in the panes held it: `MainWindowSizingTests` builds
+the real controller and drags it to `WindowDefaults.minHeight`. So
+`TitlebarActionWindow.constrainFrameRect` performs AppKit's own two steps for the untitled case —
+size into `visibleFrame`, then move inside it (`MainWindowFrame.held`) — and `applyInitialFrame`
+holds the restored frame the same way. Fullscreen is excepted: AppKit sizes a fullscreen window
+to the screen's *full* frame, menu bar included, and holding that inside `visibleFrame` would
+shrink a window the platform had just sized on purpose. The held frame is asserted **equal** to
+what AppKit gives a titled window across the same rectangles, so the two cannot drift.
+
 **A pixel-art glyph is not a vector glyph with antialiasing disabled.** Windows 95/98 drew its
 caption figures from Marlett (`0` Minimize, `1` Maximize, `2` Restore, `r` Close) inside a 16×14
 button on the default 18px caption band. The Windows family therefore carries explicit one-bit

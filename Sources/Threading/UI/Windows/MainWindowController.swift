@@ -277,7 +277,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func applyInitialFrame() {
         guard let window else { return }
 
-        if !window.setFrameUsingName(MainWindowDefaults.frameAutosaveName) {
+        if window.setFrameUsingName(MainWindowDefaults.frameAutosaveName) {
+            holdRestoredFrameOnScreen(window)
+        } else {
             window.setContentSize(NSSize(
                 width: WindowDefaults.defaultWidth,
                 height: WindowDefaults.defaultHeight
@@ -286,6 +288,24 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         window.setFrameAutosaveName(MainWindowDefaults.frameAutosaveName)
+    }
+
+    /// A restored frame that no longer fits the screen, brought back to it.
+    ///
+    /// `setFrameUsingName` is the one door into a window's frame that AppKit does not police —
+    /// measured, it calls `constrainFrameRect(_:to:)` not at all — so whatever was saved is what
+    /// the window wears, however large and wherever it lands. That is survivable for a titled
+    /// window, which the next thing to constrain it puts back; under a chrome-takeover theme the
+    /// window is frameless and nothing ever constrains it again. It shipped as a window 3386
+    /// points tall on a 1084-point screen, restored to exactly that on every launch, with the
+    /// composer two thousand points below the bottom of the display and no edge left to drag.
+    private func holdRestoredFrameOnScreen(_ window: NSWindow) {
+        guard let bounds = MainWindowFrame.bounds(for: window) else { return }
+
+        let held = MainWindowFrame.held(window.frame, within: bounds)
+        guard held != window.frame else { return }
+
+        window.setFrame(held, display: false)
     }
 
     // MARK: - Setup
