@@ -6,20 +6,38 @@ struct PlaywrightAutomationOutput: Sendable {
     let succeeded: Bool
 }
 
-/// Runs one isolated Playwright scenario in a short-lived helper process.
+/// Runs one Playwright scenario in a short-lived helper process.
 ///
 /// Playwright and its browser binaries are intentionally not downloaded by Threading. The backend
 /// uses a local installation when present and otherwise returns one actionable installation
 /// command. This keeps the signed-in WKWebView surface independent from a large test runtime.
+///
+/// Two scenarios, two argument types, and two entry points, because their guarantees differ:
+/// an isolated run imports nothing, while an attached run drives a Chrome profile the user has
+/// signed into and is therefore fenced by an origin allowlist granted before it launches.
 final class PlaywrightAutomationRunner: Sendable {
     static let maximumRequestBytes = 256 * 1_024
     static let maximumResponseBytes = 4 * 1_024 * 1_024
     static let maximumScreenshotBytes = 24 * 1_024 * 1_024
     static let processTimeout: TimeInterval = 75
+    /// An attached run is allowed to wait for a person: the whole point of driving real Chrome
+    /// is that the sign-in is one Touch ID *the user performs*, and a 75-second ceiling would
+    /// end the run while they were still reaching for the sensor.
+    static let attachProcessTimeout: TimeInterval = 300
 
     struct Runtime {
         let python: URL
         let script: URL
+    }
+
+    /// The profile facts an attached run needs, decided by the app rather than by the agent.
+    ///
+    /// The origins are the canonical `BrowserOrigin.key` strings the user actually granted, not
+    /// the strings the tool call asked for — the bridge compares against exactly these.
+    struct AttachProfile: Sendable {
+        let userDataDirectory: URL
+        let channel: String
+        let allowedOrigins: [String]
     }
 
     private let pythonOverride: URL?
@@ -46,6 +64,19 @@ final class PlaywrightAutomationRunner: Sendable {
         }
     }
 
+    func run(
+        _ arguments: BrowserAttachRunArguments,
+        profile: AttachProfile,
+        completion: @escaping @MainActor @Sendable (PlaywrightAutomationOutput) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let output = runSynchronously(arguments, profile: profile)
+            Task { @MainActor in
+                completion(output)
+            }
+        }
+    }
+
     private func runSynchronously(
         _ arguments: BrowserIsolatedRunArguments
     ) -> PlaywrightAutomationOutput {
@@ -60,6 +91,69 @@ final class PlaywrightAutomationRunner: Sendable {
             return failure("include_image requires screenshot=true.")
         }
 
+        return execute(
+            arguments,
+            capturesScreenshot: arguments.screenshot == true,
+            timeout: Self.processTimeout,
+            failureIntro: "Isolated Playwright scenario failed",
+            failureHint: """
+                If the browser binary is missing, run: python3 -m playwright install \
+                \(arguments.engine ?? "chromium")
+                """
+        ) { _ in [:] }
+    }
+
+    private func runSynchronously(
+        _ arguments: BrowserAttachRunArguments,
+        profile: AttachProfile
+    ) -> PlaywrightAutomationOutput {
+        let steps = arguments.steps ?? []
+        guard (1...50).contains(steps.count) else {
+            return failure("steps must contain between 1 and 50 entries.")
+        }
+        if arguments.fullPage == true && arguments.screenshot != true {
+            return failure("full_page requires screenshot=true.")
+        }
+        if arguments.includeImage == true && arguments.screenshot != true {
+            return failure("include_image requires screenshot=true.")
+        }
+        guard !profile.allowedOrigins.isEmpty else {
+            return failure("An attached run needs at least one authorized origin.")
+        }
+
+        return execute(
+            arguments,
+            capturesScreenshot: arguments.screenshot == true,
+            timeout: Self.attachProcessTimeout,
+            failureIntro: "Attached Chrome scenario failed",
+            failureHint: """
+                If Chrome refused the profile, close any window already using it and try again; \
+                one profile directory can only be open in one Chrome at a time.
+                """
+        ) { _ in
+            // The app decides the mode, the profile, and the granted origins. Whatever the tool
+            // call said about them was already normalized and authorized before this point.
+            [
+                "mode": "attach",
+                "user_data_dir": profile.userDataDirectory.path,
+                "channel": profile.channel,
+                "allowed_origins": profile.allowedOrigins
+            ]
+        }
+    }
+
+    /// Encodes one request, runs the bridge, and reads its bounded reply.
+    ///
+    /// `overrides` is where an app-owned fact wins over an agent-supplied one, so a mode or an
+    /// origin list cannot be talked into something else by the arguments it travels beside.
+    private func execute<Arguments: Encodable>(
+        _ arguments: Arguments,
+        capturesScreenshot: Bool,
+        timeout: TimeInterval,
+        failureIntro: String,
+        failureHint: String,
+        overrides: (Arguments) -> [String: Any]
+    ) -> PlaywrightAutomationOutput {
         let runtime: Runtime
         do {
             runtime = try resolveRuntime()
@@ -75,7 +169,7 @@ final class PlaywrightAutomationRunner: Sendable {
                 withIntermediateDirectories: true
             )
         } catch {
-            return failure("Could not prepare isolated browser files: \(error.localizedDescription)")
+            return failure("Could not prepare browser automation files: \(error.localizedDescription)")
         }
         defer { try? FileManager.default.removeItem(at: temporary) }
 
@@ -90,10 +184,13 @@ final class PlaywrightAutomationRunner: Sendable {
                   var object = try JSONSerialization.jsonObject(with: encoded)
                     as? [String: Any] else {
                 return failure(
-                    "The isolated browser request exceeds \(Self.maximumRequestBytes) bytes."
+                    "The browser automation request exceeds \(Self.maximumRequestBytes) bytes."
                 )
             }
-            if arguments.screenshot == true {
+            for (key, value) in overrides(arguments) {
+                object[key] = value
+            }
+            if capturesScreenshot {
                 object["_screenshot_path"] = screenshotURL.path
             }
             let request = try JSONSerialization.data(withJSONObject: object)
@@ -124,7 +221,7 @@ final class PlaywrightAutomationRunner: Sendable {
 
             let timeoutLock = NSLock()
             var timedOut = false
-            let timeout = DispatchWorkItem {
+            let watchdog = DispatchWorkItem {
                 guard process.isRunning else { return }
                 timeoutLock.lock()
                 timedOut = true
@@ -133,21 +230,21 @@ final class PlaywrightAutomationRunner: Sendable {
             }
             try process.run()
             DispatchQueue.global(qos: .utility).asyncAfter(
-                deadline: .now() + Self.processTimeout,
-                execute: timeout
+                deadline: .now() + timeout,
+                execute: watchdog
             )
             process.waitUntilExit()
-            timeout.cancel()
+            watchdog.cancel()
             timeoutLock.lock()
             let didTimeOut = timedOut
             timeoutLock.unlock()
             if didTimeOut {
                 return failure(
-                    "The isolated browser exceeded \(Int(Self.processTimeout)) seconds and was stopped."
+                    "The browser automation run exceeded \(Int(timeout)) seconds and was stopped."
                 )
             }
         } catch {
-            return failure("Could not launch isolated Playwright: \(error.localizedDescription)")
+            return failure("Could not launch Playwright: \(error.localizedDescription)")
         }
 
         let stderr = boundedText(at: errorURL, maximumBytes: 4_096)
@@ -170,15 +267,14 @@ final class PlaywrightAutomationRunner: Sendable {
             } ?? "The scenario failed."
             return failure(
                 """
-                Isolated Playwright scenario failed: \(detail)
-                If the browser binary is missing, run: python3 -m playwright install \
-                \(arguments.engine ?? "chromium")
+                \(failureIntro): \(detail)
+                \(failureHint)
                 """
             )
         }
 
         var screenshot: Data?
-        if arguments.screenshot == true,
+        if capturesScreenshot,
            let data = try? Data(contentsOf: screenshotURL),
            data.count <= Self.maximumScreenshotBytes {
             screenshot = data

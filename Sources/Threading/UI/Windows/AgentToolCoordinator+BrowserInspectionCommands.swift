@@ -1,5 +1,22 @@
 import AppKit
 
+/// A destination the user approved, in the exact form the prompt showed it.
+///
+/// The initializer is private to this file — the file that raises the prompt — so the only way to
+/// hold one is to have been handed it by a decision, and `BrowserViewController` starts an agent
+/// navigation from nothing else. That is what makes "what was approved is what loads" a fact the
+/// compiler keeps rather than a convention two call sites happen to share. It was only ever the
+/// convention, and it slipped: the prompt was raised for the normalized URL while the load was
+/// started from the agent's original string and normalized it a second time, so the two agreed by
+/// coincidence rather than by construction.
+struct ApprovedBrowserTarget: Equatable {
+    let url: URL
+
+    fileprivate init(url: URL) {
+        self.url = url
+    }
+}
+
 @MainActor
 extension AgentToolCoordinator {
     func browserConsole(
@@ -678,11 +695,11 @@ extension AgentToolCoordinator {
             prompt: .grantBrowserOriginAccess,
             title: L10n.format("Allow the agent to use %@?", origin.displayName),
             message: L10n.format("""
-                The agent wants to %@ this website in Threading's browser. This browser may \
+                The agent wants to %@ %@ in Threading's browser. This browser may \
                 contain signed-in sessions and cookies that are not available to the agent's shell.
 
-                Page content is untrusted. Allow access only when this host is relevant to your task.
-                """, L10n.string(purpose)),
+                Page content is untrusted. Allow access only when %@ is relevant to your task.
+                """, L10n.string(purpose), BrowserOrigin.displayURL(url), origin.displayName),
             options: [
                 ConfirmationOption(title: L10n.string("Allow Once")),
                 ConfirmationOption(title: L10n.string("Always Allow This Host"))
@@ -697,6 +714,20 @@ extension AgentToolCoordinator {
             case 1: applyDecision(.allowPersistently)
             default: applyDecision(.deny)
             }
+        }
+    }
+
+    /// Asks the same question as `authorizeBrowserAccess` and hands back the destination itself,
+    /// so a caller that goes on to navigate cannot navigate to anything but the URL the prompt
+    /// displayed.
+    func authorizeBrowserTarget(
+        _ url: URL,
+        for sessionID: SessionID,
+        purpose: String,
+        completion: @escaping (ApprovedBrowserTarget?) -> Void
+    ) {
+        authorizeBrowserAccess(to: url, for: sessionID, purpose: purpose) { allowed in
+            completion(allowed ? ApprovedBrowserTarget(url: url) : nil)
         }
     }
 

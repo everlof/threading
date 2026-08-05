@@ -109,6 +109,7 @@ final class BrowserChromeBar: NSView {
         static let labelledConditionThreshold: CGFloat = 360
         static let labelledAnnotationThreshold: CGFloat = 560
         static let labelledPasswordThreshold: CGFloat = 520
+        static let hintedPasswordThreshold: CGFloat = 780
         static let expandedPrivateThreshold: CGFloat = 520
     }
 
@@ -130,8 +131,15 @@ final class BrowserChromeBar: NSView {
         "key.fill",
         L10n.string("Private Password Input")
     )
+    /// Names the one-touch fills beside the affordance, because the affordance alone says only
+    /// that the field is the user's — not that a single manager shortcut finishes the sign-in.
+    /// Copy, not capability: Threading invokes nothing and still never sees the value.
+    let passwordHintLabel = NSTextField(
+        labelWithString: L10n.string("Fill with 1Password or system AutoFill")
+    )
 
     private let privateIndicator = BrowserPrivateIndicator()
+    private let themeEvents = AppEventObservations()
     private let stack: NSStackView
     private let contextKind: BrowserContextKind
     private var activeTestConditionCount = 0
@@ -151,6 +159,7 @@ final class BrowserChromeBar: NSView {
             reloadButton,
             privateIndicator,
             passwordInputButton,
+            passwordHintLabel,
             addressField,
             annotationButton,
             testConditionsButton,
@@ -208,6 +217,23 @@ final class BrowserChromeBar: NSView {
             Password field under user control · use your password manager or type privately; \
             Threading never exposes its value to the agent
             """)
+
+        // The address stays the strip's primary content, so the hint yields space before it does
+        // and truncates rather than starving it in the crowded states its threshold cannot see.
+        // `.detail`, not `.caption`: a caption carries emphasis, and a sentence that reads louder
+        // than the control it is explaining is the opposite of a quiet hint.
+        passwordHintLabel.applyFont(.detail())
+        passwordHintLabel.lineBreakMode = .byTruncatingTail
+        passwordHintLabel.isHidden = true
+        passwordHintLabel.setContentHuggingPriority(.required, for: .horizontal)
+        passwordHintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        applyPasswordHintInk()
+        themeEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyPasswordHintInk()
+        }
+        themeEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
+            self?.applyPasswordHintInk()
+        }
         testConditionsButton.isHidden = true
         closePopupButton.isHidden = true
         closePopupButton.toolTip = L10n.string(
@@ -340,6 +366,11 @@ final class BrowserChromeBar: NSView {
             passwordInputButton.title = passwordTitle
         }
 
+        // The hint is the widest thing the focused state adds, so it is the first of the pair to
+        // go: the key glyph, then its title, then the sentence that explains both.
+        passwordHintLabel.isHidden = !isPasswordFieldFocused
+            || width < Layout.hintedPasswordThreshold
+
         let annotationTitle = isAnnotating
             && width >= Layout.labelledAnnotationThreshold
             ? L10n.string("Annotating")
@@ -347,6 +378,11 @@ final class BrowserChromeBar: NSView {
         if annotationButton.title != annotationTitle {
             annotationButton.title = annotationTitle
         }
+    }
+
+    /// A theme states this colour, and a theme can change while the field is still focused.
+    private func applyPasswordHintInk() {
+        passwordHintLabel.textColor = Design.Text.secondary
     }
 
     static func button(_ symbol: String, _ label: String) -> ThemedButton {
@@ -593,7 +629,11 @@ final class BrowserViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
-        view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
         webViewStack = [webView]
         setupChrome()
         observeWebView()
@@ -980,7 +1020,7 @@ final class BrowserViewController: NSViewController {
     }
 
     /// Navigates and calls back when the page finishes, fails, or times out — the form the
-    /// agent's navigate tool uses so it can act on a loaded page.
+    /// address bar uses, and the only one that turns typed text into a destination.
     func navigate(
         to input: String,
         waitUntil: BrowserNavigationReadiness = .load,
@@ -990,7 +1030,25 @@ final class BrowserViewController: NSViewController {
             onLoad(false, "Not a valid URL or search query.")
             return
         }
+        load(url, waitUntil: waitUntil, onLoad: onLoad)
+    }
 
+    /// The only way an agent navigation starts. It takes the approved destination itself rather
+    /// than the text the agent asked for, so the URL that loads is by construction the URL the
+    /// consent prompt put on screen — no second parse can land somewhere else in between.
+    func navigate(
+        to target: ApprovedBrowserTarget,
+        waitUntil: BrowserNavigationReadiness = .load,
+        onLoad: @escaping (_ success: Bool, _ message: String) -> Void
+    ) {
+        load(target.url, waitUntil: waitUntil, onLoad: onLoad)
+    }
+
+    private func load(
+        _ url: URL,
+        waitUntil: BrowserNavigationReadiness,
+        onLoad: @escaping (_ success: Bool, _ message: String) -> Void
+    ) {
         _ = view   // Forces `loadView` if the surface has not been shown yet (an agent may drive
                    // navigation before the user opens the browser). `loadViewIfNeeded` is 14+.
         beginTrackedLoad(waitUntil: waitUntil, onLoad)
@@ -3026,18 +3084,38 @@ final class BrowserViewController: NSViewController {
         }
     }
 
-    /// Turns whatever was typed into a URL: an explicit scheme is honoured, a bare domain gets
-    /// `https://`, and anything else becomes a search — so the bar accepts URLs and queries alike.
+    /// Turns whatever was typed into a URL: an explicit scheme is honoured when it names a page
+    /// this browser can load and refused when it does not, a bare domain gets `https://`, and
+    /// anything else becomes a search — so the bar accepts URLs and queries alike.
     static func normalizedURL(from input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let url = URL(string: trimmed), url.scheme != nil, url.host != nil || url.scheme == "about" {
+        if let url = URL(string: trimmed), url.scheme != nil, url.host != nil {
             return url
         }
+        if trimmed.caseInsensitiveCompare(BrowserOrigin.blankPageURLString) == .orderedSame {
+            return URL(string: BrowserOrigin.blankPageURLString)
+        }
 
-        if trimmed.contains("."), !trimmed.contains(" "), let url = URL(string: "https://\(trimmed)") {
-            return url
+        if trimmed.contains("."), !trimmed.contains(" ") {
+            // An input that already names a scheme is an absolute URL, not a bare domain waiting
+            // for one. Prefixing it built a second scheme in front of the first: `file:///notes.html`
+            // became `https://file:///notes.html`, whose *host* is the word "file" — so the grant
+            // prompt asked about a host that does not exist, and answering it would have sent the
+            // browser somewhere nobody named. A scheme we cannot open is refused instead, which
+            // also keeps a local path out of the search fallback below.
+            //
+            // The test is what follows the colon rather than the colon itself, because a bare
+            // domain with a port parses its own host as a scheme: `example.com:8080/path` has
+            // scheme `example.com`, and that one does need the prefix.
+            if let scheme = URL(string: trimmed)?.scheme,
+               trimmed.dropFirst(scheme.count + 1).first?.isNumber != true {
+                return nil
+            }
+            if let url = URL(string: "https://\(trimmed)") {
+                return url
+            }
         }
 
         let query = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed

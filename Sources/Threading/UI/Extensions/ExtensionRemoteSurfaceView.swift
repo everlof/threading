@@ -29,7 +29,11 @@ final class ExtensionRemoteSurfaceView:
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
         layer?.contentsGravity = .resizeAspect
         setAccessibilityRole(.image)
 

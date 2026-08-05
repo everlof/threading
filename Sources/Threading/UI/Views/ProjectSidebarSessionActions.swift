@@ -29,6 +29,131 @@ struct SessionSurfaceTogglePresentation: Equatable {
     }
 }
 
+// MARK: - Permission Mode Presentation
+
+/// The one description of how much a conversation may do before it has to ask.
+///
+/// Three surfaces offer this same choice — the session row's menu, the opening composer's chip
+/// and the reply composer's chip — and each had grown its own rows, its own wording for the
+/// inherit item and its own copy of the symbol. That is exactly the split
+/// `SessionSurfaceTogglePresentation` above exists to prevent: one setting cannot be allowed to
+/// name the app-wide default one way in a menu and another way one click along.
+///
+/// What the three genuinely differ about is `Timing` — when a mode chosen here starts to
+/// apply — so that is the only thing they pass in.
+enum PermissionModePresentation {
+    static let symbol = "hand.raised"
+
+    /// What a chip says when nothing here and nothing in Settings has chosen: it names *where*
+    /// the decision is made rather than guessing what the CLI's own config says, which
+    /// Threading cannot read and must not claim to know.
+    static var agentSettingTitle: String { L10n.string("Agent's Setting") }
+
+    /// The inherit row's wording, given the app-wide default. It names the inherited answer
+    /// where there is one and defers where there is not, so choosing the default explicitly and
+    /// leaving it alone are visibly the same thing.
+    static func inheritedTitle(_ inherited: AgentPermissionMode?) -> String {
+        guard let inherited else { return L10n.string("Use Agent's Setting") }
+        return L10n.format("Use Default (%@)", inherited.displayName)
+    }
+
+    /// Names the mode that will actually apply, not only the one chosen on this surface: with
+    /// no choice of its own the chip shows the app-wide default, and falls back to naming where
+    /// the decision goes when there is no default either.
+    static func chipTitle(
+        selected: AgentPermissionMode?,
+        inherited: AgentPermissionMode?
+    ) -> String {
+        (selected ?? inherited)?.displayName ?? agentSettingTitle
+    }
+
+    /// The app-wide default new conversations inherit, read in one place so three surfaces
+    /// cannot each reach for a different setting.
+    @MainActor
+    static var appDefault: AgentPermissionMode? { AppSettings.shared.defaultPermissionMode }
+
+    /// When a mode chosen on a given surface starts to apply.
+    enum Timing {
+        /// The conversation does not exist yet, so the choice is simply what it launches with
+        /// and there is nothing to say about a delay.
+        case whenTheSessionStarts
+        /// A live transport carries it to the running agent straight away.
+        case immediately
+        /// Only the record changes. What the session row's item has always meant: the mode is
+        /// stated in the flags of the process this configures at startup.
+        case whenTheChatRestarts
+    }
+
+    /// The sentence a menu adds under its rows when choosing one changes the record and not the
+    /// running agent. Nil where the choice lands where it says it does.
+    static func note(for timing: Timing) -> String? {
+        switch timing {
+        case .whenTheSessionStarts, .immediately:
+            nil
+        case .whenTheChatRestarts:
+            L10n.string("Applies the next time this chat starts.")
+        }
+    }
+
+    /// What a live conversation is told when inherit is chosen and there is no app-wide default
+    /// to resolve it to. The control channel names one mode and has no "return to what you were
+    /// configured with", so the record is all that can change, and saying so is what keeps the
+    /// chip from reading as a posture the agent never took.
+    static var inheritRecordedOnly: String {
+        L10n.string(
+            "This chat keeps the permission mode it is running with. "
+                + "The agent's own setting applies the next time it starts."
+        )
+    }
+
+    /// The rows every surface offers: the inherit item naming the app-wide default, then each
+    /// mode with what it does and what it costs on this agent.
+    ///
+    /// Both `representedValue` and `onChoose` are filled, because the two kinds of caller read
+    /// the answer differently — a `ChipView` reads the value back through its own `onSelect`,
+    /// a presented menu runs the row's action. Passing no `onChoose` leaves the value the only
+    /// answer, which is what the chips want.
+    static func rows(
+        for kind: AgentKind,
+        selected: AgentPermissionMode?,
+        inherited: AgentPermissionMode?,
+        timing: Timing,
+        onChoose: ((AgentPermissionMode?) -> Void)? = nil
+    ) -> [ThemedMenuEntry] {
+        var rows: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: inheritedTitle(inherited),
+                representedValue: nil,
+                isSelected: selected == nil,
+                onChoose: onChoose.map { choose in { choose(nil) } }
+            ))
+        ]
+
+        for mode in AgentPermissionMode.allCases {
+            // The description rides as the subtitle rather than a hover tooltip, so what a
+            // mode actually permits is read in the same glance that chooses it.
+            rows.append(.item(ThemedMenuItem(
+                title: mode.displayName,
+                subtitle: [mode.menuDescription, mode.caveat(for: kind)]
+                    .compactMap { $0 }
+                    .joined(separator: " "),
+                representedValue: mode,
+                isSelected: mode == selected,
+                onChoose: onChoose.map { choose in { choose(mode) } }
+            )))
+        }
+
+        // A row that answers nothing, because the sentence is about the whole menu rather than
+        // about any one mode in it.
+        if let note = note(for: timing) {
+            rows.append(.separator)
+            rows.append(.item(ThemedMenuItem(title: note, isEnabled: false)))
+        }
+
+        return rows
+    }
+}
+
 // MARK: - Share Link Grants
 
 /// The three links Share Chat can put on the clipboard, and what each one hands out.
@@ -266,13 +391,6 @@ enum SessionActionMenuDefaults {
     /// The submenu holding the set-once-and-leave configuration. Named here because the row
     /// menu and its tests must agree on where those items went.
     static var sessionOptionsTitle: String { L10n.string("Session Options") }
-
-    /// What the permission-mode submenu's first row says, given the app-wide default: the
-    /// inherited answer where there is one, and where the decision goes where there is not.
-    static func inheritedPermissionModeTitle(_ inherited: AgentPermissionMode?) -> String {
-        guard let inherited else { return L10n.string("Use Agent's Setting") }
-        return L10n.format("Use Default (%@)", inherited.displayName)
-    }
 }
 
 // MARK: - Session Row Actions
@@ -351,9 +469,14 @@ extension ProjectSidebarViewController {
                 self?.askAgentToRenameClicked()
             })
         }
-        entries.append(action(L10n.string("Copy Session ID")) { [weak self] in
-            self?.copySessionIDClicked()
-        })
+        // Everything about this chat that is needed *elsewhere* — an id to resume by, a path
+        // to grep — folded behind one Copy item; see `sessionCopyEntry`.
+        let copyProject = projectStore.project(forSessionID: sessionID)
+        entries.append(sessionCopyEntry(
+            for: session,
+            project: copyProject,
+            transcriptURL: copyProject.flatMap { SessionTranscript.url(for: session, in: $0) }
+        ))
         if AppSettings.shared.remoteAccessEnabled {
             entries.append(action(L10n.string("Share Chat…")) { [weak self] in
                 self?.shareSessionClicked()
@@ -388,6 +511,58 @@ extension ProjectSidebarViewController {
     /// One plain action row.
     private func action(_ title: String, _ body: @escaping () -> Void) -> ThemedMenuEntry {
         .item(ThemedMenuItem(title: title, onChoose: body))
+    }
+
+    /// Everything about a chat that is needed *elsewhere*, folded behind one Copy item: the
+    /// ids that name it (to the agent and to the app), the checkout it runs in, and the
+    /// transcript on disk. One fold rather than a run of "Copy …" rows — they share one verb,
+    /// none is reached for often, and an unbroken run is half of how this menu once outgrew
+    /// its panel.
+    ///
+    /// Two identifiers, not one with a fallback: the agent's names the conversation to the
+    /// CLI (`--resume`, the transcript filename), Threading's names it to the app and its
+    /// extensions. The retired single item silently copied whichever existed, which made the
+    /// string on the pasteboard mean different things on different rows. The agent's id and
+    /// the transcript are absent rather than disabled before the agent has named the
+    /// conversation — there is nothing true to copy under those titles yet.
+    ///
+    /// `project` and `transcriptURL` arrive resolved so this stays a pure builder a test can
+    /// call. The transcript is resolved at build rather than on the click — the same cost
+    /// `moveToAccountEntry` already pays through `SessionMigration.canMigrate` — because
+    /// presence is the decision: a row that resolves nothing when chosen fails silently.
+    func sessionCopyEntry(
+        for session: AgentSession,
+        project: Project?,
+        transcriptURL: URL?
+    ) -> ThemedMenuEntry {
+        var submenu: [ThemedMenuEntry] = []
+        if session.resumeState.transcriptID != nil {
+            submenu.append(action(L10n.string("Agent Session ID")) { [weak self] in
+                self?.copyAgentSessionIDClicked()
+            })
+        }
+        submenu.append(action(L10n.string("Threading ID")) { [weak self] in
+            self?.copyThreadingIDClicked()
+        })
+        if let project {
+            let path = project.folderPath
+            submenu.append(action(L10n.string("Worktree Path")) {
+                Self.copyToPasteboard(path)
+            })
+        }
+        if let transcriptURL {
+            submenu.append(action(L10n.string("Transcript Path")) {
+                Self.copyToPasteboard(transcriptURL.path)
+            })
+        }
+        return .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: submenu))
+    }
+
+    /// The one pasteboard write every Copy row shares — cleared first, so a failed set never
+    /// leaves the previous clipboard posing as the copied value.
+    static func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
     }
 
     /// Starts a new group. Skips where the previous group contributed nothing — most of the
@@ -511,7 +686,7 @@ extension ProjectSidebarViewController {
     /// in the account's own `/config` and resolves server-side when unset, so claiming a value
     /// here would be a guess shown as a fact.
     private func remoteControlEntry(for session: AgentSession) -> ThemedMenuEntry? {
-        guard session.kind == .claude else { return nil }
+        guard session.kind.supports(.remoteControl) else { return nil }
 
         let rows: [ThemedMenuEntry] = RemoteControlChoice.allCases.map { choice in
             .item(ThemedMenuItem(
@@ -536,33 +711,22 @@ extension ProjectSidebarViewController {
     /// The inherit item names the app-wide default where there is one and defers where there is
     /// not — Threading cannot read `permissions.defaultMode` or `config.toml`, and a row claiming
     /// a value it guessed would be worse than one that says where the answer lives.
+    ///
+    /// Record-only from here whichever agent it is, which is why the rows carry the
+    /// restart note: unlike the reply composer's chip, this menu never touches the running
+    /// process. See `setPermissionMode` below.
     private func permissionModeEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard session.kind.supportsPermissionModes else { return nil }
-        let inherited = AppSettings.shared.defaultPermissionMode
-
-        var rows: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: SessionActionMenuDefaults.inheritedPermissionModeTitle(inherited),
-                isSelected: session.permissionMode == nil,
-                onChoose: { [weak self] in self?.setPermissionMode(nil) }
-            ))
-        ]
-        for mode in AgentPermissionMode.allCases {
-            // The description rides as the subtitle rather than a hover tooltip, so what a
-            // mode actually permits is read in the same glance that chooses it.
-            rows.append(.item(ThemedMenuItem(
-                title: mode.displayName,
-                subtitle: [mode.menuDescription, mode.caveat(for: session.kind)]
-                    .compactMap { $0 }
-                    .joined(separator: " "),
-                isSelected: mode == session.permissionMode,
-                onChoose: { [weak self] in self?.setPermissionMode(mode) }
-            )))
-        }
 
         return .item(ThemedMenuItem(
             title: L10n.string("Permission Mode"),
-            submenu: rows
+            submenu: PermissionModePresentation.rows(
+                for: session.kind,
+                selected: session.permissionMode,
+                inherited: PermissionModePresentation.appDefault,
+                timing: .whenTheChatRestarts,
+                onChoose: { [weak self] mode in self?.setPermissionMode(mode) }
+            )
         ))
     }
 
@@ -587,18 +751,24 @@ extension ProjectSidebarViewController {
               ConversationContinuation.canContinue(session, in: project) else { return nil }
 
         let destinations = ConversationContinuation.destinations(for: session)
-        guard let provider = destinations.first?.provider else { return nil }
+        guard !destinations.isEmpty else { return nil }
 
         let rows: [ThemedMenuEntry] = destinations.map { account in
             .item(ThemedMenuItem(
-                title: accountMenuLabel(account),
+                title: continuationMenuLabel(account),
                 onChoose: { [weak self] in self?.continueWith(account) }
             ))
         }
         return .item(ThemedMenuItem(
-            title: L10n.format("Continue with %@", provider.displayName),
+            title: L10n.string("Continue with…"),
             submenu: rows
         ))
+    }
+
+    private func continuationMenuLabel(_ account: AgentAccount) -> String {
+        let provider = account.provider.displayName
+        guard account.provider.supportsAccounts, !account.isDefault else { return provider }
+        return "\(provider) · \(accountMenuLabel(account))"
     }
 
     private func accountMenuLabel(_ account: AgentAccount) -> String {
@@ -734,13 +904,26 @@ extension ProjectSidebarViewController {
     ///
     /// It is the one fact about a chat that is needed *elsewhere* — grepping a transcript,
     /// resuming from a terminal, quoting a session in a bug report — and the only way to read
-    /// it before this was to ask the agent running inside it.
-    @objc private func copySessionIDClicked() {
+    /// it before this was to ask the agent running inside it. Guarded rather than falling back
+    /// to Threading's id: the item is only offered while the agent has named the conversation,
+    /// and if that stopped being true between the menu opening and the click, copying a
+    /// different identifier under this title is worse than copying nothing.
+    @objc private func copyAgentSessionIDClicked() {
+        guard let sessionID = actionSessionID,
+              let session = projectStore.session(withID: sessionID),
+              let transcriptID = session.resumeState.transcriptID else { return }
+
+        Self.copyToPasteboard(transcriptID.rawValue)
+    }
+
+    /// Copies Threading's own identifier for the chat — the one that stays constant across
+    /// resumes, account moves and `Continue with…`, and the one extensions, support files and
+    /// the diagnostics journal key by.
+    @objc private func copyThreadingIDClicked() {
         guard let sessionID = actionSessionID,
               let session = projectStore.session(withID: sessionID) else { return }
 
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(session.externalIdentifier, forType: .string)
+        Self.copyToPasteboard(session.threadingIdentifier)
     }
 
     /// A copied link is a single-use invitation for this chat only. Collaboration and permission

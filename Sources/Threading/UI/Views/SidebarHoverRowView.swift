@@ -7,7 +7,12 @@ import AppKit
 /// Selection is drawn by the outline view itself; this fills the gap between "nothing" and
 /// "selected", so rows read as clickable before they are clicked. Group headings do not get
 /// one — they only expand from their disclosure, and a highlight would promise more.
-final class SidebarHoverRowView: NSTableRowView {
+///
+/// A `ThemedComponent` for the reason `ThemeBoundaryAudit` states about rows: a row that draws
+/// theme colours has to be distinguishable from the plain one AppKit builds, which draws the
+/// system's. This is the sidebar's louder answer to the question `ThemedTableRowView` answers
+/// everywhere else.
+final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
 
     // MARK: - Properties
 
@@ -61,8 +66,10 @@ final class SidebarHoverRowView: NSTableRowView {
         }
         guard isSelected else { return }
 
-        // Full accent while the sidebar has focus, muted when it does not — the same two
-        // strengths AppKit distinguishes, so a background window does not shout.
+        // Full accent in the window in front, muted behind it — the same two strengths AppKit
+        // distinguishes, but on the question `ListSelectionStrength` re-answers for every list
+        // in the app: the *window's*, not the focus inside it. So a background window does not
+        // shout and the front one does not whisper at the row a click just picked.
         let fill = isEmphasized ? Design.Surface.accent : AppThemePalette.color(.accentMuted)
         fill.setFill()
         highlightPath.fill()

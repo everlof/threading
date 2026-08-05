@@ -39,10 +39,21 @@ final class TerminalContainerViewController: NSViewController {
         }
     }
 
+    /// The session whose next attach is the composer's own, and the animator that spends it.
+    ///
+    /// `SessionCoordinator` leaves the mark at the point a composer start succeeds, because the
+    /// composer is the only surface that can hand a box over: a resume, a sidebar click and a
+    /// remote start all arrive at the same `show(sessionID:)` with nothing on screen to move.
+    private var pendingComposerHandoffSessionID: SessionID?
+    private let composerHandoff = ComposerHandoffAnimator()
+
     /// The floating branch-and-changes card, and the watcher feeding it. The monitor follows
     /// `currentSessionID`: it exists only while a session's checkout is on screen.
     private let gitStatusOverlay = GitStatusOverlayView()
     private var gitChangeMonitor: GitChangeMonitor?
+    /// The session whose row is spinning for the monitor's first read, so tearing the monitor
+    /// down can lower a raise whose completion will now never fire.
+    private var gitStatusLoadingSessionID: SessionID?
     /// Transcript reads started after the owning renderer has exited. The hierarchy survives
     /// renderer disposal, so its selected child must remain a working destination too.
     private var retainedSubagentTranscriptLoads = SubagentTranscriptLoadCache()
@@ -75,7 +86,8 @@ final class TerminalContainerViewController: NSViewController {
         let divider = ShellDrawerDivider()
         divider.translatesAutoresizingMaskIntoConstraints = false
         divider.isHidden = true
-        divider.onDrag = { [weak self] delta in self?.resizeDrawer(by: delta) }
+        divider.onDrag = { [weak self] delta in self?.drawerDividerDragged(by: delta) }
+        divider.onDragEnded = { [weak self] in self?.drawerDividerDragEnded() }
         return divider
     }()
     private lazy var drawerHeight = drawerHost.heightAnchor.constraint(equalToConstant: 0)
@@ -84,8 +96,19 @@ final class TerminalContainerViewController: NSViewController {
     /// preference for a window, not a fact about the session — so it persists app-wide.
     private var drawerHeightValue: CGFloat = ShellDrawerHeight.stored
 
+    /// The unclamped height the pointer is asking for during a divider drag, nil between
+    /// drags. The constraint stops at the floor while the hand keeps going, and this running
+    /// total is the only record of how far past it the drag went — the drawer's copy of the
+    /// split divider's overshoot problem, kept here because the divider reports only deltas.
+    private var drawerDragTargetHeight: CGFloat?
+
+    /// Which drawer transition is current, so a close's completion — which hides the band —
+    /// cannot fire after something reopened it mid-slide.
+    private var drawerTransitionGeneration = 0
+
     private var settingsPage: NSViewController?
     private var settingsPageCache: [String: NSViewController] = [:]
+    private var settingsAISearch: SettingsAISearchViewController?
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
@@ -152,6 +175,10 @@ final class TerminalContainerViewController: NSViewController {
             self?.refreshGitStatusOverlayAudience()
         }
         appEvents.observe(SessionSharingDidChange.self) { [weak self] _ in
+            self?.refreshGitStatusOverlayAudience()
+        }
+        appEvents.observe(SessionInputControlDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
             self?.refreshGitStatusOverlayAudience()
         }
     }
@@ -320,6 +347,7 @@ final class TerminalContainerViewController: NSViewController {
     /// the user is in the middle of making. The rule lives in `SessionComposerViewController`,
     /// which is what every route here goes through.
     func showComposer(projectID: ProjectID?) {
+        consumeComposerHandoff(for: nil)
         detachCurrentChild()
         currentComposerProjectID = projectID
         currentSettingsPageID = nil
@@ -357,10 +385,29 @@ final class TerminalContainerViewController: NSViewController {
         install(settings: page, repaint: cached != nil)
     }
 
+    /// Shows the AI settings search surface and starts a run for the query.
+    ///
+    /// Kept as one controller across asks, like the page cache above, so a second question
+    /// replaces the first's content rather than the whole surface. It is deliberately not in
+    /// `settingsPageCache`: it has no page ID, and `currentSettingsPageID` goes nil so the
+    /// toolbar does not claim a destination the sidebar cannot select.
+    @discardableResult
+    func showSettingsAISearch(query: String) -> SettingsAISearchViewController {
+        let cached = settingsAISearch
+        let controller = cached ?? SettingsAISearchViewController()
+        settingsAISearch = controller
+
+        currentSettingsPageID = nil
+        install(settings: controller, repaint: cached != nil)
+        controller.begin(query: query)
+        return controller
+    }
+
     /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by
     /// margins — pinned straight to the pane rather than through an intermediate container,
     /// which did not size its child.
     private func install(settings page: NSViewController, repaint: Bool) {
+        consumeComposerHandoff(for: nil)
         currentComposerProjectID = nil
 
         if settingsPage == nil {
@@ -468,7 +515,7 @@ final class TerminalContainerViewController: NSViewController {
 
         let open = !drawerHostController.isOpen(for: sessionID)
         drawerHostController.setOpen(open, for: sessionID)
-        applyDrawer(for: sessionID, focusing: open)
+        applyDrawer(for: sessionID, focusing: open, animated: true)
     }
 
     var isShellDrawerOpen: Bool {
@@ -477,12 +524,40 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Points the drawer host at the session and sizes the band to its open state. The host's
     /// children stay parented across every switch — only the visible list changes.
-    private func applyDrawer(for sessionID: SessionID?, focusing: Bool = false) {
+    ///
+    /// `animated` is passed by the gestures — the toggle, a drag-shut, the drag spring — and
+    /// left false by a session switch: the switch swaps the whole workspace at once, and the
+    /// drawer sliding beside an instant page change would animate a change of subject as if it
+    /// were a change of state. The motion itself is `PaneTransition`'s, the same one the
+    /// window's split panes run.
+    private func applyDrawer(
+        for sessionID: SessionID?,
+        focusing: Bool = false,
+        animated: Bool = false
+    ) {
+        drawerTransitionGeneration += 1
+        let generation = drawerTransitionGeneration
+
         guard let sessionID, drawerHostController.isOpen(for: sessionID) else {
-            drawerHostController.showSession(nil)
-            drawerHeight.constant = 0
-            drawerDivider.isHidden = true
-            drawerHost.isHidden = true
+            guard animated, !drawerHost.isHidden else {
+                drawerHostController.showSession(nil)
+                drawerHeight.constant = 0
+                drawerDivider.isHidden = true
+                drawerHost.isHidden = true
+                return
+            }
+
+            // The tabs stay up while the band slides away; what the drawer shows is swapped
+            // out only once there is no band left to see it in — and only if nothing has
+            // reopened the drawer while the slide ran.
+            PaneTransition.run(in: view) {
+                drawerHeight.constant = 0
+            } completion: { [weak self] in
+                guard let self, self.drawerTransitionGeneration == generation else { return }
+                self.drawerHostController.showSession(nil)
+                self.drawerDivider.isHidden = true
+                self.drawerHost.isHidden = true
+            }
             return
         }
 
@@ -491,8 +566,15 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.showSession(sessionID)
 
         drawerHost.isHidden = false
-        drawerHeight.constant = clampedDrawerHeight(drawerHeightValue)
         drawerDivider.isHidden = false
+        let target = clampedDrawerHeight(drawerHeightValue)
+        if animated, drawerHeight.constant != target {
+            PaneTransition.run(in: view) {
+                drawerHeight.constant = target
+            }
+        } else {
+            drawerHeight.constant = target
+        }
         if focusing { drawerHostController.focusActiveTab() }
     }
 
@@ -503,18 +585,54 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.shellRootPid(for: sessionID)
     }
 
-    private func resizeDrawer(by delta: CGFloat) {
-        drawerHeightValue = clampedDrawerHeight(drawerHeight.constant - delta)
+    /// Internal rather than private: the drag-shut tests drive the divider's two callbacks
+    /// through these seams, because a synthesized `NSEvent` cannot carry the `deltaY` the real
+    /// divider reports.
+    func drawerDividerDragged(by delta: CGFloat) {
+        // The pointer's own height, unclamped, so the release knows about travel the
+        // constraint refused — then the constraint takes the clamped copy, exactly as before.
+        let target = (drawerDragTargetHeight ?? drawerHeight.constant) - delta
+        drawerDragTargetHeight = target
+        drawerHeightValue = clampedDrawerHeight(target)
         drawerHeight.constant = drawerHeightValue
         ShellDrawerHeight.stored = drawerHeightValue
     }
 
+    /// The drawer's copy of `SidebarSplitViewController.shutPaneIfPushedPast`: a release with
+    /// the pointer pushed past the floor shuts the band, by the same rule and the same motion.
+    /// The height the drawer reopens at is the one it had — the floor, recorded when the drag
+    /// reached it — not the overshoot, which was never a height at all.
+    func drawerDividerDragEnded() {
+        defer { drawerDragTargetHeight = nil }
+        guard let target = drawerDragTargetHeight,
+              let sessionID = currentSessionID,
+              drawerHostController.isOpen(for: sessionID),
+              PaneTransition.dragShutsPane(thickness: target, floor: drawerFloor) else { return }
+
+        drawerHostController.setOpen(false, for: sessionID)
+        applyDrawer(for: sessionID, animated: true)
+        // A drawer shut at its divider never reaches the window's toggle, so the window is
+        // told — the split panes get this for free from their resize notifications.
+        delegate?.terminalContainerDidChangeShellDrawer(self)
+    }
+
+    /// The least the drawer can be: its content's one honest line of output plus the strip
+    /// band that rides on top of it.
+    private var drawerFloor: CGFloat {
+        ShellDrawerDefaults.minimumHeight + ThemedTabStripView.bandHeight
+    }
+
     private func clampedDrawerHeight(_ height: CGFloat) -> CGFloat {
-        // The strip band rides on top of the shell, so the floor grows by exactly the band:
-        // the *content* below it keeps the old minimum's one honest line of output.
-        let floor = ShellDrawerDefaults.minimumHeight + ThemedTabStripView.bandHeight
+        let floor = drawerFloor
         let ceiling = max(floor, view.bounds.height * ShellDrawerDefaults.maximumHeightFraction)
         return min(max(height, floor), ceiling)
+    }
+
+    /// Test seam: the drawer's gestures need a session on screen, and the real route —
+    /// `show(sessionID:)` — launches that session's agent, which a hosted test must never do.
+    /// States the pane's subject without attaching any surface.
+    func setCurrentSessionForTesting(_ sessionID: SessionID?) {
+        currentSessionID = sessionID
     }
 
     /// Ends a closed session's drawer surfaces, so no shell outlives the thing it belonged to.
@@ -527,7 +645,7 @@ final class TerminalContainerViewController: NSViewController {
     func openShellDrawer() {
         guard let sessionID = currentSessionID else { return }
         drawerHostController.setOpen(true, for: sessionID)
-        applyDrawer(for: sessionID)
+        applyDrawer(for: sessionID, animated: true)
     }
 
     /// The opposite, for the drag spring's restore: a drawer opened for a drop that never
@@ -535,7 +653,7 @@ final class TerminalContainerViewController: NSViewController {
     func collapseShellDrawer() {
         guard let sessionID = currentSessionID else { return }
         drawerHostController.setOpen(false, for: sessionID)
-        applyDrawer(for: sessionID)
+        applyDrawer(for: sessionID, animated: true)
     }
 
     /// Deletion sweep — forwarded here because the drawer host is this pane's child.
@@ -562,8 +680,16 @@ final class TerminalContainerViewController: NSViewController {
     /// Selecting a dormant session is the "reopen" gesture: it resumes the prior
     /// conversation by identifier rather than starting a fresh one.
     func show(sessionID: SessionID?, initialPrompt: String? = nil) {
+        // Spent before the early return as well, so a selection that changes nothing on screen
+        // cannot leave a mark standing for some later attach to animate.
+        let handsOverTheBox = consumeComposerHandoff(for: sessionID)
+
         guard sessionID != currentSessionID || settingsPage != nil || currentTerminalID != nil
         else { return }
+
+        // Read while the composer is still the visible surface: its frame and its picture are
+        // both gone the moment the conversation takes the pane.
+        let handoff = handsOverTheBox ? composerHandoffSnapshot() : nil
 
         detachCurrentChild()
         currentTerminalID = nil
@@ -593,7 +719,8 @@ final class TerminalContainerViewController: NSViewController {
             showConversation(
                 agentSession,
                 in: project,
-                initialPrompt: effectiveInitialPrompt
+                initialPrompt: effectiveInitialPrompt,
+                handoff: handoff
             )
             return
         }
@@ -615,6 +742,7 @@ final class TerminalContainerViewController: NSViewController {
     /// Shows a first-class project terminal, starting a fresh shell only when no process is
     /// currently retained for it.
     func show(terminalID: TerminalID) {
+        consumeComposerHandoff(for: nil)
         guard terminalID != currentTerminalID || settingsPage != nil else { return }
 
         detachCurrentChild()
@@ -777,11 +905,66 @@ final class TerminalContainerViewController: NSViewController {
         controller.focus()
     }
 
+    // MARK: - Composer Handoff
+
+    /// Marks the next attach of this session as the composer's own.
+    ///
+    /// Called before the sidebar selection that performs that attach. The coordinator knows a
+    /// start came from the composer; the pane is what knows whether the surface arriving has a
+    /// box to take the handoff, and whether the composer is still the thing on screen.
+    func prepareComposerHandoff(for sessionID: SessionID) {
+        pendingComposerHandoffSessionID = sessionID
+    }
+
+    /// Spends the mark: true only for the session it was left for, and only while the composer
+    /// is still the visible surface.
+    ///
+    /// **Every** call clears it, which is the cancellation rule — a mark that survived one
+    /// attach would animate some later conversation out of a composer nobody had typed in.
+    @discardableResult
+    func consumeComposerHandoff(for sessionID: SessionID?) -> Bool {
+        guard let pending = pendingComposerHandoffSessionID else { return false }
+        pendingComposerHandoffSessionID = nil
+        guard pending == sessionID else { return false }
+        return !composerViewController.view.isHidden
+    }
+
+    private func composerHandoffSnapshot() -> ComposerHandoffAnimator.Snapshot? {
+        view.layoutSubtreeIfNeeded()
+        return ComposerHandoffAnimator.snapshot(
+            composer: composerViewController.view,
+            box: composerViewController.promptHandoffView,
+            in: view
+        )
+    }
+
+    /// The box the user typed in travels to where the conversation replies from, and the rest
+    /// of the composer leaves as a picture of itself.
+    ///
+    /// The destination frame does not exist until the pane has laid the conversation out, which
+    /// is why this follows the attach rather than being arranged around it.
+    private func runComposerHandoff(
+        _ snapshot: ComposerHandoffAnimator.Snapshot?,
+        into conversation: ConversationViewController
+    ) {
+        guard let snapshot else { return }
+
+        view.layoutSubtreeIfNeeded()
+        composerHandoff.run(
+            snapshot,
+            in: view,
+            below: gitStatusOverlay,
+            into: conversation.promptHandoffView,
+            revealing: [conversation.scrollView]
+        )
+    }
+
     /// Installs the native conversation view for a session, launching it on first show.
     private func showConversation(
         _ agentSession: AgentSession,
         in project: Project,
-        initialPrompt: String?
+        initialPrompt: String?,
+        handoff: ComposerHandoffAnimator.Snapshot? = nil
     ) {
         let isNew = AgentRuntime.shared.conversation(for: agentSession.id) == nil
         let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
@@ -791,6 +974,7 @@ final class TerminalContainerViewController: NSViewController {
         // derived from the container's selection.
         currentSessionID = agentSession.id
         attachConversation(conversation)
+        runComposerHandoff(handoff, into: conversation)
 
         guard isNew else { return }
 
@@ -880,6 +1064,11 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func detachCurrentChild() {
+        // Anything else taking the pane cancels a handoff in flight: it lands on its end state
+        // and takes its ghosts with it, rather than finishing a fade over the surface that
+        // replaced the one it was carrying a box between.
+        composerHandoff.finish()
+
         if let page = settingsPage {
             page.view.removeFromSuperview()
             page.removeFromParent()
@@ -1064,9 +1253,20 @@ private extension TerminalContainerViewController {
 
     /// Follows the selection: the card and its watcher serve the checkout on screen, and a
     /// pane showing no session — composer, settings, nothing — shows no card either.
+    ///
+    /// The loading raise is lowered on *every* way out, not just the read finishing while its
+    /// session is still current. It used to ride only `onInitialReadComplete`, which dies with
+    /// the monitor — so switching sessions before the first read of a big checkout landed left
+    /// the abandoned row's spinner raised for the rest of the app's life. A monitor torn down
+    /// here is a load this pane no longer serves, and saying so is this method's job; nothing
+    /// downstream will.
     func updateGitChangeMonitor() {
         gitChangeMonitor?.stop()
         gitChangeMonitor = nil
+        if let previous = gitStatusLoadingSessionID {
+            gitStatusLoadingSessionID = nil
+            delegate?.terminalContainer(self, gitStatusLoadingDidChange: false, for: previous)
+        }
         gitStatusOverlay.clear()
         gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
         refreshGitStatusOverlaySubagents()
@@ -1076,6 +1276,7 @@ private extension TerminalContainerViewController {
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
 
+        gitStatusLoadingSessionID = sessionID
         delegate?.terminalContainer(self, gitStatusLoadingDidChange: true, for: sessionID)
 
         gitChangeMonitor = GitChangeMonitor(
@@ -1086,7 +1287,12 @@ private extension TerminalContainerViewController {
                 self.refreshGitStatusOverlayRunState()
             },
             onInitialReadComplete: { [weak self] in
-                guard let self, self.currentSessionID == sessionID else { return }
+                // Lowered for the session the raise was made for, current or not — the raise
+                // is that session's row, and lowering an already-lowered reason costs nothing.
+                guard let self else { return }
+                if self.gitStatusLoadingSessionID == sessionID {
+                    self.gitStatusLoadingSessionID = nil
+                }
                 self.delegate?.terminalContainer(
                     self,
                     gitStatusLoadingDidChange: false,
@@ -1096,6 +1302,7 @@ private extension TerminalContainerViewController {
         )
 
         guard gitChangeMonitor != nil else {
+            gitStatusLoadingSessionID = nil
             delegate?.terminalContainer(
                 self,
                 gitStatusLoadingDidChange: false,
@@ -1132,9 +1339,15 @@ private extension TerminalContainerViewController {
             gitStatusOverlay.updateAudience(GitStatusOverlayView.AudienceReading())
             return
         }
+        let inputControl = RemoteSessionMirrorRegistry.shared.ownerInputControlState(
+            for: sessionID
+        )
         gitStatusOverlay.updateAudience(GitStatusOverlayView.AudienceReading(
             following: RemoteSessionMirrorRegistry.shared.followers(of: sessionID).count,
-            isShared: RemoteAccessCoordinator.shared.hasSessionShares(sessionID)
+            isShared: RemoteAccessCoordinator.shared.hasSessionShares(sessionID),
+            focusedControllerName: inputControl.mode == .focused
+                ? inputControl.controllerDisplayName
+                : nil
         ))
     }
 
@@ -1197,7 +1410,10 @@ private extension TerminalContainerViewController {
         let transcript = observedModelTranscript(for: session, in: project)
         let model = configured ?? transcript.flatMap { ClaudeTranscriptModel.known(at: $0) }
         let effort = AgentModels.effectiveEffort(for: session, model: model, account: account)
-        let isFast = session.kind == .codex
+        // A terminal can only report a Fast setting that exists before launch. A live
+        // control-channel flag belongs to a running conversation, which this surface is not,
+        // so its sessions report Standard rather than a state nothing here can observe.
+        let isFast = session.kind.supports(.serviceTierFastMode)
             && (
                 session.fastMode
                     ?? AgentModels.defaultFastMode(
@@ -1232,7 +1448,9 @@ private extension TerminalContainerViewController {
         // a suppressed one prints nothing by construction, so there is no line to defer to
         // and the card owes every fact. Skipping the probe also skips its cached answer,
         // which describes a line the user is no longer shown.
-        guard session.kind == .claude, !AppSettings.shared.suppressesClaudeStatusLine else {
+        guard session.kind.supports(.statusLine),
+              !AppSettings.shared.suppressesClaudeStatusLine
+        else {
             gitStatusOverlay.updateModel(reading)
             return
         }
@@ -1269,7 +1487,7 @@ private extension TerminalContainerViewController {
     /// `ClaudeTranscriptModel` answers nothing for a file it cannot open, which is the same
     /// answer by a shorter route than a `fileExists` check on the main thread.
     private func observedModelTranscript(for session: AgentSession, in project: Project) -> URL? {
-        guard session.kind == .claude,
+        guard session.kind.supports(.transcriptModelRecord),
               let transcriptID = session.resumeState.transcriptID
         else { return nil }
 
@@ -1373,20 +1591,24 @@ extension TerminalContainerViewController {
             case .unavailable:
                 return
             case .loaded:
-                state.replaceConversation(threadID: threadID, events: events)
-            }
-
-            if isTruncated {
-                state.apply(.activity(
+                state.replaceTranscriptConversation(
                     threadID: threadID,
-                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
-                ))
+                    events: events
+                ) { [weak self, weak state] in
+                    guard let self, let state else { return }
+                    if isTruncated {
+                        state.apply(.activity(
+                            threadID: threadID,
+                            text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                        ))
+                    }
+                    self.delegate?.terminalContainer(
+                        self,
+                        subagentsDidChange: state.timeline,
+                        for: sessionID
+                    )
+                }
             }
-            self.delegate?.terminalContainer(
-                self,
-                subagentsDidChange: state.timeline,
-                for: sessionID
-            )
         }
     }
 
@@ -1555,8 +1777,16 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     /// A turn's changed-files card asked for its diff; the window opens the review tab on
     /// the Last Turn scope.
     func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController)
+    /// A native conversation's handoff divider asked to reveal its source session.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestOpenSession sessionID: SessionID
+    )
     /// The empty state's one action: begin a session, the same route ⌘N takes.
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
+    /// The shell drawer opened or shut from inside the pane — a divider dragged past its
+    /// floor — so the window's own controls must follow a change they did not make.
+    func terminalContainerDidChangeShellDrawer(_ container: TerminalContainerViewController)
 }
 
 // MARK: - ConversationViewControllerDelegate
@@ -1572,6 +1802,13 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
 
     func conversationDidRequestTurnDiff(_ controller: ConversationViewController) {
         delegate?.terminalContainerDidRequestTurnDiff(self)
+    }
+
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestOpenSession sessionID: SessionID
+    ) {
+        delegate?.terminalContainer(self, didRequestOpenSession: sessionID)
     }
 
     func conversationDidChangeActivity(_ controller: ConversationViewController) {

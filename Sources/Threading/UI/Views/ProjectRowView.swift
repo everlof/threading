@@ -9,7 +9,7 @@ import ThreadingExtensionKit
 /// Where the checkout lives and what branch it is on are shown in the *session* rows' hover
 /// popover, since a session is what actually runs inside the checkout — the project row
 /// states the project's identity and nothing that merely describes its current state.
-final class ProjectRowView: NSTableCellView {
+final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     // MARK: - Properties
 
@@ -75,7 +75,7 @@ final class ProjectRowView: NSTableCellView {
     /// slot. A project row shows `+` and `⋯`; a branch heading shows a grouping gear.
     private let createButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.createSymbol,
-        accessibility: L10n.string("New chat or terminal"),
+        accessibility: L10n.string("New chat"),
         target: .inline,
         inkSource: .chrome
     )
@@ -97,8 +97,11 @@ final class ProjectRowView: NSTableCellView {
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
-    /// Invoked when the project row's `+` is pressed.
-    var onCreateAction: ((NSView) -> Void)?
+    /// Invoked when the project row's `+` is pressed: a new chat, made without asking.
+    var onCreateAction: ((ProjectID) -> Void)?
+    /// Invoked when the `+` is right-clicked, for the rest of what it can make. Carries the
+    /// button to hang the menu from beside the project it belongs to.
+    var onCreateMenuAction: ((ProjectID, NSView, ThemedMenuAnchor) -> Bool)?
 
     /// The project behind the hover popover — set only for project rows, so headings show
     /// none. The popover's content is built at dwell time rather than configure time, because
@@ -126,7 +129,13 @@ final class ProjectRowView: NSTableCellView {
     /// `textField` is deliberately left unset (see `SessionRowView`); colours are owned by
     /// `applyTextColors` and reapplied when selection changes.
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { applyTextColors() }
+        didSet {
+            applyTextColors()
+            // Selection moves the ground under the tile as well as under the text — the same
+            // reason `SessionRowView` re-decides its mark here. A project's own favicon is as
+            // able to vanish into a block of accent as an agent's is.
+            rederiveThemedContent()
+        }
     }
 
     // MARK: - Initialization
@@ -190,6 +199,7 @@ final class ProjectRowView: NSTableCellView {
             moreAccessibility: "Project actions",
             showsCreate: true
         )
+        bindCreateButton(to: project.id)
         nameLabel.applyFont(.emphasizedBody)
 
         switch style {
@@ -418,7 +428,7 @@ final class ProjectRowView: NSTableCellView {
 
     private func applyIconImage() {
         let stored = shownProjectIcon.flatMap {
-            ProjectIconStore.displayImage(for: $0, darkAppearance: isDarkAppearance)
+            ProjectIconStore.displayImage(for: $0, on: IconBackplate.Ground(rowGround()))
         }
         // No real mark yet: a deterministic tile from the name, so every project is
         // distinguishable at a glance without anything having been found or stored.
@@ -426,13 +436,28 @@ final class ProjectRowView: NSTableCellView {
         nativeIcon = iconView.image
     }
 
-    private var isDarkAppearance: Bool {
-        effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    /// What the tile is actually drawn on: the sidebar's surface, with the selection fill
+    /// composited onto it where there is one. The same rule, and the same reason for asking only
+    /// about the emphasized fill, that `SessionRowView.rowGround` states.
+    ///
+    /// This used to be `isDarkAppearance` — a `Bool` that `ProjectIconStore` turned into the tone
+    /// of the *system* sidebar. Under Windows 98 the sidebar is `#C0C0C0`, tone 0.75, and the
+    /// constant claimed 0.97; every favicon whose own tone fell between them kept a plate it did
+    /// not need or lost one it did. See `IconBackplate.Ground`.
+    private func rowGround() -> NSColor {
+        let base = Design.Surface.background
+        guard backgroundStyle == .emphasized else { return base }
+        return base.composited(under: Design.Surface.accent)
     }
 
-    /// The backplate decision depends on the appearance, so a flip re-composes the icon.
+    /// The backplate decision depends on the ground, so an appearance flip re-composes the icon —
+    /// and so does a theme change, through `ThemeDerivedContent`.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        rederiveThemedContent()
+    }
+
+    func rederiveThemedContent() {
         guard shownProjectIcon != nil else { return }
         applyIconImage()
         customizationHost.refresh()
@@ -502,8 +527,9 @@ final class ProjectRowView: NSTableCellView {
         hoverButton.onPress = { [weak self] in self?.hoverButtonClicked() }
         hoverButton.translatesAutoresizingMaskIntoConstraints = false
 
-        createButton.presentsMenu = true
-        createButton.onPress = { [weak self] in self?.createButtonClicked() }
+        // The `+` is an action, not a menu: a press makes a chat, which is what it is asked for
+        // nearly every time. The terminal is a right-click away. Both gestures are bound to a
+        // project in `configure`, not here — see `bindCreateButton`.
         createButton.translatesAutoresizingMaskIntoConstraints = false
 
         hoverControls.orientation = .horizontal
@@ -607,7 +633,11 @@ final class ProjectRowView: NSTableCellView {
     }
 
     private func presentPopover() {
-        guard let project = popoverProject, window != nil, popover == nil else { return }
+        // Asked of the popover rather than of the reference held to it: a dropdown opening in
+        // this window closes the card out from under the row (see
+        // `ThemedPopover.closeAll(presentedFrom:)`), and a row that read a stale reference as
+        // "still showing" would never raise one again.
+        guard let project = popoverProject, window != nil, popover?.isShown != true else { return }
         guard let controller = makeProjectHoverCard(for: project) else { return }
 
         let content = HostPopoverFactory.make(.sidebarProjectHoverCard)
@@ -710,8 +740,19 @@ final class ProjectRowView: NSTableCellView {
         onHoverAction?(hoverButton)
     }
 
-    private func createButtonClicked() {
-        onCreateAction?(createButton)
+    /// Binds both of the `+`'s gestures to *this* project rather than to whatever the row is
+    /// showing when they fire.
+    ///
+    /// A press outlives the row it started on — `ThemedIconButton` completes the gesture even
+    /// after the sidebar has recycled this view into another project's row — and a late release
+    /// that read the row's current project would make the chat in the wrong checkout. The same
+    /// binding the archive button on a session row makes, for the same reason.
+    private func bindCreateButton(to projectID: ProjectID) {
+        createButton.onPress = { [weak self] in self?.onCreateAction?(projectID) }
+        createButton.onContextMenu = { [weak self] anchor in
+            guard let self else { return false }
+            return onCreateMenuAction?(projectID, createButton, anchor) ?? false
+        }
     }
 
     private func setCount(_ count: Int) {

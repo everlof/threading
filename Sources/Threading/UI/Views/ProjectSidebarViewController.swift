@@ -77,7 +77,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// Settings is the sidebar's one standing destination. Surfaces that live in the *trailing*
     /// panel are opened from that panel — see `DisplayPaneController.newTabEntries(for:)` — so
     /// this column never carries a permanent door to something it does not show.
-    private lazy var footer = PaneFooterView(leading: [settingsButton], margin: .paneEdge)
+    // A non-release build carries its channel mark beside Settings — see `BuildChannelBadge`.
+    private lazy var footer = PaneFooterView(
+        leading: [settingsButton, BuildChannelBadge.make()].compactMap { $0 },
+        margin: .paneEdge
+    )
 
     /// Where a receipt for something the list just did appears — above the footer, in the
     /// column the row left from. See `present(_:)`.
@@ -165,6 +169,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// Which rows are spinning and why. Kept at controller level so a reused row gets the same
     /// state when it scrolls out and back into view.
     private var loadingState = SessionLoadingState()
+
+    /// Sweeps loading raises nobody lowered — see `SessionLoadingState.lowerExpired`. Alive
+    /// only while something is spinning, so an idle sidebar schedules nothing.
+    private var loadingWatchdog: Timer?
 
     /// Invalidates a deferred presentation when the user makes another selection first.
     private var selectionRequestGeneration = 0
@@ -852,6 +860,58 @@ extension ProjectSidebarViewController {
         for affectedSessionID in loadingState.set(isLoading, reason: reason, for: sessionID) {
             refreshRow(sessionID: affectedSessionID)
         }
+        updateLoadingWatchdog()
+    }
+
+    /// Keeps the expiry sweep scheduled exactly while any row is spinning.
+    ///
+    /// The sweep is the failsafe under the reasons: a raise whose lower gets dropped — a
+    /// completion dying with its owner, a callback guarded on a selection that has moved on —
+    /// used to spin its row for the rest of the app's life, and nothing on screen said whose
+    /// raise it was. Now it ends after `SessionLoadingDefaults.maxHold`, and the journal names
+    /// the owner that leaked it.
+    private func updateLoadingWatchdog() {
+        if loadingState.isEmpty {
+            loadingWatchdog?.invalidate()
+            loadingWatchdog = nil
+            return
+        }
+
+        guard loadingWatchdog == nil else { return }
+
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: SessionLoadingDefaults.sweepInterval,
+            repeats: true
+        ) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated { self.sweepExpiredLoadingReasons() }
+        }
+        timer.tolerance = SessionLoadingDefaults.sweepInterval / 2
+        loadingWatchdog = timer
+    }
+
+    private func sweepExpiredLoadingReasons() {
+        let cutoff = Date().addingTimeInterval(-SessionLoadingDefaults.maxHold)
+
+        for (sessionID, reason) in loadingState.lowerExpired(raisedBefore: cutoff) {
+            // An expiry is a raiser that dropped its lower — a bug, and this is its only trace.
+            ThreadingLogger.session.error(
+                """
+                Lowered a loading spinner nobody ended: \(reason.rawValue, privacy: .public) \
+                for \(sessionID.uuidString, privacy: .public)
+                """
+            )
+            EventLog.shared.record(.session, "Lowered a loading spinner nobody ended", [
+                "session": sessionID.uuidString,
+                "reason": reason.rawValue
+            ])
+            refreshRow(sessionID: sessionID)
+        }
+
+        updateLoadingWatchdog()
     }
 
     /// Selects a project row, which is what puts its composer on screen.
@@ -1056,6 +1116,13 @@ extension ProjectSidebarViewController {
         sidebar.onSelect = { [weak self] pageID in
             guard let self else { return }
             self.delegate?.projectSidebar(self, didSelectSettingsPage: pageID)
+        }
+        // Read once as the sidebar is built: availability is a filesystem scan for logins,
+        // which a per-keystroke rebuild must not repeat.
+        sidebar.isAskAIAvailable = SettingsSearchResearch.provider != nil
+        sidebar.onAskAI = { [weak self] query in
+            guard let self else { return }
+            self.delegate?.projectSidebar(self, askAIAboutSettings: query)
         }
         view.addSubview(sidebar)
 
@@ -1325,9 +1392,17 @@ private extension ProjectSidebarViewController {
         presentSidebarMenu(projectMenuEntries(row: row), from: anchor)
     }
 
-    private func showProjectCreationMenu(for projectID: ProjectID, from anchor: NSView) {
-        guard let row = projectRow(for: projectID) else { return }
-        presentSidebarMenu(
+    /// The rest of what a project's `+` can make, offered on its secondary click. The press
+    /// itself makes a chat; this is where the terminal lives, and where the chat is named so
+    /// the gesture still says what it does.
+    @discardableResult
+    private func showProjectCreationMenu(
+        for projectID: ProjectID,
+        from source: NSView,
+        anchor: ThemedMenuAnchor = .control
+    ) -> Bool {
+        guard let row = projectRow(for: projectID) else { return false }
+        return presentSidebarMenu(
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("New Chat…"),
@@ -1338,7 +1413,8 @@ private extension ProjectSidebarViewController {
                     onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
                 ))
             ],
-            from: anchor
+            from: source,
+            anchor: anchor
         )
     }
 
@@ -1553,8 +1629,16 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
             }
-            cell.onCreateAction = { [weak self] anchor in
-                self?.showProjectCreationMenu(for: projectNode.projectID, from: anchor)
+            cell.onCreateAction = { [weak self] projectID in
+                // What the `+` is for: a chat in this project, without a menu in the way.
+                self?.select(projectID: projectID)
+            }
+            cell.onCreateMenuAction = { [weak self] projectID, anchor, menuAnchor in
+                self?.showProjectCreationMenu(
+                    for: projectID,
+                    from: anchor,
+                    anchor: menuAnchor
+                ) ?? false
             }
             return true
         }
@@ -1758,6 +1842,28 @@ extension ProjectSidebarViewController {
                 title: L10n.string("Rename Terminal…"),
                 onChoose: pinnedAction(row) { $0.renameClicked() }
             )),
+            // The same fold the chat rows carry, holding the two facts a terminal can state:
+            // the id that names it to Threading, and the checkout it is standing in. Captured
+            // by id, not row-resolved — an id does not move when the tree reloads under the
+            // open menu. The worktree is resolved on the click rather than at build, because
+            // `displayProject` costs git calls and the theme entry beside this one already
+            // answers *its* tier with the same cwd-derived project.
+            .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: [
+                .item(ThemedMenuItem(
+                    title: L10n.string("Threading ID"),
+                    onChoose: {
+                        Self.copyToPasteboard(terminalID.uuidString.lowercased())
+                    }
+                )),
+                .item(ThemedMenuItem(
+                    title: L10n.string("Worktree Path"),
+                    onChoose: { [weak self] in
+                        guard let project = self?.projectStore
+                            .displayProject(forTerminalID: terminalID) else { return }
+                        Self.copyToPasteboard(project.folderPath)
+                    }
+                ))
+            ])),
             terminalThemeEntry(for: terminalID),
             .separator,
             .item(ThemedMenuItem(
@@ -1794,6 +1900,7 @@ extension ProjectSidebarViewController {
         entries.append(projectIconEntry(row: row))
         if let projectID {
             entries.append(projectThemeEntry(for: projectID))
+            entries.append(projectChangeRequestEntry(for: projectID))
             entries.append(projectMuteEntry(for: projectID, row: row))
         }
         entries.append(.item(ThemedMenuItem(
@@ -2110,6 +2217,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, askAIAboutSettings query: String)
 }
 
 // MARK: - Arrangement Menu

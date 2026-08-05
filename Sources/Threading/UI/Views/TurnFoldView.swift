@@ -63,10 +63,16 @@ final class TurnFoldView: NSView {
 
     /// A semantic disclosure for another already-ordered run, such as adjacent tool calls in a
     /// child transcript. The caller owns the label because this fold does not describe a turn.
-    init(label: String, folding views: [NSView]) {
+    init(
+        label: String,
+        folding views: [NSView],
+        expanded: Bool = false,
+        onExpansionChanged: ((TurnFoldView, Bool) -> Void)? = nil
+    ) {
         self.foldedViews = views
-        self.onExpansionChanged = nil
+        self.onExpansionChanged = onExpansionChanged
         self.label = label
+        self.isExpanded = expanded
         super.init(frame: .zero)
         setupViews()
     }

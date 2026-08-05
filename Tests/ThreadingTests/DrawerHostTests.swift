@@ -217,6 +217,20 @@ final class DrawerHostTests: XCTestCase {
         XCTAssertEqual(host.tabs(for: session).map(\.id), [ids[0], ids[1]])
     }
 
+    func testCloseAllTabsLeavesTheStripEmpty() throws {
+        let host = makeHost()
+        let session = SessionID()
+        host.showSession(session)
+        _ = host.addTerminalTab(for: session)
+        _ = host.addTerminalTab(for: session)
+        _ = host.addTerminalTab(for: session)
+        let firstID = try XCTUnwrap(host.tabs(for: session).first?.id)
+
+        try choose("Close All Tabs", in: host.standardTabEntries(for: firstID, sessionID: session))
+
+        XCTAssertTrue(host.tabs(for: session).isEmpty)
+    }
+
     /// The commands that would do nothing are offered disabled, keeping the menu one shape.
     func testInapplicableCloseCommandsAreDisabledNotHidden() throws {
         let host = makeHost()
@@ -229,6 +243,11 @@ final class DrawerHostTests: XCTestCase {
         XCTAssertEqual(item("Close Other Tabs", in: entries)?.isEnabled, false)
         XCTAssertEqual(item("Close Tabs to the Right", in: entries)?.isEnabled, false)
         XCTAssertEqual(item("Close Tab", in: entries)?.isEnabled, true)
+        XCTAssertEqual(
+            item("Close All Tabs", in: entries)?.isEnabled,
+            true,
+            "With one tab, closing all of them still closes it"
+        )
     }
 
     private func item(_ title: String, in entries: [ThemedMenuEntry]) -> ThemedMenuItem? {

@@ -15,9 +15,17 @@ final class GitReviewViewController: NSViewController {
     // MARK: - Properties
 
     let sessionID: SessionID
-    private let folderPath: String
+    let folderPath: String
 
     private(set) var mode: GitReviewMode
+
+    private var isTurnInFlight: Bool {
+        AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+    }
+
+    private var modeTitle: String {
+        mode.title(isTurnInFlight: isTurnInFlight)
+    }
 
     /// Called when the user picks a different mode, so the pane can persist the tab with it.
     var onModeChange: (() -> Void)?
@@ -40,7 +48,7 @@ final class GitReviewViewController: NSViewController {
     }()
     lazy var modeChip: ChipView = {
         let chip = ChipView()
-        chip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: mode.title)
+        chip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: modeTitle)
         chip.itemsProvider = { [weak self] in self?.modeItems() ?? [] }
         chip.onSelect = { [weak self] item in
             guard let raw = item.representedValue as? String,
@@ -57,6 +65,12 @@ final class GitReviewViewController: NSViewController {
         cluster.translatesAutoresizingMaskIntoConstraints = false
         return cluster
     }()
+    /// The header's margin, held because which view starts the row changes: the chip is a pill
+    /// whose frame is its ink, and Back is a plain button carrying its hover surface around a
+    /// chevron. Pinned alike they would start 4pt apart, which is visible against a column of
+    /// cards on one straight edge.
+    private lazy var headerClusterLeading: NSLayoutConstraint = headerCluster.leadingAnchor
+        .constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.inset)
     lazy var counterLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.caption)
@@ -80,8 +94,10 @@ final class GitReviewViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
         stack.translatesAutoresizingMaskIntoConstraints = false
+        // No top inset: the gap under the header is the scroll view's, so the stack path and the
+        // file table start their first row on the same line.
         stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
+            top: 0,
             left: Design.Spacing.inset,
             bottom: Design.Spacing.inset,
             right: Design.Spacing.inset
@@ -105,10 +121,24 @@ final class GitReviewViewController: NSViewController {
         table.addTableColumn(column)
         table.headerView = nil
         table.selectionHighlightStyle = .none
+        // `.automatic` resolves to `.inset` here, which keeps 16pt at each side and 10pt above
+        // the first row — a margin of AppKit's own, on top of the pane's, that put every file
+        // card 40pt in while the header's chip started at 12. `.plain` with no intercell width
+        // hands the row the table's full width, so the pane's inset is the only one there is.
+        // It is also what `viewDidLayout`'s column check already assumes: under `.inset` the
+        // column can never equal the table's width, so the guard never held.
+        table.style = .plain
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.small)
+        // No intercell spacing either: AppKit splits it, hanging half a gap above the first card
+        // as well as between every pair, so the header's margin measured 3pt wider than the
+        // pane's. `GitReviewVirtualRowHost` carries the gap under each row instead, where it
+        // separates cards without also padding the top of the list.
+        table.intercellSpacing = .zero
         table.rowHeight = 48
-        table.usesAutomaticRowHeights = true
+        // File rows publish their TextKit-measured heights through the delegate. AppKit's
+        // automatic path double-counts a vertically large NSTextView during its first fitting
+        // pass, producing blank document height even when the descendant constraints are right.
+        table.usesAutomaticRowHeights = false
         table.autoresizingMask = [.width]
         table.delegate = self
         table.dataSource = self
@@ -129,6 +159,21 @@ final class GitReviewViewController: NSViewController {
         pill.translatesAutoresizingMaskIntoConstraints = false
         pill.isHidden = true
         return pill
+    }()
+    lazy var changeRequestBar: GitReviewChangeRequestBar = {
+        let bar = GitReviewChangeRequestBar()
+        bar.isHidden = true
+        bar.onPrimaryAction = { [weak self] in self?.performChangeRequestPrimaryAction() }
+        bar.onOpen = { [weak self] in self?.openCurrentPullRequest() }
+        bar.onPolicyChange = { [weak self] policy in
+            guard let self else { return }
+            ChangeRequestConfigurationStore.shared.setPublishPolicy(
+                policy,
+                forProjectPath: self.folderPath
+            )
+            self.renderChangeRequestBar()
+        }
+        return bar
     }()
     lazy var jumpToEndButton: ThemedButton = {
         let button = ThemedButton(
@@ -181,8 +226,8 @@ final class GitReviewViewController: NSViewController {
     /// reader's place while a mode switch starts at the top.
     var renderedMode: GitReviewMode?
 
-    /// Which files the user has opened or closed by hand. Consulted ahead of the auto-expand
-    /// heuristic, so a watched checkout re-reading itself does not close what is being read.
+    /// Which files the user has opened or closed by hand. Consulted ahead of the initial expanded
+    /// state, so a watched checkout re-reading itself does not undo what the reader chose.
     var expansionOverrides: [String: Bool] = [:]
     var bulkExpansionOverride: Bool?
 
@@ -195,6 +240,9 @@ final class GitReviewViewController: NSViewController {
     var defaultFileExpansion: [String: Bool] = [:]
     var renderedFileRoot: URL?
     var instantiatedFileRowCount = 0
+    var measuredFileRowHeights: [String: (width: CGFloat, height: CGFloat)] = [:]
+    var measuredPreludeRowHeights: [Int: (width: CGFloat, height: CGFloat)] = [:]
+    var fileRowHeightWidth: CGFloat = 0
 
     /// Whether a long line wraps to the pane or runs off it into a horizontal scroller. Wrapping
     /// is the default because the pane is often narrow, and hiding half a changed line off the
@@ -225,15 +273,38 @@ final class GitReviewViewController: NSViewController {
     /// it, so it never outlives the thing it is about.
     var notice: (text: String, isError: Bool)?
 
+    /// Pull-request state is loaded beside the diff, but has its own generation and task: a
+    /// network answer from the old branch must not repaint the newly checked-out one.
+    let changeRequestClient: GitHubPullRequestClient
+    var changeRequestLocalState: ChangeRequestLocalState?
+    var changeRequestRepositoryStatus: ChangeRequestRepositoryStatus?
+    var changeRequestFailureMessage: String?
+    var changeRequestPrimaryAction: GitReviewChangeRequestPrimaryAction = .retry
+    var changeRequestTask: Task<Void, Never>?
+    var changeRequestGeneration = 0
+    var isChangingRequest = false
+    var lastChangeRequestRead: (signature: String, date: Date)?
+    lazy var changeRequestBarHeight = changeRequestBar.heightAnchor
+        .constraint(equalToConstant: 0)
+    lazy var scrollViewTop = scrollView.topAnchor.constraint(
+        equalTo: changeRequestBar.bottomAnchor
+    )
+
     /// Holds the header's `···` dropdown while it is up; released from its own dismissal.
     var overflowMenuSession: AnyObject?
 
     // MARK: - Initialization
 
-    init(sessionID: SessionID, folderPath: String, mode: GitReviewMode) {
+    init(
+        sessionID: SessionID,
+        folderPath: String,
+        mode: GitReviewMode,
+        changeRequestClient: GitHubPullRequestClient? = nil
+    ) {
         self.sessionID = sessionID
         self.folderPath = folderPath
         self.mode = mode
+        self.changeRequestClient = changeRequestClient ?? .live()
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -270,6 +341,37 @@ final class GitReviewViewController: NSViewController {
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.refresh(force: true)
         }
+        appEvents.observe(ChangeRequestConfigurationDidChange.self) { [weak self] event in
+            guard let self,
+                  event.repositoryIdentity == GitInfo.repositoryIdentity(for: self.folderPath)
+            else { return }
+            self.renderChangeRequestBar()
+        }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard scrollView.documentView === fileTableView else { return }
+
+        // A one-column table does not make its column follow the clip width merely because the
+        // column is autoresizing. Without this, the table occupied the pane but every file card
+        // stayed at AppKit's narrow initial column width.
+        if let column = fileTableView.tableColumns.first,
+           abs(column.width - fileTableView.bounds.width) > 0.5 {
+            fileTableView.sizeLastColumnToFit()
+        }
+
+        let cardWidth = max(fileTableView.bounds.width - Design.Spacing.inset * 2, 0)
+        guard cardWidth > 1, abs(cardWidth - fileRowHeightWidth) > 0.5 else { return }
+        fileRowHeightWidth = cardWidth
+        guard fileTableView.numberOfRows > 0 else { return }
+
+        // Visible TextKit rows remeasure themselves in `GitReviewFileRow.layout`. Offscreen
+        // rows have no views, so invalidate their cheap width-derived estimates as one batch;
+        // otherwise a pane resize leaves the document extent and scrollbar at the old wrapping.
+        fileTableView.noteHeightOfRows(
+            withIndexesChanged: IndexSet(integersIn: 0..<fileTableView.numberOfRows)
+        )
     }
 
     deinit {
@@ -280,6 +382,7 @@ final class GitReviewViewController: NSViewController {
             }
         }
         watcher?.stop()
+        changeRequestTask?.cancel()
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
         }
@@ -318,9 +421,18 @@ final class GitReviewViewController: NSViewController {
         }
 
         view.addSubview(scrollView)
+        view.addSubview(changeRequestBar)
         view.addSubview(placeholderLabel)
         view.addSubview(summaryPill)
         view.addSubview(jumpToEndButton)
+    }
+
+    /// Shows or hides Back, moving the row's margin onto whichever view now starts it.
+    func setBackVisible(_ visible: Bool) {
+        backButton.isHidden = !visible
+        headerClusterLeading.constant = visible
+            ? Design.Spacing.inset - backButton.opticalHorizontalInset
+            : Design.Spacing.inset
     }
 
     private func setupConstraints() {
@@ -328,25 +440,38 @@ final class GitReviewViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             // The toolbar insets the safe area; pinning to the view's own top would slide
-            // the header under it. The row's insets mirror the overflow button's on the other
-            // side, so the chip starts where the row does instead of hanging mid-air.
+            // the header under it. One margin on all four sides: the row starts and ends where
+            // the file cards do, sits `inset` below the tab strip and leaves `inset` above the
+            // first card, so the header reads as the top of the list rather than as chrome
+            // floating over it.
             headerCluster.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: Design.Spacing.small
+                constant: inset
             ),
-            headerCluster.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            headerClusterLeading,
 
             counterLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Design.Spacing.medium),
-            counterLabel.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
+            counterLabel.firstBaselineAnchor.constraint(equalTo: modeChip.contentFirstBaselineAnchor),
             counterLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: menuButton.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
 
-            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            // Aligned by ink: a plain button's frame carries its hover surface, so pinning the
+            // frame to the margin lands the glyph short of it. Pulled out by the padding the
+            // button states, the `···` sits on the same line as the cards' trailing edge.
+            menuButton.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -(inset - menuButton.opticalHorizontalInset)
+            ),
             menuButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: modeChip.bottomAnchor, constant: Design.Spacing.small),
+            changeRequestBar.topAnchor.constraint(equalTo: modeChip.bottomAnchor, constant: inset),
+            changeRequestBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            changeRequestBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            changeRequestBarHeight,
+
+            scrollViewTop,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -374,11 +499,7 @@ final class GitReviewViewController: NSViewController {
 
     @objc func scrollToDiffEnd() {
         view.layoutSubtreeIfNeeded()
-        let overflow = max(
-            0,
-            (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height
-        )
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: overflow))
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: maximumScrollOffsetY()))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         updateScrollControls()
     }
@@ -388,12 +509,25 @@ final class GitReviewViewController: NSViewController {
             if isViewLoaded { jumpToEndButton.isHidden = true }
             return
         }
-        let overflow = max(
-            0,
-            (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height
-        )
+        let overflow = maximumScrollOffsetY()
         let distanceFromEnd = overflow - scrollView.contentView.bounds.origin.y
         jumpToEndButton.isHidden = overflow <= 1 || distanceFromEnd <= 4
+    }
+
+    /// AppKit's actual terminal scroll position. A document-height subtraction ignores the
+    /// bottom content inset reserved for the floating summary pill, so the jump button stopped
+    /// early and then hid as though it had reached the end. Let the clip view apply the same
+    /// constraints it uses for wheel and scroller-thumb movement.
+    func maximumScrollOffsetY() -> CGFloat {
+        guard scrollView.documentView != nil else { return 0 }
+        let bounds = scrollView.contentView.bounds
+        let proposed = NSRect(
+            x: bounds.minX,
+            y: (scrollView.documentView?.frame.maxY ?? 0) + bounds.height,
+            width: bounds.width,
+            height: bounds.height
+        )
+        return max(scrollView.contentView.constrainBoundsRect(proposed).origin.y, 0)
     }
 
     // MARK: - Public Methods
@@ -402,6 +536,7 @@ final class GitReviewViewController: NSViewController {
     /// they arrive from tab switches and activity edges, which cluster.
     func refresh(force: Bool) {
         if !isViewLoaded { loadView() }
+        refreshModePresentation()
 
         // A change the pane could not act on when it arrived is not stale — it is the reason
         // this refresh exists, so it outranks the debounce.
@@ -415,9 +550,15 @@ final class GitReviewViewController: NSViewController {
         }
 
         guard let root = repositoryRoot else {
+            setChangeRequestBarVisible(false)
             show(.message("Not a git repository."))
             return
         }
+
+        // Git Review's forced reloads also arrive from filesystem activity. Keep those local
+        // reloads responsive without converting every checkout or index write into a GitHub
+        // request; explicit PR actions clear the cache and force their own provider refresh.
+        refreshChangeRequest(in: root, forceRemote: false)
 
         switch mode {
         case .commit:
@@ -425,7 +566,16 @@ final class GitReviewViewController: NSViewController {
 
         case .lastTurn:
             guard let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: sessionID) else {
-                show(.message("No turn recorded yet.\nThe baseline is captured when the agent starts working."))
+                if let failure = GitTurnBaselineStore.shared.captureFailure(forSessionID: sessionID) {
+                    show(.message(
+                        L10n.string("Couldn’t capture this turn’s starting state.")
+                            + "\n" + failure.localizedDescription
+                    ))
+                } else {
+                    show(.message(L10n.string(
+                        "No turn recorded yet.\nThe baseline is captured before the agent starts working."
+                    )))
+                }
                 return
             }
             loadDiff(.lastTurn(baseline), in: root)
@@ -621,7 +771,8 @@ final class GitReviewViewController: NSViewController {
         GitReviewMode.allCases.map { candidate in
             .item(
                 ThemedMenuItem(
-                    title: candidate.title,
+                    title: candidate.title(isTurnInFlight: isTurnInFlight),
+                    subtitle: candidate.comparisonDescription,
                     representedValue: candidate.rawValue,
                     isSelected: candidate == mode
                 )
@@ -639,13 +790,20 @@ final class GitReviewViewController: NSViewController {
         switchMode(to: mode)
     }
 
+    /// Activity changes can rename Last Turn without changing its persisted mode or forcing a
+    /// git read. The dropdown receives the same live wording the next time it opens.
+    func refreshModePresentation() {
+        guard isViewLoaded else { return }
+        modeChip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: modeTitle)
+    }
+
     private func switchMode(to newMode: GitReviewMode) {
         guard newMode != mode else { return }
         mode = newMode
         // What was opened by hand described the old comparison; the same path in a new mode is
         // a different diff.
         expansionOverrides.removeAll()
-        modeChip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: newMode.title)
+        refreshModePresentation()
         onModeChange?()
         refresh(force: true)
     }

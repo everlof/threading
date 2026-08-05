@@ -2,6 +2,76 @@ import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+enum ConversationComposerCommands {
+    static let skillsID = RemoteComposerCatalog.skillsCommandID
+    static let statusID = "threading.command:status"
+    static let skills = ComposerCapability(
+        id: skillsID,
+        name: "skills",
+        description: L10n.string("Browse skills available in this conversation"),
+        kind: .command,
+        trigger: .slash,
+        presentation: .command
+    )
+    static let status = ComposerCapability(
+        id: statusID,
+        name: "status",
+        description: L10n.string("Show native session status"),
+        kind: .command,
+        trigger: .slash,
+        presentation: .command
+    )
+
+    /// Provider catalogs win when they can execute a command. Otherwise Threading replaces a
+    /// disabled expectation with the local equivalent, which is how Codex's documented
+    /// terminal-only `/status` becomes useful without pretending app-server implements it.
+    static func addingAppCommands(
+        to providerCapabilities: [ComposerCapability]
+    ) -> [ComposerCapability] {
+        var capabilities = providerCapabilities
+        replaceDisabledOrInsert(status, in: &capabilities)
+
+        if capabilities.contains(where: \.isAvailableInSkillCatalog) {
+            replaceDisabledOrInsert(skills, in: &capabilities)
+        }
+        return capabilities
+    }
+
+    private static func replaceDisabledOrInsert(
+        _ appCommand: ComposerCapability,
+        in capabilities: inout [ComposerCapability]
+    ) {
+        let matches: (ComposerCapability) -> Bool = { capability in
+            guard capability.trigger == appCommand.trigger else { return false }
+            return capability.name.caseInsensitiveCompare(appCommand.name) == .orderedSame
+                || capability.aliases.contains { alias in
+                    alias.caseInsensitiveCompare(appCommand.name) == .orderedSame
+                }
+        }
+        if capabilities.contains(where: { matches($0) && $0.isEnabled }) { return }
+        if let index = capabilities.firstIndex(where: matches) {
+            capabilities[index] = appCommand
+        } else {
+            capabilities.insert(appCommand, at: 0)
+        }
+    }
+}
+
+enum ConversationTransportText {
+    /// Slash syntax is positional in Claude: a participant envelope before the leading token
+    /// turns a command into ordinary prose. Keep the provider payload exact and leave remote
+    /// attribution to Threading's participant state for command-shaped submissions.
+    static func message(
+        _ text: String,
+        participantDisplayName: String?,
+        preservesLeadingSlash: Bool
+    ) -> String {
+        guard let participantDisplayName,
+              !(preservesLeadingSlash && text.hasPrefix("/")) else { return text }
+        return "Message from \(participantDisplayName) in the shared chat:\n\(text)"
+    }
+}
+
 /// Renders an agent conversation natively, in place of the agent's terminal: user turns as
 /// bubbles, the agent's replies as markdown, tool calls as collapsible rows, approvals as
 /// inline cards. This controller drives the stream; the drawing lives in `ConversationRendering`.
@@ -13,6 +83,14 @@ final class ConversationViewController: NSViewController {
     private let project: Project
 
     let stream: ConversationStreamSession
+
+    /// The one catalog consumed by the local composer and projected to remote clients. Provider
+    /// metadata remains authoritative; Threading contributes only actions it implements itself.
+    var composerCapabilities: [ComposerCapability] {
+        ConversationComposerCommands.addingAppCommands(
+            to: (stream as? ComposerCapabilityProviding)?.composerCapabilities ?? []
+        )
+    }
 
     /// What the conversation *is*, derived from the stream without touching AppKit. The view
     /// tree follows the changes it reports rather than being built straight from events, so
@@ -72,6 +150,9 @@ final class ConversationViewController: NSViewController {
         prompt.translatesAutoresizingMaskIntoConstraints = false
         prompt.fontSurface = .conversation
         prompt.showsImageAttachments = true
+        // The model, effort and speed a reply is sent with live on the box's own bottom row —
+        // see `PromptView.SubmitPlacement.footer`.
+        prompt.submitPlacement = .footer
         prompt.placeholder = L10n.format("Reply to %@", agentSession.kind.displayName)
         prompt.onSubmit = { [weak self] text in
             guard let self else { return }
@@ -92,6 +173,10 @@ final class ConversationViewController: NSViewController {
             guard let self else { return }
             self.requestComment(on: self.attachmentContext(path: path))
         }
+        prompt.onChange = { [weak self] text in
+            guard let self else { return }
+            SessionContinuityStore.shared.setConversationDraft(text, for: self.sessionID)
+        }
         return prompt
     }()
     private lazy var promptContentContainer: ComponentContentContainer = {
@@ -99,6 +184,14 @@ final class ConversationViewController: NSViewController {
         container.setAccessibilityIdentifier("composer.conversation-reply.content")
         return container
     }()
+    /// The box the composer-to-conversation handoff animates into.
+    ///
+    /// The container rather than the `PromptView` inside it, mirroring the composer's own
+    /// `promptHandoffView`: an extension may have composed accessories around the native
+    /// prompt, and what the box the user typed in becomes has to be the whole box it becomes.
+    /// Read by the pane that swaps the composer for this conversation.
+    var promptHandoffView: NSView { promptContentContainer }
+
     private lazy var promptCustomizationHost = ComponentCustomizationHost(
         target: .conversationReplyComposer(
             sessionID: agentSession.id.uuidString.lowercased()
@@ -124,15 +217,15 @@ final class ConversationViewController: NSViewController {
     /// Invoked for semantic actions in extension-provided reply accessories.
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
-    /// The status text and, ahead of it, the working orb — shown only while a
-    /// turn is in flight (`showWorkingOrb`).
+    /// One line of narration above the composer: what the turn is doing, and after it what the
+    /// last one cost. The working orb leads it and is shown only while a turn is in flight.
+    ///
+    /// Narration only. Everything the user can *change* about the next message — model, effort,
+    /// speed — sits on the composer's own bottom row instead, because a control that edits what
+    /// you are about to send belongs inside the thing you are sending. Left here they read as a
+    /// strip of chips floating between the conversation and the input, belonging to neither.
     private lazy var statusRow: NSStackView = {
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [
-            orbView, statusLabel, spacer, contextLabel, modelChip, effortChip, speedChip
-        ])
+        let row = NSStackView(views: [orbView, statusLabel])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.tight
@@ -151,8 +244,14 @@ final class ConversationViewController: NSViewController {
     }()
     private let modelChip = ChipView()
 
-    /// Codex reasoning is model-specific catalog data: Sol and Terra currently reach Ultra,
-    /// Luna reaches Max, and older models stop at Extra High.
+    /// How much this conversation may do before it has to ask. Second on the row because that
+    /// is where the opening composer puts it: model then mode is the pair both composers lead
+    /// with, and two surfaces answering the same questions in a different order is the thing
+    /// worth spending the slot on. Catalog-backed effort follows on both; speed is reply-only.
+    private let modeChip = ChipView()
+
+    /// Reasoning levels belong to model metadata. Whether they can be changed after launch is
+    /// the transport's separate `ReasoningEffortConfigurableConversation` promise.
     private let effortChip = ChipView()
 
     /// The Fast/Standard picker: Codex's tri-state Fast/Standard/Account-default tier and Claude's
@@ -189,6 +288,10 @@ final class ConversationViewController: NSViewController {
     /// Unlike `stream.isRunning`, this is one user turn currently awaiting its terminal event.
     /// Both native transports keep their process open between turns.
     var isTurnInFlight = false
+
+    /// The prompt has been accepted locally but is held behind the git-baseline barrier. During
+    /// this short window neither the local composer nor a remote mirror may start another turn.
+    private var isPreparingTurn = false
 
     /// The backgrounded shells, children and monitors the agent currently has running.
     ///
@@ -228,8 +331,11 @@ final class ConversationViewController: NSViewController {
     /// When the user's hand last touched the scroll view, so a bounds change can be read as
     /// theirs rather than as one of our own scrolls landing.
     var lastUserScrollAt: TimeInterval = 0
+    private var viewportSaveWorkItem: DispatchWorkItem?
+    private var didRestoreContinuityViewport = false
 
     enum PresentationID: Hashable {
+        case handoff
         case timeline(Int)
         case divider(turnStart: Int)
         case fold(turnStart: Int)
@@ -376,8 +482,11 @@ final class ConversationViewController: NSViewController {
             handle: agentSession.accountHandle
         )
         self.account = account
-        let configuredEffort = AgentModels.defaultEffort(
-            for: agentSession.kind,
+        let launchModel = agentSession.model
+            ?? AgentModels.defaultModel(for: agentSession.kind, account: account)
+        let launchEffort = AgentModels.effectiveEffort(
+            for: agentSession,
+            model: launchModel,
             account: account
         )
 
@@ -393,7 +502,7 @@ final class ConversationViewController: NSViewController {
         case .claude:
             self.stream = ClaudeStreamSession(
                 sessionID: agentSession.id,
-                effort: configuredEffort,
+                effort: launchEffort,
                 subagentTranscriptPlan: {
                     let current = ProjectStore.shared.session(withID: agentSession.id)
                         ?? agentSession
@@ -416,6 +525,7 @@ final class ConversationViewController: NSViewController {
         case .codex:
             self.stream = CodexStreamSession(
                 sessionID: agentSession.id,
+                workingDirectory: project.folderPath,
                 configurationProvider: {
                     let current = ProjectStore.shared.session(withID: agentSession.id)
                         ?? agentSession
@@ -448,10 +558,40 @@ final class ConversationViewController: NSViewController {
                 },
                 plan: plan
             )
+        case .grok:
+            self.stream = GrokACPStreamSession(
+                sessionID: agentSession.id,
+                workingDirectory: project.folderPath,
+                plan: plan
+            )
+        case .openCode:
+            preconditionFailure("This agent runtime uses the terminal surface")
         }
         super.init(nibName: nil, bundle: nil)
+        if let handoff = agentSession.handoff {
+            let canOpenSource = handoff.source.flatMap {
+                ProjectStore.shared.session(withID: $0.sessionID)
+            } != nil
+            let handoffView = ConversationHandoffView(
+                handoff: handoff,
+                canOpenSource: canOpenSource,
+                onOpenSource: { [weak self] sessionID in
+                    guard let self else { return }
+                    self.delegate?.conversation(self, didRequestOpenSession: sessionID)
+                }
+            )
+            presentationItems.append(PresentationItem(
+                id: .handoff,
+                content: .retained(handoffView),
+                opensTurn: false
+            ))
+        }
         appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
             self?.refreshConversationRowsIfCustomizationChanged(event)
+        }
+        appEvents.observe(SessionInputControlDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.refreshInputControl()
         }
     }
 
@@ -460,6 +600,8 @@ final class ConversationViewController: NSViewController {
     }
 
     deinit {
+        viewportSaveWorkItem?.cancel()
+        saveConversationViewport()
         workingStatusTimer?.invalidate()
     }
 
@@ -483,6 +625,11 @@ final class ConversationViewController: NSViewController {
         // resulting gutter is what the turn rail lives in.
         // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
         setupPromptCustomization()
+
+        let continuity = SessionContinuityStore.shared.state(for: sessionID)
+        if !continuity.conversationDraft.isEmpty {
+            promptView.stringValue = continuity.conversationDraft
+        }
 
         wireConversationControls()
 
@@ -583,6 +730,12 @@ final class ConversationViewController: NSViewController {
         modelChip.onSelect = { [weak self] item in
             self?.selectModel(item.representedValue as? String)
         }
+        modeChip.itemsProvider = { [weak self] in self?.permissionModeItems() ?? [] }
+        modeChip.onSelect = { [weak self] item in
+            // Nil is a real answer here — the inherit row — so this reads "not a mode" as
+            // inherit rather than falling back to one.
+            self?.selectPermissionMode(item.representedValue as? AgentPermissionMode)
+        }
         effortChip.itemsProvider = { [weak self] in self?.effortItems() ?? [] }
         effortChip.onSelect = { [weak self] item in
             self?.selectEffort(item.representedValue as? String)
@@ -594,8 +747,21 @@ final class ConversationViewController: NSViewController {
         }
 
         modelChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        modeChip.setContentCompressionResistancePriority(.required, for: .horizontal)
         effortChip.setContentCompressionResistancePriority(.required, for: .horizontal)
         speedChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // What the reply will be sent with, on the leading side; what it has cost so far, on
+        // the trailing side beside the send. The composer places them — see
+        // `PromptView.setFooterControls(leading:trailing:)`.
+        //
+        // Model then mode first, because that is the pair the opening composer leads with and
+        // keeping those two slots identical across the two composers is the point. Effort and
+        // speed have no opening-composer counterpart, so they follow.
+        promptView.setFooterControls(
+            leading: [modelChip, modeChip, effortChip, speedChip],
+            trailing: [contextLabel]
+        )
         refreshConversationControls()
     }
 
@@ -611,17 +777,24 @@ final class ConversationViewController: NSViewController {
                 constant: -Design.Spacing.small
             ),
 
+            // Both edges pinned, not one: the line is a single truncating label now, and a row
+            // free to size itself to its content is what let the controls it used to carry
+            // cluster against the leading edge instead of reaching the pane's trailing one.
+            //
+            // Twice the inset, so the narration starts on the same vertical as the text in the
+            // box below it — the box is inset from the pane, and its text inset again from the
+            // box. Aligned by ink rather than by frame.
             statusRow.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
-                constant: Design.Spacing.inset
+                constant: Design.Spacing.inset * 2
             ),
             statusRow.trailingAnchor.constraint(
-                lessThanOrEqualTo: view.trailingAnchor,
+                equalTo: view.trailingAnchor,
                 constant: -Design.Spacing.inset
             ),
             statusRow.bottomAnchor.constraint(
                 equalTo: promptContentContainer.topAnchor,
-                constant: -Design.Spacing.tight
+                constant: -Design.Spacing.small
             ),
 
             promptContentContainer.leadingAnchor.constraint(
@@ -660,16 +833,48 @@ final class ConversationViewController: NSViewController {
         selectedSubagentID = subagentState.selectedThreadID
         refreshSubagentState()
 
-        stream.onEvent = { [weak self] event in self?.handle(event) }
+        if let reporting = stream as? ProviderExecutionReportingConversation {
+            reporting.onProviderExecution = { [weak self] event in
+                guard let self else { return }
+                ExecutionAuditStore.shared.record(
+                    providerEvent: event,
+                    sessionID: self.sessionID,
+                    provider: self.agentSession.kind
+                )
+            }
+        }
+
+        stream.onEvent = { [weak self] event in
+            guard let self else { return }
+            ExecutionAuditStore.shared.record(
+                streamEvent: event,
+                sessionID: self.sessionID,
+                provider: self.agentSession.kind
+            )
+            self.handle(event)
+        }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
         stream.onSendAvailabilityChange = { [weak self] in
             self?.refreshConversationControls()
             guard let self else { return }
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
+        if let capabilities = stream as? ComposerCapabilityProviding {
+            capabilities.onComposerCapabilitiesChange = { [weak self] in
+                guard let self else { return }
+                self.refreshComposerCapabilitySurfaces()
+            }
+        }
+        refreshComposerCapabilitySurfaces()
         if let reporting = stream as? SubagentReportingConversation {
             reporting.onSubagentEvent = { [weak self] event in
                 self?.handleSubagent(event)
+            }
+        }
+        if let reporting = stream as? SessionTitleReportingConversation {
+            reporting.onSessionTitleChange = { [weak self] title in
+                guard let self else { return }
+                ProjectStore.shared.updateAgentTitle(title, for: self.sessionID)
             }
         }
 
@@ -713,8 +918,57 @@ final class ConversationViewController: NSViewController {
         let sinceGesture = ProcessInfo.processInfo.systemUptime - lastUserScrollAt
         if sinceGesture < ConversationDefaults.gestureAttribution {
             autoScroll.noteUserScrolled(nearBottom: isNearConversationBottom)
+            scheduleConversationViewportSave()
         }
         updateVisibleTurns()
+    }
+
+    private func scheduleConversationViewportSave() {
+        viewportSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.saveConversationViewport()
+        }
+        viewportSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + SessionContinuityDefaults.viewportSaveDelay,
+            execute: work
+        )
+    }
+
+    private func saveConversationViewport() {
+        guard isViewLoaded else { return }
+        viewportSaveWorkItem?.cancel()
+        viewportSaveWorkItem = nil
+        let overflow = max(0, documentView.bounds.height - scrollView.contentSize.height)
+        let progress = overflow > 0
+            ? Double(min(max(scrollView.contentView.bounds.origin.y / overflow, 0), 1))
+            : 1
+        SessionContinuityStore.shared.setConversationViewport(
+            progress: progress,
+            followsBottom: isNearConversationBottom,
+            for: sessionID
+        )
+    }
+
+    @discardableResult
+    private func restoreConversationViewportIfAvailable() -> Bool {
+        guard !didRestoreContinuityViewport else { return false }
+        didRestoreContinuityViewport = true
+        let continuity = SessionContinuityStore.shared.state(for: sessionID)
+        guard !continuity.conversationFollowsBottom,
+              let progress = continuity.conversationViewportProgress else { return false }
+
+        view.layoutSubtreeIfNeeded()
+        tableView.layoutSubtreeIfNeeded()
+        let overflow = max(0, documentView.bounds.height - scrollView.contentSize.height)
+        guard overflow > 0 else { return false }
+        scrollView.contentView.setBoundsOrigin(NSPoint(
+            x: 0,
+            y: overflow * min(max(progress, 0), 1)
+        ))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        autoScroll.noteUserScrolled(nearBottom: false)
+        return true
     }
 
     // MARK: - Minimap
@@ -943,7 +1197,9 @@ final class ConversationViewController: NSViewController {
         // intermediate prefix on the main thread.
         refreshMinimap()
         autoScroll.noteReplayFinished()
-        scrollToBottom()
+        if !restoreConversationViewportIfAvailable() {
+            scrollToBottom()
+        }
         stream.start()
         apply(.status(.ready(model: nil, lastTurn: nil)))
         restoreConversationConfiguration()
@@ -1044,9 +1300,32 @@ final class ConversationViewController: NSViewController {
         return RemoteConversationSnapshotDTO(
             rows: rows,
             streamingText: timeline.streamingText,
-            canSend: stream.canSend,
+            canSend: stream.canSend && !isPreparingTurn,
+            composerCapabilities: composerCapabilities.map { capability in
+                RemoteComposerCapabilityDTO(
+                    id: capability.id,
+                    name: capability.name,
+                    displayName: capability.displayName,
+                    description: capability.description,
+                    argumentHint: capability.argumentHint,
+                    aliases: capability.aliases,
+                    kind: capability.kind.rawValue,
+                    isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
+                    trigger: capability.trigger.rawValue,
+                    presentation: capability.presentation.rawValue,
+                    isEnabled: capability.isEnabled,
+                    unavailableReason: capability.unavailableReason
+                )
+            },
             permission: activePermissionCard?.remoteRequest
         )
+    }
+
+    private func refreshComposerCapabilitySurfaces() {
+        if isViewLoaded {
+            promptView.composerCapabilities = composerCapabilities
+        }
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 
     /// Resolves only the permission card that is currently visible. Queued requests remain
@@ -1060,7 +1339,12 @@ final class ConversationViewController: NSViewController {
     /// One staging door for messages, diffs, images, the attachments pane, and remote clients.
     /// The prompt owns the receipt UI; the controller owns session routing and focus.
     func stageContextAttachment(_ attachment: ConversationContextAttachment) {
+        guard RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) else {
+            refreshInputControl()
+            return
+        }
         promptView.addContextAttachment(attachment)
+        SessionContinuityStore.shared.setConversationDraft(promptView.stringValue, for: sessionID)
     }
 
     func requestComment(on attachment: ConversationContextAttachment) {
@@ -1148,7 +1432,6 @@ final class ConversationViewController: NSViewController {
         return String(candidate.dropFirst(prefix.count))
     }
 
-
     // MARK: - Input
 
     @discardableResult
@@ -1160,9 +1443,55 @@ final class ConversationViewController: NSViewController {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let context = ConversationContextPolicy.normalized(context)
         guard !trimmed.isEmpty || !context.isEmpty else { return false }
-        let localPrompt = ConversationPrompt(text: trimmed, context: context)
+        guard !isPreparingTurn else { return false }
+        if authorization == nil,
+           !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
+            refreshInputControl()
+            return false
+        }
 
-        let transported: String
+        // A reference/comment turn is ordinary model input. Treating its leading `/word` as a
+        // session command would drop the sidecar context at the provider's command boundary.
+        let invocation = context.isEmpty
+            ? ComposerCapabilityResolver.invocation(
+                in: trimmed,
+                capabilities: composerCapabilities
+            )
+            : nil
+
+        // `/skills` belongs to Threading's composer, not either provider. Remote clients render
+        // the same catalog themselves; only a local invocation has a picker to open here.
+        if invocation?.capability.id == ConversationComposerCommands.skillsID {
+            guard authorization == nil else { return false }
+            promptView.showSkillCompletions()
+            return true
+        }
+
+        // Codex app-server exposes status ingredients rather than a `/status` RPC. Claude's
+        // live catalog remains authoritative when it advertises its own enabled command; this
+        // fallback is used only when the provider has no native implementation.
+        if invocation?.capability.id == ConversationComposerCommands.statusID {
+            apply(timeline.appendNotice(nativeStatusText, kind: .muted))
+            if authorization == nil {
+                promptView.clear()
+                SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
+            }
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return true
+        }
+
+        if let invocation, !invocation.capability.isEnabled {
+            let reason = invocation.capability.unavailableReason
+                ?? L10n.string("This command is not available in native Chat")
+            apply(timeline.appendNotice(reason, kind: .error))
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return false
+        }
+
+        guard stream.canSend else { return false }
+
+        let localPrompt = ConversationPrompt(text: trimmed, context: context)
+        let transportedText: String
         if let authorization, let member = authorization.member {
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -1171,32 +1500,102 @@ final class ConversationViewController: NSViewController {
             // The provider transport has no participant-metadata channel. A short, explicit
             // envelope lets the agent understand who "me" and another named member refer to,
             // while the locally rendered bubble remains the person's original message.
-            transported = "Message from \(member.displayName) in the shared chat:\n\(localPrompt.visibleText)"
+            transportedText = ConversationTransportText.message(
+                localPrompt.visibleText,
+                participantDisplayName: member.displayName,
+                preservesLeadingSlash: agentSession.kind.supports(.slashCommandPrefix)
+            )
         } else {
             RemoteNotificationService.shared.recordOwnerInteraction(sessionID: sessionID)
-            transported = localPrompt.visibleText
+            transportedText = trimmed
         }
-        guard stream.send(ConversationPrompt(text: transported, context: context)) else {
-            return false
+
+        let transportedPrompt = ConversationPrompt(text: transportedText, context: context)
+
+        isPreparingTurn = true
+        latestChangedFilesCard?.hideViewDiff()
+        refreshInputControl()
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+
+        GitTurnBaselineStore.shared.prepareTurn(sessionID: sessionID) { [weak self] in
+            guard let self else { return }
+            self.isPreparingTurn = false
+            self.sendPreparedTurn(
+                localPrompt: localPrompt,
+                transportedPrompt: transportedPrompt,
+                invocation: invocation,
+                sourceText: trimmed
+            )
+        }
+        return true
+    }
+
+    /// Releases one accepted prompt after its immutable turn-start tree has been recorded.
+    private func sendPreparedTurn(
+        localPrompt: ConversationPrompt,
+        transportedPrompt: ConversationPrompt,
+        invocation: ComposerInvocation?,
+        sourceText: String
+    ) {
+        let sent: Bool
+        if let invocation,
+           let capabilityStream = stream as? ComposerCapabilityProviding {
+            // Provider actions are syntax-bearing protocol messages. Do not prepend the shared
+            // chat participant envelope or reconstruct their arguments; the resolver has kept
+            // the exact trimmed source for this purpose.
+            sent = capabilityStream.send(invocation)
+        } else {
+            sent = stream.send(transportedPrompt)
+        }
+        guard sent else {
+            refreshInputControl()
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return
         }
         refreshConversationControls()
         runProgress = nil
 
-        // Echoed locally as it is sent. The stream never reports a live user turn back —
-        // `.userMessage` exists only for replay — so producing it here is what draws it once.
-        // Anchoring is decided *before* the echo lands so its `addRow` cannot first yank the
-        // view to the bottom.
-        autoScroll.noteMessageSent()
-        apply(timeline.appendUserMessage(localPrompt.userMessage))
-        anchorSentMessage(at: timeline.rows.count - 1)
+        if invocation?.capability.presentation == .command {
+            apply(timeline.appendNotice(sourceText, kind: .muted))
+        } else {
+            // Echoed locally as it is sent. The stream never reports a live user turn back —
+            // `.userMessage` exists only for replay — so producing it here is what draws it
+            // once. Anchoring is decided before the echo lands so its `addRow` cannot yank the
+            // view to the bottom first.
+            autoScroll.noteMessageSent()
+            apply(timeline.appendUserMessage(localPrompt.userMessage))
+            anchorSentMessage(at: timeline.rows.count - 1)
+        }
 
         // Drawn here, which is the moment the turn starts and the only place the status enters
         // `working` — so the word is fixed for the whole wait and a new one arrives with the
         // next turn.
         apply(.status(.working(word: workingWords.next())))
         promptView.clear()
+        SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
-        return true
+    }
+
+    private var nativeStatusText: String {
+        let model = activeModel.map(ModelName.display) ?? ConversationControlDefaults.defaultModel
+        let activity: String
+        if isTurnInFlight {
+            activity = L10n.string("Working…")
+        } else if stream.isRunning {
+            activity = L10n.string("Ready")
+        } else {
+            activity = L10n.string("Stopped")
+        }
+        let context = lastContextReading.map {
+            TurnStatusText.context(tokens: $0.tokens, window: $0.window)
+        } ?? L10n.string("Context not reported yet")
+        return L10n.format(
+            "Native Chat status · %@ · %@ · %@ · %@",
+            agentSession.kind.displayName,
+            model,
+            activity,
+            context
+        )
     }
 
     private func apply(_ changes: [ConversationTimeline.Change]) {
@@ -1234,6 +1633,16 @@ final class ConversationViewController: NSViewController {
     private func handle(_ event: StreamEvent) {
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
+            if storedSession.isCrossProviderContinuation {
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.recordHandoffTargetModel(model)
+                }
+            }
+            // Only an unpinned session speaks for the account: one running an explicit choice
+            // reports that choice, which says nothing about what "no model chosen" resolves to.
+            if storedSession.model == nil, let account {
+                AccountPreferencesStore.shared.setLastReportedModel(model, for: account.id)
+            }
         }
         // Recorded, deliberately not announced. Work can only be backgrounded from inside a
         // turn, so the rise never changes the activity; the fall arrives in the gap between a
@@ -1327,18 +1736,19 @@ final class ConversationViewController: NSViewController {
             case .loaded:
                 break
             }
-            self.isReplaying = true
-            self.subagentState.replaceConversation(threadID: threadID, events: events)
-            if isTruncated {
-                self.handleSubagent(.activity(
-                    threadID: threadID,
-                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
-                ))
+            self.subagentState.replaceTranscriptConversation(
+                threadID: threadID,
+                events: events
+            ) { [weak self] in
+                guard let self else { return }
+                if isTruncated {
+                    self.handleSubagent(.activity(
+                        threadID: threadID,
+                        text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                    ))
+                }
+                self.scheduleTranscriptStabilityChecks(threadID: threadID)
             }
-            self.isReplaying = false
-            self.refreshSubagentState()
-            self.notifySelectedSubagentUpdated()
-            self.scheduleTranscriptStabilityChecks(threadID: threadID)
         }
 
         if let history = stream as? SubagentHistoryConversation {
@@ -1440,6 +1850,28 @@ final class ConversationViewController: NSViewController {
             ?? AgentModels.defaultModel(for: session.kind, account: account)
     }
 
+    /// What the menu's "leave it to the CLI" row names, and where that name came from.
+    ///
+    /// The chip resolves through `activeModel` while the row used to consult only the account's
+    /// config file, so the two disagreed in the one case that matters: an account naming no
+    /// model of its own ran a session whose chip read `Opus · 1M` — reported by the CLI when it
+    /// started — above a row still reading "Default model". Same question, two answers, one
+    /// click apart. The rule itself lives in `AgentModels` and is tested there.
+    private var resolvedDefaultModel: ResolvedDefaultModel {
+        AgentModels.resolvedDefault(
+            sessionModel: storedSession.model,
+            reportedModel: reportedModel,
+            configuredModel: AgentModels.defaultModel(
+                for: storedSession.kind,
+                account: account
+            ),
+            rememberedModel: account.flatMap {
+                AccountPreferencesStore.shared.lastReportedModel(for: $0.id)
+                    ?? ClaudeAccountLastRunModel.lastRunModel(account: $0)
+            }
+        )
+    }
+
     /// Read at the point a turn starts, so changing effort while idle updates both the launch
     /// plan and the working/last-turn status for that turn.
     var effectiveEffort: String? {
@@ -1451,18 +1883,32 @@ final class ConversationViewController: NSViewController {
     }
 
     private func refreshConversationControls() {
-        let canConfigure: Bool
-        switch agentSession.kind {
-        case .claude:
-            // Claude accepts control requests while a turn is active; they apply to its next
-            // model round-trip without restarting the persistent process.
-            canConfigure = stream.isRunning
-        case .codex:
-            // App-server accepts model, effort and service tier on the next turn request.
-            canConfigure = stream.canSend
-        }
+        refreshInputControl()
+        // The transport answers this, not the runtime: when a change lands is a property of
+        // the wire protocol carrying it. See `ConversationStreamSession`.
+        let canConfigure = stream.acceptsConfigurationChange
 
         let session = storedSession
+
+        // Configured before the catalog guard below, because the permission posture is not a
+        // property of the model: a runtime that publishes no model catalog still has one.
+        //
+        // Not gated on `canConfigure` either. Model, effort and speed have meaning only on a
+        // live transport, but the mode also has a durable record that states the next launch —
+        // which is the whole of what it means on a dormant conversation, and the session row's
+        // own Permission Mode item is editable at exactly those times. Two entrances to one
+        // setting must not disagree about whether it can be changed at all. Only a change
+        // already in flight closes it.
+        modeChip.isHidden = !session.kind.supportsPermissionModes
+        modeChip.isEnabled = !isChangingConversationConfiguration
+        modeChip.configure(
+            symbolName: PermissionModePresentation.symbol,
+            title: PermissionModePresentation.chipTitle(
+                selected: session.permissionMode,
+                inherited: PermissionModePresentation.appDefault
+            )
+        )
+
         let options = AgentModels.options(for: session.kind, account: account)
         guard !options.isEmpty else {
             modelChip.isHidden = true
@@ -1480,31 +1926,38 @@ final class ConversationViewController: NSViewController {
             title: model.map(ModelName.display) ?? ConversationControlDefaults.defaultModel
         )
 
-        let modelOption = AgentModels.option(
-            identifier: model,
-            for: session.kind,
-            account: account
-        )
-        effortChip.isHidden = session.kind != .codex
-            || modelOption?.reasoningLevels.isEmpty != false
-        effortChip.isEnabled = canConfigure && !isChangingConversationConfiguration
-        effortChip.configure(
-            symbolName: ConversationControlDefaults.effortSymbol,
-            title: effortDisplayName(effectiveEffort, option: modelOption)
-        )
-
-        speedChip.isHidden = !supportsFastMode(model: model, kind: session.kind)
-        speedChip.isEnabled = canConfigure && !isChangingConversationConfiguration
-
-        let inherited = AgentModels.defaultFastMode(
-            for: session.kind,
+        let modelOption = ReasoningEffortPresentation.option(
+            kind: session.kind,
             model: model,
             account: account
         )
-        // Claude's print transport starts with Fast off unless Threading sends its flag control.
-        // Codex can inherit Fast from its account or model catalog.
-        let effective = session.fastMode ?? inherited ?? (
-            session.kind == .claude ? false : nil
+        // The catalog decides whether levels exist; the transport separately promises that a
+        // choice reaches the next turn. Claude currently has only a launch flag, so its opening
+        // composer offers effort without this reply composer implying a live change.
+        effortChip.isHidden = modelOption == nil
+            || !(stream is ReasoningEffortConfigurableConversation)
+        effortChip.isEnabled = canConfigure && !isChangingConversationConfiguration
+        effortChip.configure(
+            symbolName: ReasoningEffortPresentation.symbol,
+            title: ReasoningEffortPresentation.title(
+                selected: session.reasoningEffort,
+                kind: session.kind,
+                model: model,
+                account: account
+            )
+        )
+
+        speedChip.isHidden = !AgentModels.supportsFastMode(
+            kind: session.kind,
+            model: model,
+            account: account
+        )
+        speedChip.isEnabled = canConfigure && !isChangingConversationConfiguration
+
+        let effective = AgentModels.effectiveFastMode(
+            for: session,
+            model: model,
+            account: account
         )
         let speedTitle: String
         switch effective {
@@ -1518,11 +1971,27 @@ final class ConversationViewController: NSViewController {
         )
     }
 
+    private func refreshInputControl() {
+        guard isViewLoaded else { return }
+        let state = RemoteSessionMirrorRegistry.shared.ownerInputControlState(for: sessionID)
+        promptView.isSubmissionEnabled = state.canWrite && !isPreparingTurn
+        if isPreparingTurn {
+            promptView.submissionDisabledReason = L10n.string("Preparing turn…")
+        } else if !state.canWrite {
+            promptView.submissionDisabledReason = L10n.format(
+                "%@ is controlling this chat. Your draft stays here.",
+                state.controllerDisplayName ?? L10n.string("Another participant")
+            )
+        } else {
+            promptView.submissionDisabledReason = nil
+        }
+    }
+
     private func modelItems() -> [ThemedMenuEntry] {
         let session = storedSession
-        let configured = AgentModels.defaultModel(for: session.kind, account: account)
-        let defaultTitle = configured.map {
-            "\(ModelName.display(for: $0))\(ConversationControlDefaults.accountDefaultSuffix)"
+        let resolved = resolvedDefaultModel
+        let defaultTitle = resolved.identifier.map {
+            "\(ModelName.display(for: $0))\(ConversationControlDefaults.suffix(for: resolved.source))"
         } ?? ConversationControlDefaults.defaultModel
 
         // The same readings the composer's model menu carries. Switching model mid-conversation
@@ -1540,7 +2009,7 @@ final class ConversationViewController: NSViewController {
             isSelected: session.model == nil
         )
         if let account {
-            AccountUsageMenu.decorate(&defaultItem, forModel: configured, on: account)
+            AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
         }
 
         var items: [ThemedMenuEntry] = [.item(defaultItem)]
@@ -1573,61 +2042,45 @@ final class ConversationViewController: NSViewController {
         return items
     }
 
-    private func effortItems() -> [ThemedMenuEntry] {
-        let session = storedSession
-        guard session.kind == .codex,
-              let option = AgentModels.option(
-                identifier: activeModel,
-                for: session.kind,
-                account: account
-              ),
-              !option.reasoningLevels.isEmpty
-        else { return [] }
-
-        let configured = AgentModels.defaultEffort(for: session.kind, account: account)
-        let inherited: String?
-        let inheritedSuffix: String
-        if let configured, option.supports(reasoningEffort: configured) {
-            inherited = configured
-            inheritedSuffix = ConversationControlDefaults.accountDefaultSuffix
-        } else {
-            inherited = option.defaultReasoningLevel
-            inheritedSuffix = ConversationControlDefaults.modelDefaultSuffix
-        }
-
-        let inheritedLevel = option.reasoningLevels.first { $0.effort == inherited }
-        var items: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: inherited.map {
-                    "\(effortDisplayName($0, option: option))\(inheritedSuffix)"
-                } ?? ConversationControlDefaults.defaultEffort,
-                subtitle: inheritedLevel?.description,
-                representedValue: nil,
-                isSelected: session.reasoningEffort == nil
-                    || !option.supports(reasoningEffort: session.reasoningEffort)
-            ))
-        ]
-
-        items += option.reasoningLevels.map { level in
-            .item(ThemedMenuItem(
-                title: level.displayName,
-                subtitle: level.description,
-                representedValue: level.effort,
-                isSelected: level.effort == session.reasoningEffort
-            ))
-        }
-        return items
+    /// The same rows the session row's menu and the opening composer offer, from one builder —
+    /// three menus for one setting could otherwise disagree about what the app-wide default is
+    /// called. Only the timing is this surface's own.
+    private func permissionModeItems() -> [ThemedMenuEntry] {
+        PermissionModePresentation.rows(
+            for: storedSession.kind,
+            selected: storedSession.permissionMode,
+            inherited: PermissionModePresentation.appDefault,
+            timing: permissionModeTiming
+        )
     }
 
-    private func speedItems() -> [ThemedMenuEntry] {
+    /// When a mode chosen on this chip starts to apply.
+    ///
+    /// The transport answers it, not the runtime's name — the same rule the other three chips
+    /// follow. A Claude conversation that is running carries the change on its control channel;
+    /// a dormant one, and every transport that cannot be asked mid-conversation, records it for
+    /// the next launch instead.
+    private var permissionModeTiming: PermissionModePresentation.Timing {
+        stream.acceptsConfigurationChange && stream is PermissionModeSwitchableConversation
+            ? .immediately
+            : .whenTheChatRestarts
+    }
+
+    private func effortItems() -> [ThemedMenuEntry] {
         let session = storedSession
-        let inherited = AgentModels.defaultFastMode(
-            for: session.kind,
+        return ReasoningEffortPresentation.rows(
+            selected: session.reasoningEffort,
+            kind: session.kind,
             model: activeModel,
             account: account
         )
-        let effective = session.fastMode ?? inherited ?? (
-            session.kind == .claude ? false : nil
+    }
+
+    private func speedItems() -> [ThemedMenuEntry] {
+        let effective = AgentModels.effectiveFastMode(
+            for: storedSession,
+            model: activeModel,
+            account: account
         )
 
         return [
@@ -1648,20 +2101,69 @@ final class ConversationViewController: NSViewController {
 
     private func selectEffort(_ effort: String?) {
         guard !isChangingConversationConfiguration,
-              storedSession.kind == .codex,
               stream.canSend,
+              stream is ReasoningEffortConfigurableConversation,
               let option = AgentModels.option(
                 identifier: activeModel,
-                for: .codex,
+                for: storedSession.kind,
                 account: account
               ),
               effort == nil || option.supports(reasoningEffort: effort)
         else { return }
 
         ProjectStore.shared.update(sessionID: agentSession.id) {
-            $0.setCodexReasoningEffort(effort)
+            $0.setReasoningEffort(effort)
         }
         refreshConversationControls()
+    }
+
+    /// How much this conversation may do before it has to ask.
+    ///
+    /// Claude carries it live: `set_permission_mode` rides the same control channel `set_model`
+    /// does, and a mode the CLI will not take comes back as an error rather than being silently
+    /// dropped, so a refusal surfaces instead of reading as success. Every other transport
+    /// records the choice for the next launch, which is what the session row's own item has
+    /// always meant — the mode is stated in the flags of the process this configures at startup.
+    ///
+    /// Inherit has no value on the wire: the control request names one mode and the CLI has no
+    /// "return to whatever you were configured with". Resolving it the way the launch line
+    /// resolves it is as far as this can honestly go, and where that resolves to nothing only
+    /// the record changes — which the conversation is told rather than left to infer from a chip
+    /// that now reads Agent's Setting.
+    private func selectPermissionMode(_ mode: AgentPermissionMode?) {
+        guard !isChangingConversationConfiguration,
+              storedSession.kind.supportsPermissionModes else { return }
+
+        let persist = { [weak self] in
+            guard let self else { return }
+            ProjectStore.shared.setPermissionMode(mode, for: self.agentSession.id)
+            self.isChangingConversationConfiguration = false
+            self.refreshConversationControls()
+        }
+
+        guard permissionModeTiming == .immediately,
+              let switcher = stream as? PermissionModeSwitchableConversation
+        else {
+            persist()
+            return
+        }
+
+        guard let resolved = mode ?? PermissionModePresentation.appDefault else {
+            persist()
+            appendNotice(PermissionModePresentation.inheritRecordedOnly, kind: .muted)
+            return
+        }
+
+        isChangingConversationConfiguration = true
+        refreshConversationControls()
+        switcher.setPermissionMode(resolved) { [weak self] result in
+            switch result {
+            case .success:
+                persist()
+            case .failure(let error):
+                self?.configurationChangeFailed(error)
+            }
+        }
     }
 
     private func selectModel(_ model: String?) {
@@ -1669,7 +2171,11 @@ final class ConversationViewController: NSViewController {
 
         let session = storedSession
         let resolved = model ?? AgentModels.defaultModel(for: session.kind, account: account)
-        let supportsFast = supportsFastMode(model: resolved, kind: session.kind)
+        let supportsFast = AgentModels.supportsFastMode(
+            kind: session.kind,
+            model: resolved,
+            account: account
+        )
         let selectedOption = AgentModels.option(
             identifier: resolved,
             for: session.kind,
@@ -1693,7 +2199,7 @@ final class ConversationViewController: NSViewController {
                 if let effort = $0.reasoningEffort,
                    selectedOption?.reasoningLevels.isEmpty == false,
                    selectedOption?.supports(reasoningEffort: effort) != true {
-                    $0.setCodexReasoningEffort(nil)
+                    $0.setReasoningEffort(nil)
                 }
             }
             self.reportedModel = resolved
@@ -1741,6 +2247,16 @@ final class ConversationViewController: NSViewController {
         case .codex:
             guard stream.canSend else { return }
             persist()
+
+        case .grok, .openCode:
+            // Unreachable today, and deliberately not silent. The chip is already hidden when
+            // `AgentModels.options(for:)` is empty, which is every runtime here — so a runtime
+            // that starts publishing a model catalog would reach this line, and returning
+            // without a word is a control that takes a press and does nothing. It needs a
+            // branch stating how its transport carries the change, the way the two above do.
+            // (Effort is different and needs no branch: it has one storage path, guarded by
+            // the configuration itself. Model and Fast each have two.)
+            return
         }
     }
 
@@ -1772,28 +2288,27 @@ final class ConversationViewController: NSViewController {
         case .codex:
             guard stream.canSend else { return }
             persist()
+
+        case .grok, .openCode:
+            // Unreachable today, and deliberately not silent. The chip is already hidden when
+            // `AgentModels.options(for:)` is empty, which is every runtime here — so a runtime
+            // that starts publishing a model catalog would reach this line, and returning
+            // without a word is a control that takes a press and does nothing. It needs a
+            // branch stating how its transport carries the change, the way the two above do.
+            // (Effort is different and needs no branch: it has one storage path, guarded by
+            // the configuration itself. Model and Fast each have two.)
+            return
         }
     }
 
-    private func supportsFastMode(model: String?, kind: AgentKind) -> Bool {
-        switch kind {
-        case .claude:
-            return AgentModels.claudeSupportsFastMode(model)
-        case .codex:
-            return AgentModels.option(
-                identifier: model,
-                for: .codex,
-                account: account
-            )?.supportsFastMode == true
-        }
-    }
-
-    /// Model is already present on Claude's launch line. Fast mode has no launch flag in the
-    /// persistent print transport, so an explicit saved choice is restored over its control
-    /// channel once that process is ready.
+    /// Model and permission mode are already present on the launch line. Fast mode has no launch
+    /// flag in a persistent print transport, so an explicit saved choice is restored over its
+    /// control channel once that process is ready.
+    ///
+    /// The transport's own conformance is the test, not the runtime's name: a transport that
+    /// cannot be asked mid-conversation does not conform, and one that can needs no entry here.
     private func restoreConversationConfiguration() {
-        guard storedSession.kind == .claude,
-              let fast = storedSession.fastMode,
+        guard let fast = storedSession.fastMode,
               let switcher = stream as? FastModeConversation
         else { return }
 
@@ -1816,24 +2331,30 @@ final class ConversationViewController: NSViewController {
 
 private enum ConversationControlDefaults {
     static let modelSymbol = "cpu"
-    static let effortSymbol = "brain"
     static let speedSymbol = "bolt.fill"
-    static var defaultModel: String { L10n.string("Default model") }
-    static var defaultEffort: String { L10n.string("Default effort") }
+    /// The last resort, reached only by a login that has never run this agent anywhere — no
+    /// configuration, no organisation default, no transcript to read. "Default model" was the
+    /// wrong words for it: it reads as a setting whose value is being withheld, when the truth
+    /// is that nothing has chosen yet and the agent will decide at launch. Naming the decider is
+    /// the most this can honestly say; the CLI's own fallback is negotiated per subscription and
+    /// is not written down on this machine.
+    static var defaultModel: String { L10n.string("Agent's choice") }
     static var accountDefault: String { L10n.string("Account default") }
     static var accountDefaultSuffix: String { L10n.string("  (account default)") }
-    static var modelDefaultSuffix: String { L10n.string("  (model default)") }
+    static var runningModelSuffix: String { L10n.string("  (in use)") }
+    static var lastUsedSuffix: String { L10n.string("  (last used)") }
+
+    /// How the default row qualifies the model it names. A configured model is a setting the
+    /// user can go and change; one the runtime reported is a fact about this session only.
+    static func suffix(for source: ResolvedDefaultModel.Source) -> String {
+        switch source {
+        case .accountConfiguration: return accountDefaultSuffix
+        case .reportedByRuntime: return runningModelSuffix
+        case .rememberedFromEarlierRun: return lastUsedSuffix
+        }
+    }
     static var standard: String { L10n.string("Standard") }
     static var fast: String { L10n.string("Fast") }
     static var standardDetail: String { L10n.string("Normal speed and usage") }
     static var fastDetail: String { L10n.string("1.5× speed, increased usage") }
-}
-
-private func effortDisplayName(
-    _ effort: String?,
-    option: AgentModelOption?
-) -> String {
-    guard let effort else { return ConversationControlDefaults.defaultEffort }
-    return option?.reasoningLevels.first { $0.effort == effort }?.displayName
-        ?? AgentReasoningLevel(effort: effort, description: "").displayName
 }

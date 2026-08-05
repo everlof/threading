@@ -252,7 +252,11 @@ final class DisplayPaneController: NSViewController {
   /// itself on a system light/dark switch.
   private func setupBackdrop() {
     let backdrop = ThemedSurfaceView()
-    backdrop.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+    backdrop.applySurface(
+      fill: Design.Surface.ground,
+      radius: .fixed(0),
+      pattern: .backdrop
+    )
     view.addSubview(backdrop)
 
     NSLayoutConstraint.activate([
@@ -864,10 +868,18 @@ final class DisplayPaneController: NSViewController {
   func noteSessionStoppedWorking(_ sessionID: SessionID) {
     guard sessionID == currentSessionID else { return }
 
+    activeTab(for: sessionID)?.review?.refreshModePresentation()
     activeTab(for: sessionID)?.review?.refresh(force: false)
     activeTab(for: sessionID)?.info?.refresh()
     // A comparison on screen through a turn is probably of files the turn was rewriting.
     activeTab(for: sessionID)?.compare?.refresh(force: true)
+  }
+
+  /// Entering a turn changes Last Turn's meaning to This Turn before the first checkout write.
+  /// Renaming the chip is enough; the checkout watcher will refresh content as files move.
+  func noteSessionStartedWorking(_ sessionID: SessionID) {
+    guard sessionID == currentSessionID else { return }
+    activeTab(for: sessionID)?.review?.refreshModePresentation()
   }
 
   // MARK: - Public — Info Tab
@@ -1433,6 +1445,20 @@ final class DisplayPaneController: NSViewController {
     guard let sessionID = currentSessionID else { return [] }
     var entries = standardTabEntries(for: id, sessionID: sessionID)
     guard !entries.isEmpty else { return [] }
+    // What the tab *holds* comes before what can be done to the tab: a comparison is exported
+    // far more often than a tab is closed to the right, and the closes are the run everything
+    // else in this menu is measured against.
+    if let compare = tabs(for: sessionID).first(where: { $0.id == id })?.compare,
+      compare.canExportComparison
+    {
+      entries.insert(.separator, at: 0)
+      entries.insert(
+        .item(
+          ThemedMenuItem(
+            title: L10n.string("Export Comparison…"),
+            onChoose: { [weak compare] in compare?.exportComparison() }
+          )), at: 0)
+    }
     if let transfers = transferEntries?(id), !transfers.isEmpty {
       entries.append(.separator)
       entries.append(contentsOf: transfers)

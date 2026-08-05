@@ -28,6 +28,12 @@ protocol ConversationViewControllerDelegate: AnyObject {
 
     /// The latest turn's changed-files card asked for its diff — Git Review's Last Turn scope.
     func conversationDidRequestTurnDiff(_ controller: ConversationViewController)
+
+    /// The handoff divider's direct source endpoint was chosen.
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestOpenSession sessionID: SessionID
+    )
 }
 
 // MARK: - Flipped Clip View

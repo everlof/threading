@@ -11,6 +11,7 @@ extension PersistedPanel {
     let parts = panelTabs.map { tab -> String in
       switch tab.kind {
       case .browser: return "b:\(tab.url ?? "")"
+      case .audit: return "u:\(tab.mode ?? "")·\(tab.url ?? "")"
       case .html: return "h:\(tab.title ?? "")·\(tab.subtitle)"
       case .image: return "i:\(tab.title ?? tab.url ?? "")"
       case .semanticScene: return "s:\(tab.title ?? "")"
@@ -41,6 +42,8 @@ extension PersistedPanel {
       switch tab.kind {
       case .browser:
         detail = "browser on \(tab.url ?? "a blank page")"
+      case .audit:
+        detail = "execution audit (the user can inspect exact tool requests and results)"
       case .html:
         detail = "document \"\(tab.title ?? "HTML")\""
       case .image:

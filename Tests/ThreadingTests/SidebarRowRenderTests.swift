@@ -372,6 +372,40 @@ final class SidebarRowRenderTests: XCTestCase {
     /// three channels. It is a premise check, not the measurement.
     private static let groundTolerance: CGFloat = 0.1
 
+    /// `color` as the fixture's own backing store can hold it.
+    ///
+    /// The rep `bitmapImageRepForCachingDisplay` hands back is Generic RGB, and a saturated
+    /// primary does not survive the trip from sRGB into it: Vaporwave's magenta comes back 0.25
+    /// away summed over the channels, and Newsprint's red 0.11 — both of them correct renders of
+    /// exactly the colour asked for. Putting the expected colour through the same store is what
+    /// keeps the premise below strict; widening its tolerance to 0.26 instead would have
+    /// swallowed a fill that genuinely failed to land.
+    private func drawn(
+        _ color: NSColor,
+        inTheSpaceOf rep: NSBitmapImageRep
+    ) throws -> NSColor {
+        let probe = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 1,
+            pixelsHigh: 1,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: rep.colorSpaceName,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), "Failed to build the reference pixel")
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: probe)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: 1, height: 1).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        return try XCTUnwrap(probe.colorAt(x: 0, y: 0), "No reference pixel was drawn")
+    }
+
     /// How far apart two colours are, summed over the channels — the same reading
     /// `SidebarRowHighlightTests` takes, and enough to say which of two inks a pixel is.
     private func distance(_ first: NSColor, _ second: NSColor) -> CGFloat {
@@ -392,13 +426,23 @@ final class SidebarRowRenderTests: XCTestCase {
     private func strongestTrailingControlInk(
         of row: NSTableCellView,
         identified identifier: String,
-        over fill: NSColor
+        over dynamicFill: NSColor
     ) throws -> NSColor {
         // The other half of what selection means to the row: the caller paints the fill, and this
         // is the background style AppKit hands the cell to say that fill is emphasized.
         row.backgroundStyle = .emphasized
 
         let host = NSView(frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height))
+        // A role is a *dynamic* colour, and asking one for its components resolves it against
+        // whatever appearance AppKit last had in hand rather than the one this fixture draws in —
+        // the trap `GeneratedAppIcon` documents at length. Vaporwave and Newsprint state an accent
+        // that moves between appearances, so the premise below was comparing one appearance's fill
+        // against the other appearance's pixels and reporting a correct render as a broken
+        // fixture. Flattened once, here, under the appearance the row is actually drawn in.
+        var fill = dynamicFill
+        host.effectiveAppearance.performAsCurrentDrawingAppearance {
+            fill = dynamicFill.usingColorSpace(.sRGB) ?? dynamicFill
+        }
         host.addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -440,9 +484,10 @@ final class SidebarRowRenderTests: XCTestCase {
         // colour the fixture asked for.
         let ground = try XCTUnwrap(rep.colorAt(x: 0, y: 0), "No pixel at the fixture's corner")
         XCTAssertLessThan(
-            distance(ground, fill),
+            distance(ground, try drawn(fill, inTheSpaceOf: rep)),
             Self.groundTolerance,
-            "Fixture premise: the corner should hold the selection fill the row was given"
+            "\(AppThemePalette.current.name): fixture premise — the corner should hold the "
+                + "selection fill the row was given"
         )
 
         var strongest = ground

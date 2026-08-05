@@ -303,23 +303,26 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
 
         AgentRuntime.shared.discard(sessionID: sessionID)
-        switch ConversationContinuation.create(from: sessionID, to: account) {
-        case .success(let session):
-            pendingPrompt = NewChatOpeningMessage.compose(
-                prompt: ConversationContinuation.openingPrompt(for: session),
-                reusableMessage: AppSettings.shared.newChatOpeningMessage
-            )
-            sidebar.reload()
-            sidebar.select(sessionID: session.id)
-            onPresentationChanged()
+        ConversationContinuation.create(from: sessionID, to: account) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let session):
+                self.pendingPrompt = NewChatOpeningMessage.compose(
+                    prompt: ConversationContinuation.openingPrompt(for: session),
+                    reusableMessage: AppSettings.shared.newChatOpeningMessage
+                )
+                self.sidebar.reload()
+                self.sidebar.select(sessionID: session.id)
+                self.onPresentationChanged()
 
-        case .failure(let error):
-            container.reopenIfShowing(sessionID: sessionID)
-            let alert = ThemedAlert()
-            alert.messageText = L10n.string("Couldn't continue the conversation")
-            alert.informativeText = error.message
-            alert.alertStyle = .warning
-            alert.runModal()
+            case .failure(let error):
+                self.container.reopenIfShowing(sessionID: sessionID)
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Couldn't continue the conversation")
+                alert.informativeText = error.message
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
         }
     }
 
@@ -355,10 +358,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         kind: AgentKind,
         accountHandle: AccountHandle,
         model: String?,
+        reasoningEffort: String?,
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
-        prompt: String
+        prompt: String,
+        attachmentPaths: [String]
     ) -> Bool {
         let targetProjectID = Self.targetProjectID(
             startingAt: projectID,
@@ -377,6 +382,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             kind: kind,
             accountHandle: accountHandle,
             model: model,
+            reasoningEffort: reasoningEffort,
             usesNativeUI: usesNativeUI,
             permissionMode: permissionMode,
             title: SessionNaming.promptTitle(from: task)
@@ -390,9 +396,32 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "project": targetProjectID.uuidString,
             "agent": kind.rawValue,
             "account": accountHandle.name,
+            "reasoningEffort": reasoningEffort ?? "inherit",
             "permissionMode": permissionMode?.rawValue ?? "inherit",
             "prompt": opening ?? ""
         ])
+
+        // Filed the moment the session exists, through the same declared door a drop on a running
+        // terminal uses. This was the one user handoff that showed a picture, sent its path, and
+        // recorded nothing: the opening prompt's images were the only ones a session could never
+        // show back, and the temporary file the path points at outlives the turn by nothing.
+        if !attachmentPaths.isEmpty,
+           let folder = ProjectStore.shared.project(withID: targetProjectID)?.folderPath {
+            PromptAttachment.record(
+                paths: attachmentPaths,
+                sessionID: session.id,
+                projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+            )
+        }
+
+        // The box just typed in becomes the box the conversation replies from. Only from here,
+        // and only where the surface arriving has a box to become: a terminal start, a resume,
+        // a sidebar click and a remote start all reach the same attach with nothing on screen
+        // to move. Marked before the selection that performs that attach, and spent by it — see
+        // `TerminalContainerViewController.consumeComposerHandoff(for:)`.
+        if session.usesNativeUI, session.kind.supportsNativeUI {
+            container.prepareComposerHandoff(for: session.id)
+        }
 
         DraftStore.shared.clear(for: projectID)
         pendingPrompt = opening

@@ -56,7 +56,7 @@ final class AppDelegateTests: XCTestCase {
             "showPreferences", "openTerminalTab", "openFilesTab", "openBrowser", "openReview",
             "openInfo", "toggleShell", "toggleDisplayPanel", "toggleCurrentTheme", "newSession", "addProject",
             "newProject", "closeSession", "toggleSidebar", "showFind", "inspectElement",
-            "inspectPoint", "increaseFontSize", "decreaseFontSize"
+            "increaseFontSize", "decreaseFontSize"
         ]
 
         for name in actions {
@@ -69,11 +69,33 @@ final class AppDelegateTests: XCTestCase {
         }
     }
 
-    func testOpeningFoldersIsIgnoredWithoutTheStateLock() {
-        // Adopting a folder instantiates ProjectStore, and instantiating it writes
-        // projects.json — the user's real one. An instance that does not own the lock must not.
+    /// Adopting a folder writes the user's real store, which is the exact clobber the
+    /// single-instance lock exists to prevent — so an instance that never launched, and so never
+    /// took the lock, must not adopt one either.
+    ///
+    /// The folder is a real directory, so the `isDirectory` check inside the loop passes and the
+    /// only thing standing between this call and `addProject` is the lock guard. Asserting the
+    /// store is unchanged is the point: the call merely *not trapping* was all this pinned
+    /// before, which the guard being deleted outright would still have satisfied.
+    func testOpeningFoldersIsIgnoredWithoutTheStateLock() throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("AppDelegateTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let adopted = ProjectStore.shared.projects.count
+
         let delegate = AppDelegate()
-        delegate.application(NSApp, open: [URL(fileURLWithPath: NSTemporaryDirectory())])
+        delegate.application(NSApp, open: [folder])
+
+        XCTAssertEqual(
+            ProjectStore.shared.projects.count, adopted,
+            "a delegate without the state lock adopted a folder into the user's real store"
+        )
+        XCTAssertFalse(
+            ProjectStore.shared.projects.contains { $0.folderURL.path == folder.path },
+            "the dropped folder was adopted despite the lock guard"
+        )
     }
 
     /// The sidebar-arrangement toggles live in the View menu with registry-backed shortcuts,

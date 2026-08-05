@@ -66,11 +66,44 @@ final class PaneFooterRenderTests: XCTestCase {
         print("Rendered pane footer storybook to \(directory.path)")
     }
 
+    /// The same band as a non-release build wears it: the channel mark beside Settings.
+    /// NIGHTLY is the story because it is the longest of the three titles.
+    func testRendersTheFooterWithABuildChannelBadge() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        defer { AppThemePalette.set(.system) }
+
+        var written = 0
+        for (themeName, theme) in Render.themes {
+            AppThemePalette.set(theme)
+            for (appearanceName, appearanceID) in Render.appearances {
+                let data = try XCTUnwrap(
+                    footerImage(appearance: appearanceID, channel: .nightly),
+                    "Failed to render the badged footer under \(themeName) in \(appearanceName)"
+                )
+                try data.write(
+                    to: directory.appendingPathComponent(
+                        "footer-badge-\(themeName)-\(appearanceName).png"
+                    )
+                )
+                written += 1
+            }
+        }
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count)
+        print("Rendered badged pane footer storybook to \(directory.path)")
+    }
+
     // MARK: - Helpers
 
     /// The sidebar footer's exact shape: the band at the pane's bottom on the pane's own
-    /// ground, the titled Settings button alone at the leading margin.
-    private func footerImage(appearance name: NSAppearance.Name) -> Data? {
+    /// ground, the titled Settings button at the leading margin — followed by the channel
+    /// badge when a channel is asked for, exactly as `ProjectSidebarViewController` builds it.
+    private func footerImage(
+        appearance name: NSAppearance.Name,
+        channel: BuildChannel? = nil
+    ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
@@ -82,7 +115,8 @@ final class PaneFooterRenderTests: XCTestCase {
             gear.isBordered = false
             gear.font = Design.Typography.controlRegular()
 
-            let footer = PaneFooterView(leading: [gear])
+            let leading = [gear, channel.flatMap(BuildChannelBadge.make(for:))].compactMap { $0 }
+            let footer = PaneFooterView(leading: leading)
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(

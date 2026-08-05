@@ -44,6 +44,14 @@ final class TerminalDropImageTests: XCTestCase {
         XCTAssertEqual(TerminalDropImage.readable([tiff], for: .shell), [tiff])
     }
 
+    /// Until Grok's attachment path contract is measured, preserve exactly what the user
+    /// dropped. A speculative PNG copy could be less useful than the original file.
+    func testGrokPreservesOriginalImagePath() throws {
+        let tiff = try write(.tiff, named: "scan")
+
+        XCTAssertEqual(TerminalDropImage.readable([tiff], for: .agent(.grok)), [tiff])
+    }
+
     /// A format the CLI matches on already becomes an image on its own. A copy would be a
     /// second file for no gain, and would lose the name the user knows it by.
     func testFormatsTheAgentTakesAreUntouched() throws {

@@ -295,10 +295,10 @@ final class OpenInTests: XCTestCase {
 
     // MARK: - The Header Control
 
-    /// The pane header carries the split control, and it is *its own group* beside the session's
-    /// actions rather than a sixth button inside them: those four act on the pane, this one
-    /// leaves for another app.
-    func testThePaneHeaderCarriesTheOpenInControlAsItsOwnGroup() throws {
+    /// The pane header carries the split control as **one** control, beside the session's
+    /// actions rather than as two more buttons inside them: those four act on the pane, this one
+    /// leaves for another app — and its two halves act on the same thing, so they share a plate.
+    func testThePaneHeaderCarriesTheOpenInControlAsOneSplitControl() throws {
         let controller = MainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
@@ -308,14 +308,35 @@ final class OpenInTests: XCTestCase {
         let choose = try XCTUnwrap(controller.openInMenuToolbarButton, "the control cannot be re-aimed")
 
         XCTAssertTrue(open.isDescendant(of: root), "the Open in button is not in the window")
+        let plate = try XCTUnwrap(
+            open.superview as? SplitIconButtonView,
+            "the press and its chevron are two buttons again rather than halves of one control"
+        )
         XCTAssertTrue(
-            open.superview === choose.superview,
-            "the press and its chevron drifted into separate groups"
+            choose.superview === plate,
+            "the press and its chevron drifted onto separate plates"
         )
-        XCTAssertNotNil(
-            open.superview?.superview as? ToolbarButtonGroupView,
-            "the pair is spaced by NSStackView's rules rather than ours"
+        XCTAssertTrue(
+            plate.isDescendant(of: root),
+            "the split control is not in the window"
         )
+
+        // Welded, not spaced: the halves share an edge, which is the whole difference between
+        // this control and a group of buttons.
+        plate.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            open.frame.maxX,
+            choose.frame.minX,
+            accuracy: 0.5,
+            "a gap opened between the two halves — they are a group again"
+        )
+        XCTAssertEqual(
+            plate.fittingSize.width,
+            Design.Size.toolbarButtonWidth + Design.Size.splitMenuWidth,
+            accuracy: 0.5,
+            "the plate is wider than the two halves it holds"
+        )
+
         XCTAssertFalse(
             controller.sessionContextToolbarButton?.superview === open.superview,
             "leaving for another app reads as a fifth way to act on this pane"
@@ -330,11 +351,14 @@ final class OpenInTests: XCTestCase {
         controller.updateOpenInControls()
 
         XCTAssertNil(controller.currentFolderURL, "a fresh window claims a checkout")
+        // The plate, not the halves: an empty surface left in the header is still a control
+        // saying there is something here to press.
         XCTAssertTrue(
-            controller.openInToolbarButton?.isHidden == true,
-            "the button offers to open a checkout that is not there"
+            controller.openInSplitControl?.isHidden == true,
+            "the control offers to open a checkout that is not there"
         )
-        XCTAssertTrue(controller.openInMenuToolbarButton?.isHidden == true)
+        XCTAssertTrue(controller.openInToolbarButton?.isHiddenOrHasHiddenAncestor == true)
+        XCTAssertTrue(controller.openInMenuToolbarButton?.isHiddenOrHasHiddenAncestor == true)
     }
 
     /// A control added to the header costs the *narrowest* window its room, and that room is
@@ -348,10 +372,9 @@ final class OpenInTests: XCTestCase {
         let root = try XCTUnwrap(controller.window?.contentView)
         let header = try XCTUnwrap(controller.pageTabView.superview as? NSStackView)
 
-        // Shown by hand: a fresh window has no checkout, so the pair hides itself and the
+        // Shown by hand: a fresh window has no checkout, so the control hides itself and the
         // measurement would be of the header *without* the thing being measured.
-        controller.openInToolbarButton?.isHidden = false
-        controller.openInMenuToolbarButton?.isHidden = false
+        controller.openInSplitControl?.isHidden = false
 
         controller.window?.setContentSize(
             NSSize(

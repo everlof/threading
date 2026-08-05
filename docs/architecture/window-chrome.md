@@ -208,10 +208,38 @@ neither is opened by dragging. `WindowEdgeTests` asserts it where the bug lived,
 of a real unshown window, and was checked against a stubbed-out fix to confirm the seam
 reappears without it.
 
-`SidebarSplitViewController` overrides `toggleSidebar(_:)` to set `isCollapsed` directly.
-The stock implementation collapses but does not restore here, which left no way back to the
-sidebar. Overriding it fixes the toolbar button and the View menu together, since both route
-through that one method.
+`SidebarSplitViewController` overrides `toggleSidebar(_:)` to route through its own
+`setCollapsed(_:on:)`. The stock implementation collapses but does not restore here, which left
+no way back to the sidebar. Overriding it fixes the toolbar button and the View menu together,
+since both route through that one method.
+
+### How a pane moves
+
+**One route, stated once.** `PaneTransition` (`UI/Design`) is the single statement of how a
+workspace pane comes and goes: the standard duration and curve, implicit animation for the
+geometry laid out against the change, and a completion that runs one main-loop turn after
+AppKit's own — because AppKit's completion fires before the split view commits its final model
+frames, which is a lesson this window had already paid for. The sidebar and the display panel
+run it through `SidebarSplitViewController.setCollapsed`; the shell drawer runs its height
+constant through the same `run`. Before this, each pane moved its own way — the sidebar slid
+from the toolbar and snapped at the divider, the panel always snapped, the drawer jumped — and
+"how a pane moves" had been restated, differently, three times.
+
+Two resolutions live inside the route rather than at every call site. **A window nobody can
+see gets the final state at once**: AppKit has been measured withholding an off-screen window's
+resize notifications and animation completions (`toggleSidebar`'s inset fallback exists for
+exactly that), and the completions here carry real work — the panel's restored width, the
+drawer's hidden band — so an unshown window skips the motion, which is also what keeps the
+hosted fixtures deterministic. And **a session switch is not a gesture**: it swaps the whole
+workspace at once, so `syncDisplayPane` and the drawer's session swap pass `animated: false`
+— a pane sliding beside an instant page change would animate a change of subject as if it were
+a change of state.
+
+The panel's reveal keeps its width choreography on this route: the stored width is read while
+the pane is still shut, the reveal animates the item out, and the completion makes the width
+the divider's own answer through `applyDisplayPaneWidth` — the only holder that survives the
+next layout pass — with `isRestoringDisplayPaneWidth` now held for exactly the transition
+instead of a guessed two turns.
 
 ### Dragging a pane shut
 
@@ -219,8 +247,8 @@ through that one method.
 keeps going; that gap is the only record of how hard the divider was pushed, because no frame
 moved.
 
-In the running app, a dragged divider has **never** shut this column — not "stopped working",
-never, on the report of the person dragging it. Every collapse it has ever done came from the
+In the running app, a dragged divider had **never** shut this column — not "stopped working",
+never, on the report of the person dragging it. Every collapse it had ever done came from the
 toolbar, the View menu, or a test calling `setPosition`. AppKit is not flatly refusing, either:
 driven through the same tracking loop in a fixture it collapses a `canCollapse` pane at *half
 the pane's floor* (floor 207pt — released at 120 the column stayed, at 90 it shut), so the
@@ -228,9 +256,23 @@ machinery exists and something about the real window keeps it from firing. Worth
 worth depending on: that threshold sits a hundred points past a column that has visibly stopped,
 travelled blind, which is not a gesture anyone would find.
 
-`SidebarSplitViewController.shutPaneIfPushedPast` shuts the pane once the pointer is released
-`SidebarDefaults.shutOvershoot` past the floor — near enough to the stop that the push is one
-movement. AppKit's rule stays underneath: if it ever does fire, a longer push is still a push.
+`SidebarSplitViewController.shutPaneIfPushedPast` shuts a pane once the pointer is released
+past the floor by `PaneTransition.dragShutsPane`'s answer — near enough to the stop that the
+push is one movement. **Both of the divider's neighbours are candidates**: the sidebar is
+pushed leftward past its floor, the display panel rightward past its own, and the middle pane
+cannot collapse, so a push toward it answers nothing. The threshold is the shared
+`PaneTransition.shutOvershoot`, **capped at half the pane's floor**: the panel's floor is its
+48pt chrome, and the uncapped overshoot past that lies 12pt outside the window — a release the
+pointer cannot reach when the window's edge meets the screen's. The shut itself is deferred one
+turn of the run loop, because the release is still unwinding the divider's tracking loop and a
+collapse begun inside that unwind applies its final state without its motion — the one shut in
+the window that snapped while every other one slid. AppKit's rule stays underneath: if it ever
+does fire, a longer push is still a push.
+
+The shell drawer takes the same push at its own divider. Its height constraint clamps at the
+floor while the pointer keeps going, so the container keeps the unclamped running total during
+the drag and asks the same `dragShutsPane` on release — see [`sessions.md`](sessions.md) for
+the drawer's half of it.
 
 The drag itself stays AppKit's. `ThemedSplitView.mouseDown` calls `super`, which does not return
 until its tracking loop has pulled the mouse-up — there are no gesture recognizers on this split

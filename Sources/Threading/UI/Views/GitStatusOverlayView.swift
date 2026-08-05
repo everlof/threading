@@ -179,8 +179,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     struct AudienceReading: Equatable {
         var following = 0
         var isShared = false
+        var focusedControllerName: String?
 
-        var isEmpty: Bool { following == 0 && !isShared }
+        var isEmpty: Bool { following == 0 && !isShared && focusedControllerName == nil }
     }
 
     /// The card's rows, top down: the summary line, the counters line, the agent line, the
@@ -194,9 +195,24 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The agent line: which model this session is running, and how, for the facts its own
     /// status line does not already say.
     private let modelRow = NSStackView()
-    private let glyph = NSImageView()
-    private let countersMark = NSImageView()
-    private let modelMark = NSImageView()
+    private let glyph = ThemedFloatingGlyphView(
+        systemSymbolName: "arrow.triangle.branch",
+        classicGlyph: .branch,
+        pointSize: GitStatusOverlayDefaults.markPointSize,
+        accessibilityDescription: L10n.string("Branch")
+    )
+    private let countersMark = ThemedFloatingGlyphView(
+        systemSymbolName: "plusminus",
+        classicGlyph: .changes,
+        pointSize: GitStatusOverlayDefaults.markPointSize,
+        accessibilityDescription: L10n.string("Changes")
+    )
+    private let modelMark = ThemedFloatingGlyphView(
+        systemSymbolName: "cpu",
+        classicGlyph: .model,
+        pointSize: GitStatusOverlayDefaults.markPointSize,
+        accessibilityDescription: L10n.string("Model")
+    )
     private let subagentsButton: ThemedButton
     private let audienceButton: ThemedButton
     private var summaryLabel: NSTextField?
@@ -242,7 +258,18 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var collapsedBottomConstraint: NSLayoutConstraint?
     private var expandedBottomConstraint: NSLayoutConstraint?
     private var slotTopConstraint: NSLayoutConstraint?
+    private var rowHeightConstraints: [NSLayoutConstraint] = []
+    private var horizontalInsetConstraints: [NSLayoutConstraint] = []
     private var slotRowWidthConstraints: [NSLayoutConstraint] = []
+
+    /// This view sits over the terminal, but owns an opaque chrome surface of its own. The
+    /// terminal therefore chooses what surrounds the card; the app theme chooses the card.
+    private var floatingStyle: AppTheme.Material.PopoverStyle = .system
+    private var surfaceInk: Design.Ink = .chrome
+    /// Paired with `surfaceInk` above rather than named as a chrome role: both are placeholders
+    /// until `applyInk` resolves the real floating chrome, and an overlay that names
+    /// `Design.Surface` is reading a ground it is not drawn on.
+    private var surfaceFill: NSColor = Design.Ink.chrome.surface
 
     /// Held so a backdrop change can rebuild the label, which carries its colours inside an
     /// attributed string and cannot be re-inked in place.
@@ -317,14 +344,27 @@ final class GitStatusOverlayView: BackdropOverlay {
         // card, the plan while a run replaces that line. There is deliberately **no spinner
         // here**. A terminal session's CLI draws its own a few lines below, and a native
         // conversation has one beside its status (`ConversationViewController.orbView`), so a
-        // third one in the corner was the same sentence three times — and the only one of the
-        // three sitting on the terminal's own palette, where an accent it never chose reads as
-        // a stray colour rather than as a state.
-        configureMark(glyph, symbol: "arrow.triangle.branch", description: L10n.string("Branch"))
-        configureMark(countersMark, symbol: "plusminus", description: L10n.string("Changes"))
+        // third one in the corner was the same sentence three times.
+        configureMark(
+            glyph,
+            symbol: "arrow.triangle.branch",
+            classicGlyph: .branch,
+            description: L10n.string("Branch")
+        )
+        configureMark(
+            countersMark,
+            symbol: "plusminus",
+            classicGlyph: .changes,
+            description: L10n.string("Changes")
+        )
         // The same symbol the composer and the conversation's status row already use for the
         // model chip, so one fact keeps one mark wherever it is shown.
-        configureMark(modelMark, symbol: "cpu", description: L10n.string("Model"))
+        configureMark(
+            modelMark,
+            symbol: "cpu",
+            classicGlyph: .model,
+            description: L10n.string("Model")
+        )
 
         summaryRow.orientation = .horizontal
         summaryRow.alignment = .centerY
@@ -365,9 +405,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.action = #selector(openSubagents)
         subagentsButton.emphasis = .tertiary
         subagentsButton.applyFont(GitStatusOverlayDefaults.font)
-        // No hoverFill here: this is a BackdropOverlay, and `applyInk` states it from the
-        // ink measured against the terminal's backdrop — a chrome role would be wrong by
-        // exactly the amount the two palettes differ.
+        // No hover fill here: `applyInk` states it after resolving the floating chrome surface.
         subagentsButton.setContentHuggingPriority(.required, for: .horizontal)
         subagentsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         subagentsButton.isHidden = true
@@ -418,6 +456,28 @@ final class GitStatusOverlayView: BackdropOverlay {
             equalTo: content.bottomAnchor,
             constant: GitStatusOverlayDefaults.rowGap
         )
+        let subagentsHeight = subagentsButton.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.rowHeight
+        )
+        let audienceHeight = audienceButton.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.rowHeight
+        )
+        let contentLeading = content.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: Design.Spacing.medium
+        )
+        let contentTrailing = content.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -Design.Spacing.medium
+        )
+        let slotLeading = extensionSlotStack.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: Design.Spacing.medium
+        )
+        let slotTrailing = extensionSlotStack.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -Design.Spacing.medium
+        )
 
         // The children row is a button, and a button carries its own padding around the mark it
         // draws. Insetting the text rows by exactly that much is what puts all three marks in
@@ -432,6 +492,10 @@ final class GitStatusOverlayView: BackdropOverlay {
         collapsedBottomConstraint = collapsedBottom
         expandedBottomConstraint = expandedBottom
         slotTopConstraint = slotTop
+        rowHeightConstraints = [subagentsHeight, audienceHeight]
+        horizontalInsetConstraints = [
+            contentLeading, contentTrailing, slotLeading, slotTrailing
+        ]
 
         NSLayoutConstraint.activate([
             // The two control rows take the card's row height rather than the one `ThemedButton`
@@ -439,24 +503,14 @@ final class GitStatusOverlayView: BackdropOverlay {
             // knowing what it would sit under, and here that made it 22 beside text rows whose
             // hover reached 19 — three rows on two rhythms. Constrained, every row is one shape
             // and `childrenRowInset` is a number this file states rather than discovers.
-            subagentsButton.heightAnchor.constraint(
-                equalToConstant: GitStatusOverlayDefaults.rowHeight
-            ),
-            audienceButton.heightAnchor.constraint(
-                equalToConstant: GitStatusOverlayDefaults.rowHeight
-            ),
+            subagentsHeight,
+            audienceHeight,
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
+            contentLeading,
+            contentTrailing,
             contentTop,
-            extensionSlotStack.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: Design.Spacing.medium
-            ),
-            extensionSlotStack.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -Design.Spacing.medium
-            ),
+            slotLeading,
+            slotTrailing,
             slotTop,
             collapsedBottom
         ])
@@ -480,37 +534,37 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Ink
 
-    /// This card floats on the *terminal's* background, not on the chrome's ground — see
-    /// `BackdropOverlay`. Its surface and its label both come from there.
+    /// The terminal owns the ground around this card; the app theme owns the opaque floating
+    /// surface and every mark on it. That distinction is why a Windows 98 window gets an
+    /// infotip-like corner card even above a green terminal, rather than a modern dark pill.
     ///
     /// `+N −M` stays green and red — those two are semantic rather than decorative, and a green
     /// that stopped meaning added would cost more than the contrast it bought — but it is the
     /// theme's green *measured against this card* (`Design.Diff.on(_:)`), which keeps the hue and
-    /// moves only the lightness when the card is too close to it. The card's colour comes from
-    /// the terminal's palette, so the app theme cannot know what its own green will land on.
-    /// **The card is opaque**, which the roles it draws from are not. It floats over the pane's
-    /// live content — a conversation, or the terminal itself — rather than over an empty stretch
-    /// of backdrop, so `ink.surface` at 14% let the text underneath run straight through the
-    /// branch name. Flattening against the ground keeps exactly the colour the role asks for and
-    /// loses only the see-through; `WindowBackdrop.opaque` carries the reasoning.
-    ///
-    /// The border flattens against the *card*, not the ground, because that is what is behind it.
-    override func applyInk(_ ink: Design.Ink) {
-        layer?.cornerRadius = Design.Radius.pill(height: GitStatusOverlayDefaults.height)
-        let surface = WindowBackdrop.opaque(ink.surface)
-        applyLayerBackground(surface)
-        layer?.borderWidth = Design.Radius.border
-        applyLayerBorder(ink.border.composited(over: surface))
-        glyph.contentTintColor = ink.secondary
-        countersMark.contentTintColor = ink.tertiary
-        modelMark.contentTintColor = ink.tertiary
+    /// moves only the lightness when the card is too close to it. The surface role is flattened
+    /// against the theme's ground, so a translucent authored role cannot reveal terminal text.
+    override func applyInk(_: Design.Ink) {
+        // Backdrop changes still arrive here because the terminal owns what surrounds the card.
+        let chrome = ThemedFloatingSurfaceChrome.current(for: effectiveAppearance)
+        floatingStyle = chrome.style
+        surfaceInk = chrome.ink
+        surfaceFill = chrome.fill
+        chrome.apply(to: self)
+
+        for mark in [glyph, countersMark, modelMark] {
+            mark.setPointSize(GitStatusOverlayDefaults.markPointSize)
+        }
+        glyph.tintColor = surfaceInk.secondary
+        countersMark.tintColor = surfaceInk.tertiary
+        modelMark.tintColor = surfaceInk.tertiary
         // Both button rows, the same way. The audience row used to be given neither, so it drew
         // in AppKit's own label colour and lifted to nothing under the pointer — the one row of
         // the card that was inert by omission rather than by design.
         for button in [subagentsButton, audienceButton] {
-            button.contentTintColor = ink.secondary
-            button.hoverFill = ink.surfaceHover
+            button.contentTintColor = surfaceInk.secondary
+            button.hoverFill = surfaceInk.surfaceHover
         }
+        applyDensity()
         needsDisplay = true
         rebuild()
     }
@@ -636,18 +690,54 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Private Methods
 
+    private var verticalInset: CGFloat {
+        floatingStyle.density == .compact
+            ? Design.Spacing.small
+            : GitStatusOverlayDefaults.verticalInset
+    }
+
+    private var rowPadding: CGFloat {
+        floatingStyle.density == .compact
+            ? Design.Spacing.hairline
+            : GitStatusOverlayDefaults.rowPadding
+    }
+
+    private var rowGap: CGFloat {
+        floatingStyle.density == .compact
+            ? Design.Spacing.small
+            : GitStatusOverlayDefaults.rowGap
+    }
+
+    private var horizontalInset: CGFloat {
+        floatingStyle.density == .compact
+            ? Design.Spacing.small
+            : Design.Spacing.medium
+    }
+
+    private func applyDensity() {
+        content.spacing = rowGap
+        extensionSlotStack.spacing = rowGap
+        expandedBottomConstraint?.constant = verticalInset
+        for constraint in rowHeightConstraints {
+            constraint.constant = GitStatusOverlayDefaults.textRowHeight + rowPadding * 2
+        }
+        for (index, constraint) in horizontalInsetConstraints.enumerated() {
+            constraint.constant = index.isMultiple(of: 2) ? horizontalInset : -horizontalInset
+        }
+    }
+
     private func rebuild() {
-        // The counters sit on the card, not on the backdrop the card floats over.
-        let diff = Design.Diff.on(WindowBackdrop.opaque(ink.surface))
+        // The counters sit on the card, not on the terminal backdrop around it.
+        let diff = Design.Diff.on(surfaceFill)
         let head = Self.headText(
             for: lastReading,
             isRunActive: isRunActive,
             progress: runProgress,
-            ink: ink
+            ink: surfaceInk
         )
-        let counters = Self.countersText(for: lastReading, ink: ink, diff: diff)
+        let counters = Self.countersText(for: lastReading, ink: surfaceInk, diff: diff)
 
-        let model = Self.modelText(for: modelReading, ink: ink)
+        let model = Self.modelText(for: modelReading, ink: surfaceInk)
 
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
@@ -673,11 +763,10 @@ final class GitStatusOverlayView: BackdropOverlay {
             label.cell?.lineBreakMode = .byTruncatingMiddle
             summaryLabel = label
             summaryRow.addArrangedSubview(label)
-            glyph.image = NSImage(
-                systemSymbolName: isRunActive ? "checklist" : "arrow.triangle.branch",
-                accessibilityDescription: isRunActive
-                    ? L10n.string("Plan")
-                    : L10n.string("Branch")
+            glyph.setSymbol(
+                isRunActive ? "checklist" : "arrow.triangle.branch",
+                classicGlyph: isRunActive ? .plan : .branch,
+                accessibilityDescription: isRunActive ? L10n.string("Plan") : L10n.string("Branch")
             )
         }
         if let counters {
@@ -698,7 +787,10 @@ final class GitStatusOverlayView: BackdropOverlay {
             // is only as wide as its longest row, so on a long branch name that spacer opened a
             // hole halfway across the counters line and nowhere else — one stretched gap in a
             // card whose every other row starts and ends on its own ink.
-            countersRow.setCustomSpacing(Design.Spacing.medium, after: files)
+            countersRow.setCustomSpacing(
+                floatingStyle.density == .compact ? Design.Spacing.small : Design.Spacing.medium,
+                after: files
+            )
         }
         if let model {
             let label = NSTextField.label(attributed: model)
@@ -722,30 +814,30 @@ final class GitStatusOverlayView: BackdropOverlay {
         let buttonRows = [subagentsButton, audienceButton].filter { !$0.isHidden }
         let hasButtonRows = !buttonRows.isEmpty
         contentTopConstraint?.constant = textRows.isEmpty
-            ? max(0, GitStatusOverlayDefaults.verticalInset - childrenInset)
-            : GitStatusOverlayDefaults.verticalInset
+            ? max(0, verticalInset - childrenInset)
+            : verticalInset
         let bottomInset = hasButtonRows
-            ? max(0, GitStatusOverlayDefaults.verticalInset - childrenInset)
-            : GitStatusOverlayDefaults.verticalInset
+            ? max(0, verticalInset - childrenInset)
+            : verticalInset
         collapsedBottomConstraint?.constant = bottomInset
         // Extension rows continue the same list, so they join it on the same gap.
         slotTopConstraint?.constant = hasButtonRows
-            ? max(0, GitStatusOverlayDefaults.rowGap - childrenInset)
-            : GitStatusOverlayDefaults.rowGap
+            ? max(0, rowGap - childrenInset)
+            : rowGap
         for row in textRows.dropLast() {
             content.setCustomSpacing(NSStackView.useDefaultSpacing, after: row)
         }
         if let above = textRows.last {
             content.setCustomSpacing(
                 hasButtonRows
-                    ? max(0, GitStatusOverlayDefaults.rowGap - childrenInset)
+                    ? max(0, rowGap - childrenInset)
                     : NSStackView.useDefaultSpacing,
                 after: above
             )
         }
         for row in buttonRows.dropLast() {
             content.setCustomSpacing(
-                max(0, GitStatusOverlayDefaults.rowGap - 2 * childrenInset),
+                max(0, rowGap - 2 * childrenInset),
                 after: row
             )
         }
@@ -810,18 +902,23 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// constrained to `rowHeight`: asking the control what height it chose was asking the wrong
     /// party, and the answer (22 against a 15pt line) was the number the card then had to work
     /// around instead of the number it wanted.
-    private var childrenRowInset: CGFloat { GitStatusOverlayDefaults.rowPadding }
+    private var childrenRowInset: CGFloat { rowPadding }
 
     /// The height of a row that is just words — an `NSTextField.label` at the card's font, which
     /// is its line box and nothing else.
     private static var textRowHeight: CGFloat { GitStatusOverlayDefaults.textRowHeight }
 
     /// One mark, sized and centred in the column every row's mark shares.
-    private func configureMark(_ view: NSImageView, symbol: String, description: String) {
-        view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
-        view.symbolConfiguration = .init(
-            pointSize: GitStatusOverlayDefaults.markPointSize,
-            weight: .medium
+    private func configureMark(
+        _ view: ThemedFloatingGlyphView,
+        symbol: String,
+        classicGlyph: ThemedFloatingGlyphView.ClassicGlyph,
+        description: String
+    ) {
+        view.setSymbol(
+            symbol,
+            classicGlyph: classicGlyph,
+            accessibilityDescription: description
         )
         view.translatesAutoresizingMaskIntoConstraints = false
         view.setContentHuggingPriority(.required, for: .horizontal)
@@ -933,8 +1030,14 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// because "0 following" is a row spent saying nothing. What the row is *for* in that second
     /// case is that the chat is reachable at all.
     private static func audienceText(_ reading: AudienceReading) -> String {
-        guard reading.following > 0 else { return L10n.string("Shared") }
-        return L10n.format("%lld following", Int64(reading.following))
+        let following = reading.following > 0
+            ? L10n.format("%lld following", Int64(reading.following))
+            : nil
+        if let controller = reading.focusedControllerName {
+            let control = L10n.format("%@ controlling", controller)
+            return [control, following].compactMap { $0 }.joined(separator: " · ")
+        }
+        return following ?? L10n.string("Shared")
     }
 
     /// The agent line as one spoken phrase, or nil when the card has no agent row.
@@ -1098,8 +1201,8 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// across the gap would put the pair back to the single block this whole shape avoids.
     private func washRect(for row: NSView) -> NSRect {
         let breathing = min(
-            GitStatusOverlayDefaults.rowPadding,
-            (GitStatusOverlayDefaults.rowGap - Design.Spacing.hairline) / 2
+            rowPadding,
+            (rowGap - Design.Spacing.hairline) / 2
         )
         return convert(row.frame, from: content).insetBy(dx: 0, dy: -breathing)
     }
@@ -1109,11 +1212,11 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// On the card rather than in a control of its own, because the rows *are* the card's own
     /// layout — the marks share one column with the children row's, and a wrapper around two of
     /// the four rows would have to reproduce the whole rhythm to keep it. The fill is the weight
-    /// the children row already lifts to (`ink.surfaceHover`), measured against the terminal's
-    /// backdrop like everything else the card draws.
+    /// the children row already lifts to (`surfaceInk.surfaceHover`), measured against the
+    /// floating card the theme owns.
     override func draw(_ dirtyRect: NSRect) {
         guard let row = hoveredGitRow, !row.isHidden else { return }
-        ThemedSurface.draw(washRect(for: row), fill: ink.surfaceHover)
+        ThemedSurface.draw(washRect(for: row), fill: surfaceInk.surfaceHover)
     }
 
     override func mouseDown(with event: NSEvent) {

@@ -18,6 +18,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         let title: String
         let agentLine: String
         let agentIcon: NSImage?
+        let handoffLine: String?
         let path: String
         let branch: String?
         /// The linked worktree's name, or nil for an ordinary checkout.
@@ -49,6 +50,15 @@ final class SessionInfoPopoverViewController: NSViewController {
 
             agentLine = line
             agentIcon = session.kind.icon
+            if let handoff = session.handoff {
+                var stops = handoff.endpoints.map(\.displayName)
+                if handoff.omittedEndpointCount > 0, !stops.isEmpty {
+                    stops.insert("… +\(handoff.omittedEndpointCount)", at: min(1, stops.count))
+                }
+                handoffLine = stops.joined(separator: " → ")
+            } else {
+                handoffLine = nil
+            }
 
             let folderPath = ProjectStore.shared.project(forSessionID: session.id)?.folderPath
             path = folderPath ?? ""
@@ -147,9 +157,18 @@ final class SessionInfoPopoverViewController: NSViewController {
 
         rows.append(row(icon: info.agentIcon, text: info.agentLine, emphasis: .secondary))
 
+        if let handoffLine = info.handoffLine {
+            rows.append(wrappingRow(
+                symbol: SessionPopoverDefaults.handoffSymbol,
+                classicGlyph: .handoff,
+                text: handoffLine
+            ))
+        }
+
         if !info.path.isEmpty {
             rows.append(row(
                 symbol: SessionPopoverDefaults.folderSymbol,
+                classicGlyph: .folder,
                 text: abbreviated(info.path),
                 emphasis: .secondary
             ))
@@ -157,10 +176,20 @@ final class SessionInfoPopoverViewController: NSViewController {
 
         if let branch = info.branch {
             let text = info.worktree.map { SessionPopoverDefaults.worktreeBranchLabel(branch, $0) } ?? branch
-            rows.append(row(symbol: SessionPopoverDefaults.branchSymbol, text: text, emphasis: .secondary))
+            rows.append(row(
+                symbol: SessionPopoverDefaults.branchSymbol,
+                classicGlyph: .branch,
+                text: text,
+                emphasis: .secondary
+            ))
         }
 
-        rows.append(row(symbol: info.stateSymbol, text: info.stateText, emphasis: .muted))
+        rows.append(row(
+            symbol: info.stateSymbol,
+            classicGlyph: .status,
+            text: info.stateText,
+            emphasis: .muted
+        ))
 
         return rows
     }
@@ -174,9 +203,17 @@ final class SessionInfoPopoverViewController: NSViewController {
         }
     }
 
-    private func row(symbol: String, text: String, emphasis: Emphasis) -> NSView {
+    private func row(
+        symbol: String,
+        classicGlyph: ThemedFloatingGlyphView.ClassicGlyph,
+        text: String,
+        emphasis: Emphasis
+    ) -> NSView {
         row(
-            icon: NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+            icon: ThemedFloatingGlyphView(
+                systemSymbolName: symbol,
+                classicGlyph: classicGlyph
+            ),
             text: text,
             emphasis: emphasis
         )
@@ -190,7 +227,22 @@ final class SessionInfoPopoverViewController: NSViewController {
         icon.setContentHuggingPriority(.required, for: .horizontal)
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         icon.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.iconSlotWidth).isActive = true
+        return row(iconView: icon, text: text, emphasis: emphasis)
+    }
 
+    private func row(
+        icon: ThemedFloatingGlyphView,
+        text: String,
+        emphasis: Emphasis
+    ) -> NSView {
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+        icon.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.iconSlotWidth).isActive = true
+
+        return row(iconView: icon, text: text, emphasis: emphasis)
+    }
+
+    private func row(iconView icon: NSView, text: String, emphasis: Emphasis) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.applyFont(.subheading)
         label.textColor = emphasis.color
@@ -202,6 +254,34 @@ final class SessionInfoPopoverViewController: NSViewController {
         stack.alignment = .centerY
         stack.spacing = Design.Spacing.small
 
+        return stack
+    }
+
+    private func wrappingRow(
+        symbol: String,
+        classicGlyph: ThemedFloatingGlyphView.ClassicGlyph,
+        text: String
+    ) -> NSView {
+        let icon = ThemedFloatingGlyphView(
+            systemSymbolName: symbol,
+            classicGlyph: classicGlyph
+        )
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+        icon.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.iconSlotWidth).isActive = true
+
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.detail())
+        label.textColor = Design.Text.secondary
+        label.preferredMaxLayoutWidth = SessionPopoverDefaults.contentWidth
+            - SessionPopoverDefaults.iconSlotWidth
+            - Design.Spacing.small
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let stack = NSStackView(views: [icon, label])
+        stack.orientation = .horizontal
+        stack.alignment = .top
+        stack.spacing = Design.Spacing.small
         return stack
     }
 
@@ -220,6 +300,7 @@ enum SessionPopoverDefaults {
 
     static let folderSymbol = "folder"
     static let branchSymbol = "arrow.triangle.branch"
+    static let handoffSymbol = "arrow.left.arrow.right"
 
     /// Precedes the parent's title on a side chat's agent line.
     static var sideChatPrefix: String { L10n.string("forked from") }

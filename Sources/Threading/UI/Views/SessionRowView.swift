@@ -6,7 +6,7 @@ import ThreadingExtensionKit
 
 /// Sidebar row for a session: the agent icon, the session title, and a trailing slot that
 /// shows status normally and the row's actions under the pointer.
-final class SessionRowView: NSTableCellView {
+final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     // MARK: - Properties
 
@@ -152,7 +152,7 @@ final class SessionRowView: NSTableCellView {
             // Selection changes the ground under the mark, not just under the text: a coral
             // starburst on a holly-red selected row is the same hole a dark favicon is on the
             // dark sidebar, and it appears and disappears as the row is selected.
-            applyAgentPlate()
+            rederiveThemedContent()
         }
     }
 
@@ -470,7 +470,10 @@ final class SessionRowView: NSTableCellView {
     }
 
     private func presentPopover() {
-        guard let popoverInfo, let sessionID, window != nil, popover == nil else { return }
+        // Asked of the popover rather than of the reference held to it, for the reason
+        // `ProjectRowView.presentPopover` states: a dropdown opening in this window closes the
+        // card, and a stale reference would read as one still showing.
+        guard let popoverInfo, let sessionID, window != nil, popover?.isShown != true else { return }
         guard let controller = makeSessionHoverCard(
             info: popoverInfo,
             sessionID: sessionID
@@ -696,14 +699,19 @@ final class SessionRowView: NSTableCellView {
     /// which is exactly the frozen-value trap `ThemedControl` exists to avoid.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyAgentPlate()
+        rederiveThemedContent()
     }
 
     /// Re-decides the mark's plate against the ground the row currently has.
     ///
     /// Cheap enough to run on every selection change: the tone of a mark this size is measured
     /// from a 32×32 sample, and a mark that needs no plate returns the image it was given.
-    private func applyAgentPlate() {
+    ///
+    /// The three ways the ground can move are the three callers: the row is filled in, the
+    /// selection arrives or leaves, and the theme changes under it. The third was missing, and an
+    /// appearance flip only stood in for it when the two themes disagreed about light and dark —
+    /// see `ThemeDerivedContent`.
+    func rederiveThemedContent() {
         guard let agentMark else { return }
         iconView.image = plated(agentMark)
         nativeIcon = iconView.image
@@ -737,7 +745,7 @@ final class SessionRowView: NSTableCellView {
         guard let image else { return nil }
         return IconBackplate.plated(
             image,
-            againstTone: IconBackplate.tone(of: rowGround()),
+            against: IconBackplate.Ground(rowGround()),
             size: SidebarRowDefaults.iconSlotWidth
         )
     }
@@ -861,8 +869,9 @@ final class SessionRowView: NSTableCellView {
 
     /// Applies the row's colours for its current dormancy and selection state.
     ///
-    /// `.emphasized` means the row is selected while the sidebar has focus, where macOS
-    /// fills the selection with the accent colour and the text must invert to stay legible.
+    /// `.emphasized` means the row is selected in the window in front — `SidebarHoverRowView`
+    /// answers that with the window's key state rather than with the sidebar's focus — where the
+    /// selection is filled with the accent colour and the text must invert to stay legible.
     /// Every other state keeps the ordinary label colours, so selection is shown by the
     /// filled shape alone.
     private func applyTextColors() {
@@ -891,6 +900,8 @@ extension AgentKind {
         switch self {
         case .claude: return "sparkle"
         case .codex: return "chevron.left.forwardslash.chevron.right"
+        case .grok: return "bolt.circle"
+        case .openCode: return "curlybraces.square"
         }
     }
 }

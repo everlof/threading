@@ -50,7 +50,7 @@ final class MarkdownView: NSStackView {
     private func build() {
         let style = self.style()
         for block in Markdown.parse(markdown, style: style) {
-            let view = makeView(for: block, style: style)
+            let view = Self.blockView(for: block, style: style)
             addArrangedSubview(view)
             view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
             view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
@@ -67,7 +67,10 @@ final class MarkdownView: NSStackView {
 
     // MARK: - Block Views
 
-    private func makeView(for block: MarkdownBlock, style: MarkdownStyle) -> NSView {
+    /// Builds one already-parsed block without wrapping it in a complete document stack.
+    /// Virtualized transcript surfaces use this seam so a long assistant answer can retain its
+    /// cheap block model while AppKit owns only the block views around the viewport.
+    static func blockView(for block: MarkdownBlock, style: MarkdownStyle) -> NSView {
         switch block {
         case .paragraph(let text), .heading(let text):
             return label(text)
@@ -89,7 +92,7 @@ final class MarkdownView: NSStackView {
         }
     }
 
-    private func label(_ text: NSAttributedString) -> NSTextField {
+    private static func label(_ text: NSAttributedString) -> NSTextField {
         let field = NSTextField(labelWithAttributedString: text)
         field.translatesAutoresizingMaskIntoConstraints = false
         field.isSelectable = true
@@ -101,7 +104,7 @@ final class MarkdownView: NSStackView {
 
     /// A bullet or numbered list, each row a fixed-width marker beside wrapping content, so
     /// wrapped lines hang under the text rather than under the marker.
-    private func list(
+    private static func list(
         _ items: [NSAttributedString],
         markers: [String],
         style: MarkdownStyle
@@ -137,7 +140,7 @@ final class MarkdownView: NSStackView {
         return stack
     }
 
-    private func codeBlock(_ code: String, style: MarkdownStyle) -> NSView {
+    private static func codeBlock(_ code: String, style: MarkdownStyle) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.applySurface(fill: style.codeBackground, radius: .control)
@@ -183,7 +186,7 @@ final class MarkdownView: NSStackView {
         return container
     }
 
-    private func quote(_ text: NSAttributedString, style: MarkdownStyle) -> NSView {
+    private static func quote(_ text: NSAttributedString, style: MarkdownStyle) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -216,7 +219,7 @@ final class MarkdownView: NSStackView {
     /// A compact GFM table. Columns keep a readable width and the block scrolls horizontally
     /// when the detail pane cannot hold them, while vertical gestures continue scrolling the
     /// conversation.
-    private func table(_ model: MarkdownTable, style: MarkdownStyle) -> NSView {
+    private static func table(_ model: MarkdownTable, style: MarkdownStyle) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.applySurface(
@@ -283,7 +286,7 @@ final class MarkdownView: NSStackView {
         return container
     }
 
-    private func addTableRow(
+    private static func addTableRow(
         _ values: [NSAttributedString],
         alignments: [NSTextAlignment],
         style: MarkdownStyle,

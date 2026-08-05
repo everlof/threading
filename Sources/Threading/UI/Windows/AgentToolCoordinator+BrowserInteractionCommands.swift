@@ -275,6 +275,49 @@ extension AgentToolCoordinator {
         }
     }
 
+    // MARK: - Password Takeover
+
+    /// Hands one exact password field to the user, from whichever tool reached it.
+    ///
+    /// Both password refusals needed the same thing and did it differently. Neither activated
+    /// the app, and `revealDisplayPane` does nothing at all for a session that is not the one on
+    /// screen — so a takeover in a background session unhid nothing, while a password manager's
+    /// own shortcut fills the focused field of the *frontmost* app and would have landed in
+    /// whatever the user happened to be reading.
+    ///
+    /// Threading still never sees the value. This decides only which window, which session, and
+    /// which field the user's own fill arrives in.
+    @discardableResult
+    func beginPasswordTakeover(
+        for sessionID: SessionID,
+        browser: BrowserViewController,
+        ref: String? = nil,
+        selector: String? = nil,
+        locator: BrowserSemanticLocator? = nil
+    ) async -> BrowserActionOutcome {
+        // The two steps a clicked notification takes, in that order: the sidebar already
+        // listens, so a session arrives here the same way it arrives from Notification Centre.
+        activateApp()
+        NotificationCenter.default.post(SessionNotificationOpened(sessionID: sessionID))
+        // Selection lands on the main queue. Reveal after it, or the pane is asked to open for
+        // a session that is not yet the visible one and silently declines.
+        for _ in 0..<BrowserAgentDefaults.sessionSelectionSettleTurns
+        where visibleSessionID() != sessionID {
+            await Task.yield()
+        }
+        revealDisplayPane(for: sessionID)
+        browser.webView.window?.makeFirstResponder(browser.webView)
+        do {
+            return try await browser.preparePasswordFieldForUser(
+                ref: ref,
+                selector: selector,
+                locator: locator
+            )
+        } catch {
+            return BrowserActionOutcome(ok: false, message: error.localizedDescription)
+        }
+    }
+
     func browserType(
         _ arguments: BrowserTypeArguments,
         for sessionID: SessionID,
@@ -310,9 +353,9 @@ extension AgentToolCoordinator {
                         return
                     }
                     guard !target.isPassword else {
-                        self.revealDisplayPane(for: sessionID)
-                        browser.webView.window?.makeFirstResponder(browser.webView)
-                        let focused = try await browser.preparePasswordFieldForUser(
+                        let focused = await self.beginPasswordTakeover(
+                            for: sessionID,
+                            browser: browser,
                             ref: arguments.ref,
                             selector: arguments.selector,
                             locator: arguments.locator
@@ -424,8 +467,13 @@ extension AgentToolCoordinator {
                             return
                         }
                         if target.isPassword {
-                            self.revealDisplayPane(for: sessionID)
-                            browser.webView.window?.makeFirstResponder(browser.webView)
+                            await self.beginPasswordTakeover(
+                                for: sessionID,
+                                browser: browser,
+                                ref: field.ref,
+                                selector: field.selector,
+                                locator: field.locator
+                            )
                             completion(.failure(
                                 "Field \(index + 1) is a password field. Passwords require user "
                                     + "control; the visible browser is ready for private entry."

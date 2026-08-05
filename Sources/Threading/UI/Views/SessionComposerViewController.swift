@@ -26,11 +26,14 @@ final class SessionComposerViewController: NSViewController {
     private let heroRegion = NSLayoutGuide()
     private var hasPlayedHeroDrawIn = false
 
-    private let projectChip = ChipView()
-    private let agentChip = ChipView()
-    private let accountChip = ChipView()
+    /// Where the session runs: the project, and the checkout inside it.
+    private let locationChip = ChipView()
+
+    /// Who it runs as: the agent, and the login inside it.
+    private let identityChip = ChipView()
+
     private let modelChip = ChipView()
-    private let branchChip = ChipView()
+    private let effortChip = ChipView()
     private let surfaceChip = ChipView()
     private let modeChip = ChipView()
     private lazy var importButton = ThemedButton(
@@ -40,23 +43,30 @@ final class SessionComposerViewController: NSViewController {
         action: #selector(importTapped)
     )
 
-    /// The one thing this screen is for, stated as a button rather than as a glyph in the
-    /// corner of the prompt.
+    /// The import offer's own row, which exists to place the button by its **ink**.
     ///
-    /// A composer's prompt is a *brief* — several lines, often a pasted paragraph — so Return
-    /// belongs to the text and the send has to live somewhere else. Out here it is also the
-    /// only primary on the page, which is what makes the row underneath read as one loud
-    /// action and one quiet one instead of two equal offers.
-    private lazy var startButton: ThemedButton = {
-        let button = ThemedButton(
-            title: L10n.string("Start session"),
-            target: self,
-            action: #selector(startTapped)
-        )
-        button.emphasis = .primary
-        button.shortcut = ComposerDefaults.startShortcut
-        button.setAccessibilityIdentifier("composer.session-start.submit")
-        return button
+    /// A plain button's frame carries the padding its hover surface needs, so aligned by frame
+    /// its first letter sits inside every other row in the column. The row subtracts what the
+    /// button itself states (`OpticalInsetProviding`) rather than a number of its own.
+    ///
+    /// The row is what hides when there is nothing to import, not only the button: a hidden view
+    /// keeps its constraints, so a button hidden inside a visible row leaves the row standing at
+    /// its full height and the column ends in a gap nothing draws in.
+    private lazy var importRow: NSView = {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.setAccessibilityIdentifier("composer.session-start.import-row")
+        importButton.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(importButton)
+
+        let inset = importButton.opticalHorizontalInset
+        NSLayoutConstraint.activate([
+            importButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: -inset),
+            importButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: inset),
+            importButton.topAnchor.constraint(equalTo: row.topAnchor),
+            importButton.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+        ])
+        return row
     }()
 
     /// Conversations found on disk for the current project, once discovery has finished.
@@ -89,13 +99,28 @@ final class SessionComposerViewController: NSViewController {
     /// Invoked for semantic actions in extension-provided prompt accessories.
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
-    /// What is left of the account the chips currently name.
-    private let usagePanel = AccountUsagePanelView()
+    /// The box the composer-to-conversation handoff animates.
+    ///
+    /// The container rather than the `PromptView` inside it: an extension may have composed
+    /// accessories around the native prompt, and what moves has to be the whole box the user was
+    /// typing in. Read by the pane that swaps this composer for the conversation it becomes.
+    var promptHandoffView: NSView { promptContentContainer }
+
+    /// What is left of the account the chips currently name, as one line inside the box.
+    ///
+    /// The same compact reading the toolbar's usage pill draws
+    /// (`AccountUsage.compactSummary`), so the number a session is started on is the number the
+    /// pill goes on showing. The detail this replaced a whole panel with is on the tooltip.
+    private let usageLabel = NSTextField(labelWithString: "")
+
+    /// The composer's own column, bottom-flush in the pane.
+    private let stack = NSStackView()
     private let appEvents = AppEventObservations()
 
     private var selectedAgent: AgentKind = AgentDefaults.defaultKind
     private var selectedAccountHandle: AccountHandle = .standard
     private var selectedModel: String?
+    private var selectedReasoningEffort: String?
     private var selectedBranch: String?
 
     /// How much the session may do before it has to ask. Nil follows
@@ -146,57 +171,92 @@ final class SessionComposerViewController: NSViewController {
         heroStack.addArrangedSubview(greetingLabel)
         heroStack.translatesAutoresizingMaskIntoConstraints = false
 
-        importButton.emphasis = .secondary
+        // The quietest tier there is. With the primary gone from this screen, a bordered import
+        // would be the loudest thing left in the column and would read as the action to take —
+        // when it is the alternative to the one the box already offers.
+        importButton.emphasis = .tertiary
+        importButton.setAccessibilityIdentifier("composer.session-start.import")
 
-        // Where first, then the choices, then what they will cost, then the task. Reading
-        // along the row is the decision in order — which is the whole reason a session starts
-        // here rather than from a menu item that picked all the defaults silently.
-        let chips = NSStackView(views: [
-            projectChip, agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip
-        ])
+        // The row's slack belongs *after* the last chip, not inside it. The column states its
+        // own measure now, so for the first time the row is wider than its chips — and a chip
+        // hugs its content loosely enough that the leftover width was shared out among them,
+        // drawing an agent's name in a pill three times its length. The spacer hugs less than
+        // any of them, so it takes the remainder instead.
+        let chipSpacer = NSView()
+        chipSpacer.setContentHuggingPriority(ComposerDefaults.spacerPriority, for: .horizontal)
+        chipSpacer.setContentCompressionResistancePriority(
+            ComposerDefaults.spacerPriority,
+            for: .horizontal
+        )
+
+        // Where, and who — two chips for the two questions, not four for their parts. A project
+        // and a checkout are one place; an agent and a login are one identity, and read as four
+        // separate answers the reader had to reassemble. What the session *runs with* is not
+        // here at all: it belongs to the words being written, so it sits on the prompt box's own
+        // bottom row (see `wirePrompt`). Placement is what carries the meaning now — above the
+        // box is who and where, inside it is what with.
+        let chips = NSStackView(views: [locationChip, identityChip, chipSpacer])
         chips.orientation = .horizontal
         chips.alignment = .centerY
         chips.spacing = Design.Spacing.small
 
-        // Chips shrink their labels to fit a tight row, which with six of them left a row of
-        // bare icons naming nothing. They hold their size here and the row stays short.
-        for chip in [agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip] {
+        locationChip.setAccessibilityIdentifier("composer.session-start.location")
+        identityChip.setAccessibilityIdentifier("composer.session-start.identity")
+
+        // Chips shrink their labels to fit a tight row, which left a row of bare icons naming
+        // nothing. They hold their size here and the row stays short.
+        for chip in [locationChip, identityChip] {
             chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        // The one chip made to shorten: a long project name truncates before it can push six
-        // siblings out of the row. A hard cap rather than a lowered priority, because a chip's
-        // width comes from its internal label's required edge pins — every chip's label
-        // resists equally, so under pressure the engine squeezed the *siblings* to bare icons
-        // while the long name kept every character.
-        projectChip.widthAnchor.constraint(
-            lessThanOrEqualToConstant: ComposerDefaults.projectChipMaxWidth
+        // The one chip made to shorten: a long location truncates before it can push the
+        // identity out of the row. A hard cap rather than a lowered priority, because a chip's
+        // width comes from its internal label's required edge pins — both labels resist
+        // equally, so under pressure the engine squeezed the *sibling* to a bare icon while the
+        // long name kept every character.
+        //
+        // The tail is what goes, which costs the checkout rather than the project name. Per-half
+        // truncation would mean budgeting characters against a width in points, on a single
+        // label that draws its own ellipsis — a guess dressed as a rule. Hovering the chip
+        // widens it to its full contents (`ChipView`), and the tooltip states the whole answer.
+        locationChip.widthAnchor.constraint(
+            lessThanOrEqualToConstant: ComposerDefaults.locationChipMaxWidth
         ).isActive = true
 
         wirePrompt()
         setupPromptCustomization()
 
-        // The action and the alternative to it, in that order: pressing Start is what this
-        // screen is for, and adopting a conversation that already exists is the other way to
-        // arrive at the same place. Import keeps the secondary shape it already had — beside
-        // a primary it now reads as the quieter of two, which is what it always was.
-        let actions = NSStackView(views: [startButton, importButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = Design.Spacing.small
-
-        let stack = NSStackView(
-            views: [chips, usagePanel, promptContentContainer, actions]
-        )
+        // Three things, evenly spaced: where this runs, what to say, and the other way in. The
+        // column used to need two different steps because it held a usage block and an action
+        // row of its own; with both folded into the box there is one rhythm to keep.
+        stack.setViews([chips, promptContentContainer, importRow], in: .leading)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
-        stack.setCustomSpacing(Design.Spacing.large, after: usagePanel)
-        stack.setCustomSpacing(Design.Spacing.large, after: promptContentContainer)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(stack)
         view.addSubview(heroStack)
         view.addLayoutGuide(heroRegion)
+
+        // The column fills the pane up to its cap, rather than inheriting its width from
+        // whichever row happens to be widest. It used to inherit it, and the widest row was the
+        // chips — so moving three of them into the box would have quietly narrowed the box they
+        // moved into.
+        //
+        // Stated against the *pane* rather than as 720, which matters more than it looks: a
+        // constant width would also become the pane's minimum, since a fitting size honours an
+        // optional constraint wherever nothing opposes it, and the window would have refused to
+        // narrow past a number that is a maximum. Read from the pane it says only "as wide as
+        // there is room for", and the `contentWidth` cap beside it is what stops it there.
+        let measure = stack.widthAnchor.constraint(
+            equalTo: view.widthAnchor,
+            constant: -Design.Spacing.pane * 2
+        )
+        measure.priority = ComposerDefaults.columnMeasurePriority
+        stack.setContentHuggingPriority(
+            ComposerDefaults.columnHuggingPriority,
+            for: .horizontal
+        )
 
         // The composer hangs from the pane's bottom edge — the shape every chat product has
         // taught: input below, room above. The prompt grows upward from here.
@@ -206,6 +266,7 @@ final class SessionComposerViewController: NSViewController {
                 equalTo: view.bottomAnchor,
                 constant: -Design.Spacing.pane
             ),
+            measure,
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: ComposerDefaults.contentWidth),
             stack.leadingAnchor.constraint(
                 greaterThanOrEqualTo: view.leadingAnchor,
@@ -216,7 +277,6 @@ final class SessionComposerViewController: NSViewController {
                 constant: -Design.Spacing.pane
             ),
             promptContentContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            usagePanel.widthAnchor.constraint(equalTo: stack.widthAnchor),
 
             // The hero floats in whatever room the composer leaves above itself.
             heroRegion.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -239,10 +299,19 @@ final class SessionComposerViewController: NSViewController {
 
         wireChips()
         observeUsage()
+        // Nothing has been discovered yet, so the offer starts absent rather than as an
+        // untitled button holding a row open until the first scan comes back.
+        refreshImportChip()
     }
 
     /// A pane too short to float the greeting shows the composer alone — half a hero peeking
     /// from behind the prompt reads as a defect, an absent one as a compact window.
+    ///
+    /// Nothing else is fitted here any more. The column is bounded by construction — a chip row,
+    /// a box capped at `Design.Size.inputMaxHeight`, and a one-line import offer — so there is
+    /// no part of it that has to be told what room it may take. What used to need telling was
+    /// the usage panel, which drew one bar per rate-limit window and grew the *window* with them
+    /// (see `window-chrome.md`); its reading is one line inside the box now.
     override func viewDidLayout() {
         super.viewDidLayout()
         heroStack.isHidden = heroRegion.frame.height
@@ -251,20 +320,18 @@ final class SessionComposerViewController: NSViewController {
 
     /// Places the protected native prompt behind the generic around-hook host. The contract only
     /// accepts horizontal hooks containing exactly one `.proceed`, so this container can gain
-    /// leading/trailing accessories but can never lose the text field. The send is outside the
-    /// container entirely — an extension cannot reach the action row at all, which is a stronger
-    /// guarantee than the one the `.proceed` rule gives the field.
+    /// leading/trailing accessories but can never lose the text field.
     private func setupPromptCustomization() {
         promptContentContainer.setAccessibilityIdentifier("composer.session-start.content")
         // A family-wide patch must not appear before the composer has a real project context.
         promptCustomizationHost.deactivate()
     }
 
-    /// A reading arriving after the composer is on screen redraws the panel in place, rather
+    /// A reading arriving after the composer is on screen redraws the line in place, rather
     /// than waiting for the next time an account is picked.
     private func observeUsage() {
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
-            self?.refreshUsagePanel()
+            self?.refreshUsage()
         }
     }
 
@@ -272,8 +339,36 @@ final class SessionComposerViewController: NSViewController {
         promptView.showsImageAttachments = true
         promptView.placeholder = ComposerDefaults.promptPlaceholder
         promptView.minimumHeight = ComposerDefaults.promptHeight
-        // Return belongs to the text here; `startButton` sends. See `PromptView.SubmitPlacement`.
-        promptView.submitPlacement = .outside
+        // The same box the conversation replies in: the send closes a control row along the
+        // bottom, and Return sends unless `AppSettings.promptReturnKey` says otherwise. See
+        // `PromptView.SubmitPlacement`.
+        promptView.submitPlacement = .footer
+
+        usageLabel.applyFont(.subheading)
+        usageLabel.textColor = Design.Text.tertiary
+        usageLabel.lineBreakMode = .byTruncatingTail
+        usageLabel.isHidden = true
+        usageLabel.setAccessibilityIdentifier("composer.session-start.usage")
+        // The one thing on the row that may lose characters. The chips beside it name choices
+        // and are unreadable half-drawn; a reading truncated from its tail still says which
+        // window is tightest, which is the part that decides anything.
+        usageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        for chip in [modelChip, modeChip, effortChip, surfaceChip] {
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        modelChip.setAccessibilityIdentifier("composer.session-start.model")
+        modeChip.setAccessibilityIdentifier("composer.session-start.mode")
+        effortChip.setAccessibilityIdentifier("composer.session-start.effort")
+        surfaceChip.setAccessibilityIdentifier("composer.session-start.surface")
+
+        // What the session will be run *with* on the leading side, what it has left to spend on
+        // the trailing side beside the send — the reply composer's arrangement, because it is
+        // the same question asked one message earlier.
+        promptView.setFooterControls(
+            leading: [modelChip, modeChip, effortChip],
+            trailing: [usageLabel, surfaceChip]
+        )
 
         promptView.onSubmit = { [weak self] prompt in
             self?.start(with: prompt)
@@ -290,14 +385,28 @@ final class SessionComposerViewController: NSViewController {
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
     private func wireChips() {
-        projectChip.itemsProvider = { [weak self] in self?.projectItems() ?? [] }
-        projectChip.onSelect = { [weak self] item in
+        // One control, two verbs — see `locationItems()` for why they are not the same act and
+        // must not be one list. The represented value says which was chosen.
+        locationChip.itemsProvider = { [weak self] in self?.locationItems() ?? [] }
+        locationChip.onSelect = { [weak self] item in
             guard let self else { return }
             switch item.representedValue {
+            case let selection as CheckoutSelection:
+                switch selection {
+                case .thisCheckout:
+                    self.selectedBranch = nil
+                case .checkout(let branch):
+                    self.selectedBranch = branch
+                case .newWorktree:
+                    // Leaves the selection alone: creating a worktree adds a project and moves
+                    // the composer to it, so this composer's branch never applies.
+                    self.createWorktree()
+                }
+                self.refreshChips()
             case let id as ProjectID:
                 guard id != self.projectID else { return }
                 self.delegate?.sessionComposer(self, didSelectProject: id)
-            case let action as ProjectChipAction:
+            case let action as ProjectAction:
                 switch action {
                 case .addExisting:
                     self.delegate?.sessionComposerDidRequestAddFolder(self)
@@ -309,25 +418,39 @@ final class SessionComposerViewController: NSViewController {
             }
         }
 
-        agentChip.itemsProvider = { [weak self] in self?.agentItems() ?? [] }
-        agentChip.onSelect = { [weak self] item in
-            let kind = item.representedValue as? AgentKind ?? AgentDefaults.defaultKind
-            self?.selectedAgent = kind
-            self?.selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: kind)
-            self?.selectedModel = nil
-            self?.refreshChips()
-        }
-
-        accountChip.itemsProvider = { [weak self] in self?.accountItems() ?? [] }
-        accountChip.onSelect = { [weak self] item in
-            self?.selectedAccountHandle = item.representedValue as? AccountHandle ?? .standard
-            self?.selectedModel = nil
-            self?.refreshChips()
+        identityChip.itemsProvider = { [weak self] in self?.identityItems() ?? [] }
+        identityChip.onSelect = { [weak self] item in
+            guard let self else { return }
+            switch item.representedValue {
+            case let handle as AccountHandle:
+                // The agent is unchanged, so only what the *login* decided is reset: a model
+                // pinned on one account is not necessarily offered on another.
+                self.selectedAccountHandle = handle
+                self.selectedModel = nil
+                self.selectedReasoningEffort = nil
+            case let kind as AgentKind:
+                self.selectedAgent = kind
+                self.selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: kind)
+                self.selectedModel = nil
+                self.selectedReasoningEffort = nil
+            default:
+                break
+            }
+            self.refreshChips()
         }
 
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
         modelChip.onSelect = { [weak self] item in
-            self?.selectedModel = item.representedValue as? String
+            guard let self else { return }
+            self.selectedModel = item.representedValue as? String
+            self.discardUnsupportedEffort()
+            self.refreshChips()
+        }
+
+        effortChip.itemsProvider = { [weak self] in self?.effortItems() ?? [] }
+        effortChip.onSelect = { [weak self] item in
+            // Nil is the explicit first row: let the account or model choose.
+            self?.selectedReasoningEffort = item.representedValue as? String
             self?.refreshChips()
         }
 
@@ -343,24 +466,6 @@ final class SessionComposerViewController: NSViewController {
         surfaceChip.onSelect = { [weak self] item in
             self?.usesNativeUI = (item.representedValue as? Bool) ?? false
             self?.refreshChips()
-        }
-
-        branchChip.itemsProvider = { [weak self] in self?.branchItems() ?? [] }
-        branchChip.onSelect = { [weak self] item in
-            guard let self else { return }
-
-            switch item.representedValue as? BranchSelection {
-            case .checkout(let branch):
-                self.selectedBranch = branch
-            case .newWorktree:
-                // Leaves the selection alone: creating a worktree adds a project and moves
-                // the composer to it, so this composer's branch never applies.
-                self.createWorktree()
-            case .thisCheckout, .none:
-                self.selectedBranch = nil
-            }
-
-            self.refreshChips()
         }
     }
 
@@ -396,12 +501,13 @@ final class SessionComposerViewController: NSViewController {
         // would launch on it while naming it in the chip.
         selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: selectedAgent)
         selectedModel = nil
+        selectedReasoningEffort = nil
         selectedBranch = nil
         selectedPermissionMode = nil
 
         promptView.clearAttachments()
 
-        // Warmed as the composer appears, not as its account menu opens: a fetch started on
+        // Warmed as the composer appears, not as the identity menu opens: a fetch started on
         // the click lands after the menu has been read and dismissed.
         AccountUsageMenu.prefetch()
         refreshGreeting()
@@ -412,7 +518,7 @@ final class SessionComposerViewController: NSViewController {
         }
 
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
-            // No project: the prompt is live, Start is not, and the project chip is the ask.
+            // No project: the prompt is live, the send is not, and the location chip is the ask.
             // Words typed here stay; a draft belonging to the project just left does not.
             promptView.stringValue = carriedPrompt ?? ""
             importable = []
@@ -487,7 +593,7 @@ final class SessionComposerViewController: NSViewController {
     /// enough that the user can select another project before it finishes.
     private func discoverImportable(for project: Project) {
         importable = []
-        importButton.isHidden = true
+        refreshImportChip()
 
         SessionImporter.discover(for: project) { [weak self] found in
             guard let self, self.projectID == project.id else { return }
@@ -498,6 +604,7 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func refreshImportChip() {
+        importRow.isHidden = importable.isEmpty
         importButton.isHidden = importable.isEmpty
         importButton.title = ComposerDefaults.importTitle(count: importable.count)
     }
@@ -506,28 +613,39 @@ final class SessionComposerViewController: NSViewController {
 
     private func refreshChips() {
         let project = projectID.flatMap { ProjectStore.shared.project(withID: $0) }
-        projectChip.configure(
-            symbolName: ComposerDefaults.projectSymbol,
-            title: project?.name ?? ComposerDefaults.chooseProjectTitle
+        let checkout = project.flatMap(checkoutBranch(of:))
+
+        locationChip.configure(
+            symbolName: ComposerDefaults.locationSymbol,
+            title: ComposerDefaults.locationTitle(project: project?.name, branch: checkout)
         )
         // The folder was the old subheading; as a tooltip it still answers "where", without
-        // spending a line of the pane on a path that rarely matters.
-        projectChip.toolTip = project.map { abbreviatedPath($0.folderPath) }
+        // spending a line of the pane on a path that rarely matters. `configure` puts the title
+        // on the tooltip, so this has to come after it.
+        locationChip.toolTip = locationDetail(project: project, branch: checkout)
 
         // A session cannot start nowhere. The prompt stays live — words first, place second —
-        // but the one loud control keeps the promise honest.
-        startButton.isEnabled = project != nil
+        // but the send keeps the promise honest, and says why rather than sitting there dimmed
+        // with nothing to explain itself: a glyph has no room for a sentence, its tooltip does.
+        promptView.isSubmissionEnabled = project != nil
+        promptView.submissionDisabledReason = project == nil
+            ? ComposerDefaults.chooseProjectFirstReason
+            : nil
 
-        agentChip.configure(icon: selectedAgent.icon, title: selectedAgent.displayName)
+        let accounts = availableAccounts
+        let account = selectedAgent.supportsAccounts
+            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+            : nil
 
-        let accounts = AgentAccountDiscovery.accounts(for: selectedAgent)
-        let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
-
-        // A menu of one is noise: the chip only appears when there is a choice to make.
-        accountChip.isHidden = accounts.count < 2
-        accountChip.configure(
-            symbolName: ComposerDefaults.accountSymbol,
-            title: account.map(AccountName.display) ?? ""
+        // The login is named only where there is a choice of one — the same threshold that used
+        // to decide whether an account chip appeared at all. A single-login agent would
+        // otherwise spend half of this chip stating something nobody can act on.
+        identityChip.configure(
+            icon: selectedAgent.icon,
+            title: ComposerDefaults.identityTitle(
+                agent: selectedAgent.displayName,
+                account: accounts.count < 2 ? nil : account.map(AccountName.display)
+            )
         )
 
         let models = AgentModels.available(for: selectedAgent, account: account)
@@ -537,17 +655,40 @@ final class SessionComposerViewController: NSViewController {
             title: modelChipTitle(for: account)
         )
 
+        // Effort is a property of the selected model's published catalog, not an assumption
+        // about the provider. No catalog means no chip and no value sent to the runtime.
+        discardUnsupportedEffort(account: account)
+        let model = modelIdentifierToLaunch(on: account)
+        let effortOption = ReasoningEffortPresentation.option(
+            kind: selectedAgent,
+            model: model,
+            account: account
+        )
+        effortChip.isHidden = effortOption == nil
+        effortChip.configure(
+            symbolName: ReasoningEffortPresentation.symbol,
+            title: ReasoningEffortPresentation.title(
+                selected: selectedReasoningEffort,
+                kind: selectedAgent,
+                model: model,
+                account: account
+            )
+        )
+
         // Names the mode that will actually apply, not only the one chosen here: with no
         // choice of its own the chip shows the app-wide default, and falls back to naming
         // where the decision goes when there is no default either.
+        modeChip.isHidden = !selectedAgent.supportsPermissionModes
         modeChip.configure(
-            symbolName: ComposerDefaults.permissionModeSymbol,
-            title: (selectedPermissionMode ?? AppSettings.shared.defaultPermissionMode)?
-                .displayName ?? ComposerDefaults.followsCLIPermissionModeTitle
+            symbolName: PermissionModePresentation.symbol,
+            title: PermissionModePresentation.chipTitle(
+                selected: selectedPermissionMode,
+                inherited: PermissionModePresentation.appDefault
+            )
         )
 
-        // Offered only for agents whose conversation Threading may render itself — both real
-        // agents, not shells. See `AgentKind.supportsNativeUI`.
+        // Offered only for runtimes whose conversation Threading can render through a
+        // structured transport. See `AgentKind.supportsNativeUI`.
         surfaceChip.isHidden = !selectedAgent.supportsNativeUI
         if surfaceChip.isHidden { usesNativeUI = false }
         surfaceChip.configure(
@@ -555,56 +696,229 @@ final class SessionComposerViewController: NSViewController {
             title: usesNativeUI ? ComposerDefaults.nativeTitle : selectedAgent.originalUITitle
         )
 
-        refreshUsagePanel(account: account)
-
-        let isRepository = projectFolder.map { GitInfo.repositoryRoot(for: $0) != nil } ?? false
-        branchChip.isHidden = !isRepository
-        branchChip.configure(
-            symbolName: ComposerDefaults.branchSymbol,
-            title: selectedBranch ?? currentBranchTitle
-        )
+        refreshUsage(account: account)
     }
 
-    /// Draws the chosen account's usage, fetching when the reading has aged out.
+    /// The logins this agent offers, and none at all for a runtime without account routing
+    /// (`AgentKind.supportsAccounts`) — asked in one place because the chip's title, its menu
+    /// and the usage line all have to agree about how many there are.
+    private var availableAccounts: [AgentAccount] {
+        selectedAgent.supportsAccounts ? AgentAccountDiscovery.accounts(for: selectedAgent) : []
+    }
+
+    /// The branch a session started now would run on, or nil where the folder is not a
+    /// repository and "which checkout" is not a question.
+    private func checkoutBranch(of project: Project) -> String? {
+        guard GitInfo.repositoryRoot(for: project.folderPath) != nil else { return nil }
+        return selectedBranch ?? GitInfo.currentBranch(for: project.folderPath)
+    }
+
+    /// Where the session will actually run, said the way the shell would say it.
+    ///
+    /// The *destination* folder, not necessarily this project's: choosing a sibling checkout
+    /// routes the session into that project
+    /// (`ProjectStore.checkout(onBranch:inRepositoryOf:)`) while the chip goes on naming this
+    /// project's repository, which is the reading a breadcrumb wants. The path is the one place
+    /// the two can be told apart, so it is what the tooltip answers with.
+    private func locationDetail(project: Project?, branch: String?) -> String? {
+        guard let project else { return nil }
+
+        let destination = selectedBranch
+            .flatMap { ProjectStore.shared.checkout(onBranch: $0, inRepositoryOf: project.id) }
+            .flatMap { ProjectStore.shared.project(withID: $0) } ?? project
+
+        let path = abbreviatedPath(destination.folderPath)
+        guard let branch else { return path }
+        return "\(path) \(ComposerDefaults.breadcrumbSeparator) \(branch)"
+    }
+
+    /// Writes the chosen account's usage onto the box's own row, fetching when the reading has
+    /// aged out.
     ///
     /// The account is passed in when the caller has already resolved it, since resolving one
     /// scans the filesystem and `refreshChips` runs on every chip change.
-    private func refreshUsagePanel(account: AgentAccount? = nil) {
+    ///
+    /// The line is the toolbar pill's own reading, metered by the model this session would
+    /// launch on — the same string, from the same formatter, so the number a user reads here is
+    /// the number the pill goes on showing once the session exists. Hidden outright when there
+    /// is nothing to say: an account with no usage source is not a thing to report an absence
+    /// about, which is the rule the pill already keeps.
+    private func refreshUsage(account: AgentAccount? = nil) {
         let account = account ?? AgentAccountDiscovery.account(
             for: selectedAgent,
             handle: selectedAccountHandle
         )
 
         guard let account else {
-            usagePanel.isHidden = true
+            clearUsage()
             return
         }
 
         AccountUsageService.shared.refresh(account)
 
-        usagePanel.show(
+        let now = Date()
+        guard let usage = AccountUsageService.shared.usage(for: account),
+              let reading = usage.compactSummary(at: now, metering: modelToLaunch(on: account))
+        else {
+            clearUsage()
+            return
+        }
+
+        usageLabel.stringValue = reading
+        usageLabel.toolTip = usageDetail(
             accountName: AccountName.display(for: account),
-            usage: AccountUsageService.shared.usage(for: account),
-            error: AccountUsageService.shared.errorMessage(for: account),
-            account: account
+            usage: usage,
+            at: now
         )
+        usageLabel.isHidden = false
     }
 
-    private var projectFolder: String? {
-        projectID.flatMap { ProjectStore.shared.project(withID: $0)?.folderPath }
+    private func clearUsage() {
+        usageLabel.stringValue = ""
+        usageLabel.toolTip = nil
+        usageLabel.isHidden = true
     }
 
-    private var currentBranchTitle: String {
-        projectFolder.flatMap { GitInfo.currentBranch(for: $0) } ?? ComposerDefaults.noBranchTitle
+    /// Everything the panel this replaced spent a block of the pane on: whose account it is,
+    /// what each window stands at and when it comes back, and how old the reading is.
+    ///
+    /// A tooltip rather than a column, because the detail is what a user reaches for once —
+    /// while the line beside the send is what they glance at every time.
+    private func usageDetail(accountName: String, usage: AccountUsage, at now: Date) -> String {
+        var lines = [
+            [accountName, usage.planLabel ?? ""]
+                .filter { !$0.isEmpty }
+                .joined(separator: UsageDefaults.segmentSeparator)
+        ].filter { !$0.isEmpty }
+
+        for window in usage.windows + usage.modelWindows {
+            var parts = ["\(window.compactName) \(AccountUsage.value(of: window, at: now))"]
+            if let resetsAt = window.resetsAt, !window.isExpired(at: now) {
+                parts.append(UsageFormat.resets(until: resetsAt, from: now))
+            }
+            lines.append(parts.joined(separator: UsageDefaults.segmentSeparator))
+        }
+
+        lines.append(ComposerDefaults.updatedTitle(UsageFormat.age(of: usage.observedAt, at: now)))
+        return lines.joined(separator: "\n")
     }
 
-    /// Where the session will run, said the way the shell would say it.
+    /// A folder said the way the shell would say it.
     private func abbreviatedPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     // MARK: - Menus
+
+    /// Where this session runs, and — under a line of its own — where to go instead.
+    ///
+    /// Two questions in one control, deliberately kept in two sections, because they are not
+    /// the same act. Choosing a checkout **routes this session**: the composer stays exactly
+    /// where it is, and the half-written brief, the agent and the model all survive it.
+    /// Choosing a project **navigates**: the composer is pointed somewhere else and every
+    /// choice in it resets. Flattened into one list they would read as one list of places, and
+    /// the first mis-click on a project row would take a paragraph of context with it.
+    ///
+    /// `New Worktree…` closes the run-here section rather than opening the other one, because
+    /// it is the single row that does both: it makes a place and then goes there.
+    ///
+    /// The nesting exists only where there is something to keep the projects apart *from*. With
+    /// no project chosen, or a folder that is not a repository, there is no run-here section at
+    /// all — and a menu whose only row is a submenu is a hover in the way of the answer.
+    private func locationItems() -> [ThemedMenuEntry] {
+        guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
+            return projectItems()
+        }
+
+        let checkouts = checkoutItems(for: project)
+        guard !checkouts.isEmpty else { return projectItems() }
+
+        return checkouts + [
+            .separator,
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.switchProjectTitle,
+                    submenu: projectItems()
+                )
+            )
+        ]
+    }
+
+    /// Where the session will run: this checkout, another checkout already added, or one
+    /// created now.
+    ///
+    /// Only checkouts are listed, not branches. A branch with nothing standing on it is not a
+    /// place a session can run — offering the repository's whole `git branch` output invited
+    /// picking one that resolved to nothing, and the session then ran here anyway while its
+    /// record claimed otherwise.
+    ///
+    /// Empty outside a repository, which is what withholds the section: a plain folder is one
+    /// place, and a section offering the one place already in the chip answers nothing.
+    private func checkoutItems(for project: Project) -> [ThemedMenuEntry] {
+        guard GitInfo.repositoryRoot(for: project.folderPath) != nil else { return [] }
+
+        let current = GitInfo.currentBranch(for: project.folderPath)
+
+        var items: [ThemedMenuEntry] = [
+            .item(
+                ThemedMenuItem(
+                    title: current.map { "\($0)\(ComposerDefaults.thisCheckoutSuffix)" }
+                        ?? project.name,
+                    representedValue: CheckoutSelection.thisCheckout,
+                    isSelected: selectedBranch == nil
+                )
+            )
+        ]
+
+        items += ProjectStore.shared.siblingCheckouts(of: project.id).map { sibling in
+            .item(
+                ThemedMenuItem(
+                    title: sibling.branch,
+                    representedValue: CheckoutSelection.checkout(sibling.branch),
+                    isSelected: sibling.branch == selectedBranch
+                )
+            )
+        }
+        items.append(.separator)
+        items.append(
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.newWorktreeTitle,
+                    representedValue: CheckoutSelection.newWorktree
+                )
+            )
+        )
+        return items
+    }
+
+    /// Who this session runs as: which login, then which runtime.
+    ///
+    /// The logins lead because they are the finer choice, and because switching agent is the
+    /// coarser move that resets what the login decided. The selected agent has no row of its
+    /// own — the chip is already showing it, and it would be the one row in the section that
+    /// changed nothing.
+    ///
+    /// The readings on the account rows are the cached ones. `show(projectID:)` warms them as
+    /// the composer appears (`AccountUsageMenu.prefetch`) for every agent's logins, not only
+    /// the selected one, which is what keeps this menu warm across a change of agent too: a
+    /// fetch started when a menu opens lands after that menu has been read and dismissed.
+    private func identityItems() -> [ThemedMenuEntry] {
+        var items: [ThemedMenuEntry] = []
+
+        // A menu of one login is noise, which is the same threshold the chip's title keeps.
+        if availableAccounts.count >= 2 {
+            items += accountItems()
+            items.append(.separator)
+        }
+
+        items += AgentKind.allCases
+            .filter { $0 != selectedAgent }
+            .map { kind in
+                .item(ThemedMenuItem(title: kind.displayName, representedValue: kind))
+            }
+        return items
+    }
 
     /// Every project, then the two ways to bring a new one in. The composer can swap projects
     /// because the alternative was leaving it for the sidebar — one more place to look for a
@@ -627,7 +941,7 @@ final class SessionComposerViewController: NSViewController {
             .item(
                 ThemedMenuItem(
                     title: ComposerDefaults.addExistingFolderTitle,
-                    representedValue: ProjectChipAction.addExisting
+                    representedValue: ProjectAction.addExisting
                 )
             )
         )
@@ -635,27 +949,17 @@ final class SessionComposerViewController: NSViewController {
             .item(
                 ThemedMenuItem(
                     title: ComposerDefaults.createNewFolderTitle,
-                    representedValue: ProjectChipAction.createNew
+                    representedValue: ProjectAction.createNew
                 )
             )
         )
         return items
     }
 
-    private func agentItems() -> [ThemedMenuEntry] {
-        AgentKind.allCases.map { kind in
-            .item(
-                ThemedMenuItem(
-                    title: kind.displayName,
-                    representedValue: kind,
-                    isSelected: kind == selectedAgent
-                )
-            )
-        }
-    }
-
+    /// The selected agent's logins, each carrying what is left of it. The identity menu's first
+    /// section; see `identityItems()`.
     private func accountItems() -> [ThemedMenuEntry] {
-        AgentAccountDiscovery.accounts(for: selectedAgent).map { account in
+        availableAccounts.map { account in
             let name = AccountName.display(for: account)
             var item = ThemedMenuItem(
                 // The emoji when the account has one: it is how the same login is identified in
@@ -682,6 +986,27 @@ final class SessionComposerViewController: NSViewController {
         selectedModel ?? AgentModels.defaultModel(for: selectedAgent, account: account)
     }
 
+    /// The model whose catalog governs controls that are set before a session exists.
+    private func modelIdentifierToLaunch(on account: AgentAccount?) -> String? {
+        selectedModel ?? resolvedDefaultModel(for: account).identifier
+    }
+
+    /// A model change is also a schema change. Never carry a value into a model that did not
+    /// publish it, even briefly while the footer is redrawn.
+    private func discardUnsupportedEffort(account: AgentAccount? = nil) {
+        guard let selectedReasoningEffort else { return }
+        let resolvedAccount = account
+            ?? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+        let option = ReasoningEffortPresentation.option(
+            kind: selectedAgent,
+            model: modelIdentifierToLaunch(on: resolvedAccount),
+            account: resolvedAccount
+        )
+        if option?.supports(reasoningEffort: selectedReasoningEffort) != true {
+            self.selectedReasoningEffort = nil
+        }
+    }
+
     /// What the chip says: the chosen model, else the one the account is configured to use,
     /// else "Default".
     ///
@@ -691,20 +1016,35 @@ final class SessionComposerViewController: NSViewController {
     private func modelChipTitle(for account: AgentAccount?) -> String {
         if let selectedModel { return ModelName.display(for: selectedModel) }
 
-        guard let configured = AgentModels.defaultModel(for: selectedAgent, account: account) else {
+        guard let resolved = resolvedDefaultModel(for: account).identifier else {
             return ComposerDefaults.defaultModelTitle
         }
-        return ModelName.display(for: configured)
+        return ModelName.display(for: resolved)
+    }
+
+    /// Nothing is running here, so the runtime cannot report — but this login may have run
+    /// before, and what it resolved to then is the only local answer for an account that
+    /// configures no model. That is precisely the case the composer used to call "Default".
+    private func resolvedDefaultModel(for account: AgentAccount?) -> ResolvedDefaultModel {
+        AgentModels.resolvedDefault(
+            sessionModel: nil,
+            reportedModel: nil,
+            configuredModel: AgentModels.defaultModel(for: selectedAgent, account: account),
+            rememberedModel: account.flatMap {
+                AccountPreferencesStore.shared.lastReportedModel(for: $0.id)
+                    ?? ClaudeAccountLastRunModel.lastRunModel(account: $0)
+            }
+        )
     }
 
     private func modelItems() -> [ThemedMenuEntry] {
         let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
-        let configured = AgentModels.defaultModel(for: selectedAgent, account: account)
+        let resolved = resolvedDefaultModel(for: account)
 
         // The first item is "leave it to the CLI", so it names what the CLI would pick rather
         // than leaving the user to find out by starting a session.
-        let defaultTitle = configured.map {
-            "\(ModelName.display(for: $0))\(ComposerDefaults.accountDefaultSuffix)"
+        let defaultTitle = resolved.identifier.map {
+            "\(ModelName.display(for: $0))\(ComposerDefaults.suffix(for: resolved.source))"
         } ?? ComposerDefaults.defaultModelTitle
 
         // Where a scoped limit is finally actionable: a spent Fable window is escaped by
@@ -717,7 +1057,7 @@ final class SessionComposerViewController: NSViewController {
             isSelected: selectedModel == nil
         )
         if let account {
-            AccountUsageMenu.decorate(&defaultItem, forModel: configured, on: account)
+            AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
         }
 
         var items: [ThemedMenuEntry] = [.item(defaultItem)]
@@ -736,51 +1076,16 @@ final class SessionComposerViewController: NSViewController {
         return items
     }
 
-    /// Where the session will run: this checkout, another checkout already added, or one
-    /// created now.
-    ///
-    /// Only checkouts are listed, not branches. A branch with nothing standing on it is not a
-    /// place a session can run — offering the repository's whole `git branch` output invited
-    /// picking one that resolved to nothing, and the session then ran here anyway while its
-    /// record claimed otherwise.
-    private func branchItems() -> [ThemedMenuEntry] {
-        guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
-            return []
-        }
-
-        let current = GitInfo.currentBranch(for: project.folderPath)
-
-        var items: [ThemedMenuEntry] = [
-            .item(
-                ThemedMenuItem(
-                    title: current.map {
-                        "\($0) — \(ComposerDefaults.thisCheckoutSuffix)"
-                    } ?? project.name,
-                    representedValue: BranchSelection.thisCheckout,
-                    isSelected: selectedBranch == nil
-                )
-            )
-        ]
-
-        items += ProjectStore.shared.siblingCheckouts(of: projectID).map { sibling in
-            .item(
-                ThemedMenuItem(
-                    title: sibling.branch,
-                    representedValue: BranchSelection.checkout(sibling.branch),
-                    isSelected: sibling.branch == selectedBranch
-                )
-            )
-        }
-        items.append(.separator)
-        items.append(
-            .item(
-                ThemedMenuItem(
-                    title: ComposerDefaults.newWorktreeTitle,
-                    representedValue: BranchSelection.newWorktree
-                )
-            )
+    private func effortItems() -> [ThemedMenuEntry] {
+        let account = selectedAgent.supportsAccounts
+            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+            : nil
+        return ReasoningEffortPresentation.rows(
+            selected: selectedReasoningEffort,
+            kind: selectedAgent,
+            model: modelIdentifierToLaunch(on: account),
+            account: account
         )
-        return items
     }
 
     // MARK: - Actions
@@ -788,16 +1093,23 @@ final class SessionComposerViewController: NSViewController {
     private func start(with prompt: String) {
         guard let projectID else { return }
 
+        // Read before the start, because starting is what empties the strip. The paths are
+        // already inside `prompt` — a CLI is handed a path, never pixels — but a path in a
+        // sentence is not a handoff anything downstream can recognise, so the images the user
+        // attached have to cross this boundary as themselves or they are filed nowhere.
+        let attachmentPaths = promptView.attachmentPaths
         let started = delegate?.sessionComposer(
             self,
             startSessionIn: projectID,
             kind: selectedAgent,
             accountHandle: selectedAccountHandle,
             model: selectedModel,
+            reasoningEffort: selectedReasoningEffort,
             branch: selectedBranch,
             usesNativeUI: usesNativeUI,
-            permissionMode: selectedPermissionMode,
-            prompt: prompt
+            permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
+            prompt: prompt,
+            attachmentPaths: attachmentPaths
         ) ?? false
 
         // The composer is not rebuilt for the project it already holds, so what has just been
@@ -817,32 +1129,12 @@ final class SessionComposerViewController: NSViewController {
     /// says so: Codex has no plan mode, and a menu that offered "Plan" without that sentence
     /// would be promising something it cannot deliver.
     private func permissionModeItems() -> [ThemedMenuEntry] {
-        let inherited = AppSettings.shared.defaultPermissionMode
-
-        var items: [ThemedMenuEntry] = [
-            .item(
-                ThemedMenuItem(
-                    title: ComposerDefaults.inheritedPermissionModeTitle(inherited),
-                    representedValue: nil,
-                    isSelected: selectedPermissionMode == nil
-                )
-            )
-        ]
-
-        items += AgentPermissionMode.allCases.map { mode in
-            .item(
-                ThemedMenuItem(
-                    title: mode.displayName,
-                    subtitle: [mode.menuDescription, mode.caveat(for: selectedAgent)]
-                        .compactMap { $0 }
-                        .joined(separator: " "),
-                    representedValue: mode,
-                    isSelected: mode == selectedPermissionMode
-                )
-            )
-        }
-
-        return items
+        PermissionModePresentation.rows(
+            for: selectedAgent,
+            selected: selectedPermissionMode,
+            inherited: PermissionModePresentation.appDefault,
+            timing: .whenTheSessionStarts
+        )
     }
 
     /// The choice of surface: the agent's own terminal, or Threading's conversation view.
@@ -882,12 +1174,6 @@ final class SessionComposerViewController: NSViewController {
 
     @objc private func importTapped() {
         presentImportPicker()
-    }
-
-    /// Goes through the prompt rather than reading its text, so the button and ⌘Return send
-    /// the same thing — the words *and* whatever images were dropped beside them.
-    @objc private func startTapped() {
-        promptView.submit()
     }
 
     private func createWorktree() {
@@ -946,6 +1232,11 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
     /// Answers whether a session was actually started. The composer empties itself on `true`
     /// and keeps everything it holds on `false`, so a start that could not be recorded does not
     /// take the prompt with it.
+    ///
+    /// `attachmentPaths` are the images the opening prompt carries. They travel beside the text
+    /// rather than being read back out of it: the session they belong to does not exist yet, so
+    /// filing them is the receiver's job, and a path parsed back out of a sentence is a guess
+    /// where this is a fact.
     @discardableResult
     func sessionComposer(
         _ composer: SessionComposerViewController,
@@ -953,10 +1244,12 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         kind: AgentKind,
         accountHandle: AccountHandle,
         model: String?,
+        reasoningEffort: String?,
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
-        prompt: String
+        prompt: String,
+        attachmentPaths: [String]
     ) -> Bool
 
     func sessionComposer(
@@ -971,34 +1264,36 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         into projectID: ProjectID
     )
 
-    /// The project chip chose an existing project. Routed through the delegate so selection,
+    /// The location chip chose an existing project. Routed through the delegate so selection,
     /// the header tab, and the sidebar all move on the one existing path.
     func sessionComposer(
         _ composer: SessionComposerViewController,
         didSelectProject projectID: ProjectID
     )
 
-    /// The project chip asked for a folder that is not a project yet.
+    /// The location chip asked for a folder that is not a project yet.
     func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController)
     func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController)
 }
 
-// MARK: - Project Chip Actions
+// MARK: - Project Actions
 
-/// What the project chip's menu offers besides the projects themselves.
-private enum ProjectChipAction {
+/// What the project list offers besides the projects themselves.
+private enum ProjectAction {
     case addExisting
     case createNew
 }
 
-// MARK: - Branch Selection
+// MARK: - Checkout Selection
 
-/// What the branch chip's menu offers: a place to run, or the action that makes one.
+/// What the location menu's first section offers: a place to run, or the action that makes one.
 ///
 /// The worktree action lived in a chip of its own, which read as a *state* — one of the
 /// choices in the row, seemingly selected — when it is a thing that happens. Folded in here,
-/// one control answers one question: which checkout does this session run in.
-private enum BranchSelection {
+/// one section answers one question: which checkout does this session run in. Kept apart from
+/// the project rows in the same menu because choosing one of these routes the session while
+/// leaving the composer alone, where choosing a project navigates away from it.
+private enum CheckoutSelection {
     case thisCheckout
     case checkout(String)
     case newWorktree
@@ -1015,14 +1310,38 @@ enum ComposerDefaults {
     /// The least air the hero needs beyond its own height before it is worth showing at all.
     static let heroMinimumClearance: CGFloat = 48
 
-    /// The widest the project chip may grow before its name truncates — roomy enough for a
-    /// real repository name, not roomy enough to starve the six chips beside it.
-    static let projectChipMaxWidth: CGFloat = 260
+    /// The widest the location chip may grow before its title truncates.
+    ///
+    /// Sixty points above the 260 the project name alone had, because the chip now answers with
+    /// a repository *and* a checkout and a branch name is not free. Still under half the
+    /// column's `contentWidth`, which is the actual constraint: past that a long name starts
+    /// eating the identity beside it, and a row where only one chip is readable is worse than a
+    /// truncated breadcrumb with the whole answer on its tooltip.
+    static let locationChipMaxWidth: CGFloat = 320
 
     /// Wider than `readableWidth`, which paces prose. This column holds a row of controls
-    /// and two usage bars, and squeezing those to a reading measure is what shrank the chips
-    /// to unlabelled icons.
+    /// and a prompt box with a control row of its own, and squeezing those to a reading measure
+    /// is what shrank the chips to unlabelled icons.
     static let contentWidth: CGFloat = 720
+
+    /// How hard the column insists on filling the pane. Below every split item's holding
+    /// priority, and that is the whole point: paired with the required `contentWidth` cap, an
+    /// equality at `.defaultHigh` states "the *pane* is no wider than 784" as surely as it states
+    /// how wide the column is, and Auto Layout is happy to satisfy it by refusing to widen the
+    /// pane. In a 1200pt window that pinned the terminal at 784 and left the sidebar unable to be
+    /// dragged narrower than 415 — the divider stopped dead well short of its floor, and carrying
+    /// on shut the column instead. Under the split view's own priorities the same measurement can
+    /// only ever answer "as wide as there is room for".
+    static let columnMeasurePriority = NSLayoutConstraint.Priority(240)
+
+    /// Below `columnMeasurePriority`, so the column goes on filling the pane rather than hugging
+    /// its widest row — which is what a stack does the moment its own hugging outranks the
+    /// measurement, and is the narrowing that measurement exists to prevent.
+    static let columnHuggingPriority = NSLayoutConstraint.Priority(1)
+
+    /// Below every control's own hugging, so a spacer is what stretches when a row has width to
+    /// spare. Any real priority would leave the chips competing for the slack with it.
+    static let spacerPriority = NSLayoutConstraint.Priority(1)
 
     /// The prompt opens several lines tall. The composer owns the whole pane and is replaced
     /// by the conversation the moment it is used, so there is nothing to be compact for — and
@@ -1032,47 +1351,62 @@ enum ComposerDefaults {
     static let branchFieldWidth: CGFloat = 260
     static let branchFieldHeight: CGFloat = 24
 
-    /// Only shown when the account states no model of its own — otherwise the chip names the
-    /// model the session will actually run on.
-    static var defaultModelTitle: String { L10n.string("Default model") }
+    /// Reached only by a login that has never run this agent anywhere — no configuration, no
+    /// organisation default, and no transcript to read a previous run out of. Everything else
+    /// names a model. See `ConversationControlDefaults.defaultModel` for why these words and not
+    /// "Default model".
+    static var defaultModelTitle: String { L10n.string("Agent's choice") }
 
     /// Marks the CLI's own choice in the model menu, so picking it explicitly and leaving it
     /// alone are visibly the same thing.
     static var accountDefaultSuffix: String { L10n.string("  (account default)") }
-    static var noBranchTitle: String { L10n.string("No branch") }
+
+    /// A model nothing configured, named because this login ran on it before. Qualified apart
+    /// from a configured one: it is where the account landed last time, not a setting to change.
+    static var lastUsedSuffix: String { L10n.string("  (last used)") }
+
+    /// Nothing runs while the composer is open, so a runtime report is impossible here and the
+    /// two reachable sources are the account's configuration and what it last ran.
+    static func suffix(for source: ResolvedDefaultModel.Source) -> String {
+        switch source {
+        case .accountConfiguration, .reportedByRuntime: return accountDefaultSuffix
+        case .rememberedFromEarlierRun: return lastUsedSuffix
+        }
+    }
     static var newWorktreeTitle: String { L10n.string("New Worktree…") }
 
-    /// Marks the project's own folder in the branch menu, so the default reads as a place
-    /// rather than as one branch name among several.
-    static var thisCheckoutSuffix: String { L10n.string("this checkout") }
+    /// Marks the project's own folder in the checkout section, so the default reads as a place
+    /// rather than as one branch name among several. Parenthesised in the shape the model
+    /// menu's "(account default)" already uses: it was joined with an em dash, which is not
+    /// a mark this app's copy uses anywhere.
+    static var thisCheckoutSuffix: String { L10n.string("  (this checkout)") }
+
+    /// Opens the projects, one layer in. Titled as the act rather than as the thing, because
+    /// the rows above it are places too and only the verb tells them apart.
+    static var switchProjectTitle: String { L10n.string("Switch Project") }
 
     /// A session is the durable object; these names describe only the UI rendering it.
     static var nativeTitle: String { L10n.string("Native (Experimental)") }
     static let surfaceSymbol = "bubble.left.and.text.bubble.right"
-    static let permissionModeSymbol = "hand.raised"
 
-    /// What the chip says when nothing here or in Settings has chosen: it names *where* the
-    /// decision is made rather than guessing what the CLI's own config says, which Threading
-    /// cannot read and must not claim to know.
-    static var followsCLIPermissionModeTitle: String { L10n.string("Agent's Setting") }
-
-    /// The inherit item's wording, given the app-wide default. It names the inherited answer
-    /// where there is one and defers where there is not, so choosing the default explicitly
-    /// and leaving it alone are visibly the same thing.
-    static func inheritedPermissionModeTitle(_ inherited: AgentPermissionMode?) -> String {
-        guard let inherited else { return L10n.string("Use Agent's Setting") }
-        return L10n.format("Use Default (%@)", inherited.displayName)
-    }
+    /// The permission-mode symbol, wording and rows live in `PermissionModePresentation`, which
+    /// three surfaces share.
     static var promptPlaceholder: String {
         L10n.string("Describe a task or ask a question")
     }
 
     static let importSymbol = "tray.and.arrow.down"
 
-    /// What the start button names and answers to. ⌘Return rather than Return, because Return
-    /// is a line break in a box this size — and the button says so on its face rather than
-    /// leaving the user to discover it.
-    static let startShortcut = KeyboardShortcut(key: "\r", modifiers: .command)
+    /// Why the send will not fire, on the glyph's tooltip. A short sentence rather than a
+    /// dimmed control with nothing to say — the chip beside it is already the ask, and this is
+    /// what connects the two.
+    static var chooseProjectFirstReason: String { L10n.string("Choose a project first") }
+
+    /// How old the usage reading is, on the label's tooltip. The panel this replaced said it
+    /// the same way, in words the usage surfaces already share.
+    static func updatedTitle(_ age: String) -> String {
+        L10n.format("Updated %@", age)
+    }
 
     /// Counted, because the number is what tells the user whether it is worth opening.
     static func importTitle(count: Int) -> String {
@@ -1081,10 +1415,33 @@ enum ComposerDefaults {
             : L10n.format("Import %lld conversations", Int64(count))
     }
 
-    static let accountSymbol = "person.crop.circle"
     static let modelSymbol = "cpu"
-    static let branchSymbol = "arrow.trianglehead.branch"
-    static let projectSymbol = "folder"
+
+    /// The folder the session runs in, which is what the location chip is *about* — a branch
+    /// glyph would name the finer half of the answer.
+    static let locationSymbol = "folder"
+
+    /// A step *into* something: the same mark the app's copy uses for a path through menus
+    /// ("Settings ▸ Themes"). A checkout is inside a project and reads that way.
+    static let breadcrumbSeparator = "▸"
+
+    /// Joins peers rather than nesting them, which is what an agent and its login are — and
+    /// what "Opus · 1M" on the row below already looks like.
+    static let identitySeparator = "·"
+
+    /// `AnotherTerminal ▸ master`; the project alone outside a repository; the ask when there is
+    /// no project yet, since that is the one question this chip has to make somebody answer.
+    static func locationTitle(project: String?, branch: String?) -> String {
+        guard let project else { return chooseProjectTitle }
+        guard let branch, !branch.isEmpty else { return project }
+        return "\(project) \(breadcrumbSeparator) \(branch)"
+    }
+
+    /// `Claude Code · work`, or the agent alone where there is only one login to run as.
+    static func identityTitle(agent: String, account: String?) -> String {
+        guard let account, !account.isEmpty else { return agent }
+        return "\(agent) \(identitySeparator) \(account)"
+    }
 
     /// The chip's ask when the composer has nowhere to start yet.
     static var chooseProjectTitle: String { L10n.string("Choose a project…") }

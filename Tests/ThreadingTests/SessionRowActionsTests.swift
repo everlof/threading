@@ -312,6 +312,89 @@ final class SessionRowActionsTests: XCTestCase {
         }
     }
 
+    /// The Copy fold carries two identifiers under two names, never one under a fallback. The
+    /// agent's id names the conversation to the CLI, Threading's names it to the app, and the
+    /// retired single item copied whichever existed — so the string on the pasteboard meant
+    /// different things on different rows, invisibly. The agent's item is absent rather than
+    /// disabled until the agent has named the conversation: there is nothing true to copy
+    /// under that title yet.
+    func testTheCopyFoldOffersBothIdentifiersOnceTheAgentHasNamedTheConversation() throws {
+        let sidebar = ProjectSidebarViewController()
+
+        var named = AgentSession(kind: .codex, title: "Named")
+        named.resumeState = .resumable(TranscriptID("019852cf-codex-rollout"))
+        let fold = try copySubmenu(in: sidebar.sessionActionEntries(for: named))
+        XCTAssertEqual(
+            Array(fold.compactMap { $0.item?.title }.prefix(2)),
+            [L10n.string("Agent Session ID"), L10n.string("Threading ID")],
+            "the identifier pair separated or lost its order"
+        )
+
+        let fresh = AgentSession(kind: .codex, title: "Fresh")
+        XCTAssertEqual(fresh.resumeState, .awaitingIdentifier)
+        let freshFold = try copySubmenu(in: sidebar.sessionActionEntries(for: fresh))
+        XCTAssertFalse(
+            freshFold.compactMap { $0.item?.title }
+                .contains(L10n.string("Agent Session ID")),
+            "an id the agent has not issued was offered for copying"
+        )
+        XCTAssertEqual(
+            freshFold.first?.item?.title,
+            L10n.string("Threading ID"),
+            "Threading's own id exists from birth and its row must too"
+        )
+    }
+
+    /// The fold's full complement, stated as a decision: ids first (the agent's, then
+    /// Threading's), then the checkout, then the transcript — and every row answers a choice,
+    /// because a fold member with nothing to do draws, highlights and silently does nothing.
+    func testTheCopyFoldCarriesThePathsWhenTheyResolve() throws {
+        var session = AgentSession(kind: .codex, title: "Named")
+        session.resumeState = .resumable(TranscriptID("019852cf-codex-rollout"))
+
+        let entry = ProjectSidebarViewController().sessionCopyEntry(
+            for: session,
+            project: Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p")),
+            transcriptURL: URL(fileURLWithPath: "/tmp/rollout.jsonl")
+        )
+        let fold = try XCTUnwrap(entry.item?.submenu)
+        XCTAssertEqual(
+            fold.compactMap { $0.item?.title },
+            [
+                L10n.string("Agent Session ID"),
+                L10n.string("Threading ID"),
+                L10n.string("Worktree Path"),
+                L10n.string("Transcript Path")
+            ]
+        )
+        for item in fold.compactMap(\.item) {
+            XCTAssertNotNil(item.onChoose, "\(item.title) answers nothing inside the fold")
+        }
+    }
+
+    /// A terminal carries the same Copy fold as the chat rows — the id that names it to
+    /// Threading and the checkout it stands in — under the same titles. One concept, one
+    /// name, whichever row it is asked of.
+    func testTheTerminalMenuOffersTheCopyFold() throws {
+        let entries = ProjectSidebarViewController()
+            .terminalMenuEntries(for: TerminalID(), row: 0)
+        let fold = try XCTUnwrap(
+            entries.compactMap(\.item).first { $0.title == L10n.string("Copy") }?.submenu,
+            "the terminal menu lost its Copy fold"
+        )
+        XCTAssertEqual(
+            fold.compactMap { $0.item?.title },
+            [L10n.string("Threading ID"), L10n.string("Worktree Path")]
+        )
+    }
+
+    private func copySubmenu(in entries: [ThemedMenuEntry]) throws -> [ThemedMenuEntry] {
+        try XCTUnwrap(
+            entries.compactMap(\.item).first { $0.title == L10n.string("Copy") }?.submenu,
+            "the session menu has no Copy fold"
+        )
+    }
+
     private func sessionOptions(in entries: [ThemedMenuEntry]) throws -> [ThemedMenuEntry] {
         try XCTUnwrap(
             entries.compactMap(\.item)

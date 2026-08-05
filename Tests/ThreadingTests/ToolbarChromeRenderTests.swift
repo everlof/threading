@@ -45,8 +45,9 @@ final class ToolbarChromeRenderTests: XCTestCase {
         written += try write(story: "02-pane-tabs") { Self.paneTabStrip() }
         written += try write(story: "03-drawer-seam") { Self.drawerSeam() }
         written += try write(story: "04-pane-header-hover") { Self.paneHeaderRow() }
+        written += try write(story: "05-open-in-states") { Self.openInStates() }
 
-        XCTAssertEqual(written, 8, "Every story should render on both backdrops")
+        XCTAssertEqual(written, 10, "Every story should render on both backdrops")
         print("Rendered toolbar chrome storybook to \(Render.directory.path)")
     }
 
@@ -114,6 +115,17 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 $0.addressField.stringValue = "https://example.test/review"
                 $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
                 $0.setAnnotating(true)
+            },
+            // The hint only earns its place if it reads as quiet beside the address at a width
+            // that can hold both. That is a judgement about ink, so it is made in a picture.
+            BrowserChromeStory(
+                name: "wide-password-hint",
+                width: 900,
+                context: .shared
+            ) {
+                $0.addressField.stringValue = "https://accounts.example.test/sign-in"
+                $0.setNavigationState(canGoBack: true, canGoForward: false, popupDepth: 0)
+                $0.setPasswordFieldFocused(true)
             }
         ]
 
@@ -143,7 +155,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, 24)
+        XCTAssertEqual(written, 28)
         print("Rendered browser chrome matrix to \(Render.directory.path)")
     }
 
@@ -244,13 +256,33 @@ final class ToolbarChromeRenderTests: XCTestCase {
             "private input state should not consume the address at minimum width"
         )
 
+        XCTAssertTrue(
+            password.passwordHintLabel.isHidden,
+            "the sentence is the widest thing the focused state adds, so it yields first"
+        )
+
         password.frame.size.width = 620
         password.updateResponsiveLayout()
         password.layoutSubtreeIfNeeded()
         XCTAssertEqual(password.passwordInputButton.title, "Private Input")
+        XCTAssertTrue(password.passwordHintLabel.isHidden)
+
+        password.frame.size.width = 900
+        password.updateResponsiveLayout()
+        password.layoutSubtreeIfNeeded()
+        XCTAssertFalse(password.passwordHintLabel.isHidden)
+        XCTAssertGreaterThanOrEqual(
+            password.addressField.frame.width,
+            72,
+            "the hint never takes the address's floor"
+        )
 
         password.setPasswordFieldFocused(false)
         XCTAssertTrue(password.passwordInputButton.isHidden)
+        XCTAssertTrue(
+            password.passwordHintLabel.isHidden,
+            "the hint belongs to the focused field, not to the tab"
+        )
     }
 
     /// The claim the storybook is there to protect.
@@ -282,6 +314,32 @@ final class ToolbarChromeRenderTests: XCTestCase {
             pageTab.inkSource,
             .backdrop,
             "the toolbar floats over the terminal's palette, not the chrome's"
+        )
+    }
+
+    /// The usage pill is measured against the controls it shares the header row with, not
+    /// against its own contents.
+    ///
+    /// It stood 20 points tall between a 28pt page tab and 28pt action buttons, because it was
+    /// sized to fit a ring and a line of text. Read as a smaller thing dropped into the row, and
+    /// gave the strip a second silhouette at exactly the control in the middle of it — the drift
+    /// the shared corner radius was introduced to end, in the one dimension that rule missed.
+    func testTheUsagePillIsAsTallAsTheControlsBesideIt() {
+        let pill = AccountUsageItemView()
+        let pageTab = Self.pageTab(title: "sonda", symbolName: "folder")
+        let action = ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options")
+
+        XCTAssertEqual(
+            pill.fittingSize.height,
+            pageTab.fittingSize.height,
+            accuracy: 0.5,
+            "the usage pill is a different height from the page tab beside it"
+        )
+        XCTAssertEqual(
+            pill.fittingSize.height,
+            action.fittingSize.height,
+            accuracy: 0.5,
+            "the usage pill is a different height from the action buttons beside it"
         )
     }
 
@@ -343,18 +401,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
         // it is the only control in this strip carrying colour, because the one question it
         // answers at a glance is which app the press sends you to. Finder's icon stands in
         // because every Mac has it — on a real strip this is VS Code, Xcode or Zed.
-        let openIn = ThemedIconButton(
-            symbolName: OpenInToolbarDefaults.fallbackSymbol,
-            accessibility: "Open in Finder"
-        )
-        if let finder = ExternalApps.app(id: ExternalApps.finderID),
-           let icon = ExternalAppLauncher.shared.icon(for: finder) {
-            openIn.setImage(icon, accessibility: "Open in Finder")
-        }
-        let openInGroup = ToolbarButtonGroupView(buttons: [
-            openIn,
-            ThemedIconButton(symbolName: DesignSymbols.chevron, accessibility: "Choose an app")
-        ])
+        let openInControl = openIn()
 
         let actions = ToolbarButtonGroupView(buttons: [
             ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options"),
@@ -366,7 +413,44 @@ final class ToolbarChromeRenderTests: XCTestCase {
             selected(ThemedIconButton(symbolName: "sidebar.trailing", accessibility: "Panel"))
         ])
 
-        return strip([pageTab, newSession, openInGroup, actions], spacing: Design.Spacing.medium)
+        return strip([pageTab, newSession, openInControl, actions], spacing: Design.Spacing.medium)
+    }
+
+    /// The Open In control at rest, with the press raised, and with the chevron raised.
+    ///
+    /// The three states are the story: they were two buttons in a group, so hovering one raised
+    /// a rounded rect of its own and the control came apart down the middle at exactly the moment
+    /// the pointer said it was one thing. What is being looked at here is the seam — the raise
+    /// has to stop inside the plate's silhouette, square at the join and round at the outer end.
+    private static func openInStates() -> NSView {
+        let hovered = openIn()
+        hovered.action.mouseEntered(with: hoverEvent())
+
+        let chosen = openIn()
+        chosen.chevron.mouseEntered(with: hoverEvent())
+
+        return strip([openIn(), hovered, chosen], spacing: Design.Spacing.large)
+    }
+
+    /// One Open In control, wearing Finder's mark because every Mac has it.
+    private static func openIn() -> SplitIconButtonView {
+        let open = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: "Open in Finder"
+        )
+        if let finder = ExternalApps.app(id: ExternalApps.finderID),
+           let icon = ExternalAppLauncher.shared.icon(for: finder) {
+            open.setImage(icon, accessibility: "Open in Finder")
+        }
+
+        return SplitIconButtonView(
+            action: open,
+            chevron: ThemedIconButton(
+                symbolName: DesignSymbols.chevron,
+                accessibility: "Choose an app",
+                target: .splitMenu
+            )
+        )
     }
 
     /// The pane's header row as it is drawn: the tabs and the `+` that adds one, with both of

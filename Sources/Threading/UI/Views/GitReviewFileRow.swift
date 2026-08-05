@@ -20,16 +20,22 @@ final class GitReviewFileRow: NSView {
 
     /// Whether the diff wraps to the pane or runs off it into a horizontal scroller.
     private let wraps: Bool
+    private let initialDiffWidth: CGFloat?
 
     /// Where this file lives, when it still does. See `init`.
     private let fileURL: URL?
 
     /// Fired only for a click, never for the initial state — the pane remembers what the user
-    /// chose, not what the auto-expand budget chose for them.
+    /// chose, not the row's default-expanded state.
     var onToggle: ((Bool) -> Void)?
 
+    /// Gives the virtual table the target state before hidden-body constraints change. It can
+    /// swap the collapsed height for its expanded estimate first, avoiding one compressed
+    /// AppKit layout pass on a large or multi-hunk body.
+    var onWillToggle: ((Bool) -> Void)?
+
     /// A reusable table needs an explicit invalidation when this view changes its fitted height.
-    /// A stack observes the constraint change directly; an automatic-height table caches it.
+    /// A stack observes the constraint change directly; the virtual table caches it by path.
     var onHeightChange: (() -> Void)?
 
     /// The whole file, staged or unstaged in one go.
@@ -46,7 +52,7 @@ final class GitReviewFileRow: NSView {
     var onRequestContextComment: ((ConversationContextAttachment) -> Void)? {
         didSet { wireContextDiffs() }
     }
-    private var contextDiffs: [DiffView] = []
+    private var contextDiffs: [GitReviewDiffTextView] = []
 
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
     /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
@@ -110,6 +116,86 @@ final class GitReviewFileRow: NSView {
         !file.hunks.isEmpty || isImageComparison(file)
     }
 
+    /// Text is immediately readable; an image comparison still waits for an explicit open,
+    /// because doing so fetches and decodes two endpoint blobs rather than revealing loaded data.
+    static func expandsByDefault(_ file: GitFileDiff) -> Bool {
+        !file.hunks.isEmpty
+    }
+
+    /// A cheap pre-materialization height for the table's scrollbar and first layout pass.
+    /// Exact TextKit height replaces it as soon as the row enters the viewport. Keeping this
+    /// model-only matters: measuring every offscreen file would undo table virtualization, but
+    /// a generic 48pt estimate both compresses expanded constraints and makes the scrollbar
+    /// grow under the reader as files are discovered.
+    static func estimatedTableHeight(
+        for file: GitFileDiff,
+        expanded: Bool,
+        wraps: Bool,
+        width: CGFloat
+    ) -> CGFloat {
+        guard expanded, isExpandable(file) else { return 48 }
+        guard !isImageComparison(file) else { return 96 }
+
+        let font = Design.Typography.code()
+        let advance = max(font.maximumAdvancement.width, 1)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading) + 2
+        let numberColumns = max(
+            1,
+            Int((GitReviewDefaults.lineNumberWidth / advance).rounded(.down))
+        )
+        let totalColumns = max(Int((max(width, 1) / advance).rounded(.down)), 1)
+        let firstLineColumns = max(totalColumns - numberColumns - 3, 1)
+
+        var remaining = GitReviewDefaults.fileDisplayCap
+        var visualLines = 0
+        var shownHunks = 0
+        var skipped = 0
+        for hunk in file.hunks {
+            guard remaining > 0 else {
+                skipped += hunk.lines.count
+                continue
+            }
+            shownHunks += 1
+            for line in hunk.lines.prefix(remaining) {
+                guard wraps else {
+                    visualLines += 1
+                    continue
+                }
+                let length = min(line.text.utf16.count, GitReviewDefaults.lineCharacterCap)
+                guard length > firstLineColumns else {
+                    visualLines += 1
+                    continue
+                }
+                let indent = min(
+                    line.text.prefix { $0 == " " || $0 == "\t" }.count,
+                    16
+                )
+                let continuationColumns = max(firstLineColumns - indent, 1)
+                visualLines += 1 + Int(ceil(
+                    Double(length - firstLineColumns) / Double(continuationColumns)
+                ))
+            }
+            remaining -= hunk.lines.count
+        }
+
+        let hasHunkHeaders = file.hunks.count > 1 || file.change != .untracked
+        let hunkHeaderHeight = hasHunkHeaders ? CGFloat(shownHunks) * 27 : 0
+        let bodyItemCount = shownHunks * (hasHunkHeaders ? 2 : 1) + (skipped > 0 ? 1 : 0)
+        let bodySpacing = CGFloat(max(bodyItemCount - 1, 0)) * Design.Spacing.tight
+        let omittedNoteHeight: CGFloat = skipped > 0 ? lineHeight : 0
+
+        // 54pt covers either one- or two-line file header, the header/body gap and card bottom;
+        // the final small spacing belongs to `GitReviewVirtualRowHost` below the card.
+        return ceil(
+            54
+                + CGFloat(visualLines) * lineHeight
+                + hunkHeaderHeight
+                + bodySpacing
+                + omittedNoteHeight
+                + Design.Spacing.small
+        )
+    }
+
     /// Extensions the compare surface decodes — raster formats. SVG stays out on purpose: it
     /// is text, and its diff says more than a render of it would.
     private static let rasterImageExtensions: Set<String> = [
@@ -145,11 +231,13 @@ final class GitReviewFileRow: NSView {
         expanded: Bool,
         staging: GitStaging? = nil,
         wraps: Bool = true,
+        initialDiffWidth: CGFloat? = nil,
         fileURL: URL? = nil
     ) {
         self.file = file
         self.staging = staging
         self.wraps = wraps
+        self.initialDiffWidth = initialDiffWidth
         self.fileURL = fileURL
         super.init(frame: .zero)
         setupViews()
@@ -158,6 +246,15 @@ final class GitReviewFileRow: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        guard bodyBuilt, isExpanded, bodyContainer.bounds.width > 1 else { return }
+
+        // Make the real card width the source of truth after a pane resize. Each changed text
+        // constraint schedules one row-cache update; `fit` is a no-op while width is unchanged.
+        contextDiffs.forEach { $0.fit(toWidth: bodyContainer.bounds.width) }
     }
 
     // MARK: - Setup
@@ -237,8 +334,10 @@ final class GitReviewFileRow: NSView {
             chevron.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
 
             bodyContainer.topAnchor.constraint(equalTo: headerContentBottom, constant: inset),
-            bodyContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            bodyContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
+            // The header content owns the card inset; the diff wash itself is full-bleed so its
+            // edge aligns with the mode chip and the card above and below it.
+            bodyContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bodyContainer.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         if !directoryText.isEmpty {
@@ -414,10 +513,21 @@ final class GitReviewFileRow: NSView {
         guard let headerBottom, let bodyBottom else { return }
         if !bodyBuilt { buildBody() }
 
-        isExpanded.toggle()
-        bodyContainer.isHidden = !isExpanded
-        headerBottom.isActive = !isExpanded
-        bodyBottom.isActive = isExpanded
+        let targetExpanded = !isExpanded
+        onWillToggle?(targetExpanded)
+        isExpanded = targetExpanded
+        if isExpanded {
+            // Remove the collapsed edge before making the body participate in stack layout.
+            // Showing it first briefly made both bottom edges required; AppKit recovered by
+            // breaking the diff's measured-height constraint, leaving the card malformed.
+            headerBottom.isActive = false
+            bodyContainer.isHidden = false
+            bodyBottom.isActive = true
+        } else {
+            bodyBottom.isActive = false
+            bodyContainer.isHidden = true
+            headerBottom.isActive = true
+        }
 
         chevron.image = NSImage(
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
@@ -448,9 +558,16 @@ final class GitReviewFileRow: NSView {
             if file.hunks.count > 1 || file.change != .untracked {
                 addBodyRow(makeHunkHeader(hunk, index: index))
             }
-            let diff = DiffView(gitLines: hunk.lines, displayCap: remaining, path: file.path, wraps: wraps)
+            let diff = GitReviewDiffTextView(
+                gitLines: hunk.lines,
+                displayCap: remaining,
+                path: file.path,
+                wraps: wraps,
+                initialLayoutWidth: initialDiffWidth
+            )
             contextDiffs.append(diff)
             wireContextDiff(diff)
+            diff.onPreferredHeightChange = { [weak self] in self?.onHeightChange?() }
             addBodyRow(wraps ? diff : Self.horizontallyScrolling(diff))
             remaining -= hunk.lines.count
         }
@@ -464,7 +581,7 @@ final class GitReviewFileRow: NSView {
         contextDiffs.forEach(wireContextDiff)
     }
 
-    private func wireContextDiff(_ diff: DiffView) {
+    private func wireContextDiff(_ diff: GitReviewDiffTextView) {
         diff.onAddContextAttachment = onAddContextAttachment
         diff.onRequestComment = onRequestContextComment
     }
@@ -527,7 +644,7 @@ final class GitReviewFileRow: NSView {
     /// A diff that runs off the pane, put in a horizontal scroller sized to its own height so
     /// the outer vertical scroll still sees the whole thing. Only the diff scrolls sideways —
     /// the header and `@@` rows stay put — which is why each hunk is wrapped, not the pane.
-    private static func horizontallyScrolling(_ diff: DiffView) -> NSView {
+    private static func horizontallyScrolling(_ diff: GitReviewDiffTextView) -> NSView {
         let scroll = ThemedScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasHorizontalScroller = true

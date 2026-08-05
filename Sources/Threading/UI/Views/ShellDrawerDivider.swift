@@ -16,6 +16,12 @@ final class ShellDrawerDivider: BackdropOverlay {
     /// Positive as the pointer moves down, which is the direction that *shrinks* the drawer.
     var onDrag: ((CGFloat) -> Void)?
 
+    /// The release. The height constraint clamps at the drawer's floor while the hand keeps
+    /// going, so only the owner's running total knows how far past it the drag went — this is
+    /// the moment that overshoot becomes an answer, exactly as a split divider's release does
+    /// (see `ThemedSplitView.dividerDragDidEnd`).
+    var onDragEnded: (() -> Void)?
+
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { needsDisplay = true } }
 
@@ -67,5 +73,9 @@ final class ShellDrawerDivider: BackdropOverlay {
 
     override func mouseDragged(with event: NSEvent) {
         onDrag?(event.deltaY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onDragEnded?()
     }
 }

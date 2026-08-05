@@ -931,10 +931,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(.separator())
 
         // ⌥⌘I — the browser devtools shortcut, for the same gesture: point at the thing on
-        // screen and get something you can paste into a conversation about it. The shifted
-        // variant is the freeflow twin; invoking one while the other is active switches mode.
+        // screen and get something you can paste into a conversation about it. One item, not
+        // two: element and freeflow are decided by what is held while pointing, so ⌥⇧⌘I still
+        // opens freeflow without a second menu entry claiming to be a different feature.
         menu.addItem(commandItem(AppCommands.ID.inspectElement, action: #selector(inspectElement)))
-        menu.addItem(commandItem(AppCommands.ID.inspectGeometry, action: #selector(inspectPoint)))
 
         let extensionSeparator = NSMenuItem.separator()
         extensionSeparator.isHidden = true
@@ -1344,11 +1344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func inspectElement() {
-        mainWindowController?.toggleElementInspector(mode: .element)
-    }
-
-    @objc private func inspectPoint() {
-        mainWindowController?.toggleElementInspector(mode: .freeflow)
+        mainWindowController?.toggleElementInspector()
     }
 
     @objc private func increaseFontSize() {

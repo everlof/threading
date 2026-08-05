@@ -40,6 +40,9 @@ final class AgentSessionViewController: NSViewController {
     /// Set when the terminal is not yet large enough to start the process, so the launch
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
+    private var identifierLaunchDate: Date?
+    private var isDiscoveringIdentifier = false
+    private var nextIdentifierDiscoveryAt = Date.distantPast
     private let remoteViewportBanner = RemoteViewportBannerView()
     private var attachmentObserver: TerminalAttachmentObserver?
     private var selectedSubagentID: String?
@@ -222,6 +225,42 @@ final class AgentSessionViewController: NSViewController {
         view.window?.makeFirstResponder(session.terminalView)
     }
 
+#if DEBUG
+    /// Starts a deterministic PTY for the opt-in cross-client browser journey. It exercises the
+    /// shipping server, terminal mirror, WebSocket and composer without spending an agent turn
+    /// or depending on a developer's Claude/Codex account. The test host owns the controller and
+    /// removes the temporary project when the journey finishes.
+    func startRemoteBrowserE2EFixture() {
+        guard !isRunning else { return }
+        _ = view
+        view.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
+        view.layoutSubtreeIfNeeded()
+
+        isRunning = true
+        activityTracker.markRunning()
+        RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
+        session.start(plan: AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: [
+                "-c",
+                #"""
+                printf '\033[2J\033[HThreading remote E2E host\r\n'
+                printf 'Atomic terminal composer ready.\r\nthreading-demo> '
+                while IFS= read -r line; do
+                  printf '\r\nreceived once: %s\r\n' "$line"
+                  if [ "$line" = "finish-e2e" ]; then
+                    printf 'E2E complete.\r\n'
+                    exit 0
+                  fi
+                  printf 'threading-demo> '
+                done
+                """#,
+            ],
+            resumeState: .unavailable
+        ))
+    }
+#endif
+
     func selectSubagent(_ threadID: String?) {
         guard let threadID,
               let selected = subagentState.timeline.agents.first(where: {
@@ -286,19 +325,20 @@ final class AgentSessionViewController: NSViewController {
             case .unavailable:
                 return
             case .loaded:
-                self.subagentState.replaceConversation(
+                self.subagentState.replaceTranscriptConversation(
                     threadID: threadID,
                     events: events
-                )
+                ) { [weak self] in
+                    guard let self else { return }
+                    if isTruncated {
+                        self.subagentState.apply(.activity(
+                            threadID: threadID,
+                            text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                        ))
+                    }
+                    self.scheduleTranscriptStabilityChecks(threadID: threadID)
+                }
             }
-            if isTruncated {
-                self.subagentState.apply(.activity(
-                    threadID: threadID,
-                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
-                ))
-            }
-            self.refreshSubagentState()
-            self.scheduleTranscriptStabilityChecks(threadID: threadID)
         }
     }
 
@@ -358,6 +398,9 @@ final class AgentSessionViewController: NSViewController {
             "command": ([plan.executable] + plan.arguments).joined(separator: " ")
         ])
 
+        if plan.resumeState == .awaitingIdentifier {
+            identifierLaunchDate = Date()
+        }
         session.start(plan: plan)
         recordLaunch(plan: plan)
     }
@@ -373,7 +416,7 @@ final class AgentSessionViewController: NSViewController {
         }
 
         if plan.resumeState == .awaitingIdentifier {
-            discoverCodexSessionID()
+            discoverAssignedSessionID()
         }
 
         delegate?.agentSessionDidChangeState(self)
@@ -388,32 +431,117 @@ final class AgentSessionViewController: NSViewController {
         delegate?.agentSessionDidChangeState(self)
     }
 
-    /// Codex assigns its own identifier, so it is recovered from the rollout file it writes
-    /// shortly after launch and stored for future resumes.
-    ///
-    /// Rollouts are written under the launching account's own home, so discovery is scoped
-    /// to that account rather than the default one.
-    private func discoverCodexSessionID() {
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID),
+    /// Persists the identifier needed to resume a fresh conversation. Codex and OpenCode assign
+    /// theirs; Grok's UUID is known but is not resumable until its first conversation record
+    /// exists. Claude's identifier is immediately resumable and never enters this path.
+    private func discoverAssignedSessionID() {
+        guard !isDiscoveringIdentifier,
+              let launchedAt = identifierLaunchDate,
               let agentSession = ProjectStore.shared.session(withID: sessionID),
+              agentSession.resumeState == .awaitingIdentifier else { return }
+
+        isDiscoveringIdentifier = true
+        switch agentSession.kind {
+        case .claude:
+            isDiscoveringIdentifier = false
+        case .codex:
+            discoverCodexSessionID(for: agentSession, launchedAt: launchedAt)
+        case .grok:
+            discoverGrokSessionID(for: agentSession)
+        case .openCode:
+            discoverOpenCodeSessionID(launchedAt: launchedAt)
+        }
+    }
+
+    /// Codex rollouts live under the launching account's own home, so discovery is scoped to
+    /// that account rather than the default one.
+    private func discoverCodexSessionID(for agentSession: AgentSession, launchedAt: Date) {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID),
               let account = AgentAccountDiscovery.account(
                   for: agentSession.kind,
                   handle: agentSession.accountHandle
-              ) else { return }
+              ) else {
+            isDiscoveringIdentifier = false
+            return
+        }
 
-        let launchedAt = Date()
         CodexSessionDiscovery.discoverSessionID(
             projectPath: project.folderPath,
             codexHome: account.configPath,
             launchedAt: launchedAt
         ) { [weak self] discoveredID in
-            guard let self, let discoveredID else { return }
+            guard let self else { return }
+            self.isDiscoveringIdentifier = false
+            guard let discoveredID else { return }
 
             ProjectStore.shared.update(sessionID: self.sessionID) { stored in
                 stored.resumeState = .resumable(discoveredID)
             }
 
             ThreadingLogger.agent.info("Discovered Codex session \(discoveredID, privacy: .public)")
+            self.delegate?.agentSessionDidChangeState(self)
+        }
+    }
+
+    /// OpenCode exposes its session list as JSON, including the creation time and directory.
+    /// Querying that public surface avoids coupling Threading to OpenCode's private SQLite
+    /// schema, which has already changed between releases.
+    private func discoverOpenCodeSessionID(launchedAt: Date) {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+            isDiscoveringIdentifier = false
+            return
+        }
+
+        OpenCodeSessionDiscovery.discoverSessionID(
+            projectPath: project.folderPath,
+            launchedAt: launchedAt
+        ) { [weak self] discoveredID in
+            guard let self else { return }
+            self.isDiscoveringIdentifier = false
+            guard let discoveredID else {
+                self.nextIdentifierDiscoveryAt = Date().addingTimeInterval(5)
+                return
+            }
+
+            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+                stored.resumeState = .resumable(discoveredID)
+            }
+
+            ThreadingLogger.agent.info(
+                "Discovered OpenCode session \(discoveredID, privacy: .public)"
+            )
+            self.delegate?.agentSessionDidChangeState(self)
+        }
+    }
+
+    /// Grok lets Threading name a new UUID, but a first-launch authentication screen does not
+    /// create that conversation. Confirm it through the supported session list before storing a
+    /// resume state, so quitting login cannot strand the sidebar row on a nonexistent UUID.
+    private func discoverGrokSessionID(for agentSession: AgentSession) {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+            isDiscoveringIdentifier = false
+            return
+        }
+
+        let expectedID = TranscriptID(agentSession.id.uuidString.lowercased())
+        GrokSessionDiscovery.discoverSessionID(
+            expectedID,
+            projectPath: project.folderPath
+        ) { [weak self] discoveredID in
+            guard let self else { return }
+            self.isDiscoveringIdentifier = false
+            guard let discoveredID else {
+                self.nextIdentifierDiscoveryAt = Date().addingTimeInterval(5)
+                return
+            }
+
+            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+                stored.resumeState = .resumable(discoveredID)
+            }
+
+            ThreadingLogger.agent.info(
+                "Confirmed Grok session \(discoveredID, privacy: .public)"
+            )
             self.delegate?.agentSessionDidChangeState(self)
         }
     }
@@ -454,6 +582,14 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
         activityTracker.recordOutput(byteCount: byteCount)
         attachmentObserver?.noteOutput()
+
+        // Grok and OpenCode do not create a record for a blank TUI. Output after the initial
+        // discovery window may mean the first prompt landed; retry at a bounded cadence until
+        // the public session list contains it.
+        if agentKind.supports(.deferredSessionIdentifier),
+           Date() >= nextIdentifierDiscoveryAt {
+            discoverAssignedSessionID()
+        }
     }
 
     func terminalSessionDidRingBell(_ session: TerminalSession) {
@@ -479,6 +615,13 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         ProjectStore.shared.update(sessionID: sessionID) { stored in
             stored.lastExitCode = exitCode
             stored.lastActiveAt = Date()
+        }
+
+        // A blank TUI of this kind creates no session until the first prompt. If the initial
+        // poll finished before the user typed, exiting is the next exact point at which to retry.
+        if agentKind.supports(.deferredSessionIdentifier) {
+            nextIdentifierDiscoveryAt = .distantPast
+            discoverAssignedSessionID()
         }
 
         delegate?.agentSession(self, didExitWithCode: exitCode)

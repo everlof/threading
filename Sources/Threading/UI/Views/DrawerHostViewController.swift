@@ -141,7 +141,11 @@ final class DrawerHostViewController: NSViewController {
         // read on. The shell below the strip paints itself with the session's theme, so what
         // this actually grounds is the strip band and any gap the content leaves.
         let backdrop = ThemedSurfaceView()
-        backdrop.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        backdrop.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
         view.addSubview(backdrop)
         NSLayoutConstraint.activate([
             backdrop.topAnchor.constraint(equalTo: view.topAnchor),
@@ -639,7 +643,10 @@ extension DrawerHostViewController: TabHosting {
     /// their one home in the panel; and a kind this host could not rebuild after a relaunch
     /// would be a tab the layout later forgets, which is worse than refusing the move.
     func canAdopt(_ tab: PaneTab) -> Bool {
-        tab.terminal != nil || tab.browser != nil
+        switch tab.body {
+        case .terminal, .browser: return true
+        default: return false
+        }
     }
 
     func detachTab(id: UUID, for sessionID: SessionID?) -> PaneTab? {

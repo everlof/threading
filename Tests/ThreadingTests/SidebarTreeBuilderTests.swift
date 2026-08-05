@@ -40,7 +40,11 @@ final class SidebarTreeBuilderTests: XCTestCase {
     ) -> AgentSession {
         let origin = parent.map(ClaudeSessionOrigin.forked(from:)) ?? .original
         var session = AgentSession(
-            configuration: .claude(remoteControl: nil, origin: origin),
+            configuration: .claude(
+                remoteControl: nil,
+                reasoningEffort: nil,
+                origin: origin
+            ),
             title: title,
             id: id
         )

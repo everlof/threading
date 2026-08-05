@@ -41,7 +41,23 @@ final class ConversationMinimapView: NSView {
 
     private var isPersistent = true
 
-    private let preview = ConversationTurnPreview()
+    /// Hidden from the moment it exists: see `attachPreview(to:)` for what a visible one with
+    /// no active mark did.
+    private let preview: ConversationTurnPreview = {
+        let preview = ConversationTurnPreview()
+        preview.isHidden = true
+        return preview
+    }()
+
+    /// Where the card sits in its container, as constraints rather than as an assigned frame.
+    ///
+    /// The card sizes itself from its own contents, so Auto Layout owns its frame — and a frame
+    /// written straight onto a view the engine owns survives exactly until the next layout pass,
+    /// which then resolves the position it was never given from the only thing it has: nothing.
+    /// The card reappeared at the container's origin, over the composer, still holding the
+    /// pointer's last turn. Two constants the pointer moves are the same arithmetic, kept.
+    private var previewLeading: NSLayoutConstraint?
+    private var previewTop: NSLayoutConstraint?
 
     // MARK: - Initialization
 
@@ -99,9 +115,23 @@ final class ConversationMinimapView: NSView {
 
     /// The preview is a sibling rather than a subview: it is wider than the rail and would be
     /// clipped by it, and it must float over the conversation.
+    ///
+    /// It is attached hidden, and `updatePreview` is what ever shows it. A card is only ever
+    /// correct beside the mark it describes, and until the pointer picks one there is no such
+    /// mark — so an attached-and-visible card had no position to be at and took Auto Layout's
+    /// answer for one: the pane's bottom-left corner, on top of the composer, an empty
+    /// translucent panel two lines tall that no pointer had asked for and nothing dismissed.
     func attachPreview(to container: NSView) {
         guard preview.superview !== container else { return }
         container.addSubview(preview, positioned: .above, relativeTo: nil)
+
+        let leading = preview.leadingAnchor.constraint(equalTo: container.leadingAnchor)
+        let top = preview.topAnchor.constraint(equalTo: container.topAnchor)
+        previewLeading = leading
+        previewTop = top
+        NSLayoutConstraint.activate([leading, top])
+
+        updatePreview()
     }
 
     // MARK: - Layout
@@ -223,7 +253,8 @@ final class ConversationMinimapView: NSView {
     }
 
     private func updatePreview() {
-        guard let activeIndex, turns.indices.contains(activeIndex), let container = preview.superview else {
+        guard let activeIndex, turns.indices.contains(activeIndex),
+              let container = preview.superview else {
             preview.isHidden = true
             return
         }
@@ -240,13 +271,19 @@ final class ConversationMinimapView: NSView {
             railHeight: railHeight
         )
         let anchor = convert(NSPoint(x: bounds.maxX, y: markCentre), to: container)
-        let size = preview.fittingSize
-        let x = anchor.x + Design.Spacing.small
-        let y = min(
-            max(anchor.y - size.height / 2, Design.Spacing.inset),
-            container.bounds.height - size.height - Design.Spacing.inset
+        let height = preview.fittingSize.height
+
+        // The rail is flipped and the pane it hangs in usually is not, so the mark's distance
+        // from the *top* is asked for explicitly rather than assumed from either view.
+        let fromTop = container.isFlipped
+            ? anchor.y
+            : container.bounds.height - anchor.y
+        let lowest = max(
+            Design.Spacing.inset,
+            container.bounds.height - height - Design.Spacing.inset
         )
 
-        preview.frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
+        previewLeading?.constant = anchor.x + Design.Spacing.small
+        previewTop?.constant = min(max(fromTop - height / 2, Design.Spacing.inset), lowest)
     }
 }

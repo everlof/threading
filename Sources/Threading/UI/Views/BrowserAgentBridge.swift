@@ -3403,6 +3403,10 @@ enum BrowserAgentDefaults {
     static let maximumAccessibilityAuditElements = 5_000
     static let maximumWaitSeconds: Double = 15
     static let waitPollNanoseconds: UInt64 = 200_000_000
+    /// How many main-actor turns a password takeover waits for the sidebar to finish selecting
+    /// the session it just asked for. The selection is one notification hop, so this is a
+    /// settle allowance rather than a poll: nothing here retries the selection itself.
+    static let sessionSelectionSettleTurns = 4
     static let maximumSnapshotHeight: CGFloat = 16_000
     static let sensitiveQueryNameFragments = [
         "access_token", "auth", "code", "credential", "key", "password",

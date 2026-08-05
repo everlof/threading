@@ -49,16 +49,17 @@ extension TabHosting {
 
     /// The context-menu entries every tab strip offers, written once against the host contract
     /// so the panel's menu and the drawer's cannot drift: the closes a tabbed app is expected
-    /// to have — this tab, the others, the ones after it — then the keyboard-reachable reorder
-    /// pair. Entries that would do nothing are disabled rather than hidden, so the menu keeps
-    /// one learnable shape wherever it opens. Hosts append what only they know (a "Move to …"
-    /// destination) after these.
+    /// to have — this tab, the others, the ones after it, all of them — then the
+    /// keyboard-reachable reorder pair. Entries that would do nothing are disabled rather than
+    /// hidden, so the menu keeps one learnable shape wherever it opens. Hosts append what only
+    /// they know (a "Move to …" destination) after these.
     func standardTabEntries(for id: UUID, sessionID: SessionID?) -> [ThemedMenuEntry] {
         let tabs = tabs(for: sessionID)
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return [] }
 
         // Captured as ids, not indices: each close mutates the list, and the menu's promise
         // is about the tabs the user saw when it opened.
+        let all = tabs.map(\.id)
         let others = tabs.filter { $0.id != id }.map(\.id)
         let after = tabs.suffix(from: index + 1).map(\.id)
 
@@ -79,6 +80,14 @@ extension TabHosting {
                 isEnabled: !after.isEmpty,
                 onChoose: { [weak self] in
                     for trailing in after { _ = self?.closeTab(id: trailing, for: sessionID) }
+                }
+            )),
+            // Always applicable — with one tab it is Close Tab said another way, which is
+            // cheaper to read than an entry that greys out for a reason nobody can see.
+            .item(ThemedMenuItem(
+                title: L10n.string("Close All Tabs"),
+                onChoose: { [weak self] in
+                    for tab in all { _ = self?.closeTab(id: tab, for: sessionID) }
                 }
             )),
             .separator,

@@ -59,6 +59,7 @@ final class PaneTab {
   enum Body {
     case content(DisplayContent)
     case browser(BrowserViewController)
+    case audit(ExecutionAuditViewController)
     case review(GitReviewViewController)
     case info(SessionInfoViewController)
     case terminal(ShellDrawerViewController)
@@ -95,6 +96,12 @@ final class PaneTab {
 
   var browser: BrowserViewController? {
     if case .browser(let browser) = body { return browser }
+    if case .audit(let audit) = body { return audit.browser }
+    return nil
+  }
+
+  var audit: ExecutionAuditViewController? {
+    if case .audit(let audit) = body { return audit }
     return nil
   }
 
@@ -148,6 +155,7 @@ final class PaneTab {
     switch body {
     case .content: return nil
     case .browser(let browser): return browser
+    case .audit(let audit): return audit
     case .review(let review): return review
     case .info(let info): return info
     case .terminal(let terminal): return terminal
@@ -169,6 +177,8 @@ final class PaneTab {
       return "doc.richtext"
     case .browser(let browser):
       return browser.contextKind == .private ? "hand.raised.fill" : "globe"
+    case .audit:
+      return "checklist.checked"
     case .review:
       return "plus.forwardslash.minus"
     case .info:
@@ -204,6 +214,8 @@ final class PaneTab {
       if let title = browser.currentTitle, !title.isEmpty { return title }
       return browser.currentURL?.host
         ?? (browser.contextKind == .private ? "Private Browser" : "Browser")
+    case .audit:
+      return L10n.string("Execution audit")
     case .review:
       return "Review"
     case .info:

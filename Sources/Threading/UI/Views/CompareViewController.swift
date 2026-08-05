@@ -23,8 +23,9 @@ final class CompareViewController: NSViewController {
     /// Called when the user picks a different mode, so the pane can persist the tab with it.
     var onChange: (() -> Void)?
 
-    /// Feeds the tab's loading affordance, same contract as Review's.
-    var onLoadingChange: ((Bool) -> Void)?
+    /// Feeds the tab's loading affordance, same contract as Review's — including the deinit
+    /// rule: a controller torn down mid-load lowers what it raised, or the row spins forever.
+    var onLoadingChange: (@MainActor @Sendable (Bool) -> Void)?
 
     private lazy var stack: NSStackView = {
         let stack = NSStackView()
@@ -32,8 +33,10 @@ final class CompareViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
         stack.translatesAutoresizingMaskIntoConstraints = false
+        // No top inset: the gap under the header row is the scroll view's, so the comparison
+        // starts where a reader's eye already is rather than an inset lower than the row above.
         stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset,
+            top: 0,
             left: Design.Spacing.inset,
             bottom: Design.Spacing.inset,
             right: Design.Spacing.inset
@@ -62,7 +65,61 @@ final class CompareViewController: NSViewController {
         label.isHidden = true
         return label
     }()
+
+    /// The tab's controls, above the scroll view rather than inside it.
+    ///
+    /// Git Review's shape, one tab along: a chip at the leading edge, the actions at the
+    /// trailing one, no band and no hairline — the pane's own header is the tab strip a few
+    /// points above, and a second banded header under it would read as chrome about chrome. What
+    /// makes this row belong to the *comparison* is that it is inset like the content and scrolls
+    /// with nothing.
+    ///
+    /// The mode chip and the expand button in it are the compare surface's own
+    /// (`ImageCompareView.hostControls`), not copies: below the canvas they were part of the
+    /// scrolled content and left the screen exactly when a tall screenshot had been read far
+    /// enough to want another mode.
+    private lazy var headerRow: NSStackView = {
+        let row = NSStackView(views: [captionLabel, exportButton])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.tight
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }()
+
+    /// Names the pair where the surface does not name it itself — a text diff, or a message.
+    /// It doubles as the row's flexible slack, which is why it stays in the row when empty.
+    private lazy var captionLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.textColor = Design.Text.secondary
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }()
+
+    private lazy var exportButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "square.and.arrow.up",
+            accessibility: L10n.string("Export comparison"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Export comparison")
+        button.onPress = { [weak self] in self?.exportComparison() }
+        button.isHidden = true
+        return button
+    }()
+
     private var compareView: ImageCompareView?
+
+    /// What the last read turned out to be, kept so the export can be built from the same answer
+    /// the body was drawn from rather than by reading both files a second time.
+    private var lastComparison: Comparison?
+
+    /// Held while the save sheet is up; released from its own completion.
+    private var exportSession: CompareExportPanel?
 
     /// The canvas's height, which is a function of the pane's width and so is recomputed
     /// whenever that changes rather than being read once as the body is built.
@@ -111,6 +168,18 @@ final class CompareViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        // Same rule as Review: torn down mid-load, the raise this controller made is one
+        // nothing else can lower — the read's completion holds the controller weakly and
+        // dies with it.
+        if isLoading {
+            let onLoadingChange = onLoadingChange
+            Task { @MainActor in
+                onLoadingChange?(false)
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -122,11 +191,25 @@ final class CompareViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        view.addSubview(headerRow)
         view.addSubview(scrollView)
         view.addSubview(placeholderLabel)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            // The toolbar insets the safe area; pinning to the view's own top would slide the
+            // row under it. Git Review's margin, so the two tabs start on one line.
+            headerRow.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Design.Spacing.inset
+            ),
+            headerRow.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor, constant: Design.Spacing.inset
+            ),
+            headerRow.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor, constant: -Design.Spacing.inset
+            ),
+            scrollView.topAnchor.constraint(
+                equalTo: headerRow.bottomAnchor, constant: Design.Spacing.small
+            ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -263,8 +346,10 @@ final class CompareViewController: NSViewController {
     private func render(_ comparison: Comparison) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         compareView = nil
+        lastComparison = comparison
         placeholderLabel.isHidden = true
         scrollView.isHidden = false
+        updateHeader(for: comparison)
 
         switch comparison {
         case .message(let text):
@@ -297,6 +382,12 @@ final class CompareViewController: NSViewController {
                 self?.updateCompareHeight()
                 self?.onChange?()
             }
+            // The surface's own controls move up into this tab's header, which is also what
+            // stops the surface reserving a row for them under the canvas.
+            let controls = compare.hostControls()
+            headerRow.insertArrangedSubview(controls.mode, at: 0)
+            headerRow.addArrangedSubview(controls.expansion)
+
             compareView = compare
             stack.addArrangedSubview(compare)
 
@@ -325,7 +416,6 @@ final class CompareViewController: NSViewController {
             updateCompareHeight()
 
         case .text(let files):
-            addTextHeader()
             for file in files {
                 for hunk in file.hunks {
                     let diff = DiffView(
@@ -349,22 +439,166 @@ final class CompareViewController: NSViewController {
         }
     }
 
-    /// One caption naming the two sides, so the text diff says what it compares the way the
-    /// image surface's tags do.
-    private func addTextHeader() {
-        let label = NSTextField(labelWithString: "\(oldTitle) → \(newTitle)")
-        label.applyFont(.caption)
-        label.textColor = Design.Text.secondary
-        label.lineBreakMode = .byTruncatingMiddle
-        stack.addArrangedSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(
-                equalTo: stack.leadingAnchor, constant: Design.Spacing.inset
-            ),
-            label.trailingAnchor.constraint(
-                lessThanOrEqualTo: stack.trailingAnchor, constant: -Design.Spacing.inset
+    /// What the header says about the comparison under it.
+    ///
+    /// The caption names the pair only where nothing else does. An image comparison already
+    /// tags both sides on the surface, and repeating the two filenames a line above them in a
+    /// pane this narrow is two-thirds of a row spent saying nothing new — so there the caption
+    /// is empty and serves as the row's slack, holding the chip at one edge and the actions at
+    /// the other.
+    private func updateHeader(for comparison: Comparison) {
+        // Whatever the last comparison hosted is not this one's: a re-read that turns a pair of
+        // images into a message would otherwise leave its mode chip in the header, switching the
+        // mode of a surface that no longer exists.
+        for control in headerRow.arrangedSubviews where control !== captionLabel
+            && control !== exportButton {
+            headerRow.removeArrangedSubview(control)
+            control.removeFromSuperview()
+        }
+
+        switch comparison {
+        case .images:
+            captionLabel.stringValue = ""
+        case .text, .message:
+            captionLabel.stringValue = "\(oldTitle) → \(newTitle)"
+        }
+        exportButton.isHidden = !canExport(comparison)
+    }
+
+    /// Whether there is a comparison to send anyone. A message is the app explaining why there
+    /// is not one, and exporting that would be exporting the explanation.
+    private func canExport(_ comparison: Comparison) -> Bool {
+        switch comparison {
+        case .images(let old, let new): return old != nil || new != nil
+        case .text(let files): return !files.isEmpty
+        case .message: return false
+        }
+    }
+
+    // MARK: - Public Methods — Export
+
+    /// Whether this tab has a comparison worth sending — what the tab's own menu asks before it
+    /// offers the command.
+    var canExportComparison: Bool {
+        lastComparison.map(canExport) ?? false
+    }
+
+    /// Asks where to write the comparison, then writes it.
+    ///
+    /// Everything after the panel closes happens off the main thread: base64 of two 64 MB images
+    /// and a deflate pass are not work to do between two frames, and the sheet is already gone by
+    /// then — there is nothing on screen waiting for it but the file appearing.
+    func exportComparison() {
+        guard let comparison = lastComparison, canExport(comparison) else {
+            NSSound.beep()
+            return
+        }
+        let export = Self.makeExport(
+            comparison,
+            oldPath: oldPath,
+            newPath: newPath,
+            oldTitle: oldTitle,
+            newTitle: newTitle,
+            mode: compareMode
+        )
+        guard let export else {
+            NSSound.beep()
+            return
+        }
+
+        exportSession = CompareExportPanel.present(
+            suggestedName: export.suggestedFileName,
+            from: view
+        ) { [weak self] url, format in
+            self?.exportSession = nil
+            Self.queue.async {
+                let outcome = Result {
+                    try CompareExportPackager.data(for: export, format: format).write(
+                        to: url, options: .atomic
+                    )
+                }
+                guard case .failure(let error) = outcome else { return }
+                Task { @MainActor in
+                    let alert = ThemedAlert(error: error)
+                    alert.messageText = L10n.string("Could Not Export Comparison")
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    /// Freezes what is on screen into the value the packager works from.
+    ///
+    /// `nonisolated` and static because none of it is the view's: it reads the bytes the
+    /// comparison already produced, asks ImageIO what they are, and hands back a `Sendable`
+    /// value — which is what lets the packaging run off the main actor without the controller
+    /// following it there.
+    nonisolated static func makeExport(
+        _ comparison: Comparison,
+        oldPath: String,
+        newPath: String,
+        oldTitle: String,
+        newTitle: String,
+        mode: ImageCompareMode,
+        at date: Date = Date()
+    ) -> CompareExport? {
+        let body: CompareExport.Body
+        switch comparison {
+        case .message:
+            return nil
+        case .images(let old, let new):
+            let oldSide = old.flatMap {
+                imageSide($0, title: oldTitle, path: oldPath)
+            }
+            let newSide = new.flatMap {
+                imageSide($0, title: newTitle, path: newPath)
+            }
+            guard oldSide != nil || newSide != nil else { return nil }
+            body = .images(old: oldSide, new: newSide)
+        case .text(let files):
+            guard !files.isEmpty else { return nil }
+            body = .text(
+                files: files,
+                old: textSide(title: oldTitle, path: oldPath),
+                new: textSide(title: newTitle, path: newPath)
             )
-        ])
+        }
+        return CompareExport(
+            oldTitle: oldTitle,
+            newTitle: newTitle,
+            mode: mode,
+            body: body,
+            exportedAt: date
+        )
+    }
+
+    nonisolated private static func imageSide(
+        _ data: Data,
+        title: String,
+        path: String
+    ) -> CompareExport.ImageSide? {
+        let name = (path as NSString).lastPathComponent
+        guard let readable = CompareExportImageType.webReadable(data, fileName: name),
+              let pixelSize = CompareExportImageType.pixelSize(of: readable.data)
+        else { return nil }
+        return CompareExport.ImageSide(
+            title: title,
+            fileName: readable.fileName,
+            data: readable.data,
+            pixelSize: pixelSize,
+            mediaType: readable.mediaType
+        )
+    }
+
+    /// The source file itself, for the archive. A side that has since been deleted is simply
+    /// absent — the diff beside it is still the comparison that was made.
+    nonisolated private static func textSide(title: String, path: String) -> CompareExport.TextSide? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        return CompareExport.TextSide(
+            title: title,
+            fileName: (path as NSString).lastPathComponent,
+            data: data
+        )
     }
 }
 

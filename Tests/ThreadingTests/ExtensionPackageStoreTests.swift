@@ -424,13 +424,23 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let controller = ExtensionsPreferencesViewController(manager: manager)
         _ = controller.view
 
-        let identifiers = Set(
+        var identifiers = Set(
             descendants(in: controller.view).compactMap { $0.accessibilityIdentifier() }
         )
         XCTAssertTrue(identifiers.contains("settings.extensions.import"))
         XCTAssertTrue(identifiers.contains(
             "settings.extensions.enabled.com.example.installed-test"
         ))
+        let card = try XCTUnwrap(
+            descendants(in: controller.view).first {
+                $0.accessibilityIdentifier()
+                    == "settings.extensions.card.com.example.installed-test"
+            }
+        )
+        XCTAssertTrue(card.accessibilityPerformPress())
+        identifiers = Set(
+            descendants(in: controller.view).compactMap { $0.accessibilityIdentifier() }
+        )
         // Updating is reachable from the page. Without it the capability delta is computed and
         // never shown, which is the same as not computing it.
         XCTAssertTrue(identifiers.contains(
@@ -465,6 +475,13 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let controller = ExtensionsPreferencesViewController(manager: manager)
         _ = controller.view
 
+        let card = try XCTUnwrap(
+            descendants(in: controller.view).first {
+                $0.accessibilityIdentifier()
+                    == "settings.extensions.card.com.example.installed-test"
+            }
+        )
+        XCTAssertTrue(card.accessibilityPerformPress())
         let labels = descendants(in: controller.view)
             .compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(labels.contains("Provides services"))
@@ -1143,10 +1160,19 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
         _ = controller.view
 
+        for identifier in [
+            "settings.tools.group.\(MCPToolCatalog.display.id)",
+            "settings.tools.group.\(group.id)"
+        ] {
+            let disclosure = descendants(in: controller.view).first {
+                $0.accessibilityIdentifier() == identifier
+            }
+            XCTAssertTrue(try XCTUnwrap(disclosure).accessibilityPerformPress())
+        }
         let labels = descendants(in: controller.view)
             .compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertTrue(labels.contains("DISPLAY PANEL"))
-        XCTAssertTrue(labels.contains("CACHE HELPER"))
+        XCTAssertTrue(labels.contains(MCPToolCatalog.display.title))
+        XCTAssertTrue(labels.contains(group.title))
         XCTAssertTrue(labels.contains("Lookup"))
         XCTAssertTrue(labels.contains("ext__com__example__cache__lookup"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])

@@ -161,10 +161,16 @@ final class AgentToolCoordinator: AgentCommandHandling {
   let displayPaneController: DisplayPaneController
   let visibleSessionID: () -> SessionID?
   let setPaneVisible: (Bool) -> Void
+  /// Bringing Threading forward, as its own seam because a password takeover has to do it and a
+  /// test must not: universal autofill fills the frontmost app's focused field, so this is real
+  /// behaviour rather than polish, and `NSApp.activate` in a test host steals the developer's
+  /// focus for a fact no assertion could read back anyway.
+  let activateApp: () -> Void
   let windowProvider: () -> NSWindow?
   let browserAccessDecisionProvider: BrowserAccessDecisionProvider?
   let browserSiteDataDecisionProvider: BrowserSiteDataDecisionProvider?
   let playwrightRunner: PlaywrightAutomationRunner
+  let chromeAutomationProfile: ChromeAutomationProfile
   let dependencies: AgentToolDependencies
   let browserAccessStore = BrowserAccessStore()
   var temporaryBrowserOrigins: [SessionID: Set<BrowserOrigin>] = [:]
@@ -176,7 +182,9 @@ final class AgentToolCoordinator: AgentCommandHandling {
     windowProvider: @escaping () -> NSWindow?,
     browserAccessDecisionProvider: BrowserAccessDecisionProvider? = nil,
     browserSiteDataDecisionProvider: BrowserSiteDataDecisionProvider? = nil,
-    playwrightRunner: PlaywrightAutomationRunner = PlaywrightAutomationRunner()
+    playwrightRunner: PlaywrightAutomationRunner = PlaywrightAutomationRunner(),
+    chromeAutomationProfile: ChromeAutomationProfile = .shared,
+    activateApp: @escaping () -> Void = { NSApp.activate(ignoringOtherApps: true) }
   ) {
     self.init(
       displayPaneController: displayPaneController,
@@ -186,6 +194,8 @@ final class AgentToolCoordinator: AgentCommandHandling {
       browserAccessDecisionProvider: browserAccessDecisionProvider,
       browserSiteDataDecisionProvider: browserSiteDataDecisionProvider,
       playwrightRunner: playwrightRunner,
+      chromeAutomationProfile: chromeAutomationProfile,
+      activateApp: activateApp,
       dependencies: .live
     )
   }
@@ -198,15 +208,19 @@ final class AgentToolCoordinator: AgentCommandHandling {
     browserAccessDecisionProvider: BrowserAccessDecisionProvider?,
     browserSiteDataDecisionProvider: BrowserSiteDataDecisionProvider?,
     playwrightRunner: PlaywrightAutomationRunner,
+    chromeAutomationProfile: ChromeAutomationProfile = .shared,
+    activateApp: @escaping () -> Void = { NSApp.activate(ignoringOtherApps: true) },
     dependencies: AgentToolDependencies
   ) {
     self.displayPaneController = displayPaneController
     self.visibleSessionID = visibleSessionID
     self.setPaneVisible = setPaneVisible
+    self.activateApp = activateApp
     self.windowProvider = windowProvider
     self.browserAccessDecisionProvider = browserAccessDecisionProvider
     self.browserSiteDataDecisionProvider = browserSiteDataDecisionProvider
     self.playwrightRunner = playwrightRunner
+    self.chromeAutomationProfile = chromeAutomationProfile
     self.dependencies = dependencies
   }
 
@@ -266,6 +280,9 @@ final class AgentToolCoordinator: AgentCommandHandling {
       return "backend capability matrix"
     case .browserRunIsolated(let arguments):
       return "\(arguments.steps?.count ?? 0) isolated Playwright steps"
+    case .browserAttachChrome(let arguments):
+      return "\(arguments.steps?.count ?? 0) attached Chrome steps across "
+        + "\(arguments.allowedOrigins?.count ?? 0) authorized origins"
     case .browserSnapshot(let arguments):
       return target(ref: arguments.ref, selector: arguments.selector, locator: nil)
     case .browserAnnotations:
@@ -502,6 +519,8 @@ final class AgentToolCoordinator: AgentCommandHandling {
       observed(browserCapabilities(for: sessionID))
     case .browserRunIsolated(let arguments):
       browserRunIsolated(arguments, for: sessionID, completion: observed)
+    case .browserAttachChrome(let arguments):
+      browserAttachChrome(arguments, for: sessionID, completion: observed)
     case .browserSnapshot(let arguments):
       browserSnapshot(arguments, for: sessionID, completion: observed)
     case .browserAnnotations:
@@ -554,6 +573,10 @@ final class AgentToolCoordinator: AgentCommandHandling {
       completion(setSessionName(arguments, for: sessionID))
     case .listReclaimableStorage:
       completion(listReclaimableStorage())
+    case .listSettings:
+      // Not `observed`: the catalogue is not panel content, and marking the panel seen here
+      // would suppress the description a later resume owes the agent.
+      completion(listSettings())
     case .proposeStorageCleanup(let arguments):
       // Answers only once the user has decided, so the agent's next turn knows the
       // outcome rather than assuming one.

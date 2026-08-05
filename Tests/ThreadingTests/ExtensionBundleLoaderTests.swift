@@ -1553,6 +1553,95 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         }
     }
 
+    /// The generated Seatbelt profile is a text document built by interpolating **paths** into
+    /// it, so a path is the one thing in it an attacker could choose. A package installed under a
+    /// directory whose name carries a newline and a directive would otherwise close the quoted
+    /// string and append its own rule — `(allow default)` inside the profile that is supposed to
+    /// be denying by default. macOS permits every byte but `/` and NUL in a name, so this is a
+    /// filename anyone can create.
+    ///
+    /// The refusal has to happen while building the profile: there is no later point at which a
+    /// malformed profile is distinguishable from an intended one.
+    func testSandboxRefusesToBuildAProfileForAPathThatCouldInjectDirectives() throws {
+        let directory = try makeBundle(
+            capabilities: [.hostProjectsRead],
+            script: "#!/bin/sh\nexit 0"
+        )
+        let hostile = directory.deletingLastPathComponent()
+            .appendingPathComponent("evil\n(allow default)\n(deny signal", isDirectory: true)
+        try? FileManager.default.removeItem(at: hostile)
+        try FileManager.default.moveItem(at: directory, to: hostile)
+        defer { try? FileManager.default.removeItem(at: hostile) }
+
+        let bundle = try ExtensionBundleInspector.inspect(at: hostile)
+        XCTAssertThrowsError(
+            try ExtensionSandboxPolicy.profile(bundle: bundle, environment: [:])
+        ) { error in
+            guard case .invalidPath = error as? ExtensionSandboxError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+
+    /// A quote in a path is escaped rather than refused — it cannot close the string it sits in,
+    /// and refusing it would make an ordinary (if odd) directory name uninstallable.
+    func testSandboxEscapesRatherThanRefusesAQuoteInAPath() throws {
+        let directory = try makeBundle(capabilities: [], script: "#!/bin/sh\nexit 0")
+        let quoted = directory.deletingLastPathComponent()
+            .appendingPathComponent(#"quote"in\name"#, isDirectory: true)
+        try? FileManager.default.removeItem(at: quoted)
+        try FileManager.default.moveItem(at: directory, to: quoted)
+        defer { try? FileManager.default.removeItem(at: quoted) }
+
+        let bundle = try ExtensionBundleInspector.inspect(at: quoted)
+        let profile = try ExtensionSandboxPolicy.profile(bundle: bundle, environment: [:])
+
+        XCTAssertTrue(profile.contains(#"quote\"in\\name"#), "the path was not escaped")
+        XCTAssertFalse(
+            profile.contains(#"quote"in"#),
+            "a bare quote reached the profile and could close the string it sits in"
+        )
+        XCTAssertTrue(profile.contains("(deny default)"))
+    }
+
+    /// The broker token is only useful on this generation's loopback port, and that is the whole
+    /// reason the profile pins one. Anything that is not plain `http` on `127.0.0.1` with a real
+    /// port must fail closed rather than widen the hole to "some host".
+    func testSandboxRefusesAHostURLThatIsNotThisMachinesLoopback() throws {
+        let directory = try makeBundle(
+            capabilities: [.hostProjectsRead],
+            script: "#!/bin/sh\nexit 0"
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bundle = try ExtensionBundleInspector.inspect(at: directory)
+
+        for hostURL in [
+            "http://evil.com:43127",
+            "http://127.0.0.1.evil.com:43127",   // a registrable domain that merely starts with it
+            "http://evil.com:43127@127.0.0.1",   // userinfo that reads as loopback to the eye
+            "https://127.0.0.1:43127",           // the profile pins tcp for plain http only
+            "http://[::1]:43127",                // loopback, but not the literal this pins
+            "http://localhost:43127",            // resolves to loopback; not the literal either
+            "http://127.0.0.1",                  // no port to pin
+            "http://127.0.0.1:0",
+            "http://127.0.0.1:99999",
+            "not a url at all",
+            ""
+        ] {
+            XCTAssertThrowsError(
+                try ExtensionSandboxPolicy.profile(
+                    bundle: bundle,
+                    environment: [ExtensionHostConnection.urlEnvironmentKey: hostURL]
+                ),
+                "should have been refused: \(hostURL)"
+            ) { error in
+                guard case .invalidHostURL = error as? ExtensionSandboxError else {
+                    return XCTFail("unexpected error for \(hostURL): \(error)")
+                }
+            }
+        }
+    }
+
     // MARK: - Launch abstraction
 
     func testRegistrationAndServeShareOneLaunchAbstraction() throws {

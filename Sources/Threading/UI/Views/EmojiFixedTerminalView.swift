@@ -58,6 +58,10 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     /// Local keyboard/paste input, excluding bytes injected by a remote controller.
     var onUserInput: (() -> Void)?
+    /// Checked only for local gestures. Remote injection and terminal protocol replies bypass
+    /// this gate, so focused control cannot break colour queries or other emulator responses.
+    var acceptsLocalInput: (() -> Bool)?
+    var onLocalInputBlocked: (() -> Void)?
     private var isInjectingRemoteInput = false
 
     /// Every chunk sent upstream to the child — keystrokes, paste, and the terminal's own
@@ -77,14 +81,95 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         send(data: data)
     }
 
+    override func keyDown(with event: NSEvent) {
+        guard acceptsLocalInput?() ?? true else {
+            onLocalInputBlocked?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        guard acceptsLocalInput?() ?? true else {
+            onLocalInputBlocked?()
+            return
+        }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+
+    override func paste(_ sender: Any) {
+        guard acceptsLocalInput?() ?? true else {
+            onLocalInputBlocked?()
+            return
+        }
+        super.paste(sender)
+    }
+
     /// Mirrors the routing condition in the fork's `MacTerminalView.scrollWheel`: the wheel
     /// goes to the process when it tracks the mouse and option is not held.
     override func scrollWheel(with event: NSEvent) {
-        if allowMouseReporting && getTerminal().mouseMode != .off
-            && !event.modifierFlags.contains(.option) {
+        let forwards = allowMouseReporting && getTerminal().mouseMode != .off
+            && !event.modifierFlags.contains(.option)
+        if forwards, !(acceptsLocalInput?() ?? true) {
+            onLocalInputBlocked?()
+            let previous = allowMouseReporting
+            allowMouseReporting = false
+            defer { allowMouseReporting = previous }
+            super.scrollWheel(with: event)
+            return
+        }
+        if forwards {
             onWheelForwarded?()
         }
         super.scrollWheel(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard shouldSuppressLocalMouseReporting else {
+            super.mouseDown(with: event)
+            return
+        }
+        onLocalInputBlocked?()
+        allowMouseReporting = false
+        defer { allowMouseReporting = true }
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard shouldSuppressLocalMouseReporting else {
+            super.mouseUp(with: event)
+            return
+        }
+        onLocalInputBlocked?()
+        allowMouseReporting = false
+        defer { allowMouseReporting = true }
+        super.mouseUp(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard shouldSuppressLocalMouseReporting else {
+            super.mouseDragged(with: event)
+            return
+        }
+        onLocalInputBlocked?()
+        allowMouseReporting = false
+        defer { allowMouseReporting = true }
+        super.mouseDragged(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard shouldSuppressLocalMouseReporting else {
+            super.mouseMoved(with: event)
+            return
+        }
+        allowMouseReporting = false
+        defer { allowMouseReporting = true }
+        super.mouseMoved(with: event)
+    }
+
+    private var shouldSuppressLocalMouseReporting: Bool {
+        allowMouseReporting && getTerminal().mouseMode != .off
+            && !(acceptsLocalInput?() ?? true)
     }
 
     override init(frame: CGRect) {
@@ -136,6 +221,10 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// The drop itself, reachable without an `NSDraggingInfo` — what is worth testing here is
     /// the bytes a pasteboard turns into, and none of them come from the gesture.
     func accept(_ pasteboard: NSPasteboard) -> Bool {
+        guard acceptsLocalInput?() ?? true else {
+            onLocalInputBlocked?()
+            return false
+        }
         let paths = PromptAttachment.paths(from: pasteboard)
         guard !paths.isEmpty else { return false }
 

@@ -96,10 +96,27 @@ the context line beside it, and a binary change lands nowhere in particular
 ## The header control
 
 A split control: the target app's own icon opens the checkout in one press, and the chevron
-beside it chooses a different one. Its own `ToolbarButtonGroupView`, *beside* the session's
-actions rather than inside them — those four act on the pane (its menu, its renderer, its two
-drawers) while this one leaves for somewhere else entirely, and a run of six identical squares
-would have said they were the same kind of thing.
+beside it chooses a different one. Its own control (`SplitIconButtonView`), *beside* the
+session's actions rather than inside them — those four act on the pane (its menu, its renderer,
+its two drawers) while this one leaves for somewhere else entirely, and a run of six identical
+squares would have said they were the same kind of thing.
+
+**One plate, two halves — not two buttons in a group.** It started as a
+`ToolbarButtonGroupView`, which is the right container for the four actions beside it: those act
+on four different things and are spaced as the separate controls they are. These two act on
+*one*, and spaced apart they read as an app's icon with an unrelated chevron floating next to
+it. Hover is where that gave itself away — each half raised a rounded rect of its own, so
+pointing at the control cut it in two at exactly the moment the pointer claimed it was single.
+
+So the surface is drawn once, by the control, and the halves draw none
+(`ThemedIconButton.drawsSurface`). A raised half fills **inside** the plate's silhouette, clipped
+to it: the outer end keeps the plate's corner and the join is a straight edge that exists only
+while the pointer is on one side of it. Nothing is drawn between the halves at rest — the join is
+what the control is, and a rule down the middle would argue with it. The halves are also not the
+same width (`Design.Size.splitMenuWidth`): the press is the point and the chevron is the
+exception, and equal halves offer them as the same choice twice. `chrome-05-open-in-states` in
+the storybook renders all three states side by side, which is the only place the seam is
+reviewable.
 
 **It is the only control in that strip carrying colour**, and deliberately: the one question it
 has to answer at a glance is where the press sends you, and no glyph the app could draw says

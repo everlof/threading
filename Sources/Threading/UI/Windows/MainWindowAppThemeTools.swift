@@ -931,9 +931,46 @@ extension AgentToolCoordinator {
                 "material cannot set glow and remove_glow in the same patch."
             )
         }
+        guard patch.controlGlow == nil || patch.removeControlGlow != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set control_glow and remove_control_glow in the same patch."
+            )
+        }
+        guard patch.popoverStyle == nil || patch.removePopoverStyle != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set popover_style and remove_popover_style in the same patch."
+            )
+        }
+        guard patch.controlBorderWidth == nil || patch.removeControlBorderWidth != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set control_border_width and remove_control_border_width "
+                    + "in the same patch."
+            )
+        }
+        guard patch.backdropPattern == nil || patch.removeBackdropPattern != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set backdrop_pattern and remove_backdrop_pattern "
+                    + "in the same patch."
+            )
+        }
+        guard patch.buttonStyle == nil || patch.removeButtonStyle != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set button_style and remove_button_style in the same patch."
+            )
+        }
+        guard patch.headingStyle == nil || patch.removeHeadingStyle != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set heading_style and remove_heading_style in the same patch."
+            )
+        }
         guard patch.fontFamily == nil || patch.removeFontFamily != true else {
             throw AppThemeEditingError.invalid(
                 "material cannot set font_family and remove_font_family in the same patch."
+            )
+        }
+        guard patch.fontFallbacks == nil || patch.removeFontFallbacks != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set font_fallbacks and remove_font_fallbacks in the same patch."
             )
         }
 
@@ -947,7 +984,110 @@ extension AgentToolCoordinator {
         if let value = patch.panelRadius { material.panelRadius = CGFloat(value) }
         if let value = patch.controlRadius { material.controlRadius = CGFloat(value) }
         if let value = patch.borderWidth { material.borderWidth = CGFloat(value) }
+        if patch.removeControlBorderWidth == true {
+            material.controlBorderWidth = nil
+        } else if let value = patch.controlBorderWidth {
+            material.controlBorderWidth = CGFloat(value)
+        }
+        if patch.removeBackdropPattern == true {
+            material.backdropPattern = nil
+        } else if let patternPatch = patch.backdropPattern {
+            let kind: AppTheme.Material.BackdropPattern.Kind
+            if let raw = cleaned(patternPatch.kind) {
+                guard let parsed = AppTheme.Material.BackdropPattern.Kind(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.backdrop_pattern.kind must be \"dots\", \"grid\", "
+                            + "\"diagonal_grid\", or \"perspective_grid\"."
+                    )
+                }
+                kind = parsed
+            } else if let inherited = base.backdropPattern?.kind {
+                kind = inherited
+            } else {
+                throw AppThemeEditingError.invalid(
+                    "material.backdrop_pattern.kind is required when the base has no pattern."
+                )
+            }
+
+            let role: AppThemeRole
+            if let raw = cleaned(patternPatch.role) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid backdrop_pattern.role."
+                    )
+                }
+                role = parsed
+            } else {
+                role = base.backdropPattern?.role ?? .border
+            }
+
+            material.backdropPattern = AppTheme.Material.BackdropPattern(
+                kind: kind,
+                role: role,
+                opacity: patternPatch.opacity ?? base.backdropPattern?.opacity ?? 0.08,
+                spacing: CGFloat(patternPatch.spacing ?? Double(base.backdropPattern?.spacing ?? 20)),
+                lineWidth: CGFloat(
+                    patternPatch.lineWidth ?? Double(base.backdropPattern?.lineWidth ?? 1)
+                )
+            )
+        }
         if let value = patch.textScale { material.textScale = CGFloat(value) }
+
+        if patch.removePopoverStyle == true {
+            material.popoverStyle = .system
+        } else if let popoverPatch = patch.popoverStyle {
+            var style = base.popoverStyle
+            if let raw = cleaned(popoverPatch.arrow) {
+                guard let parsed = AppTheme.Material.PopoverStyle.Arrow(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.arrow must be \"triangle\" or \"none\"."
+                    )
+                }
+                style.arrow = parsed
+            }
+            if let raw = cleaned(popoverPatch.surfaceRole) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\(raw) is not a valid popover_style.surface_role."
+                    )
+                }
+                style.surfaceRole = parsed
+            }
+            if let raw = cleaned(popoverPatch.edge) {
+                guard let parsed = AppTheme.Material.PopoverStyle.Edge(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.edge must be \"flat\", \"material\", or \"none\"."
+                    )
+                }
+                style.edge = parsed
+            }
+            if let raw = cleaned(popoverPatch.shadow) {
+                guard let parsed = AppTheme.Material.PopoverStyle.Shadow(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.shadow must be \"automatic\", \"system\", "
+                            + "\"material\", or \"none\"."
+                    )
+                }
+                style.shadow = parsed
+            }
+            if let raw = cleaned(popoverPatch.density) {
+                guard let parsed = AppTheme.Material.PopoverStyle.Density(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.density must be \"regular\" or \"compact\"."
+                    )
+                }
+                style.density = parsed
+            }
+            if let raw = cleaned(popoverPatch.glyphStyle) {
+                guard let parsed = AppTheme.Material.PopoverStyle.GlyphStyle(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.glyph_style must be \"system\" or \"classic\"."
+                    )
+                }
+                style.glyphStyle = parsed
+            }
+            material.popoverStyle = style
+        }
 
         if let rawPlacement = cleaned(patch.scrollerPlacement) {
             guard let parsed = AppTheme.Material.ScrollerPlacement(rawValue: rawPlacement) else {
@@ -965,12 +1105,162 @@ extension AgentToolCoordinator {
             }
             material.scrollerTrackStyle = parsed
         }
+        if let rawProgress = cleaned(patch.progressStyle) {
+            guard let parsed = AppTheme.Material.ProgressStyle(rawValue: rawProgress) else {
+                throw AppThemeEditingError.invalid(
+                    "material.progress_style must be \"continuous\" or \"segmented\"."
+                )
+            }
+            material.progressStyle = parsed
+        }
+        if let rawChoice = cleaned(patch.choiceStyle) {
+            guard let parsed = AppTheme.Material.ChoiceStyle(rawValue: rawChoice) else {
+                throw AppThemeEditingError.invalid(
+                    "material.choice_style must be \"chip\" or \"dropdown\"."
+                )
+            }
+            material.choiceStyle = parsed
+        }
+
+        if patch.removeButtonStyle == true {
+            material.buttonStyle = .system
+        } else if let buttonPatch = patch.buttonStyle {
+            guard buttonPatch.primaryBorderRole == nil
+                    || buttonPatch.removePrimaryBorder != true else {
+                throw AppThemeEditingError.invalid(
+                    "material.button_style cannot set primary_border_role and "
+                        + "remove_primary_border in the same patch."
+                )
+            }
+
+            var style = base.buttonStyle
+            if let raw = cleaned(buttonPatch.textTransform) {
+                guard let parsed = AppTheme.Material.ButtonStyle.TextTransform(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.button_style.text_transform must be \"none\" or \"uppercase\"."
+                    )
+                }
+                style.textTransform = parsed
+            }
+            if let raw = cleaned(buttonPatch.fontWeight) {
+                guard let parsed = AppTheme.Material.ButtonStyle.FontWeight(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.button_style.font_weight must be \"regular\", \"medium\", "
+                            + "\"semibold\", or \"bold\"."
+                    )
+                }
+                style.fontWeight = parsed
+            }
+            if let raw = cleaned(buttonPatch.typeface) {
+                guard let parsed = AppTheme.Material.Typeface(rawValue: raw) else {
+                    let accepted = AppTheme.Material.Typeface.allCases
+                        .map(\.rawValue)
+                        .joined(separator: ", ")
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid button_style.typeface. Accepted: \(accepted)."
+                    )
+                }
+                style.typeface = parsed
+            }
+            if let family = cleaned(buttonPatch.fontFamily) {
+                guard Design.Typography.availableFamilies.contains(family) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(family)\" is not an installed font family on this machine."
+                    )
+                }
+                style.fontFamily = family
+            }
+            if let value = buttonPatch.tracking { style.tracking = CGFloat(value) }
+            if let raw = cleaned(buttonPatch.primaryTreatment) {
+                guard let parsed = AppTheme.Material.ButtonStyle.PrimaryTreatment(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.button_style.primary_treatment must be \"filled\", "
+                            + "\"outlined\", or \"raised\"."
+                    )
+                }
+                style.primaryTreatment = parsed
+            }
+            if let raw = cleaned(buttonPatch.primaryRole) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid button_style.primary_role."
+                    )
+                }
+                style.primaryRole = parsed
+            }
+            if buttonPatch.removePrimaryBorder == true {
+                style.primaryBorderRole = nil
+            } else if let raw = cleaned(buttonPatch.primaryBorderRole) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid button_style.primary_border_role."
+                    )
+                }
+                style.primaryBorderRole = parsed
+            }
+            if let value = buttonPatch.hoverOffsetX { style.hoverOffsetX = CGFloat(value) }
+            if let value = buttonPatch.hoverOffsetY { style.hoverOffsetY = CGFloat(value) }
+            if let value = buttonPatch.pressedOffsetX { style.pressedOffsetX = CGFloat(value) }
+            if let value = buttonPatch.pressedOffsetY { style.pressedOffsetY = CGFloat(value) }
+            if let value = buttonPatch.collapseShadowOnHover {
+                style.collapseShadowOnHover = value
+            }
+            material.buttonStyle = style
+        }
+
+        if patch.removeHeadingStyle == true {
+            material.headingStyle = nil
+        } else if let headingPatch = patch.headingStyle {
+            var style = base.headingStyle ?? AppTheme.Material.HeadingStyle()
+            if let raw = cleaned(headingPatch.typeface) {
+                guard let parsed = AppTheme.Material.Typeface(rawValue: raw) else {
+                    let accepted = AppTheme.Material.Typeface.allCases
+                        .map(\.rawValue)
+                        .joined(separator: ", ")
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid heading_style.typeface. Accepted: \(accepted)."
+                    )
+                }
+                style.typeface = parsed
+            }
+            if let family = cleaned(headingPatch.fontFamily) {
+                guard Design.Typography.availableFamilies.contains(family) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(family)\" is not an installed font family on this machine."
+                    )
+                }
+                style.fontFamily = family
+            }
+            if let raw = cleaned(headingPatch.fontWeight) {
+                guard let parsed = AppTheme.Material.ButtonStyle.FontWeight(rawValue: raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.heading_style.font_weight must be \"regular\", \"medium\", "
+                            + "\"semibold\", or \"bold\"."
+                    )
+                }
+                style.fontWeight = parsed
+            }
+            if let italic = headingPatch.italic { style.italic = italic }
+            material.headingStyle = style
+        }
 
         if patch.removeBevel == true {
             material.bevel = nil
         } else if let bevel = patch.bevel {
+            let style: AppTheme.Bevel.Style
+            if let rawStyle = cleaned(bevel.style) {
+                guard let parsed = AppTheme.Bevel.Style(rawValue: rawStyle) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.bevel.style must be \"hard\" or \"soft\"."
+                    )
+                }
+                style = parsed
+            } else {
+                style = base.bevel?.style ?? .hard
+            }
             material.bevel = AppTheme.Bevel(
-                width: CGFloat(bevel.width ?? Double(base.bevel?.width ?? 2))
+                width: CGFloat(bevel.width ?? Double(base.bevel?.width ?? 2)),
+                style: style
             )
         }
 
@@ -992,43 +1282,117 @@ extension AgentToolCoordinator {
         if patch.removeFontFamily == true {
             material.fontFamily = nil
         } else if let family = cleaned(patch.fontFamily) {
-            // Checked here rather than left to resolve silently, because a theme is authored on
-            // one machine and read on another: an agent that names a family this machine does
-            // not have should be told at the point it can still choose a different one, not have
-            // its theme quietly fall back to the typeface. A theme that *arrives* naming an
-            // absent family still degrades rather than failing — that is the document's rule,
-            // and this is the authoring path. The live CoreText list, so a family an enabled
-            // extension registered counts as installed here too.
-            guard Design.Typography.availableFamilies.contains(family) else {
+            material.fontFamily = family
+        }
+        if patch.removeFontFallbacks == true {
+            material.fontFallbacks = []
+        } else if let fallbacks = patch.fontFallbacks {
+            var seen = Set<String>()
+            material.fontFallbacks = fallbacks.compactMap { raw in
+                let family = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !family.isEmpty else { return nil }
+                return seen.insert(family.lowercased()).inserted ? family : nil
+            }
+        }
+        if patch.fontFamily != nil || patch.fontFallbacks != nil
+            || patch.removeFontFamily == true || patch.removeFontFallbacks == true {
+            // Historical faces are commonly proprietary and therefore absent on the machine
+            // authoring the theme. Keep those names in the document so installing the real face
+            // later improves the theme automatically, but require the *chain* to contain one
+            // family CoreText can resolve today. That catches a misspelled chain without making
+            // MS Sans Serif, Charcoal, Swiss 721, or Topaz impossible to author on modern macOS.
+            let available = Set(Design.Typography.availableFamilies.map { $0.lowercased() })
+            guard material.fontFamilies.isEmpty
+                    || material.fontFamilies.contains(where: { available.contains($0.lowercased()) }) else {
                 throw AppThemeEditingError.invalid(
-                    "\"\(family)\" is not an installed font family on this machine."
+                    "material font_family/font_fallbacks must include at least one installed "
+                        + "font family on this machine."
                 )
             }
-            material.fontFamily = family
         }
         if patch.removeGlow == true {
             material.glow = nil
         } else if let glow = patch.glow {
-            let role: AppThemeRole
-            if let rawRole = cleaned(glow.role) {
-                guard let parsed = AppThemeRole.named(rawRole) else {
-                    throw AppThemeEditingError.invalid(
-                        "\"\(rawRole)\" is not a valid glow role."
-                    )
-                }
-                role = parsed
-            } else {
-                role = base.glow?.role ?? .accent
-            }
-            material.glow = AppTheme.Glow(
-                role: role,
-                radius: CGFloat(glow.radius ?? Double(base.glow?.radius ?? 6)),
-                opacity: glow.opacity ?? base.glow?.opacity ?? 0.2,
-                offsetX: CGFloat(glow.offsetX ?? Double(base.glow?.offsetX ?? 0)),
-                offsetY: CGFloat(glow.offsetY ?? Double(base.glow?.offsetY ?? 0))
+            material.glow = try appThemeGlow(glow, base: base.glow, field: "glow")
+        }
+        if patch.removeControlGlow == true {
+            material.controlGlow = nil
+        } else if let glow = patch.controlGlow {
+            material.controlGlow = try appThemeGlow(
+                glow,
+                base: base.controlGlow,
+                field: "control_glow"
             )
         }
         return material
+    }
+
+    /// Resolves the shared paired-shadow patch vocabulary for either panel or control depth.
+    /// Keeping this one parser is what makes the two fields genuinely equivalent for custom
+    /// themes rather than two almost-identical APIs that drift on partial updates.
+    private func appThemeGlow(
+        _ patch: AppThemeGlowArguments,
+        base: AppTheme.Glow?,
+        field: String
+    ) throws -> AppTheme.Glow {
+        guard patch.highlight == nil || patch.removeHighlight != true else {
+            throw AppThemeEditingError.invalid(
+                "material.\(field) cannot set highlight and remove_highlight in the same patch."
+            )
+        }
+
+        let role: AppThemeRole
+        if let rawRole = cleaned(patch.role) {
+            guard let parsed = AppThemeRole.named(rawRole) else {
+                throw AppThemeEditingError.invalid(
+                    "\"\(rawRole)\" is not a valid \(field) role."
+                )
+            }
+            role = parsed
+        } else {
+            role = base?.role ?? .accent
+        }
+
+        let highlight: AppTheme.Glow.Highlight?
+        if patch.removeHighlight == true {
+            highlight = nil
+        } else if let patchHighlight = patch.highlight {
+            let highlightRole: AppThemeRole
+            if let rawRole = cleaned(patchHighlight.role) {
+                guard let parsed = AppThemeRole.named(rawRole) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(rawRole)\" is not a valid \(field) highlight role."
+                    )
+                }
+                highlightRole = parsed
+            } else {
+                highlightRole = base?.highlight?.role ?? .bevelHighlight
+            }
+            highlight = AppTheme.Glow.Highlight(
+                role: highlightRole,
+                radius: CGFloat(
+                    patchHighlight.radius ?? Double(base?.highlight?.radius ?? 6)
+                ),
+                opacity: patchHighlight.opacity ?? base?.highlight?.opacity ?? 0.3,
+                offsetX: CGFloat(
+                    patchHighlight.offsetX ?? Double(base?.highlight?.offsetX ?? 0)
+                ),
+                offsetY: CGFloat(
+                    patchHighlight.offsetY ?? Double(base?.highlight?.offsetY ?? 0)
+                )
+            )
+        } else {
+            highlight = base?.highlight
+        }
+
+        return AppTheme.Glow(
+            role: role,
+            radius: CGFloat(patch.radius ?? Double(base?.radius ?? 6)),
+            opacity: patch.opacity ?? base?.opacity ?? 0.2,
+            offsetX: CGFloat(patch.offsetX ?? Double(base?.offsetX ?? 0)),
+            offsetY: CGFloat(patch.offsetY ?? Double(base?.offsetY ?? 0)),
+            highlight: highlight
+        )
     }
 
     private func appTerminalPalette(
@@ -1224,6 +1588,26 @@ extension AgentToolCoordinator {
     }
 
     private func appThemeMaterialDocument(_ material: AppTheme.Material) -> [String: Any] {
+        func glowDocument(_ glow: AppTheme.Glow) -> [String: Any] {
+            var document: [String: Any] = [
+                "role": glow.role.wireName,
+                "radius": Double(glow.radius),
+                "opacity": glow.opacity,
+                "offset_x": Double(glow.offsetX),
+                "offset_y": Double(glow.offsetY)
+            ]
+            if let highlight = glow.highlight {
+                document["highlight"] = [
+                    "role": highlight.role.wireName,
+                    "radius": Double(highlight.radius),
+                    "opacity": highlight.opacity,
+                    "offset_x": Double(highlight.offsetX),
+                    "offset_y": Double(highlight.offsetY)
+                ]
+            }
+            return document
+        }
+
         var document: [String: Any] = [
             "panel_radius": Double(material.panelRadius),
             "control_radius": Double(material.controlRadius),
@@ -1231,20 +1615,82 @@ extension AgentToolCoordinator {
             "text_scale": Double(material.textScale),
             "typeface": material.typeface.rawValue,
             "scroller_placement": material.scrollerPlacement.rawValue,
-            "scroller_track_style": material.scrollerTrackStyle.rawValue
+            "scroller_track_style": material.scrollerTrackStyle.rawValue,
+            "progress_style": material.progressStyle.rawValue,
+            "choice_style": material.choiceStyle.rawValue
         ]
+        if let width = material.controlBorderWidth {
+            document["control_border_width"] = Double(width)
+        }
+        if let pattern = material.backdropPattern {
+            document["backdrop_pattern"] = [
+                "kind": pattern.kind.rawValue,
+                "role": pattern.role.wireName,
+                "opacity": pattern.opacity,
+                "spacing": Double(pattern.spacing),
+                "line_width": Double(pattern.lineWidth)
+            ]
+        }
+        let popover = material.popoverStyle
+        document["popover_style"] = [
+            "arrow": popover.arrow.rawValue,
+            "surface_role": popover.surfaceRole.wireName,
+            "edge": popover.edge.rawValue,
+            "shadow": popover.shadow.rawValue,
+            "density": popover.density.rawValue,
+            "glyph_style": popover.glyphStyle.rawValue
+        ]
+        let button = material.buttonStyle
+        var buttonDocument: [String: Any] = [
+            "text_transform": button.textTransform.rawValue,
+            "font_weight": button.fontWeight.rawValue,
+            "tracking": Double(button.tracking),
+            "primary_treatment": button.primaryTreatment.rawValue,
+            "primary_role": button.primaryRole.wireName,
+            "hover_offset_x": Double(button.hoverOffsetX),
+            "hover_offset_y": Double(button.hoverOffsetY),
+            "pressed_offset_x": Double(button.pressedOffsetX),
+            "pressed_offset_y": Double(button.pressedOffsetY),
+            "collapse_shadow_on_hover": button.collapseShadowOnHover
+        ]
+        if let role = button.primaryBorderRole {
+            buttonDocument["primary_border_role"] = role.wireName
+        }
+        if let typeface = button.typeface {
+            buttonDocument["typeface"] = typeface.rawValue
+        }
+        if let family = button.fontFamily {
+            buttonDocument["font_family"] = family
+        }
+        document["button_style"] = buttonDocument
+        if let heading = material.headingStyle {
+            var headingDocument: [String: Any] = ["italic": heading.italic]
+            if let typeface = heading.typeface {
+                headingDocument["typeface"] = typeface.rawValue
+            }
+            if let family = heading.fontFamily {
+                headingDocument["font_family"] = family
+            }
+            if let weight = heading.fontWeight {
+                headingDocument["font_weight"] = weight.rawValue
+            }
+            document["heading_style"] = headingDocument
+        }
         if let family = material.fontFamily { document["font_family"] = family }
+        if !material.fontFallbacks.isEmpty {
+            document["font_fallbacks"] = material.fontFallbacks
+        }
         if let bevel = material.bevel {
-            document["bevel"] = ["width": Double(bevel.width)]
+            document["bevel"] = [
+                "width": Double(bevel.width),
+                "style": bevel.style.rawValue
+            ]
         }
         if let glow = material.glow {
-            document["glow"] = [
-                "role": glow.role.wireName,
-                "radius": Double(glow.radius),
-                "opacity": glow.opacity,
-                "offset_x": Double(glow.offsetX),
-                "offset_y": Double(glow.offsetY)
-            ]
+            document["glow"] = glowDocument(glow)
+        }
+        if let glow = material.controlGlow {
+            document["control_glow"] = glowDocument(glow)
         }
         return document
     }

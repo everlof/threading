@@ -66,7 +66,7 @@ appearance, so a dark chrome still previews the light themes light. Five columns
 swatches is a measured fit, not a preference (four of 128 clipped the first row).
 
 **Accounts** presents `AgentAccountDiscovery`'s existing scan and adds the one check nothing
-else does: `AgentCLIProbe` resolves `claude`/`codex` against the same login shell
+else does: `AgentCLIProbe` resolves `claude`/`codex`/`grok`/`opencode` against the same login shell
 `AgentLauncher` uses (`command -v`, the `ExternalAppLauncher.locate` shape), so the probe and
 the launch cannot disagree about PATH. A missing CLI is a sentence and an install command
 here, instead of `command not found` inside the first session's terminal. Each login also

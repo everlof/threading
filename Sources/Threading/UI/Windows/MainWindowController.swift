@@ -93,6 +93,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
+    private var lastBlockedInputToastAt = Date.distantPast
 
     /// Paces the startup relaunch of the sessions that were running at the last quit.
     /// Retained for the stagger's duration; it retires its own timer when the plan is spent.
@@ -134,6 +135,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var surfaceToggleToolbarButton: ThemedIconButton?
     var openInToolbarButton: ThemedIconButton?
     var openInMenuToolbarButton: ThemedIconButton?
+    /// The plate those two are halves of, retained because what hides with no checkout is the
+    /// whole control rather than either half of it.
+    var openInSplitControl: SplitIconButtonView?
 
     /// Holds the "Open in" dropdown while it is up; released from its own dismissal.
     var openInMenuSession: AnyObject?
@@ -366,13 +370,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // controls now that they exist too, especially the surface button whose glyph depends
         // on the restored session and which must disappear when there is no session.
         updateToolbarControlStates()
-        splitViewController.sidebarCollapseStateDidChange = { [weak self] _ in
-            self?.updatePaneToggleSelection()
+        splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
+            guard let self else { return }
+            self.updatePaneToggleSelection()
+            // A panel dragged shut leaves by the same door as one closed from its own ✕:
+            // the app-wide theme document is put away with the pane that was showing it.
+            if item === self.displayItem, collapsed {
+                self.displayPaneController.hideCurrentTheme()
+            }
         }
-        splitViewController.sidebarTransitionDidComplete = { [weak self] isCollapsed in
-            self?.updateHeaderInset(sidebarIsCollapsed: isCollapsed)
-            if !isCollapsed {
-                self?.applyPendingWorkspaceNavigatorWidth()
+        splitViewController.paneTransitionDidComplete = { [weak self] item, collapsed in
+            // The report that matters here is the *sidebar's* — it moves the pane header out
+            // from under the window controls; the panel's completions carry their own work.
+            guard let self, item === self.sidebarItem else { return }
+            self.updateHeaderInset(sidebarIsCollapsed: collapsed)
+            if !collapsed {
+                self.applyPendingWorkspaceNavigatorWidth()
             }
         }
 
@@ -638,6 +651,28 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self.exitSettingsForNavigation()
             self.sidebarViewController.select(sessionID: event.sessionID)
         }
+        appEvents.observe(SessionLocalInputBlocked.self) { [weak self] event in
+            guard let self, self.currentSessionID == event.sessionID,
+                  Date().timeIntervalSince(self.lastBlockedInputToastAt) > 2 else { return }
+            self.lastBlockedInputToastAt = Date()
+            let control = RemoteSessionMirrorRegistry.shared.ownerInputControlState(
+                for: event.sessionID
+            )
+            let controller = control.controllerDisplayName ?? L10n.string("Another participant")
+            self.sidebarViewController.presentToast(ToastRequest(
+                message: L10n.format("%@ is controlling this chat", controller),
+                detail: L10n.string("Your input was not sent."),
+                actionTitle: L10n.string("Reclaim"),
+                action: {
+                    RemoteSessionMirrorRegistry.shared.setInputControlFromOwner(
+                        .reclaim,
+                        sessionID: event.sessionID
+                    )
+                },
+                dwell: ToastDefaults.unattendedDwell,
+                identifier: "remote.input.blocked"
+            ))
+        }
     }
 
     /// Supplies the extension runtime broker with the same shell root as the native Info pane.
@@ -793,15 +828,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Display Pane
 
-    /// Shows or hides the display panel.
-    func setDisplayPaneVisible(_ visible: Bool) {
+    /// Shows or hides the display panel, through the same animated route as the sidebar.
+    ///
+    /// Animated by default because showing and hiding this panel are *gestures* — the toolbar
+    /// toggle, the pane's own ✕, a surface command. A session switch passes `animated: false`:
+    /// it swaps the whole workspace, and a panel sliding during the swap would animate a change
+    /// of subject as if it were a change of state.
+    func setDisplayPaneVisible(_ visible: Bool, animated: Bool = true) {
         if !visible {
             displayPaneController.hideCurrentTheme()
         }
         guard displayItem.isCollapsed == visible else { return }
 
         guard visible else {
-            displayItem.isCollapsed = true
+            splitViewController.setCollapsed(true, on: displayItem, animated: animated)
             updateToolbarControlStates()
             return
         }
@@ -813,19 +853,29 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // therefore still the full content width.
         let target = DisplayPaneWidth.opening(in: splitView.bounds.width)
         isRestoringDisplayPaneWidth = true
-        displayItem.isCollapsed = false
-        updateToolbarControlStates()
-
-        // Deferred by one turn of the run loop. Uncollapsing does not lay the item out
-        // synchronously, so a width applied here lands on the previous layout and is lost.
-        DispatchQueue.main.async { [weak self] in
+        splitViewController.setCollapsed(false, on: displayItem, animated: animated) { [weak self] in
             guard let self else { return }
-            self.applyDisplayPaneWidth(target)
+            guard !self.displayItem.isCollapsed else {
+                // Closed again mid-reveal: there is no width to restore, and the flag must not
+                // outlive the reveal it was guarding or no width is ever recorded again.
+                self.isRestoringDisplayPaneWidth = false
+                return
+            }
 
-            // Cleared a turn later, once the layout that produced has drained and the
-            // notifications it raised have been ignored.
-            DispatchQueue.main.async { self.isRestoringDisplayPaneWidth = false }
+            // The reveal animates the pane out to the width its item last held — the chrome
+            // floor, on a launch's first reveal. The stored width then becomes the divider's
+            // own answer (see `applyDisplayPaneWidth` for why nothing weaker survives),
+            // through the same transition, so a first reveal reads as one motion opening out
+            // rather than a slide and a snap.
+            PaneTransition.run(in: self.splitView, animated: animated) {
+                self.applyDisplayPaneWidth(target)
+            } completion: {
+                // Cleared a turn after the layout this produced has drained and the
+                // notifications it raised have been ignored.
+                self.isRestoringDisplayPaneWidth = false
+            }
         }
+        updateToolbarControlStates()
     }
 
     /// Opens the panel at the width it was last left at.
@@ -870,6 +920,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ///
     /// Content belongs to a session, so switching sessions switches what the panel shows,
     /// and a session with nothing to show closes it rather than leaving the last image up.
+    /// Unanimated throughout: a switch swaps the whole workspace at once, and the panel
+    /// sliding beside an instant page change would single it out as the one thing "moving".
     private func syncDisplayPane(to sessionID: SessionID?) {
         displayPaneController.showSession(sessionID)
 
@@ -877,16 +929,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // session must not close it. Its agent attribution remains whichever conversation is in
         // the main pane; only the inspector itself is global.
         if displayPaneController.isShowingCurrentTheme {
-            setDisplayPaneVisible(true)
+            setDisplayPaneVisible(true, animated: false)
             return
         }
 
         guard let sessionID, displayPaneController.hasContent(for: sessionID) else {
-            setDisplayPaneVisible(false)
+            setDisplayPaneVisible(false, animated: false)
             return
         }
 
-        setDisplayPaneVisible(true)
+        setDisplayPaneVisible(true, animated: false)
     }
 
     /// Forwards a pane's loading state to the row it belongs to.
@@ -2402,6 +2454,17 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         recordVisit(.settings(pageID))
     }
 
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        askAIAboutSettings query: String
+    ) {
+        let controller = containerViewController.showSettingsAISearch(query: query)
+        controller.onOpen = { [weak self] pageID in
+            self?.showSettingsPage(id: pageID)
+        }
+        updateSessionTitleItem()
+    }
+
 }
 
 // MARK: - TerminalContainerViewControllerDelegate
@@ -2450,8 +2513,23 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         showReview(mode: .lastTurn)
     }
 
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestOpenSession sessionID: SessionID
+    ) {
+        guard ProjectStore.shared.session(withID: sessionID) != nil else {
+            NSSound.beep()
+            return
+        }
+        sidebarViewController.select(sessionID: sessionID)
+    }
+
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController) {
         newSession()
+    }
+
+    func terminalContainerDidChangeShellDrawer(_ container: TerminalContainerViewController) {
+        updateToolbarControlStates()
     }
 
     func terminalContainer(
@@ -2467,6 +2545,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             AgentRuntime.shared.activity(sessionID: sessionID),
             sessionID: sessionID
         )
+
+        if AgentRuntime.shared.activity(sessionID: sessionID) == .working {
+            displayPaneController.noteSessionStartedWorking(sessionID)
+        }
 
         // An agent that just stopped working may have switched branches on the way.
         if AgentRuntime.shared.activity(sessionID: sessionID) != .working {

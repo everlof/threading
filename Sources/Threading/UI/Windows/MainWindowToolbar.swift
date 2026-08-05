@@ -123,7 +123,7 @@ extension MainWindowController: NSToolbarDelegate {
             newSessionButton,
             spacer,
             accountUsageItemView,
-            makeOpenInGroup(),
+            makeOpenInControl(),
             makeSessionActionsGroup()
         ])
         header.orientation = .horizontal
@@ -196,7 +196,13 @@ extension MainWindowController: NSToolbarDelegate {
     /// A press is one click because that is the whole point of the control — the chevron exists
     /// for the day the answer is different, not for every day. The chosen app becomes the new
     /// preference, so the two halves converge on one press for anybody who uses one editor.
-    private func makeOpenInGroup() -> ToolbarButtonGroupView {
+    ///
+    /// **One plate, two halves** (`SplitIconButtonView`), rather than two buttons spaced as
+    /// siblings. The group beside it holds four actions that act on four different things; these
+    /// two act on one, and read as two unrelated marks — an app icon, and a chevron floating next
+    /// to it — until they share a silhouette. Hover is where the old arrangement gave itself
+    /// away: each half raised its own rounded rect, and pointing at the control cut it in two.
+    private func makeOpenInControl() -> SplitIconButtonView {
         let open = ThemedIconButton(
             symbolName: OpenInToolbarDefaults.fallbackSymbol,
             accessibility: L10n.string("Open in external app")
@@ -206,7 +212,8 @@ extension MainWindowController: NSToolbarDelegate {
 
         let choose = ThemedIconButton(
             symbolName: DesignSymbols.chevron,
-            accessibility: L10n.string("Choose an app to open in")
+            accessibility: L10n.string("Choose an app to open in"),
+            target: .splitMenu
         )
         // Names what the chevron adds rather than repeating the button beside it: the press
         // already says where it goes, and this is the way to somewhere else.
@@ -218,7 +225,9 @@ extension MainWindowController: NSToolbarDelegate {
         }
         openInMenuToolbarButton = choose
 
-        return ToolbarButtonGroupView(buttons: [open, choose])
+        let control = SplitIconButtonView(action: open, chevron: choose)
+        openInSplitControl = control
+        return control
     }
 
     /// The session's four actions, as one group.
@@ -363,8 +372,9 @@ extension MainWindowController: NSToolbarDelegate {
         let launcher = ExternalAppLauncher.shared
         let app = currentFolderURL.flatMap { launcher.preferred(for: .folder($0)) }
 
-        openInToolbarButton?.isHidden = app == nil
-        openInMenuToolbarButton?.isHidden = app == nil
+        // The plate goes with them: hiding the halves alone would leave an empty surface sitting
+        // in the header, which is a control that says there is something here to press.
+        openInSplitControl?.isHidden = app == nil
 
         guard let app else { return }
 

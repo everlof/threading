@@ -4,9 +4,9 @@ import AppKit
 /// they can use.
 enum TerminalDropReader: Equatable {
 
-    /// A shell, or anything else that is only ever handed text. A path is the answer and the
-    /// file is left exactly as it is: dropping a photo onto a half-typed `sips -s format png`
-    /// must name *that* photo, not a copy of it Threading made.
+    /// A shell, or anything else for which Threading has no measured image-rewrite contract.
+    /// A path is the answer and the file is left exactly as it is: dropping a photo onto a
+    /// half-typed `sips -s format png` must name *that* photo, not a copy Threading made.
     case shell
 
     /// An agent CLI, which lifts an image out of a pasted path when the extension is one it
@@ -15,7 +15,7 @@ enum TerminalDropReader: Equatable {
 
     /// Extensions this reader turns into an attached image, lowercased.
     ///
-    /// Read out of the two CLIs rather than guessed: Claude Code matches
+    /// Read out of each measured CLI rather than guessed: Claude Code matches
     /// `/\.(png|jpe?g|gif|webp)$/i` on the pasted string, Codex maps `png`, `jpg` and `jpeg` to
     /// its two encoded formats and refuses the rest. A shell has no such list — every path is
     /// equally readable to it — which is why `nil` is not "none".
@@ -27,6 +27,12 @@ enum TerminalDropReader: Equatable {
             return ["png", "jpg", "jpeg", "gif", "webp"]
         case .agent(.codex):
             return ["png", "jpg", "jpeg"]
+        case .agent(.grok):
+            // Grok's path-paste attachment contract has not been measured. Preserve the
+            // user's original path instead of assuming that converting it to PNG adds support.
+            return nil
+        case .agent(.openCode):
+            return ["png", "jpg", "jpeg", "gif", "webp"]
         }
     }
 }

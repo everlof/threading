@@ -47,7 +47,7 @@ extension GitReviewViewController {
         resetRenderedFiles()
         scrollView.documentView = stack
         placeholderLabel.isHidden = true
-        backButton.isHidden = true
+        setBackVisible(false)
         counterLabel.isHidden = true
         summaryPill.isHidden = true
         jumpToEndButton.isHidden = true
@@ -84,7 +84,7 @@ extension GitReviewViewController {
             renderCommits(canLoadMore: canLoadMore)
 
         case .commitDetail(let commit, let files):
-            backButton.isHidden = false
+            setBackVisible(true)
             renderCounter(files)
             var prelude: [NSView] = []
             if let pendingNotice {
@@ -120,8 +120,7 @@ extension GitReviewViewController {
         }
 
         view.layoutSubtreeIfNeeded()
-        let overflow = (scrollView.documentView?.frame.height ?? 0) - scrollView.contentSize.height
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(offsetY, max(overflow, 0))))
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(offsetY, maximumScrollOffsetY())))
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
@@ -161,8 +160,9 @@ extension GitReviewViewController {
         scrollView.contentInsets.bottom = 54
     }
 
-    /// Small files open ready to read; everything else opens on click. The model is complete
-    /// immediately, while AppKit asks for views only around the table's viewport.
+    /// Files open ready to read. The model is complete immediately, while AppKit asks for views
+    /// only around the table's viewport; an expanded offscreen file is therefore state, not a
+    /// constructed body. A user's explicit close in `expansionOverrides` still wins on refresh.
     func renderFiles(_ files: [GitFileDiff], prelude: [NSView] = []) {
         let performanceSpan = PerformanceRecorder.shared.begin(
             "git.review.render-files",
@@ -181,22 +181,19 @@ extension GitReviewViewController {
 
         renderedFiles = files
         filePreludeViews = prelude
-        var remainingExpandBudget = Self.initialExpandBudget(for: files)
         for file in files {
-            let lineCount = file.hunks.reduce(0) { $0 + $1.lines.count }
-            let fitsBudget = lineCount > 0
-                && lineCount <= GitReviewDefaults.autoExpandFileLineLimit
-                && lineCount <= remainingExpandBudget
-            defaultFileExpansion[file.path] = fitsBudget
-            let expanded = expansionOverrides[file.path]
-                ?? bulkExpansionOverride
-                ?? fitsBudget
-            if expanded { remainingExpandBudget -= lineCount }
+            defaultFileExpansion[file.path] = GitReviewFileRow.expandsByDefault(file)
         }
 
         // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
         // branch comparison can list hundreds of files.
         renderedFileRoot = repositoryRoot
+
+        // `reloadData()` immediately asks for the first row views. Make the clip adopt the
+        // pane's current frame first, otherwise those expanded rows still see the 240pt
+        // bootstrap width left from `loadView` and AppKit caches that much taller answer.
+        view.layoutSubtreeIfNeeded()
+        fileRowHeightWidth = max(view.bounds.width - Design.Spacing.inset * 2, 0)
         fileTableView.reloadData()
         scrollView.documentView = fileTableView
     }
@@ -205,16 +202,12 @@ extension GitReviewViewController {
         renderedFiles = []
         filePreludeViews = []
         defaultFileExpansion = [:]
+        measuredFileRowHeights = [:]
+        measuredPreludeRowHeights = [:]
+        fileRowHeightWidth = 0
         renderedFileRoot = nil
         instantiatedFileRowCount = 0
         fileTableView.reloadData()
-    }
-
-    static func initialExpandBudget(for files: [GitFileDiff]) -> Int {
-        let changedLines = files.reduce(0) { $0 + $1.added + $1.removed }
-        let isLargeComparison = files.count > GitReviewDefaults.largeDiffFileThreshold
-            || changedLines > GitReviewDefaults.largeDiffChangedLineThreshold
-        return isLargeComparison ? 0 : GitReviewDefaults.autoExpandTotalLineLimit
     }
 
     private static func performanceMetadata(for phase: Phase) -> [String: String] {
@@ -303,6 +296,60 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         false
     }
 
+    func tableView(_ tableView: NSTableView, heightOfRow tableRow: Int) -> CGFloat {
+        // `reloadData()` asks for heights before the table becomes the document view, when its
+        // own width is still zero. The clip/root already state the pane's final width; using
+        // zero here makes every character look wrapped onto its own line and invents an enormous
+        // offscreen document tail before the first row is even materialized.
+        let paneWidth = max(
+            tableView.bounds.width,
+            scrollView.contentView.bounds.width,
+            view.bounds.width
+        )
+        let cardWidth = max(paneWidth - Design.Spacing.inset * 2, 0)
+        if filePreludeViews.indices.contains(tableRow) {
+            guard let measured = measuredPreludeRowHeights[tableRow],
+                  abs(measured.width - cardWidth) <= 0.5 else {
+                return max(
+                    tableView.rowHeight,
+                    filePreludeViews[tableRow].fittingSize.height + Design.Spacing.small
+                )
+            }
+            return measured.height
+        }
+
+        let fileIndex = tableRow - filePreludeViews.count
+        guard renderedFiles.indices.contains(fileIndex) else {
+            return tableView.rowHeight
+        }
+        let file = renderedFiles[fileIndex]
+        guard let measured = measuredFileRowHeights[file.path] else {
+            let expanded = expansionOverrides[file.path]
+                ?? bulkExpansionOverride
+                ?? defaultFileExpansion[file.path]
+                ?? false
+            return GitReviewFileRow.estimatedTableHeight(
+                for: file,
+                expanded: expanded,
+                wraps: wrapsDiffLines,
+                width: cardWidth
+            )
+        }
+        guard abs(measured.width - cardWidth) <= 0.5 else {
+            let expanded = expansionOverrides[file.path]
+                ?? bulkExpansionOverride
+                ?? defaultFileExpansion[file.path]
+                ?? false
+            return GitReviewFileRow.estimatedTableHeight(
+                for: file,
+                expanded: expanded,
+                wraps: wrapsDiffLines,
+                width: cardWidth
+            )
+        }
+        return measured.height
+    }
+
     func tableView(
         _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
@@ -318,7 +365,9 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         host.identifier = identifier
 
         if filePreludeViews.indices.contains(tableRow) {
-            host.install(filePreludeViews[tableRow])
+            let content = filePreludeViews[tableRow]
+            host.install(content)
+            schedulePreludeHeightMeasurement(content, host: host, tableRow: tableRow)
             return host
         }
 
@@ -342,19 +391,31 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             expanded: expanded,
             staging: staging,
             wraps: wrapsDiffLines,
+            initialDiffWidth: {
+                // `reloadData()` asks for the first views before this table becomes the scroll
+                // view's document, so its own frame is still zero. A controller can also receive
+                // its final frame before its unattached clip adopts it. The scroll view spans the
+                // root edge-to-edge, so whichever has resolved first is the eventual width.
+                let paneWidth = max(scrollView.contentView.bounds.width, view.bounds.width)
+                let width = paneWidth - Design.Spacing.inset * 2
+                return width > 1 ? width : nil
+            }(),
             fileURL: renderedFileRoot?.appendingPathComponent(file.path)
         )
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
         }
-        row.onHeightChange = { [weak self, weak row] in
-            guard let self, let row,
-                  tableRow < self.fileTableView.numberOfRows,
-                  self.fileTableView.row(for: row) == tableRow else { return }
+        row.onWillToggle = { [weak self] expanded in
+            guard let self else { return }
+            self.expansionOverrides[file.path] = expanded
+            self.measuredFileRowHeights[file.path] = nil
+            guard tableRow < self.fileTableView.numberOfRows else { return }
             self.fileTableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(integer: tableRow)
             )
-            self.updateScrollControls()
+        }
+        row.onHeightChange = { [weak self, weak row] in
+            self?.recordFileHeight(file, row: row, tableRow: tableRow)
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
@@ -378,7 +439,68 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 path: file.path, request: request, in: root, completion: completion
             )
         }
+        scheduleFileHeightMeasurement(file, row: row, tableRow: tableRow)
         return row
+    }
+
+    private func scheduleFileHeightMeasurement(
+        _ file: GitFileDiff,
+        row: GitReviewFileRow?,
+        tableRow: Int
+    ) {
+        DispatchQueue.main.async { [weak self, weak row] in
+            self?.recordFileHeight(file, row: row, tableRow: tableRow)
+        }
+    }
+
+    private func recordFileHeight(
+        _ file: GitFileDiff,
+        row: GitReviewFileRow?,
+        tableRow: Int
+    ) {
+        guard let row,
+              tableRow < fileTableView.numberOfRows,
+              fileTableView.row(for: row) == tableRow,
+              tableRow >= filePreludeViews.count,
+              renderedFiles[tableRow - filePreludeViews.count].path == file.path else {
+            return
+        }
+        let measured = (
+            width: row.bounds.width,
+            height: row.fittingSize.height + Design.Spacing.small
+        )
+        if let old = measuredFileRowHeights[file.path],
+           abs(old.width - measured.width) <= 0.5,
+           abs(old.height - measured.height) <= 0.5 {
+            return
+        }
+        measuredFileRowHeights[file.path] = measured
+        fileTableView.noteHeightOfRows(
+            withIndexesChanged: IndexSet(integer: tableRow)
+        )
+        updateScrollControls()
+    }
+
+    private func schedulePreludeHeightMeasurement(
+        _ content: NSView,
+        host: GitReviewVirtualRowHost,
+        tableRow: Int
+    ) {
+        DispatchQueue.main.async { [weak self, weak content, weak host] in
+            guard let self, let content, let host,
+                  self.filePreludeViews.indices.contains(tableRow),
+                  self.filePreludeViews[tableRow] === content,
+                  self.fileTableView.row(for: host) == tableRow else { return }
+            host.layoutSubtreeIfNeeded()
+            let measured = (
+                width: content.bounds.width,
+                height: host.fittingSize.height
+            )
+            self.measuredPreludeRowHeights[tableRow] = measured
+            self.fileTableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integer: tableRow)
+            )
+        }
     }
 }
 
@@ -391,12 +513,19 @@ private final class GitReviewVirtualRowHost: NSView {
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
-        let inset = Design.Spacing.inset * 2
+        // The pane's one row inset, the same measure the header's chip starts on and the stack
+        // path gives its rows — the table adds none of its own, being `.plain` with no intercell
+        // spacing. The gap between cards hangs below each of them rather than around all of
+        // them, so the first card starts on the margin and not half a gap under it.
+        let inset = Design.Spacing.inset
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor)
+            content.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Design.Spacing.small
+            )
         ])
     }
 }

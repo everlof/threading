@@ -42,7 +42,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
 
         guard cliResults == nil else { return }
         AgentCLIProbe.resolve(
-            executables: [AgentDefaults.claudeExecutable, AgentDefaults.codexExecutable]
+            executables: AgentKind.allCases.map(\.executableName)
         ) { [weak self] results in
             self?.cliResults = results
             self?.rebuildCLIRows()
@@ -293,8 +293,15 @@ enum OnboardingCLIDefaults {
     /// The install hint per executable — the `ProjectStatsPopover` shape: what is absent, the
     /// command that fixes it, and the promise that nothing else is needed.
     static func installCommand(for executable: String) -> String {
-        executable == AgentDefaults.codexExecutable
-            ? "npm install -g @openai/codex"
-            : "npm install -g @anthropic-ai/claude-code"
+        switch executable {
+        case AgentDefaults.codexExecutable:
+            return "npm install -g @openai/codex"
+        case AgentDefaults.grokExecutable:
+            return "npm install -g @xai-official/grok"
+        case AgentDefaults.openCodeExecutable:
+            return "npm install -g opencode-ai"
+        default:
+            return "npm install -g @anthropic-ai/claude-code"
+        }
     }
 }

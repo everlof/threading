@@ -263,7 +263,7 @@ extension ConversationViewController {
     ///
     /// Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
     /// against it would attribute later work to an old exchange. The diff reuses the Last Turn
-    /// machinery — the same `stash create` baseline, the same reader — so the card and the
+    /// machinery — the same immutable tree baseline, the same reader — so the card and the
     /// review pane cannot disagree about what a turn touched.
     func appendChangedFilesCard(forTurnStartingAt startIndex: Int) {
         guard !isReplaying,
@@ -710,7 +710,7 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
 /// Reusable shell around a conversation row. The host, not the content, is what AppKit recycles;
 /// replacing its child releases offscreen Markdown and tool constraint trees while preserving a
 /// stable measured height for the presentation identity.
-private final class ConversationVirtualRowHost: NSTableCellView {
+final class ConversationVirtualRowHost: NSTableCellView {
     private var releaseContent: (() -> Void)?
     private var onMeasuredHeight: ((CGFloat) -> Void)?
 

@@ -44,10 +44,13 @@ final class SessionSharingViewController: NSViewController {
     /// position or the pointer's hover. Ages are written into the rows already there.
     private var renderedShape: String?
     private var ageRows: [String: SessionSharingRowView] = [:]
+    private var controlParticipantIDs: [String] = []
 
     private lazy var titleLabel: NSTextField = {
         let label = NSTextField(labelWithString: L10n.string("Sharing"))
-        label.applyFont(.subheading)
+        // The pane title is its one typographic emphasis. Everything below it deliberately
+        // stays regular-weight so a short operational list does not read as a wall of headings.
+        label.applyFont(.emphasizedBody)
         label.textColor = Design.Text.label
         label.lineBreakMode = .byTruncatingTail
         return label
@@ -63,10 +66,11 @@ final class SessionSharingViewController: NSViewController {
 
     private lazy var shareButton: ThemedButton = {
         let button = ThemedButton(
-            title: L10n.string("Share Chat…"),
+            title: L10n.string("Share…"),
             target: self,
             action: #selector(shareClicked)
         )
+        button.emphasis = .tertiary
         button.toolTip = L10n.string("Create a single-use invitation to this chat")
         return button
     }()
@@ -75,13 +79,13 @@ final class SessionSharingViewController: NSViewController {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Design.Spacing.hairline
+        stack.spacing = Design.Spacing.small
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.edgeInsets = NSEdgeInsets(
             top: Design.Spacing.small,
-            left: Design.Spacing.small,
+            left: Design.Spacing.inset,
             bottom: Design.Spacing.inset,
-            right: Design.Spacing.small
+            right: Design.Spacing.inset
         )
         return stack
     }()
@@ -142,6 +146,10 @@ final class SessionSharingViewController: NSViewController {
         appEvents.observe(SessionSharingDidChange.self) { [weak self] _ in
             self?.refresh()
         }
+        appEvents.observe(SessionInputControlDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.refresh()
+        }
         refresh()
     }
 
@@ -155,7 +163,10 @@ final class SessionSharingViewController: NSViewController {
 
         apply(
             followers: RemoteSessionMirrorRegistry.shared.followers(of: sessionID),
-            access: RemoteAccessCoordinator.shared.access(for: sessionID)
+            access: RemoteAccessCoordinator.shared.access(for: sessionID),
+            inputControl: RemoteSessionMirrorRegistry.shared.ownerInputControlState(
+                for: sessionID
+            )
         )
     }
 
@@ -163,15 +174,19 @@ final class SessionSharingViewController: NSViewController {
     /// the exact same path after reading the two authoritative stores above.
     func apply(
         followers: [RemoteSessionMirrorRegistry.Follower],
-        access: RemoteAccessCoordinator.SessionAccess
+        access: RemoteAccessCoordinator.SessionAccess,
+        inputControl: RemoteInputControlStateDTO? = nil
     ) {
         guard isViewLoaded else { return }
         let sections = Self.sections(followers: followers, access: access)
+        let inputControl = inputControl
+            ?? RemoteSessionMirrorRegistry.shared.ownerInputControlState(for: sessionID)
 
         let shape = self.shape(
             followers: sections.watching,
             away: sections.away,
-            links: sections.links
+            links: sections.links,
+            inputControl: inputControl
         )
         guard shape != renderedShape else {
             updateAges(
@@ -182,7 +197,12 @@ final class SessionSharingViewController: NSViewController {
             return
         }
         renderedShape = shape
-        rebuild(followers: sections.watching, away: sections.away, links: sections.links)
+        rebuild(
+            followers: sections.watching,
+            away: sections.away,
+            links: sections.links,
+            inputControl: inputControl
+        )
     }
 
     /// The three groups, from the live sockets and the stored shares.
@@ -214,13 +234,22 @@ final class SessionSharingViewController: NSViewController {
     private func shape(
         followers: [RemoteSessionMirrorRegistry.Follower],
         away: [RemoteAccessCoordinator.SessionAccess.Member],
-        links: [RemoteAccessCoordinator.SessionAccess.Link]
+        links: [RemoteAccessCoordinator.SessionAccess.Link],
+        inputControl: RemoteInputControlStateDTO
     ) -> String {
         let live = followers.map {
             "\($0.id)/\($0.memberName ?? "")/\($0.deviceName ?? "")/\($0.surface)"
                 + "/\($0.viewport.map { "\($0.cols)×\($0.rows)" } ?? "")/\($0.isTyping)"
         }
-        return (live + away.map(\.id) + links.map(\.id)).joined(separator: "|")
+        let control = [
+            inputControl.mode.rawValue,
+            inputControl.controllerID ?? "",
+            String(inputControl.revision),
+            inputControl.participants.map {
+                "\($0.id)/\($0.displayName)/\($0.isOnline)"
+            }.joined(separator: ",")
+        ].joined(separator: "/")
+        return (live + away.map(\.id) + links.map(\.id) + [control]).joined(separator: "|")
     }
 
     private func updateAges(
@@ -242,7 +271,8 @@ final class SessionSharingViewController: NSViewController {
     private func rebuild(
         followers: [RemoteSessionMirrorRegistry.Follower],
         away: [RemoteAccessCoordinator.SessionAccess.Member],
-        links: [RemoteAccessCoordinator.SessionAccess.Link]
+        links: [RemoteAccessCoordinator.SessionAccess.Link],
+        inputControl: RemoteInputControlStateDTO
     ) {
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)
@@ -267,18 +297,11 @@ final class SessionSharingViewController: NSViewController {
             return
         }
 
+        addInputControl(inputControl)
+
         if !followers.isEmpty {
             add(sectionTitle: L10n.string("Watching now"), count: followers.count)
             followers.forEach(add(follower:))
-            if followers.contains(where: \.isOwnerDevice) {
-                addSettingsFootnote(
-                    L10n.string(
-                        "Your own devices are paired to this Mac, not to this chat. "
-                            + "Unpair them in Settings."
-                    ),
-                    buttonTitle: L10n.string("Remote Access…")
-                )
-            }
         }
 
         if !away.isEmpty {
@@ -294,6 +317,78 @@ final class SessionSharingViewController: NSViewController {
 
     // MARK: - Rows
 
+    private func addInputControl(_ state: RemoteInputControlStateDTO) {
+        add(sectionTitle: L10n.string("Input control"))
+
+        let mode = ThemedSegmentedControl()
+        mode.configure(
+            titles: [L10n.string("Collaborative"), L10n.string("Focused")],
+            selectedIndex: state.mode == .collaborative ? 0 : 1
+        )
+        mode.onSelect = { [weak self] index in
+            guard let self else { return }
+            RemoteSessionMirrorRegistry.shared.setInputControlFromOwner(
+                index == 0 ? .collaborative : .focused,
+                sessionID: self.sessionID,
+                targetID: index == 0 ? nil : RemoteCollaborationParticipantDTO.ownerID
+            )
+        }
+        mode.translatesAutoresizingMaskIntoConstraints = false
+        addFullWidth(mode)
+
+        if state.mode == .collaborative {
+            add(note: L10n.string("Everyone with reply access can send."))
+            return
+        }
+
+        let picker = ThemedPopUp()
+        let eligibleParticipants = state.participants.filter {
+            $0.isOnline || $0.id == state.controllerID
+        }
+        controlParticipantIDs = eligibleParticipants.map(\.id)
+        for participant in eligibleParticipants {
+            picker.addItem(ThemedMenuItem(
+                title: participant.displayName,
+                subtitle: participant.isOnline
+                    ? L10n.string("Online")
+                    : L10n.string("Away — control returns to the owner shortly")
+            ))
+        }
+        if let controllerID = state.controllerID,
+           let index = controlParticipantIDs.firstIndex(of: controllerID) {
+            picker.selectItem(at: index)
+        }
+        picker.target = self
+        picker.action = #selector(controlParticipantChanged(_:))
+        picker.setAccessibilityIdentifier("sharing.input-controller")
+        picker.setAccessibilityLabel(L10n.string("Controller"))
+        picker.translatesAutoresizingMaskIntoConstraints = false
+
+        let controllerLabel = NSTextField(labelWithString: L10n.string("Controller"))
+        controllerLabel.applyFont(.subheading)
+        controllerLabel.textColor = Design.Text.tertiary
+        controllerLabel.translatesAutoresizingMaskIntoConstraints = false
+        controllerLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let controllerRow = NSView()
+        controllerRow.translatesAutoresizingMaskIntoConstraints = false
+        controllerRow.addSubview(controllerLabel)
+        controllerRow.addSubview(picker)
+        NSLayoutConstraint.activate([
+            controllerLabel.leadingAnchor.constraint(equalTo: controllerRow.leadingAnchor),
+            controllerLabel.centerYAnchor.constraint(equalTo: picker.centerYAnchor),
+            picker.leadingAnchor.constraint(
+                equalTo: controllerLabel.trailingAnchor,
+                constant: Design.Spacing.medium
+            ),
+            picker.trailingAnchor.constraint(equalTo: controllerRow.trailingAnchor),
+            picker.topAnchor.constraint(equalTo: controllerRow.topAnchor),
+            picker.bottomAnchor.constraint(equalTo: controllerRow.bottomAnchor)
+        ])
+        addFullWidth(controllerRow)
+        add(note: L10n.string("Others can watch and keep drafts."))
+    }
+
     private func add(follower: RemoteSessionMirrorRegistry.Follower) {
         let row = SessionSharingRowView(
             symbolName: SessionSharingSymbols.watching,
@@ -304,7 +399,9 @@ final class SessionSharingViewController: NSViewController {
             detail: detail(for: follower)
         )
         row.toolTip = follower.isOwnerDevice
-            ? L10n.string("One of your own paired devices")
+            ? L10n.string(
+                "One of your own paired devices. Manage paired devices in Remote Access settings."
+            )
             : L10n.format("%@ has this chat open", name(for: follower))
         ageRows["\(follower.id)"] = row
         addFullWidth(row)
@@ -334,6 +431,7 @@ final class SessionSharingViewController: NSViewController {
             actions.append(.init(
                 title: L10n.string("Copy"),
                 accessibility: L10n.string("Copy this invitation link"),
+                emphasis: .secondary,
                 action: { [weak self] in
                     if let onCopyInvitation = self?.onCopyInvitation {
                         onCopyInvitation(url.absoluteString)
@@ -374,18 +472,8 @@ final class SessionSharingViewController: NSViewController {
         var parts: [String] = []
         if follower.isOwnerDevice {
             parts.append(L10n.string("Your device"))
-            if let deviceName = follower.deviceName { parts.append(deviceName) }
         } else if follower.memberName != nil, let deviceName = follower.deviceName {
             parts.append(deviceName)
-        }
-        parts.append(grantName(
-            capability: follower.capability,
-            canApprove: follower.canApprovePermissions
-        ))
-        // The grid, because two viewers disagreeing about it is a thing that happens and used to
-        // be invisible: the chat is held at the smallest one, which this is how you notice.
-        if let viewport = follower.viewport {
-            parts.append("\(viewport.cols)×\(viewport.rows)")
         }
         if follower.isTyping {
             parts.append(L10n.string("typing…"))
@@ -415,15 +503,10 @@ final class SessionSharingViewController: NSViewController {
     }
 
     private func detail(for link: RemoteAccessCoordinator.SessionAccess.Link) -> String {
-        let created = L10n.format("created %@", Self.relative.localizedString(
-            for: link.createdAt,
-            relativeTo: Date()
-        ))
-        let expires = L10n.format("expires %@", Self.relative.localizedString(
+        L10n.format("expires %@", Self.relative.localizedString(
             for: link.expiresAt,
             relativeTo: Date()
         ))
-        return "\(created) · \(expires)"
     }
 
     /// The grant, in the words the share sheet offers it in — one vocabulary for the thing you
@@ -464,6 +547,15 @@ final class SessionSharingViewController: NSViewController {
         onShare?()
     }
 
+    @objc private func controlParticipantChanged(_ sender: ThemedPopUp) {
+        guard controlParticipantIDs.indices.contains(sender.indexOfSelectedItem) else { return }
+        RemoteSessionMirrorRegistry.shared.setInputControlFromOwner(
+            .handoff,
+            sessionID: sessionID,
+            targetID: controlParticipantIDs[sender.indexOfSelectedItem]
+        )
+    }
+
     /// Asked every time. The invitation they came through was single-use, so the way back is a
     /// *different* action the owner has to know to take — share the chat again — which is the
     /// line `ConfirmationPrompt` draws between a question worth asking and an undo worth
@@ -495,11 +587,6 @@ final class SessionSharingViewController: NSViewController {
         }
     }
 
-    @objc private func openRemoteAccessSettings() {
-        (view.window?.windowController as? MainWindowController)?
-            .showSettingsPage(id: SettingsPages.remoteAccessID)
-    }
-
     // MARK: - Ticking
 
     /// Ages are the one thing here that changes with no event behind it. A slow tick while the
@@ -525,11 +612,15 @@ final class SessionSharingViewController: NSViewController {
 
     // MARK: - Stack helpers
 
-    private func add(sectionTitle: String, count: Int) {
-        let label = NSTextField(
-            labelWithString: L10n.format("%@  %lld", sectionTitle.uppercased(), Int64(count))
-        )
-        label.applyFont(.caption)
+    private func add(sectionTitle: String, count _: Int) {
+        // The rows themselves make the count apparent. Repeating it beside every heading added
+        // another visual token without helping the owner make a decision.
+        add(sectionTitle: sectionTitle)
+    }
+
+    private func add(sectionTitle: String) {
+        let label = NSTextField(labelWithString: sectionTitle)
+        label.applyFont(.detail())
         label.textColor = Design.Text.quaternary
         label.translatesAutoresizingMaskIntoConstraints = false
 
@@ -537,7 +628,7 @@ final class SessionSharingViewController: NSViewController {
             let spacer = NSView()
             spacer.translatesAutoresizingMaskIntoConstraints = false
             spacer.heightAnchor.constraint(
-                equalToConstant: Design.Spacing.small
+                equalToConstant: Design.Spacing.tight
             ).isActive = true
             addFullWidth(spacer)
         }
@@ -546,46 +637,12 @@ final class SessionSharingViewController: NSViewController {
 
     private func add(note: String) {
         let label = NSTextField(labelWithString: note)
-        label.applyFont(.body)
+        label.applyFont(.subheading)
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
         addFullWidth(label)
-    }
-
-    /// A quiet line under a section, with the button that acts on what it says. Only one thing
-    /// says this so far — that a paired device is the Mac's business and not this chat's — and
-    /// the button goes to the one page that can undo it.
-    private func addSettingsFootnote(_ footnote: String, buttonTitle: String) {
-        let label = NSTextField(labelWithString: footnote)
-        label.applyFont(.caption)
-        label.textColor = Design.Text.quaternary
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        addFullWidth(label)
-
-        let button = ThemedButton(
-            title: buttonTitle,
-            target: self,
-            action: #selector(openRemoteAccessSettings)
-        )
-        button.emphasis = .tertiary
-        button.translatesAutoresizingMaskIntoConstraints = false
-        let holder = NSView()
-        holder.translatesAutoresizingMaskIntoConstraints = false
-        holder.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.topAnchor.constraint(equalTo: holder.topAnchor),
-            button.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
-            button.leadingAnchor.constraint(
-                equalTo: holder.leadingAnchor,
-                constant: -button.opticalHorizontalInset
-            ),
-            button.trailingAnchor.constraint(lessThanOrEqualTo: holder.trailingAnchor)
-        ])
-        addFullWidth(holder)
     }
 
     private func addFullWidth(_ subview: NSView) {
@@ -660,18 +717,30 @@ enum SessionSharingDefaults {
 
 // MARK: - Row
 
-/// One participant, link, or live view: a mark, a name, a line of facts under it, and whatever
-/// can be done about it on the trailing edge.
+/// One participant, link, or live view: a mark, a name, a short set of facts under it, and the
+/// actions that belong to it.
 ///
-/// Two lines rather than the info pane's one because the facts here do not fit a value column —
-/// "Chrome on Mac · can reply · 46×35 · watching 12 min" is a sentence, and squeezing it into a
-/// right-aligned slot beside a name is how it would end up truncated to "Chrome on…".
+/// The title and its actions share the first line. Metadata owns the full second-line width and
+/// may wrap once; an action no longer turns useful text into an ellipsis at narrow pane widths.
 final class SessionSharingRowView: NSView {
 
     struct Action {
         let title: String
         let accessibility: String
+        let emphasis: ThemedButton.Emphasis
         let action: () -> Void
+
+        init(
+            title: String,
+            accessibility: String,
+            emphasis: ThemedButton.Emphasis = .tertiary,
+            action: @escaping () -> Void
+        ) {
+            self.title = title
+            self.accessibility = accessibility
+            self.emphasis = emphasis
+            self.action = action
+        }
     }
 
     private let glyphView = NSImageView()
@@ -686,7 +755,10 @@ final class SessionSharingRowView: NSView {
     /// nor the pane's scroll position.
     var detail: String {
         get { detailLabel.stringValue }
-        set { detailLabel.stringValue = newValue }
+        set {
+            detailLabel.stringValue = newValue
+            setAccessibilityLabel("\(titleLabel.stringValue). \(newValue)")
+        }
     }
 
     init(
@@ -716,17 +788,19 @@ final class SessionSharingRowView: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        detailLabel.applyFont(.caption)
+        detailLabel.applyFont(.detail())
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.stringValue = detail
-        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.lineBreakMode = .byWordWrapping
+        detailLabel.maximumNumberOfLines = 2
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
 
         [glyphView, titleLabel, detailLabel].forEach(addSubview)
 
         let buttons = NSStackView()
         buttons.orientation = .horizontal
-        buttons.spacing = Design.Spacing.hairline
+        buttons.spacing = Design.Spacing.small
         buttons.translatesAutoresizingMaskIntoConstraints = false
         for (index, action) in actions.enumerated() {
             let button = ThemedButton(
@@ -735,28 +809,27 @@ final class SessionSharingRowView: NSView {
                 action: #selector(runAction(_:))
             )
             button.tag = index
-            button.emphasis = .tertiary
+            button.emphasis = action.emphasis
             button.setAccessibilityHelp(action.accessibility)
             buttons.addArrangedSubview(button)
         }
         addSubview(buttons)
 
         let inset = Design.Spacing.small
-        NSLayoutConstraint.activate([
+        var constraints = [
             glyphView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             glyphView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             glyphView.widthAnchor.constraint(
                 equalToConstant: SessionSharingDefaults.glyphSlot
             ),
 
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
             titleLabel.leadingAnchor.constraint(
                 equalTo: glyphView.trailingAnchor,
                 constant: Design.Spacing.tight
             ),
             titleLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: buttons.leadingAnchor,
-                constant: -Design.Spacing.tight
+                constant: -Design.Spacing.medium
             ),
 
             detailLabel.topAnchor.constraint(
@@ -764,15 +837,22 @@ final class SessionSharingRowView: NSView {
                 constant: Design.Spacing.hairline
             ),
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            detailLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: buttons.leadingAnchor,
-                constant: -Design.Spacing.tight
-            ),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             detailLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset),
 
-            buttons.centerYAnchor.constraint(equalTo: centerYAnchor),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
-        ])
+        ]
+        if actions.isEmpty {
+            constraints.append(titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset))
+            constraints.append(buttons.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor))
+        } else {
+            // Text actions are full-height controls. Aligning them to a label whose line box is
+            // shorter put their focus ring almost on the row edge; own the top inset instead and
+            // vertically center the title against the resulting control.
+            constraints.append(buttons.topAnchor.constraint(equalTo: topAnchor, constant: inset))
+            constraints.append(titleLabel.centerYAnchor.constraint(equalTo: buttons.centerYAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
 
         setAccessibilityRole(.group)
         setAccessibilityLabel("\(title). \(detail)")
