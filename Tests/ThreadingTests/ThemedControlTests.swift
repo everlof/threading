@@ -4112,6 +4112,91 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    // MARK: - Secure Field
+
+    /// The masking is the *cell*, which is the whole reason `ThemedSecureField` subclasses the
+    /// themed field and swaps only `cellClass`. Swift has one superclass and secure entry lives
+    /// below `NSTextFieldCell`, so the tempting alternative — subclassing `NSSecureTextField`
+    /// and restating the surface, the focus ring and the placeholder — would have been a second
+    /// copy of the theming that could drift. If this assertion ever fails the field still draws
+    /// correctly and silently stops hiding the password.
+    func testASecureFieldMasksThroughAppKitsOwnCell() throws {
+        let field = ThemedSecureField()
+        let cell = try XCTUnwrap(
+            field.cell as? NSSecureTextFieldCell,
+            "the secure field was built with an ordinary editable cell"
+        )
+        XCTAssertTrue(cell.echosBullets, "the cell echoes the typed characters")
+    }
+
+    /// Inherited, not restated: the point of the subclass is that the well, the ring and the
+    /// placeholder are the ones every other field draws.
+    func testASecureFieldDrawsTheSameThemedChromeAsAnOrdinaryField() {
+        let field = ThemedSecureField()
+        XCTAssertFalse(field.isBezeled)
+        XCTAssertFalse(field.drawsBackground)
+        XCTAssertEqual(field.focusRingType, .none)
+        XCTAssertEqual(field.intrinsicContentSize.height, Design.Size.fieldHeight)
+    }
+
+    /// The two cells cannot share an ancestor, so they share the text rect through one function.
+    /// This is the regression that extraction exists to prevent: the field editor is placed by
+    /// that rect, so a drift between the two shows up as text jumping on click in one of them.
+    func testBothFieldCellsPlaceTheirTextIdentically() {
+        let bounds = NSRect(x: 0, y: 0, width: 240, height: Design.Size.fieldHeight)
+        let plain = ThemedTextField(string: "hunter2")
+        let secure = ThemedSecureField()
+        secure.stringValue = "hunter2"
+
+        XCTAssertEqual(
+            plain.cell?.drawingRect(forBounds: bounds),
+            secure.cell?.drawingRect(forBounds: bounds),
+            "the secure cell's text rect drifted from the ordinary one"
+        )
+    }
+
+    /// The placeholder is a *built* attributed string, so it freezes where the field's own font
+    /// and ink would be re-resolved. `ThemedTextField` rebuilds it on the theme sweep; the
+    /// subclass has to still be observing.
+    func testASecureFieldRebuildsItsPlaceholderOnAThemeSweep() {
+        let field = ThemedSecureField()
+        field.placeholderString = "Test account password"
+
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeLibrary.current.id))
+
+        let attributed = field.placeholderAttributedString
+        XCTAssertEqual(attributed?.string, "Test account password")
+        XCTAssertEqual(
+            attributed?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor,
+            Design.Text.tertiary,
+            "the placeholder kept a stale ink through the theme change"
+        )
+    }
+
+    /// A secure field is still a text field to assistive technology — the value is what is
+    /// withheld, not the control's identity.
+    func testASecureFieldReportsATextFieldRole() {
+        XCTAssertEqual(ThemedSecureField().accessibilityRole(), .textField)
+    }
+
+    /// The secure field editor is an `NSSecureTextView` inside the same private clip view an
+    /// ordinary field expands into, so the inherited boundary already answers for it. Asserted
+    /// without a window on purpose: everything here is decidable from the hierarchy rule itself,
+    /// and a first responder would have moved this case out of the fast plan.
+    func testASecureFieldPermitsOnlyItsOwnPrivateEditor() {
+        let field = ThemedSecureField()
+        let clip = NSClipView()
+        let editor = NSTextView()
+
+        XCTAssertFalse(field.permitsSystemChrome(clip), "a clip view that is not ours passed")
+        field.addSubview(clip)
+        XCTAssertTrue(field.permitsSystemChrome(clip))
+
+        XCTAssertFalse(field.permitsSystemChrome(editor), "a loose text view passed")
+        clip.addSubview(editor)
+        XCTAssertTrue(field.permitsSystemChrome(editor))
+    }
+
     /// The two fields given a frame rather than asked for their size — an alert's accessory and
     /// the rename prompt — restate the same height, or the one field the app puts in front of a
     /// decision is the tightest one it draws.
@@ -5018,6 +5103,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedTabStripView",
                 "ThemedTextField",
                 "ThemedSearchField",
+                "ThemedSecureField",
                 "ThemedTextView",
                 "ThemedToggle",
                 "ThemedSurface",

@@ -23951,6 +23951,36 @@
           }
         }
       }
+    },
+    "ThemedSecureField": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedSecureField"
+          }
+        }
+      }
+    },
+    "Test account password": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lösenord för testkonto"
+          }
+        }
+      }
+    },
+    "The same well with AppKit's secure cell inside it, so masking, the pasteboard rules and the input-method log stay where the system puts them. Deliberately no reveal control: a field that can be un-masked puts a password on screen while an agent may be driving the app beside it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samma brunn med AppKits säkra cell inuti, så att maskering, reglerna för urklipp och loggen för inmatningsmetoder stannar där systemet placerar dem. Medvetet ingen visa-knapp: ett fält som kan avmaskeras lägger ett lösenord på skärmen medan en agent kan styra appen bredvid det."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

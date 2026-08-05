@@ -141,6 +141,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedTabStripView",
         "ThemedTextField",
         "ThemedSearchField",
+        "ThemedSecureField",
         "ThemedTextView",
         "ThemedToggle",
         "ThemedSurface",
@@ -982,11 +983,16 @@ final class ComponentGalleryViewController: NSViewController {
         let disabled = ThemedTextField(string: L10n.string("Disabled"))
         disabled.isEnabled = false
 
+        let secure = ThemedSecureField()
+        secure.placeholderString = L10n.string("Test account password")
+        secure.target = self
+        secure.action = #selector(textCommitted)
+
         matchQueryField.placeholderString = L10n.string("Type a word, or paste the whole ID")
         matchQueryField.delegate = self
         matchQueryField.setAccessibilityIdentifier("gallery.search-match.query")
 
-        for field in [field, search, disabled, matchQueryField] {
+        for field in [field, search, disabled, secure, matchQueryField] {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
         }
@@ -1130,6 +1136,15 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedTextField & ThemedSearchField",
                     "Editable, search-shaped, and disabled states.",
                     row([field, search, disabled])
+                ),
+                story(
+                    "ThemedSecureField",
+                    "The same well with AppKit's secure cell inside it, so masking, the "
+                        + "pasteboard rules and the input-method log stay where the system puts "
+                        + "them. Deliberately no reveal control: a field that can be un-masked "
+                        + "puts a password on screen while an agent may be driving the app "
+                        + "beside it.",
+                    row([secure])
                 ),
                 story(
                     "SearchMatchLabel",

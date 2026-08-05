@@ -139,8 +139,8 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
     /// The leading edge the text begins at, so a subclass can put a glyph in front of it.
     fileprivate var contentInset: CGFloat {
-        get { (cell as? ThemedTextFieldCell)?.contentInset ?? Layout.inset }
-        set { (cell as? ThemedTextFieldCell)?.contentInset = newValue }
+        get { (cell as? ThemedFieldCell)?.contentInset ?? Layout.inset }
+        set { (cell as? ThemedFieldCell)?.contentInset = newValue }
     }
 
     private func drawSurface() {
@@ -167,22 +167,47 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
 // MARK: - Cell
 
+/// What `ThemedTextField` needs of whichever cell it was built with, so the glyph inset is
+/// reachable without naming one concrete cell class. Secure entry is a *cell* behaviour and
+/// `NSSecureTextFieldCell` descends from `NSTextFieldCell` directly, so the themed cells are
+/// siblings rather than a chain — see `ThemedSecureField`.
+@MainActor
+protocol ThemedFieldCell: AnyObject {
+    var contentInset: CGFloat { get set }
+}
+
+/// The text rect both themed cells place their content in.
+///
+/// A free function rather than a shared superclass for the reason above: the two cells cannot
+/// share an ancestor below `NSTextFieldCell`, and the alternative was this arithmetic — on which
+/// the field editor's position and therefore whether text jumps on click depends — living in two
+/// files and drifting.
+///
+/// Height is taken from the font rather than from `cellSize(forBounds:)`, which AppKit may answer
+/// by asking for this rect back.
+@MainActor
+private func themedFieldTextRect(
+    _ rect: NSRect,
+    font: NSFont?,
+    contentInset: CGFloat
+) -> NSRect {
+    let height = ceil((font ?? Design.Typography.body()).boundingRectForFont.height)
+    return NSRect(
+        x: rect.minX + contentInset,
+        y: rect.midY - height / 2,
+        width: max(0, rect.width - contentInset - ThemedTextField.Layout.inset),
+        height: height
+    )
+}
+
 /// Insets the text so it clears the drawn border, and centres it in a control whose height comes
 /// from the design scale rather than from the font.
-private final class ThemedTextFieldCell: NSTextFieldCell {
+private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
 
     var contentInset: CGFloat = ThemedTextField.Layout.inset
 
-    /// Height is taken from the font rather than from `cellSize(forBounds:)`, which AppKit may
-    /// answer by asking for this rect back.
     private func adjusted(_ rect: NSRect) -> NSRect {
-        let height = ceil((font ?? Design.Typography.body()).boundingRectForFont.height)
-        return NSRect(
-            x: rect.minX + contentInset,
-            y: rect.midY - height / 2,
-            width: max(0, rect.width - contentInset - ThemedTextField.Layout.inset),
-            height: height
-        )
+        themedFieldTextRect(rect, font: font, contentInset: contentInset)
     }
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
@@ -207,6 +232,78 @@ private final class ThemedTextFieldCell: NSTextFieldCell {
         )
         // *After* `super`, which is the whole subtlety: AppKit configures the shared editor as it
         // hands it over, and anything said first is overwritten by the field it is being lent to.
+        ThemedTextSelection.apply(to: editor, in: controlView)
+    }
+
+    override func edit(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor: NSText,
+        delegate: Any?,
+        event: NSEvent?
+    ) {
+        super.edit(
+            withFrame: adjusted(rect), in: controlView, editor: editor,
+            delegate: delegate, event: event
+        )
+        ThemedTextSelection.apply(to: editor, in: controlView)
+    }
+}
+
+// MARK: - Secure
+
+/// A masked field drawn from the theme, replacing a bezelled `NSSecureTextField`.
+///
+/// Subclasses `ThemedTextField` and swaps only the *cell*, because that is where secure entry
+/// actually lives: `NSSecureTextField` is an `NSTextField` whose cell is an
+/// `NSSecureTextFieldCell`, and the cell is what vends the secure field editor that suppresses
+/// the glyphs, the pasteboard and the input-method log. Inheriting the themed field therefore
+/// keeps one surface, one focus ring and one placeholder treatment, and puts the masking exactly
+/// where AppKit puts it.
+///
+/// It exists for one screen — entering a test-account password in Settings — and deliberately
+/// offers no reveal control. A field that can be un-masked is a field whose value is on screen
+/// while an agent may be driving the app beside it.
+final class ThemedSecureField: ThemedTextField {
+
+    override class var cellClass: AnyClass? {
+        get { ThemedSecureFieldCell.self }
+        set { super.cellClass = newValue }
+    }
+
+    /// The secure field editor is a `NSSecureTextView` inside the same private clip view an
+    /// ordinary field expands into. `ThemedTextField.permitsSystemChrome` already answers for
+    /// `NSTextView` subclasses, so nothing is relaxed here — this is only where that is stated.
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        .textField
+    }
+}
+
+/// The secure sibling of `ThemedTextFieldCell`, sharing its text rect and nothing else.
+private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCell {
+
+    var contentInset: CGFloat = ThemedTextField.Layout.inset
+
+    private func adjusted(_ rect: NSRect) -> NSRect {
+        themedFieldTextRect(rect, font: font, contentInset: contentInset)
+    }
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        super.drawingRect(forBounds: adjusted(rect))
+    }
+
+    override func select(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor: NSText,
+        delegate: Any?,
+        start: Int,
+        length: Int
+    ) {
+        super.select(
+            withFrame: adjusted(rect), in: controlView, editor: editor,
+            delegate: delegate, start: start, length: length
+        )
         ThemedTextSelection.apply(to: editor, in: controlView)
     }
 
