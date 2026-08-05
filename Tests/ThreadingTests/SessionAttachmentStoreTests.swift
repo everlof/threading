@@ -35,6 +35,11 @@ final class SessionAttachmentStoreTests: XCTestCase {
 
     private var payloads: [SessionID: String] = [:]
 
+    /// The scope answer is read on every admission and every read, so the double is a box the
+    /// test can flip mid-case — which is the interesting half: the rule is configurable, and
+    /// what happens *at the moment it changes* is what these assert.
+    private var allowsFilesOutsideProject = false
+
     private func makeStore(takesCustody: Bool = true) -> SessionAttachmentStore {
         SessionAttachmentStore(
             loadPayload: { [weak self] in self?.payloads[$0] },
@@ -42,7 +47,8 @@ final class SessionAttachmentStoreTests: XCTestCase {
             retainPersisted: { [weak self] ids in
                 self?.payloads = self?.payloads.filter { ids.contains($0.key) } ?? [:]
             },
-            copiesDirectory: takesCustody ? { [copies] in copies! } : nil
+            copiesDirectory: takesCustody ? { [copies] in copies! } : nil,
+            allowsFilesOutsideProject: { [weak self] in self?.allowsFilesOutsideProject ?? false }
         )
     }
 
@@ -201,6 +207,206 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(store.attachments(for: session).map(\.origin), [.agent])
     }
 
+    // MARK: - The Scope The Scanned Door Is Held To
+
+    /// The refusal is not silence: the pane has to be able to say what the rule cost, or the
+    /// setting is one nobody can find from the place it applies.
+    func testARefusedPathIsCountedEvenThoughItIsNotListed() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("private.png"))
+
+        store.recordReferences(in: "wrote \(shot.path)", sessionID: session, projectRoot: checkout)
+
+        XCTAssertEqual(store.attachments(for: session), [])
+        XCTAssertEqual(store.countOfFilesOutsideProject(for: session), 1)
+        XCTAssertEqual(
+            store.withheldReferences(for: session).map(\.path),
+            [shot.resolvingSymlinksInPath().path]
+        )
+    }
+
+    /// Nothing to say when the rule costs nothing — which is what lets the pane stay quiet.
+    func testASessionThatNamesNothingOutsideItsProjectCountsNothing() throws {
+        let store = makeStore()
+        let session = SessionID()
+        try write([0x89], to: checkout.appendingPathComponent("diagram.png"))
+
+        store.recordReferences(in: "see `diagram.png`", sessionID: session, projectRoot: checkout)
+
+        XCTAssertEqual(store.attachments(for: session).count, 1)
+        XCTAssertEqual(store.countOfFilesOutsideProject(for: session), 0)
+    }
+
+    /// Widening takes custody rather than pointing outside: the property the containment rule
+    /// was really providing — every listed file somewhere the app controls — has to survive the
+    /// rule being relaxed, because it is what the remote endpoint stands on.
+    func testWideningTheScopeCopiesTheFileInRatherThanReferencingIt() throws {
+        allowsFilesOutsideProject = true
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89, 0x50], to: elsewhere.appendingPathComponent("shot.png"))
+
+        store.recordReferences(in: "wrote \(shot.path)", sessionID: session, projectRoot: checkout)
+
+        let listed = try XCTUnwrap(store.attachments(for: session).first)
+        XCTAssertEqual(listed.name, "shot.png")
+        XCTAssertTrue(listed.isOutsideProject)
+        XCTAssertTrue(
+            listed.url.path.hasPrefix(copies.path),
+            "a widened scope listed a file the app has no custody of: \(listed.url.path)"
+        )
+        XCTAssertEqual(try Data(contentsOf: listed.url), Data([0x89, 0x50]))
+        XCTAssertEqual(store.countOfFilesOutsideProject(for: session), 1)
+    }
+
+    /// The answer the user gave is the answer the pane shows, not the answer it shows the next
+    /// time an agent happens to print the path again: nothing re-reads the terminal's buffer on
+    /// a settings change, so what was refused has to be admittable from what was remembered.
+    func testWhatWasRefusedIsAdmittedTheMomentTheScopeWidens() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("late.png"))
+        store.recordReferences(in: "wrote \(shot.path)", sessionID: session, projectRoot: checkout)
+        XCTAssertEqual(store.attachments(for: session), [])
+
+        allowsFilesOutsideProject = true
+        XCTAssertEqual(store.admitWithheldFilesOutsideProject(for: session).map(\.name), ["late.png"])
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["late.png"])
+        XCTAssertTrue(
+            store.withheldReferences(for: session).isEmpty,
+            "a file that has been admitted is still being counted as withheld"
+        )
+    }
+
+    /// Narrowing again is immediate and total, and it does not depend on anything being open to
+    /// notice: everything that can serve an attachment reads through the one gate.
+    func testNarrowingTheScopeHidesThoseRowsEverywhereWithoutDestroyingThem() throws {
+        allowsFilesOutsideProject = true
+        let store = makeStore()
+        let session = SessionID()
+        let outside = try write([0x89], to: elsewhere.appendingPathComponent("outside.png"))
+        try write([0x89], to: checkout.appendingPathComponent("inside.png"))
+        store.recordReferences(
+            in: "both \(outside.path) and `inside.png`",
+            sessionID: session,
+            projectRoot: checkout
+        )
+        XCTAssertEqual(store.attachments(for: session).count, 2)
+        let kept = try XCTUnwrap(
+            store.attachments(for: session).first(where: \.isOutsideProject)
+        )
+
+        allowsFilesOutsideProject = false
+
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["inside.png"])
+        XCTAssertNil(
+            store.attachment(for: session, relativePath: kept.relativePath),
+            "a row hidden by the scope is still addressable by relative path — the phone's key"
+        )
+        XCTAssertEqual(store.countOfFilesOutsideProject(for: session), 1)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: kept.url.path),
+            "narrowing the scope destroyed bytes it had already taken custody of"
+        )
+
+        allowsFilesOutsideProject = true
+        XCTAssertEqual(store.attachments(for: session).count, 2, "the row did not come back")
+    }
+
+    /// A handoff was never governed by the rule, so the setting may not touch it. This is the
+    /// bug in the other direction: the pane blaming a setting for something it does not control.
+    func testTheScopeDoesNotGovernAFileTheUserOrTheAgentHandedOver() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("declared.png"))
+
+        store.record(declared: shot, sessionID: session, projectRoot: checkout, origin: .user)
+
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["declared.png"])
+        XCTAssertEqual(
+            store.countOfFilesOutsideProject(for: session),
+            0,
+            "a declared file was counted as something the scope setting is deciding about"
+        )
+    }
+
+    /// Persisted like the rest, and read back as what it is: the gate has to still find these
+    /// after a relaunch, or a narrow scope would silently serve what a wide one admitted.
+    func testTheOutsideMarkSurvivesARelaunch() throws {
+        allowsFilesOutsideProject = true
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("kept.png"))
+        makeStore().recordReferences(
+            in: "wrote \(shot.path)",
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        let relaunched = makeStore()
+        XCTAssertEqual(relaunched.attachments(for: session).map(\.isOutsideProject), [true])
+
+        allowsFilesOutsideProject = false
+        XCTAssertEqual(makeStore().attachments(for: session), [])
+    }
+
+    /// A listener may only ever see a finished store.
+    ///
+    /// The change is announced synchronously, and the pane answers it by refreshing — which
+    /// admits whatever is still withheld. Announcing before clearing the withheld list therefore
+    /// handed the listener the same work again, and the pane and the store recursed until the
+    /// stack ran out: a segmentation fault, from turning a setting on.
+    func testAdmittingAnnouncesOnlyAfterTheWithheldListIsCleared() throws {
+        allowsFilesOutsideProject = true
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("reentrant.png"))
+        allowsFilesOutsideProject = false
+        store.recordReferences(in: "wrote \(shot.path)", sessionID: session, projectRoot: checkout)
+        allowsFilesOutsideProject = true
+
+        var reentries = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: SessionAttachmentsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { _ in
+            reentries += 1
+            // What the pane does, and may keep doing safely however deep the reply arrives.
+            guard reentries < 8 else { return }
+            MainActor.assumeIsolated {
+                store.admitWithheldFilesOutsideProject(for: session)
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        store.admitWithheldFilesOutsideProject(for: session)
+
+        XCTAssertEqual(reentries, 1, "the store announced a change it had not finished making")
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["reentrant.png"])
+    }
+
+    /// The hint is a hint, not a queue: the count may not grow with an afternoon of output.
+    func testWhatIsRememberedAboutRefusedPathsIsBounded() throws {
+        let store = makeStore()
+        let session = SessionID()
+        var text = ""
+        for index in 0...(SessionAttachmentDefaults.maximumWithheldPerSession + 8) {
+            let file = try write(
+                [UInt8(index % 251)],
+                to: elsewhere.appendingPathComponent("noise-\(index).png")
+            )
+            text += "\(file.path)\n"
+        }
+
+        store.recordReferences(in: text, sessionID: session, projectRoot: checkout)
+
+        XCTAssertEqual(
+            store.withheldReferences(for: session).count,
+            SessionAttachmentDefaults.maximumWithheldPerSession
+        )
+    }
+
     // MARK: - Provenance
 
     func testProvenanceSurvivesARelaunch() throws {
@@ -278,5 +484,170 @@ final class SessionAttachmentStoreTests: XCTestCase {
             ),
             "a forgotten session kept its copies"
         )
+    }
+
+    // MARK: - Stress
+
+    /// Opt-in scan workload against a terminal-sized buffer of paths.
+    ///
+    /// This is the main thread's work: the observer scans on the same queue the window draws on,
+    /// so the scan's cost is a stall's cost. Two things about the scope change made it worth a
+    /// deterministic number rather than an argument. Containment used to be answered *before*
+    /// the filesystem, so an outside path was rejected on a string comparison; reporting one
+    /// costs a `stat`, which puts the filesystem in the path of text an agent merely printed.
+    /// And the wide scope copies bytes, on that same thread. `maximumCandidatesPerScan` is what
+    /// bounds the first; the per-session cap bounds the second.
+    ///
+    /// The buffer is generated before the clock starts, so the measurements cover the regex
+    /// pass, the resolution, the admission and — where the workload asks for it — the copies.
+    func testStressAttachmentScanWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_ATTACHMENT_STRESS"] == "1",
+            "Set THREADING_ATTACHMENT_STRESS=1 to run the attachment-scan sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let pathCount = environment["THREADING_ATTACHMENT_STRESS_PATHS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 1_000
+        let shape = StressShape(
+            rawValue: environment["THREADING_ATTACHMENT_STRESS_SHAPE"] ?? "mixed"
+        ) ?? .mixed
+        allowsFilesOutsideProject = environment["THREADING_ATTACHMENT_STRESS_SCOPE"] == "wide"
+
+        let buffer = try makeStressBuffer(shape: shape, pathCount: pathCount)
+        let store = makeStore()
+        let session = SessionID()
+
+        // A cold scan, then a repeat of the identical buffer: the second is the one a repainting
+        // terminal actually pays, since every path in it has been seen and admitted already.
+        let baselineMemory = Self.physicalFootprintBytes()
+        let coldStarted = DispatchTime.now().uptimeNanoseconds
+        let admitted = store.recordReferences(
+            in: buffer.text,
+            sessionID: session,
+            projectRoot: checkout
+        )
+        let coldEnded = DispatchTime.now().uptimeNanoseconds
+        let warmStarted = DispatchTime.now().uptimeNanoseconds
+        store.recordReferences(in: buffer.text, sessionID: session, projectRoot: checkout)
+        let warmEnded = DispatchTime.now().uptimeNanoseconds
+
+        // And the read every pane, tool and remote fetch goes through, which re-proves each
+        // stored row against the filesystem and applies the scope gate.
+        let readStarted = DispatchTime.now().uptimeNanoseconds
+        let listed = store.attachments(for: session)
+        let readEnded = DispatchTime.now().uptimeNanoseconds
+        let countStarted = DispatchTime.now().uptimeNanoseconds
+        let outside = store.countOfFilesOutsideProject(for: session)
+        let countEnded = DispatchTime.now().uptimeNanoseconds
+
+        XCTAssertLessThanOrEqual(listed.count, SessionAttachmentDefaults.maximumPerSession)
+        XCTAssertLessThanOrEqual(
+            store.withheldReferences(for: session).count,
+            SessionAttachmentDefaults.maximumWithheldPerSession
+        )
+
+        let copiedBytes = Self.directoryBytes(copies)
+        let memoryDelta = Self.physicalFootprintBytes().saturatingSubtract(baselineMemory)
+        print(
+            "THREADING_PERF attachment-scan "
+                + "shape=\(shape.rawValue) scope=\(allowsFilesOutsideProject ? "wide" : "narrow") "
+                + "paths=\(pathCount) buffer_kb=\(buffer.text.utf8.count / 1024) "
+                + "inside_on_disk=\(buffer.insideCount) outside_on_disk=\(buffer.outsideCount) "
+                + "admitted=\(admitted.count) listed=\(listed.count) "
+                + "withheld=\(store.withheldReferences(for: session).count) outside_count=\(outside) "
+                + "cold_scan_ms=\(Self.milliseconds(coldEnded - coldStarted)) "
+                + "warm_scan_ms=\(Self.milliseconds(warmEnded - warmStarted)) "
+                + "read_ms=\(Self.milliseconds(readEnded - readStarted)) "
+                + "count_ms=\(Self.milliseconds(countEnded - countStarted)) "
+                + "copied_mb=\(Self.megabytes(copiedBytes)) "
+                + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
+        )
+    }
+
+    /// What the scanned text is made of. Each is a real afternoon in a terminal.
+    private enum StressShape: String {
+        /// Paths to files that exist, half in the checkout and half outside it.
+        case mixed
+        /// Every path outside the checkout — `find ~ -name '*.png'`, the case the rule exists for.
+        case outside
+        /// Path-*shaped* prose naming nothing that exists: the cheapest to refuse and the most
+        /// common, since a build log is mostly words.
+        case absent
+    }
+
+    private struct StressBuffer {
+        let text: String
+        let insideCount: Int
+        let outsideCount: Int
+    }
+
+    private func makeStressBuffer(shape: StressShape, pathCount: Int) throws -> StressBuffer {
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+        var lines: [String] = []
+        var insideCount = 0
+        var outsideCount = 0
+
+        for index in 0..<pathCount {
+            let isInside = shape == .mixed && index.isMultiple(of: 2)
+            switch shape {
+            case .absent:
+                lines.append("could not open /Users/nobody/missing-\(index).png: no such file")
+            case .mixed, .outside:
+                let file = isInside
+                    ? checkout.appendingPathComponent("render-\(index).png")
+                    : elsewhere.appendingPathComponent("shot-\(index).png")
+                try bytes.write(to: file)
+                if isInside {
+                    insideCount += 1
+                    lines.append("wrote `render-\(index).png` in 12ms")
+                } else {
+                    outsideCount += 1
+                    lines.append("wrote \(file.path) in 12ms")
+                }
+            }
+            // Prose between the paths, because a scan reads a terminal rather than a manifest,
+            // and the regex pass is over all of it.
+            lines.append("  \(index) files considered, 0 errors, 12 warnings — continuing")
+        }
+        return StressBuffer(
+            text: lines.joined(separator: "\n"),
+            insideCount: insideCount,
+            outsideCount: outsideCount
+        )
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func directoryBytes(_ directory: URL) -> UInt64 {
+        let files = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey]
+        )
+        var total: UInt64 = 0
+        while let url = files?.nextObject() as? URL {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            total += UInt64(size)
+        }
+        return total
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
+    }
+}
+
+private extension UInt64 {
+    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
     }
 }

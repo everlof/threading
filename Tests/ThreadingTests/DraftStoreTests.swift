@@ -120,9 +120,52 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: quarantine), original)
     }
 
+    func testSessionContinuitySurvivesANewStoreAndStaysPerSession() {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeContinuityStore()
+
+        store.setConversationDraft("unfinished answer", for: first)
+        store.setConversationDraft("other session", for: second)
+        store.setConversationViewport(progress: 0.37, followsBottom: false, for: first)
+
+        let reloaded = makeContinuityStore()
+        XCTAssertEqual(reloaded.state(for: first).conversationDraft, "unfinished answer")
+        XCTAssertEqual(reloaded.state(for: second).conversationDraft, "other session")
+        XCTAssertEqual(reloaded.state(for: first).conversationViewportProgress, 0.37)
+        XCTAssertFalse(reloaded.state(for: first).conversationFollowsBottom)
+    }
+
+    func testSessionContinuityClearsOnlyTheAcceptedDraft() {
+        let sessionID = SessionID()
+        let store = makeContinuityStore()
+        store.setConversationDraft("sent", for: sessionID)
+        store.setConversationViewport(progress: 0.5, followsBottom: false, for: sessionID)
+
+        store.setConversationDraft("", for: sessionID)
+
+        XCTAssertEqual(store.state(for: sessionID).conversationDraft, "")
+        XCTAssertEqual(store.state(for: sessionID).conversationViewportProgress, 0.5)
+    }
+
+    func testSessionContinuityClampsViewportProgress() {
+        let sessionID = SessionID()
+        let store = makeContinuityStore()
+
+        store.setConversationViewport(progress: 2, followsBottom: false, for: sessionID)
+        XCTAssertEqual(store.state(for: sessionID).conversationViewportProgress, 1)
+
+        store.setConversationViewport(progress: -1, followsBottom: false, for: sessionID)
+        XCTAssertEqual(store.state(for: sessionID).conversationViewportProgress, 0)
+    }
+
     // MARK: - Helpers
 
     private func makeStore() -> DraftStore {
         DraftStore(directory: testDirectory)
+    }
+
+    private func makeContinuityStore() -> SessionContinuityStore {
+        SessionContinuityStore(directory: testDirectory)
     }
 }

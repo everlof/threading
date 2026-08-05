@@ -12,6 +12,24 @@ final class SessionNamingTests: XCTestCase {
         )
     }
 
+    /// However the prompt spells the end of a line. `\r\n` is a *single* grapheme cluster in
+    /// Swift, so `split(separator: "\n")` divides CRLF text nowhere at all — a prompt pasted
+    /// from a Windows-authored source had no first line to take, and the whole thing became the
+    /// session name, newlines and all, cut off wherever the cap landed.
+    func testPromptTitleTakesTheFirstLineWhateverEndsIt() {
+        for prompt in [
+            "Fix the tests\r\nand then the build",
+            "Fix the tests\rand then the build",
+            "Fix the tests\u{2028}and then the build"
+        ] {
+            XCTAssertEqual(
+                SessionNaming.promptTitle(from: prompt),
+                "Fix the tests",
+                "did not stop at the line ending in \(prompt.debugDescription)"
+            )
+        }
+    }
+
     func testPromptTitleCapsLength() throws {
         let long = String(repeating: "word ", count: 40)
         let title = try XCTUnwrap(SessionNaming.promptTitle(from: long))

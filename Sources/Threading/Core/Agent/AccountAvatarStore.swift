@@ -81,6 +81,7 @@ enum AccountAvatarStore {
         switch account.provider {
         case .claude: return claudeEmail(configPath: account.configPath)
         case .codex: return codexEmail(configPath: account.configPath)
+        case .grok, .openCode: return nil
         }
     }
 

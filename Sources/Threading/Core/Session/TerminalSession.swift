@@ -120,6 +120,15 @@ final class TerminalSession: NSObject {
             }
         }
 
+        terminalView.acceptsLocalInput = { [weak self] in
+            guard let sessionID = self?.identity.ownerSessionID else { return true }
+            return RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID)
+        }
+        terminalView.onLocalInputBlocked = { [weak self] in
+            guard let sessionID = self?.identity.ownerSessionID else { return }
+            NotificationCenter.default.post(SessionLocalInputBlocked(sessionID: sessionID))
+        }
+
         terminalView.onOutputBytes = { [weak self] slice in
             guard let self, let onRawOutput = self.onRawOutput else { return }
             // Copy the slice out of SwiftTerm's reused buffer before it hands off.
@@ -391,6 +400,10 @@ final class TerminalSession: NSObject {
     /// Inserts text at the current cursor position (e.g., a generated command).
     /// This sends the text to the PTY as if the user typed it.
     func insertText(_ text: String) {
+        if let sessionID = identity.ownerSessionID,
+           !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
+            return
+        }
         terminalView.send(txt: text)
     }
 

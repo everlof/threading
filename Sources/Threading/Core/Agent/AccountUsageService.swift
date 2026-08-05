@@ -259,6 +259,10 @@ final class AccountUsageService {
         switch account.provider {
         case .claude: return try await ClaudeUsageFetcher.fetch(account: account)
         case .codex: return try await CodexUsageFetcher.fetch(account: account)
+        case .grok:
+            throw UsageFetchError.noCredential("Grok manages usage in its own TUI.")
+        case .openCode:
+            throw UsageFetchError.noCredential("OpenCode manages provider usage in its own TUI.")
         }
     }
 }

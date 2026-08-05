@@ -47,6 +47,12 @@ the difference: an unopenable database is moved aside (with its `-wal` and `-shm
 deleted, or SQLite would recover a fresh database from them) and reported, which is what lets
 the store refuse to write over state it could not read.
 
+Agent execution evidence has different write and trust needs from mutable application state, so it
+does not live in SQLite. [Execution Audit](execution-audit.md) keeps a bounded append-only,
+SHA-256-linked JSONL chain per session under `ExecutionAudit/`. Its directory and files are
+owner-only, rotation is reported as a verified suffix rather than a complete history, and deleting
+a session or project synchronously removes all of that session's segments.
+
 `ProjectDatabaseTests` imports **the machine's own `projects.json`** into a throwaway database
 and compares ids, order, titles, accounts and resume identifiers. A fixture proves the code
 path; that one proves the file the user will actually migrate, which is the only copy they
@@ -150,6 +156,23 @@ Attached images are **not** drafted: a pasted screenshot is a file in a temporar
 and a path written to disk now can name nothing by the next launch. They survive instead by the
 composer being kept as it was left for as long as it is pointed at the same project — see
 [`sessions.md`](sessions.md), which is also where the bug that rule fixes is recorded.
+
+`SessionContinuityStore` applies the same criticality rule to an already-running Native session.
+Its `session-continuity.json` entry is keyed by `SessionID` and writes an unsent conversation draft
+immediately; viewport progress is cheaper and is coalesced. Transcript content remains in the
+provider-owned session, so this file stores only the private local draft, normalized reading
+position, follow-bottom choice, and update time. Clearing a submitted draft preserves the
+viewport. An unreadable file follows `RecoverableFileStore` quarantine rather than being replaced
+silently.
+
+The companion clients use the same contract with a wider key. iOS stores a versioned archive in
+its own `UserDefaults`; the dependency-free browser stores one in same-origin `localStorage`.
+Both length-prefix the paired host identity before the session id so ids cannot collide, persist
+the last host/session route, and keep Native and terminal drafts distinct. A Tailscale/relay URL
+is deliberately absent from that key: both are routes to one paired host. Records containing an
+unsent draft are never pruned automatically; position-only records are bounded to the 250 most
+recent. No continuity archive is synchronized across clients, because merging partial human input
+or moving another person's viewport would turn safety state into collaboration state.
 
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is

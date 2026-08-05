@@ -17,8 +17,19 @@ struct AccountPreference: Codable, Equatable {
     /// before the switch existed, and every account nobody has touched — reads as on.
     var isDisabled: Bool?
 
+    /// The model this account's runtime last announced for a session that pinned none.
+    ///
+    /// Observed, not chosen: it is what the CLI resolved "no `--model`" to the last time this
+    /// login ran, which is the only local answer for an account whose config names no model and
+    /// whose organisation names none either. Recorded only from unpinned sessions — a session
+    /// running the user's explicit pick says nothing about what the default would have been.
+    var lastReportedModel: String?
+
     var isEmpty: Bool {
-        emoji == nil && displayNameOverride == nil && isDisabled == nil
+        emoji == nil
+            && displayNameOverride == nil
+            && isDisabled == nil
+            && lastReportedModel == nil
     }
 }
 
@@ -87,6 +98,19 @@ final class AccountPreferencesStore {
     /// Sets the display name for an account. Pass nil or blank to fall back to discovery.
     func setDisplayNameOverride(_ name: String?, for accountID: AccountID) {
         update(accountID) { $0.displayNameOverride = normalized(name) }
+    }
+
+    /// The model this account's runtime last resolved "no model chosen" to, if it ever has.
+    func lastReportedModel(for accountID: AccountID) -> String? {
+        preferences[accountID.rawValue]?.lastReportedModel
+    }
+
+    /// Records what an account's runtime reported. Writes only on a change, because this is
+    /// called on every session start and each write persists and posts a change notification.
+    func setLastReportedModel(_ model: String?, for accountID: AccountID) {
+        let normalisedModel = normalized(model)
+        guard normalisedModel != preferences[accountID.rawValue]?.lastReportedModel else { return }
+        update(accountID) { $0.lastReportedModel = normalisedModel }
     }
 
     /// Restores the discovered icon and name, leaving the account switched however it is.

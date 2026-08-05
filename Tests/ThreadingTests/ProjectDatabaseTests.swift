@@ -356,13 +356,27 @@ final class ProjectDatabaseTests: XCTestCase {
 
     func testProviderSpecificMutationCannotCreateAnImpossibleWrite() throws {
         let database = try makeDatabase()
-        var session = AgentSession(kind: .claude, title: "Invalid")
-        XCTAssertFalse(session.setCodexReasoningEffort("high"))
+        var session = AgentSession(kind: .grok, title: "Invalid")
+        XCTAssertFalse(session.setReasoningEffort("high"))
 
         try database.save(
             ProjectsState(projects: [makeProject("alpha", sessions: [session])])
         )
         XCTAssertNil(try database.load().projects[0].sessions[0].reasoningEffort)
+    }
+
+    func testClaudeReasoningEffortSurvivesThePayload() throws {
+        let database = try makeDatabase()
+        var session = AgentSession(kind: .claude, title: "Deliberate", model: "opus")
+        XCTAssertTrue(session.setReasoningEffort("xhigh"))
+
+        try database.save(
+            ProjectsState(projects: [makeProject("alpha", sessions: [session])])
+        )
+
+        let restored = try database.load().projects[0].sessions[0]
+        XCTAssertEqual(restored.kind, .claude)
+        XCTAssertEqual(restored.reasoningEffort, "xhigh")
     }
 
     // MARK: - Model Fidelity

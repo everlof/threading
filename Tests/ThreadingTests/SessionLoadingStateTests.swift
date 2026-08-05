@@ -11,6 +11,7 @@ final class SessionLoadingStateTests: XCTestCase {
 
     private let alpha = SessionID()
     private let beta = SessionID()
+    private let epoch = Date(timeIntervalSinceReferenceDate: 0)
 
     // MARK: - Reasons
 
@@ -85,9 +86,68 @@ final class SessionLoadingStateTests: XCTestCase {
         XCTAssertFalse(state.isLoading(alpha))
     }
 
-    // MARK: - External Identifier
+    // MARK: - Expiry
 
-    /// What "Copy Session ID" puts on the pasteboard.
+    /// The failsafe under the reasons: a raise whose lower gets dropped — a completion dying
+    /// with its owner — used to spin its row for the rest of the app's life. Now it expires,
+    /// and the sweep is told whose raise it took, because an expiry is a raiser that leaked.
+    func testARaiseNobodyLowersExpires() {
+        var state = SessionLoadingState()
+        state.set(true, reason: .gitStatus, for: alpha, at: epoch)
+
+        let expired = state.lowerExpired(raisedBefore: epoch.addingTimeInterval(1))
+
+        XCTAssertEqual(expired.count, 1)
+        XCTAssertEqual(expired.first?.sessionID, alpha)
+        XCTAssertEqual(expired.first?.reason, .gitStatus)
+        XCTAssertFalse(state.isLoading(alpha))
+    }
+
+    /// Re-raising is the owner saying the load is still real, so the clock starts over — a
+    /// session re-selected while its checkout re-reads must not lose the new load's spinner
+    /// to the old load's age.
+    func testARenewedRaiseIsYoungAgain() {
+        var state = SessionLoadingState()
+        state.set(true, reason: .gitStatus, for: alpha, at: epoch)
+        state.set(true, reason: .gitStatus, for: alpha, at: epoch.addingTimeInterval(20))
+
+        let expired = state.lowerExpired(raisedBefore: epoch.addingTimeInterval(10))
+
+        XCTAssertTrue(expired.isEmpty)
+        XCTAssertTrue(state.isLoading(alpha))
+    }
+
+    /// Each raise carries its own age: the sweep takes only the leaked one, and a fresh
+    /// reason keeps the row spinning exactly as one lowered by its owner would.
+    func testExpiryTakesOnlyTheOldRaise() {
+        var state = SessionLoadingState()
+        state.set(true, reason: .presentation, for: alpha, at: epoch)
+        state.set(true, reason: .gitReview, for: alpha, at: epoch.addingTimeInterval(20))
+
+        let expired = state.lowerExpired(raisedBefore: epoch.addingTimeInterval(10))
+
+        XCTAssertEqual(expired.count, 1)
+        XCTAssertEqual(expired.first?.reason, .presentation)
+        XCTAssertTrue(state.isLoading(alpha), "the fresh review read still holds the spinner")
+        XCTAssertEqual(state.reasons(for: alpha), [.gitReview])
+    }
+
+    /// What decides whether the sweep needs to be scheduled at all.
+    func testEmptinessFollowsTheLastSpinner() {
+        var state = SessionLoadingState()
+        XCTAssertTrue(state.isEmpty)
+
+        state.set(true, reason: .gitStatus, for: alpha, at: epoch)
+        XCTAssertFalse(state.isEmpty)
+
+        state.lowerExpired(raisedBefore: epoch.addingTimeInterval(1))
+        XCTAssertTrue(state.isEmpty)
+    }
+
+    // MARK: - Identifiers
+
+    /// The identifier that names a conversation outside Threading is the agent's own where
+    /// there is one — what "Copy Agent Session ID" puts on the pasteboard.
     func testTheExternalIdentifierIsTheAgentsOwnWhereThereIsOne() {
         var session = AgentSession(kind: .codex, title: "Rollout")
         session.resumeState = .resumable(TranscriptID("019852cf-codex-rollout"))
@@ -101,6 +161,19 @@ final class SessionLoadingStateTests: XCTestCase {
         let session = AgentSession(kind: .claude, title: "Fresh")
 
         XCTAssertEqual(session.resumeState, .awaitingIdentifier)
-        XCTAssertEqual(session.externalIdentifier, session.id.uuidString.lowercased())
+        XCTAssertEqual(session.externalIdentifier, session.threadingIdentifier)
+    }
+
+    /// Threading's own identifier, in the lowercased spelling every app-side surface uses —
+    /// what "Copy Threading ID" puts on the pasteboard. It exists from birth and does not
+    /// move when the agent later names the conversation.
+    func testTheThreadingIdentifierIsTheLowercasedSessionID() {
+        var session = AgentSession(kind: .codex, title: "Rollout")
+
+        XCTAssertEqual(session.threadingIdentifier, session.id.uuidString.lowercased())
+
+        let before = session.threadingIdentifier
+        session.resumeState = .resumable(TranscriptID("019852cf-codex-rollout"))
+        XCTAssertEqual(session.threadingIdentifier, before)
     }
 }

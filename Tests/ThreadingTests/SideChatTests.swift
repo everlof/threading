@@ -36,6 +36,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
             title: "Side Chat"
@@ -53,6 +54,7 @@ final class SideChatTests: XCTestCase {
         var child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
             title: "Side Chat"
@@ -72,6 +74,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
             title: "Side Chat"
@@ -117,6 +120,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
             title: "Side Chat"
@@ -146,6 +150,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
             title: "Side Chat"
@@ -222,10 +227,7 @@ final class SideChatTests: XCTestCase {
     func testCodexNativeReasoningEffortConfiguresThePersistentAppServer() throws {
         let project = try makeProject()
         var session = AgentSession(
-            configuration: .codex(
-                reasoningEffort: "ultra",
-                continuedFromClaude: nil
-            ),
+            configuration: .codex(reasoningEffort: "ultra"),
             title: "Codex",
             model: "gpt-5.6-sol"
         )
@@ -267,12 +269,26 @@ final class SideChatTests: XCTestCase {
 
     func testContinuationLineageRoundTripsWithoutTheSourceRecord() throws {
         let sourceID = SessionID()
-        let session = AgentSession(
-            configuration: .codex(
-                reasoningEffort: nil,
-                continuedFromClaude: sourceID
+        let destinationID = SessionID()
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: sourceID,
+                kind: .claude,
+                model: "claude-sonnet-4-5",
+                title: "Parser fix"
             ),
-            title: "Continue the parser fix"
+            ConversationHandoffEndpoint(
+                sessionID: destinationID,
+                kind: .codex,
+                model: "gpt-5.6-sol",
+                title: "Continue the parser fix"
+            )
+        ]))
+        let session = AgentSession(
+            configuration: .codex(reasoningEffort: nil),
+            title: "Continue the parser fix",
+            handoff: handoff,
+            id: destinationID
         )
 
         let restored = try JSONDecoder().decode(
@@ -286,12 +302,27 @@ final class SideChatTests: XCTestCase {
     }
 
     func testContinuationBootstrapExistsOnlyUntilItsFirstLaunch() {
-        var continuation = AgentSession(
-            configuration: .codex(
-                reasoningEffort: nil,
-                continuedFromClaude: SessionID()
+        let sourceID = SessionID()
+        let destinationID = SessionID()
+        let handoff = ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: sourceID,
+                kind: .claude,
+                model: nil,
+                title: nil
             ),
-            title: "Continue the parser fix"
+            ConversationHandoffEndpoint(
+                sessionID: destinationID,
+                kind: .codex,
+                model: nil,
+                title: nil
+            )
+        ])!
+        var continuation = AgentSession(
+            configuration: .codex(reasoningEffort: nil),
+            title: "Continue the parser fix",
+            handoff: handoff,
+            id: destinationID
         )
 
         let opening = ConversationContinuation.openingPrompt(for: continuation)
@@ -303,6 +334,85 @@ final class SideChatTests: XCTestCase {
         XCTAssertNil(ConversationContinuation.openingPrompt(
             for: AgentSession(kind: .codex, title: "Ordinary")
         ))
+    }
+
+    func testOpenCodeContinuationAttachesTheDurableSnapshot() throws {
+        let project = try makeProject()
+        let sourceID = SessionID()
+        let destinationID = SessionID()
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: sourceID,
+                kind: .grok,
+                model: "grok-4",
+                title: "Source"
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: destinationID,
+                kind: .openCode,
+                model: nil,
+                title: "Destination"
+            )
+        ]))
+        let session = AgentSession(
+            configuration: .openCode,
+            title: "Destination",
+            handoff: handoff,
+            id: destinationID
+        )
+
+        let command = try XCTUnwrap(
+            AgentLauncher.plan(
+                for: session,
+                in: project,
+                initialPrompt: ConversationContinuation.openingPrompt(for: session)
+            ).arguments.last
+        )
+        let snapshotPath = ConversationHandoffStore.url(for: destinationID).path
+
+        XCTAssertTrue(command.contains("'--file' '\(snapshotPath)'"), command)
+        XCTAssertTrue(command.contains("'--prompt'"), command)
+        XCTAssertFalse(command.contains("<conversation_history>"), command)
+    }
+
+    func testGrokTerminalContinuationReceivesBoundedInlineHistory() throws {
+        let sourceID = SessionID()
+        let destinationID = SessionID()
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: sourceID,
+                kind: .openCode,
+                model: nil,
+                title: "Source"
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: destinationID,
+                kind: .grok,
+                model: "grok-4",
+                title: "Destination"
+            )
+        ]))
+        let session = AgentSession(
+            configuration: .grok,
+            title: "Destination",
+            handoff: handoff,
+            id: destinationID
+        )
+        try ConversationHandoffStore.save(
+            snapshot: ConversationHandoffSnapshot(
+                sourceProvider: "OpenCode",
+                sourceTitle: "Source",
+                wasTruncated: false,
+                segments: ["[USER]\nKeep the parser lossless."]
+            ),
+            for: destinationID
+        )
+        addTeardownBlock { ConversationHandoffStore.remove(for: destinationID) }
+
+        let prompt = try XCTUnwrap(ConversationContinuation.openingPrompt(for: session))
+        XCTAssertTrue(prompt.contains("<conversation_history>"), prompt)
+        XCTAssertTrue(prompt.contains("Keep the parser lossless."), prompt)
+        XCTAssertFalse(prompt.contains("conversation_history`"), prompt)
     }
 
     func testHandoffStoreCopiesAndRemovesTheFrozenTranscript() throws {
@@ -365,6 +475,153 @@ final class SideChatTests: XCTestCase {
             pageCharacterLimit: 5_000
         ).get()
         XCTAssertNotEqual(first, second)
+    }
+
+    func testNormalisedSnapshotRoundTripsAndPaginatesWithoutProviderFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-normalised-handoff-\(UUID().uuidString)")
+        let sessionID = SessionID()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let snapshot = ConversationHandoffSnapshot(
+            sourceProvider: "OpenCode",
+            sourceTitle: "Portable",
+            wasTruncated: true,
+            segments: ["[USER]\none", "[ASSISTANT]\ntwo"]
+        )
+        try ConversationHandoffStore.save(
+            snapshot: snapshot,
+            for: sessionID,
+            rootDirectory: root
+        )
+        let url = ConversationHandoffStore.url(for: sessionID, rootDirectory: root)
+        XCTAssertEqual(
+            try ConversationHandoffStore.loadSnapshot(
+                at: url,
+                legacySourceKind: nil,
+                legacySourceTitle: ""
+            ),
+            snapshot
+        )
+
+        let first = try ConversationHistoryPage.render(
+            snapshotURL: url,
+            legacySourceKind: nil,
+            legacySourceTitle: "",
+            cursor: nil,
+            pageCharacterLimit: 1
+        ).get()
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(first.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(payload["source_provider"] as? String, "OpenCode")
+        XCTAssertEqual(payload["replay_window_truncated"] as? Bool, true)
+        XCTAssertEqual(payload["next_cursor"] as? String, "1")
+    }
+
+    func testOpenCodeExportKeepsVisibleContextAndDropsReasoning() throws {
+        let export: [String: Any] = [
+            "info": ["id": "session"],
+            "messages": [
+                [
+                    "info": ["role": "user"],
+                    "parts": [["type": "text", "text": "Question"]]
+                ],
+                [
+                    "info": ["role": "assistant"],
+                    "parts": [
+                        ["type": "reasoning", "text": "private chain"],
+                        ["type": "text", "text": "Answer"],
+                        [
+                            "type": "tool",
+                            "tool": "read",
+                            "state": ["input": ["path": "README"], "output": "contents"]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: export)
+        let history = try ConversationHandoffCapture.openCodeSegments(from: data)
+            .joined(separator: "\n")
+
+        XCTAssertTrue(history.contains("[USER]\nQuestion"), history)
+        XCTAssertTrue(history.contains("[ASSISTANT]\nAnswer"), history)
+        XCTAssertTrue(history.contains("ASSISTANT TOOL CALL: read"), history)
+        XCTAssertTrue(history.contains("[TOOL RESULT]\ncontents"), history)
+        XCTAssertFalse(history.contains("private chain"), history)
+    }
+
+    func testRepeatedHandoffDoesNotDuplicateItsHistoryTransport() {
+        let events: [StreamEvent] = [
+            .userMessage("Threading cross-provider continuation bootstrap"),
+            .assistantMessage(blocks: [
+                .toolUse(
+                    id: "history",
+                    tool: .mcp("mcp__threading__conversation_history"),
+                    input: [:]
+                )
+            ]),
+            .toolResults([ToolResult(
+                toolUseID: "history",
+                text: "<conversation_history>old turn</conversation_history>",
+                isError: false
+            )]),
+            .userMessage("New question"),
+            .assistantMessage(blocks: [.text("New answer")])
+        ]
+
+        let history = ConversationHistoryPage.continuationSegments(from: events)
+            .joined(separator: "\n")
+        XCTAssertFalse(history.contains("bootstrap"), history)
+        XCTAssertFalse(history.contains("old turn"), history)
+        XCTAssertTrue(history.contains("New question"), history)
+        XCTAssertTrue(history.contains("New answer"), history)
+    }
+
+    func testHandoffPresentationKeepsOriginAndNewestStops() throws {
+        let kinds: [AgentKind] = [.claude, .codex, .grok, .openCode, .claude]
+        let endpoints = kinds.enumerated().map { index, kind in
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: kind,
+                model: "model-\(index)",
+                title: nil
+            )
+        }
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: endpoints))
+        let presentation = ConversationHandoffPresentation(handoff: handoff)
+
+        XCTAssertEqual(presentation.endpoints.map(\.sessionID), [
+            endpoints[0].sessionID,
+            endpoints[3].sessionID,
+            endpoints[4].sessionID
+        ])
+        XCTAssertEqual(presentation.omittedEndpointCount, 2)
+        XCTAssertTrue(presentation.compactPath.contains("+2"))
+        XCTAssertTrue(presentation.spokenPath.contains("2 earlier stops omitted"))
+    }
+
+    func testHandoffTargetModelSettlesOnTheFirstRuntimeReport() throws {
+        var handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .claude,
+                model: "claude-sonnet-4-5",
+                title: nil
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .codex,
+                model: "account-default",
+                title: nil,
+                modelIsProvisional: true
+            )
+        ]))
+
+        handoff.recordTargetModel("gpt-5.6-sol")
+        handoff.recordTargetModel("later-resume-model")
+        XCTAssertEqual(handoff.target?.model, "gpt-5.6-sol")
     }
 
     // MARK: - Helpers

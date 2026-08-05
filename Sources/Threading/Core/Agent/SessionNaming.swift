@@ -35,7 +35,14 @@ enum SessionNaming {
               !ImportDefaults.injectedPrefixes.contains(where: { trimmed.hasPrefix($0) })
         else { return nil }
 
-        let firstLine = trimmed.split(separator: "\n").first.map(String.init) ?? trimmed
+        // `\.isNewline` rather than `"\n"`: `\r\n` is a single grapheme cluster, so splitting a
+        // `String` on `"\n"` does not divide CRLF text at all. A prompt pasted from a
+        // Windows-authored source then had no "first line" — the whole thing became the title,
+        // newlines and all, capped mid-sentence.
+        let firstLine = trimmed
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? trimmed
         return String(firstLine.prefix(ImportDefaults.titleLimit))
             .trimmingCharacters(in: .whitespaces)
     }
@@ -212,7 +219,7 @@ enum SessionNaming {
     @MainActor
     static func refreshAgentTitle(forSessionID sessionID: SessionID) {
         guard let session = ProjectStore.shared.session(withID: sessionID),
-              session.kind == .claude,
+              session.kind.supports(.transcriptTitles),
               let transcriptID = session.resumeState.transcriptID,
               let project = ProjectStore.shared.project(forSessionID: sessionID),
               let url = ClaudeTranscript.url(sessionID: transcriptID, for: session, in: project)
@@ -310,6 +317,8 @@ enum SessionNaming {
                         .map(Transcript.at)
                 case .codex:
                     transcript = account.map { .codexRollout($0, transcriptID) }
+                case .grok, .openCode:
+                    transcript = nil
                 }
 
                 guard let transcript else { continue }
@@ -336,11 +345,14 @@ enum SessionNaming {
                 }
                 guard let url else { continue }
 
-                let agentTitle = reading.kind == .claude ? claudeTranscriptTitle(at: url) : nil
+                let agentTitle = reading.kind.supports(.transcriptTitles)
+                    ? claudeTranscriptTitle(at: url)
+                    : nil
                 let promptTitle: String?
                 switch reading.kind {
                 case .claude: promptTitle = SessionImporter.claudeFirstPrompt(at: url)
                 case .codex: promptTitle = SessionImporter.codexTitle(at: url)
+                case .grok, .openCode: promptTitle = nil
                 }
 
                 guard agentTitle != nil || promptTitle != nil else { continue }

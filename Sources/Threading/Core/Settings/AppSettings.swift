@@ -539,6 +539,22 @@ final class AppSettings {
         !disabledAttachmentDetectionAgentKinds.contains(kind)
     }
 
+    /// Whether a *scanned* path may be listed when the file lives outside the project.
+    ///
+    /// Off by default, and the default is the safety measure rather than a preference: the
+    /// attachment list is the allowlist the paired phone fetches against, so one `find ~ -name
+    /// '*.png'` printed in a terminal would otherwise enumerate the user's pictures into it.
+    /// Stored as the opt-*in* so the narrow answer survives a defaults reset, an unreadable
+    /// value, and a machine the user has never opened this page on. Declared handoffs are not
+    /// governed by it — see `SessionAttachmentStore`.
+    var includesAttachmentsOutsideProject: Bool {
+        get { defaults.bool(forKey: Keys.includesAttachmentsOutsideProject) }
+        set {
+            defaults.set(newValue, forKey: Keys.includesAttachmentsOutsideProject)
+            notifyChanged()
+        }
+    }
+
     func setAttachmentReferenceDetection(for kind: AgentKind, enabled: Bool) {
         var disabled = disabledAttachmentDetectionAgentKinds
         if enabled {
@@ -763,6 +779,44 @@ final class AppSettings {
         }
     }
 
+    /// Whether an owner's paired device may use the public relay when private Tailscale access
+    /// is unavailable in Private + Sharing mode. Off is deliberately fail-closed: enabling a
+    /// public sharing door must not silently make private owner traffic use it too.
+    var remoteAccessAllowsOwnerRelayFallback: Bool {
+        get { defaults.bool(forKey: Keys.remoteAccessAllowsOwnerRelayFallback) }
+        set {
+            defaults.set(newValue, forKey: Keys.remoteAccessAllowsOwnerRelayFallback)
+            notifyChanged()
+        }
+    }
+
+    /// Keeps the public relay warm in Private + Sharing mode even when no share exists. Off is
+    /// the privacy-preserving default; the coordinator otherwise starts it on the first public
+    /// share and stops it after the final share is revoked or expires.
+    var remoteAccessKeepsRelayReady: Bool {
+        get { defaults.bool(forKey: Keys.remoteAccessKeepsRelayReady) }
+        set {
+            defaults.set(newValue, forKey: Keys.remoteAccessKeepsRelayReady)
+            notifyChanged()
+        }
+    }
+
+    /// How a newly shared session starts. The choice is only a default: the owner can switch
+    /// the live session between collaborative and focused control at any time.
+    var remoteInputControlDefault: RemoteInputControlDefault {
+        get {
+            guard let raw = defaults.string(forKey: Keys.remoteInputControlDefault),
+                  let value = RemoteInputControlDefault(rawValue: raw) else {
+                return .collaborative
+            }
+            return value
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.remoteInputControlDefault)
+            notifyChanged()
+        }
+    }
+
     /// Whether Threading may ask its release feed whether a newer version exists.
     ///
     /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
@@ -866,6 +920,9 @@ final class AppSettings {
             Keys.automaticUpdateChecksEnabled: true,
             Keys.playsAttentionAlertSound: true,
             Keys.reportsClaudeLifecycleEvents: true,
+            Keys.remoteAccessAllowsOwnerRelayFallback: false,
+            Keys.remoteAccessKeepsRelayReady: false,
+            Keys.remoteInputControlDefault: RemoteInputControlDefault.collaborative.rawValue,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
             Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue,
             Keys.appTextSize: AppTextSize.standard.rawValue
@@ -915,6 +972,7 @@ final class AppSettings {
         static let disabledAttentionAlerts = "disabledAttentionAlerts"
         static let playsAttentionAlertSound = "playsAttentionAlertSound"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
+        static let includesAttachmentsOutsideProject = "includesAttachmentsOutsideProject"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
         static let workspaceNavigatorSelection = "workspaceNavigatorSelection"
@@ -927,6 +985,10 @@ final class AppSettings {
         static let defaultPermissionMode = "defaultPermissionMode"
         static let remoteAccessEnabled = "remoteAccessEnabled"
         static let remoteAccessConnectionMode = "remoteAccessConnectionMode"
+        static let remoteAccessAllowsOwnerRelayFallback =
+            "remoteAccessAllowsOwnerRelayFallback"
+        static let remoteAccessKeepsRelayReady = "remoteAccessKeepsRelayReady"
+        static let remoteInputControlDefault = "remoteInputControlDefault"
         static let automaticUpdateChecksEnabled = "automaticUpdateChecksEnabled"
         static let githubAppClientID = "githubAppClientID"
         static let workingOrbStyle = "workingOrbStyle"
@@ -1065,7 +1127,7 @@ enum PromptReturnKey: String, CaseIterable {
     var settingsDetail: String {
         switch self {
         case .matchesComposer:
-            L10n.string("The brief for a new session takes a line break; a reply in a conversation sends.")
+            L10n.string("A box with a send control in it sends; a note attached to a report takes a line break.")
         case .sends:
             L10n.string("Shift-Return starts a new line.")
         case .startsNewLine:

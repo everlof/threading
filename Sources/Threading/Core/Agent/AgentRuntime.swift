@@ -178,7 +178,8 @@ final class AgentRuntime {
             return
         }
 
-        if stored.kind == .claude, conversations[report.sessionID] != nil {
+        if !stored.kind.supports(.sharedSubagentIdentity),
+           conversations[report.sessionID] != nil {
             return
         }
 
@@ -200,7 +201,7 @@ final class AgentRuntime {
 
         state.apply(.discovered(SubagentDescriptor(
             threadID: childID,
-            parentThreadID: report.agentSessionID,
+            parentThreadID: report.agentSessionID?.rawValue,
             // An empty type is the parent reporting itself, never a child's role. Storing it
             // would put `""` on the descriptor and leave `displayName` guessing.
             role: report.subagentType.flatMap { $0.isEmpty ? nil : $0 },
@@ -249,17 +250,19 @@ final class AgentRuntime {
     /// reports the one it was resumed with — in both cases writing it back is a no-op worth
     /// skipping rather than a correction.
     private func adoptReportedIdentifier(_ report: HookLifecycleReport) {
-        guard let reported = report.agentSessionID, !reported.isEmpty,
+        guard let reported = report.agentSessionID,
               let stored = ProjectStore.shared.session(withID: report.sessionID),
               stored.resumeState == .awaitingIdentifier else {
             return
         }
 
         ProjectStore.shared.update(sessionID: report.sessionID) { session in
-            session.resumeState = .resumable(TranscriptID(reported))
+            session.resumeState = .resumable(reported)
         }
 
-        ThreadingLogger.agent.info("Adopted reported session \(reported, privacy: .public)")
+        ThreadingLogger.agent.info(
+            "Adopted reported session \(reported.rawValue, privacy: .public)"
+        )
         controllers[report.sessionID]?.noteStateChanged()
     }
 

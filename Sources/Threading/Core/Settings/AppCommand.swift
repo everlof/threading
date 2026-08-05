@@ -136,8 +136,10 @@ enum AppCommands {
         static func selectTab(_ number: Int) -> String { "tab.select.\(number)" }
         static let selectTabNumbers = 1...9
 
+        /// Still `inspect.element` after the two commands merged, because an id is what a
+        /// stored shortcut override keys on — renaming it would silently drop the binding of
+        /// anyone who had rebound the one command that survived.
         static let inspectElement = "inspect.element"
-        static let inspectGeometry = "inspect.geometry"
     }
 
     // MARK: Editable
@@ -215,10 +217,10 @@ enum AppCommands {
         AppCommand(id: ID.nextTab, group: .view, title: "Next Tab",
                    defaultShortcut: KeyboardShortcut(key: "]", modifiers: [.command, .shift]), isEditable: true),
 
-        AppCommand(id: ID.inspectElement, group: .inspect, title: "Inspect Element",
-                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .option]), isEditable: true),
-        AppCommand(id: ID.inspectGeometry, group: .inspect, title: "Inspect Geometry",
-                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .option, .shift]), isEditable: true)
+        // One command, not two. Element and freeflow are read from the modifiers held while
+        // pointing, so the old ⌥⇧⌘I still opens freeflow — it arrives with ⇧ already down.
+        AppCommand(id: ID.inspectElement, group: .inspect, title: "Inspect…",
+                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .option]), isEditable: true)
     ]
 
     // MARK: Fixed

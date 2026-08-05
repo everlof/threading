@@ -45,7 +45,7 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertEqual(report.sessionID, sessionID)
         XCTAssertEqual(report.event, .turnStarted)
-        XCTAssertEqual(report.agentSessionID, "abc-123")
+        XCTAssertEqual(report.agentSessionID, TranscriptID("abc-123"))
         XCTAssertEqual(report.prompt, "do the thing")
     }
 
@@ -63,7 +63,7 @@ final class HookLifecycleTests: XCTestCase {
             ]
         ))
 
-        XCTAssertEqual(report.agentSessionID, "parent-123")
+        XCTAssertEqual(report.agentSessionID, TranscriptID("parent-123"))
         XCTAssertEqual(report.turnID, "turn-456")
         XCTAssertEqual(report.subagentID, "child-789")
         XCTAssertEqual(report.subagentType, "explorer")

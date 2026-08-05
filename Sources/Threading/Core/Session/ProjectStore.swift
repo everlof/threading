@@ -92,6 +92,7 @@ final class ProjectStore {
         }
         for session in removedProject?.sessions ?? [] {
             ConversationHandoffStore.remove(for: session.id)
+            ExecutionAuditStore.shared.remove(sessionID: session.id)
         }
 
         DraftStore.shared.clear(for: id)
@@ -152,42 +153,30 @@ final class ProjectStore {
         usesNativeUI: Bool = false,
         permissionMode: AgentPermissionMode? = nil,
         title: String? = nil,
-        continuedFrom: SessionID? = nil,
-        continuationSourceKind: AgentKind? = nil,
+        handoff: ConversationHandoff? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
-        guard let index = index(ofProject: projectID) else { return nil }
-        guard (continuedFrom == nil) == (continuationSourceKind == nil) else {
-            return nil
-        }
+        let account = kind.supportsAccounts
+            ? AgentAccountDiscovery.account(for: kind, handle: accountHandle)
+            : nil
+        let resolvedModel = model ?? AgentModels.defaultModel(for: kind, account: account)
+        let validEffort = reasoningEffort == nil
+            || AgentModels.option(
+                identifier: resolvedModel,
+                for: kind,
+                account: account
+            )?.supports(reasoningEffort: reasoningEffort) == true
 
-        let configuration: AgentSessionConfiguration
-        switch kind {
-        case .claude:
-            guard reasoningEffort == nil else { return nil }
-            if let continuedFrom {
-                guard continuationSourceKind == .codex else { return nil }
-                configuration = .claude(
-                    remoteControl: nil,
-                    origin: .continuedFromCodex(continuedFrom)
-                )
-            } else {
-                configuration = .claude(remoteControl: nil, origin: .original)
-            }
-        case .codex:
-            if let continuedFrom {
-                guard continuationSourceKind == .claude else { return nil }
-                configuration = .codex(
-                    reasoningEffort: reasoningEffort,
-                    continuedFromClaude: continuedFrom
-                )
-            } else {
-                configuration = .codex(
-                    reasoningEffort: reasoningEffort,
-                    continuedFromClaude: nil
-                )
-            }
-        }
+        guard validEffort,
+              let index = index(ofProject: projectID),
+              let configuration = AgentSessionConfiguration(
+                kind: kind,
+                reasoningEffort: reasoningEffort,
+                accountHandle: accountHandle,
+                permissionMode: permissionMode
+              ),
+              handoff == nil || handoff?.isValid(destinationID: id, destinationKind: kind) == true
+        else { return nil }
 
         // No title means unnamed, not named after the agent: the display falls back to a
         // generic label until the first prompt supplies a name (`applyPromptTitle`). The
@@ -198,6 +187,7 @@ final class ProjectStore {
             accountHandle: accountHandle,
             model: model,
             usesNativeUI: usesNativeUI,
+            handoff: handoff,
             id: id
         )
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
@@ -226,14 +216,11 @@ final class ProjectStore {
         guard let location = locate(sessionID: parentID) else { return nil }
 
         let parent = projects[location.projectIndex].sessions[location.sessionIndex]
-        guard parent.kind == .claude,
+        guard let configuration = parent.forkedConfiguration,
               parent.resumeState.isResumable else { return nil }
 
         var session = AgentSession(
-            configuration: .claude(
-                remoteControl: nil,
-                origin: .forked(from: parentID)
-            ),
+            configuration: configuration,
             title: title ?? AgentDefaults.sideChatTitle,
             accountHandle: parent.accountHandle,
             model: parent.model,
@@ -366,6 +353,7 @@ final class ProjectStore {
     /// mode of a session that is already running: Claude's own Shift+Tab does that, and the CLI
     /// does not report the result back.
     func setPermissionMode(_ mode: AgentPermissionMode?, for sessionID: SessionID) {
+        guard session(withID: sessionID)?.kind.supportsPermissionModes == true else { return }
         update(sessionID: sessionID) { $0.permissionMode = mode }
         notifyChanged()
     }
@@ -499,6 +487,7 @@ final class ProjectStore {
     func removeSession(id sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
         ConversationHandoffStore.remove(for: sessionID)
+        ExecutionAuditStore.shared.remove(sessionID: sessionID)
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
         rebuildLookupIndexes()
 

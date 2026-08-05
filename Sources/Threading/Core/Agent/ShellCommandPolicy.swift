@@ -13,15 +13,22 @@ import Foundation
 /// **It is built to be wrong in one direction only.** Every rule below refuses on doubt, and
 /// the failure it protects against is auto-approving something destructive. So:
 ///
-/// - The allowlist is short, explicit, and holds only commands with no write mode at all.
-///   `sed` and `awk` are absent despite being read-shaped, because `sed -i` edits in place and
-///   `awk` can open files for writing.
+/// - The allowlist is short and explicit, and **naming a command is not enough**. A reader turns
+///   into a writer through an argument — `sort -o`, `tree -o`, `git diff --output=`,
+///   `uniq IN OUT` — or into an executor of something never vetted — `fd -x`, `rg --pre=`. Each
+///   allowlisted command carries the flags that do that, verified against the binary. `awk` is
+///   absent altogether: it can open files for writing from inside its program, so there is no
+///   flag to name.
 /// - Anything that could reach a command this policy never sees is refused outright:
 ///   redirection, command substitution, backgrounding, process substitution, a leading variable
 ///   assignment, or an absolute path in place of a bare command name.
 /// - Splitting on operators is deliberately naive, and that is safe *because* it is naive: a
 ///   `;` inside a quoted argument splits into a segment whose first word is not on the
 ///   allowlist, so the whole command is refused rather than admitted.
+/// - **Arguments are read unquoted**, because the shell will run `find . "-delete"` and
+///   `find . -delete` identically and every rule here is a prefix test. Quoting a flag was
+///   enough to walk past all of them. The command *name* keeps its quotes, so unquoting can
+///   only ever refuse more, never admit more.
 ///
 /// Nothing here weakens an existing rule. It only narrows what prompts, to the same bar
 /// Claude's `Read` and `Grep` already clear.
@@ -80,14 +87,35 @@ enum ShellCommandPolicy {
         guard !name.contains("="), !name.contains("/") else { return false }
         guard Rule.readOnlyCommands.contains(name) else { return false }
 
-        let arguments = Array(tokens.dropFirst())
+        // Read as the shell will read it, not as it was typed. `find . "-delete"` and
+        // `find . -delete` are one call spelled two ways, and every rule below is a prefix test
+        // that only the unquoted spelling failed — so quoting a flag was enough to walk past
+        // the whole policy and have the deletion auto-approved.
+        let arguments = tokens.dropFirst().map(unquoted)
+
+        // A flag that names a file to write, or a command to run, turns a reader into a writer.
+        // Named per command rather than banned outright, because the same spelling means
+        // opposite things: `-o` is "only print the match" to `grep` and "write the result here"
+        // to `sort`. Found by asking what each allowlisted command can be made to do, rather
+        // than trusting the claim that all but three had no write mode.
+        if let dangerous = Rule.writeFlagsByCommand[name],
+           arguments.contains(where: { argument in dangerous.contains { names(argument, $0) } }) {
+            return false
+        }
 
         switch name {
-        case "find", "fd":
+        case "find":
             // `find` is the one allowlisted command that can run other commands and delete.
             return !arguments.contains { argument in
-                Rule.findWriteFlags.contains { argument.hasPrefix($0) }
+                Rule.findWriteFlags.contains { names(argument, $0) }
             }
+
+        case "fd":
+            // `fd` spells the same capability differently, and its short forms share no prefix
+            // with `find`'s: `-x`, `-X`, `--exec` and `--exec-batch` all run an arbitrary
+            // command per match. Matched exactly, because `find . -xdev` is an ordinary read
+            // and a `-x` *prefix* would refuse it.
+            return !arguments.contains { Rule.fdExecFlags.contains($0) }
 
         case "git":
             return isReadOnlyGit(arguments)
@@ -95,18 +123,50 @@ enum ShellCommandPolicy {
         case "sed":
             return isPrintingSed(arguments)
 
+        case "uniq":
+            // `uniq [INPUT [OUTPUT]]` writes its *second* operand — a write with no flag on it
+            // at all. Counting bare operands is naive in the same way the splitting is: a
+            // value-taking flag like `-f 1` makes its number look like an operand, so
+            // `uniq -f 1 file` prompts. That is the direction to be wrong in.
+            return arguments.filter { !$0.hasPrefix("-") }.count < 2
+
         default:
             return true
         }
+    }
+
+    /// Whether `argument` is `flag`, in either spelling that flag accepts a value in.
+    ///
+    /// The two forms cannot share one test. A **long** flag takes its value after `=`, so it must
+    /// match exactly or up to that `=` — matching it by bare prefix refuses `rg --pretty` for
+    /// starting with `--pre`, and a common read that prompts is the failure this policy was
+    /// measured to avoid. A **short** flag attaches its value directly (`sort -o/tmp/x`), so
+    /// there it is the prefix that is correct.
+    private static func names(_ argument: String, _ flag: String) -> Bool {
+        guard flag.hasPrefix("--") else { return argument.hasPrefix(flag) }
+        return argument == flag || argument.hasPrefix(flag + "=")
+    }
+
+    /// One shell token with a single layer of matching quotes removed.
+    ///
+    /// Only ever applied to *arguments*. The command name keeps its quotes and so keeps failing
+    /// the allowlist, which is the safe direction: unquoting it would admit `"ls"` — and the
+    /// point of this policy is never to widen what passes.
+    private static func unquoted(_ token: String) -> String {
+        guard token.count >= 2,
+              let first = token.first, let last = token.last,
+              first == last, first == "\"" || first == "'" else { return token }
+        return String(token.dropFirst().dropLast())
     }
 
     /// Whether a `sed` call is the print-a-line-range form and nothing else.
     ///
     /// `sed` is here reluctantly and admitted narrowly, because it is how Codex *reads*:
     /// measured across real rollouts, `sed -n '1,220p' file` accounts for 42% of its shell
-    /// calls, and refusing it made the classifier nearly pointless. It is also the one
-    /// allowlisted command that can write — `-i` edits in place, `-f` runs a script this policy
-    /// never sees, and a `w` inside the script writes a file.
+    /// calls, and refusing it made the classifier nearly pointless. It is also the allowlisted
+    /// command whose writes a flag list cannot describe: `-i` edits in place and `-f` runs a
+    /// script this policy never sees, but a `w` inside the script writes a file with no flag on
+    /// the line at all.
     ///
     /// So rather than banning the write flags and admitting the rest, the *script itself* must
     /// be a bare line range ending in `p`. Anything else — a substitution, a `w`, a regex
@@ -118,7 +178,7 @@ enum ShellCommandPolicy {
         guard arguments.contains("-n") else { return false }
 
         guard !arguments.contains(where: { argument in
-            Rule.sedWriteFlags.contains { argument.hasPrefix($0) }
+            Rule.sedWriteFlags.contains { names(argument, $0) }
         }) else { return false }
 
         guard let script = arguments.first(where: { !$0.hasPrefix("-") }) else { return false }
@@ -154,8 +214,8 @@ enum ShellCommandPolicy {
         /// Kept separate for the ones that are more than a character, and for readability.
         static let forbiddenSequences = ["$(", "${"]
 
-        /// Commands admitted here. All but `find`, `git` and `sed` have no write mode at all;
-        /// those three carry their own rule above.
+        /// Commands admitted here. Being on this list only clears the *name*; the argument rules
+        /// above still have to pass, because several of these write or execute when asked to.
         ///
         /// `awk` is deliberately absent — it can open files for writing from inside its
         /// program, and unlike `sed` there is no narrow form worth carving out: it did not
@@ -172,6 +232,32 @@ enum ShellCommandPolicy {
         /// `find` predicates that run a command or delete a file.
         static let findWriteFlags = ["-exec", "-execdir", "-ok", "-okdir", "-delete",
                                      "-fprint", "-fls", "-fprintf"]
+
+        /// `fd`'s equivalents, matched exactly rather than by prefix — see the `fd` case above.
+        static let fdExecFlags: Set<String> = ["-x", "-X", "--exec", "--exec-batch"]
+
+        /// Per command, the flags that make it write a file or run another command.
+        ///
+        /// Every one of these was verified against the binary rather than inferred: each writes
+        /// an arbitrary path, or executes an arbitrary command, while the command's *name* is on
+        /// the allowlist. Prefix-matched so the attached spellings (`--output=x`, `-ox`) are
+        /// caught with the detached ones.
+        ///
+        /// Deliberately over-broad where a prefix is shared with something harmless —
+        /// `git diff -O<orderfile>` only reads, and prompts anyway, because `git grep -O` runs a
+        /// pager and telling them apart means knowing the subcommand's flag grammar.
+        static let writeFlagsByCommand: [String: [String]] = [
+            // `sort -o FILE` / `--output=FILE` writes the sorted result over FILE.
+            "sort": ["-o", "--output"],
+            // `tree -o FILE` sends the listing to FILE.
+            "tree": ["-o"],
+            // `yq -i` edits the document in place.
+            "yq": ["-i", "--inplace", "--in-place"],
+            // `git diff --output=FILE` writes the patch to FILE; `git grep -O` runs a pager.
+            "git": ["--output", "-O", "--open-files-in-pager"],
+            // `rg --pre=CMD` and `--hostname-bin=CMD` each execute CMD.
+            "rg": ["--pre", "--hostname-bin"]
+        ]
 
         /// `sed` flags that edit in place or run a script this policy never sees.
         static let sedWriteFlags = ["-i", "--in-place", "-f", "--file"]

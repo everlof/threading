@@ -41,6 +41,10 @@ Five guards keep it honest:
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
+Grok and OpenCode terminal sessions stay on this provider-neutral output inference. Threading does
+not rewrite either runtime's configuration to install lifecycle hooks; adding the runtime does not
+pretend that its repaint traffic has Claude/Codex's structured turn semantics.
+
 **An agent that reports its own turns is believed instead.** All of the above is a proxy, and
 the guards exist because it cannot tell thinking from repainting. When
 `AppSettings.reportsClaudeLifecycleEvents` is on, `AgentLauncher.claudeCommand` writes a
@@ -350,8 +354,32 @@ on operators is deliberately naive, and that is safe *because* it is naive — a
 quoted argument splits into a segment whose first word is not allowlisted, so the line is refused
 rather than admitted.
 
-Three rules came from measuring 5,165 real Codex commands rather than from reasoning, and each
-was wrong first:
+**Naming a command is not enough, and for a long time this file said it was.** The allowlist was
+described as holding "only commands with no write mode at all", with `find`, `git` and `sed`
+carrying their own rules. That claim did not survive being checked against the binaries. Every
+one of these was on the allowlist, classified read-only, and auto-approved without a prompt:
+
+- `fd -x`, `-X`, `--exec`, `--exec-batch` — run an arbitrary command per match. The `find` rule
+  next to it tested `hasPrefix("-exec")`, which none of `fd`'s spellings begin with.
+- `rg --pre=CMD` and `--hostname-bin=CMD` — execute CMD.
+- `sort -o FILE`, `tree -o FILE`, `git diff --output=FILE`, `yq -i` — write an arbitrary path.
+- `uniq IN OUT` — writes its second *operand*, with no flag to spot at all.
+
+Two things follow. Each allowlisted command now carries the flags that turn it into a writer or
+an executor, named per command because the same spelling is harmless elsewhere — `-o` prints only
+the match to `grep` and writes the result to `sort`, so banning it outright would make the most
+common search in the corpus prompt. And long flags match exactly or up to their `=`, never by
+bare prefix: `rg --pretty` starts with `--pre`, and refusing it would break an ordinary read.
+
+**Arguments are read unquoted.** Separately and worse, every rule here is a prefix test against
+the line *as typed*, while the shell runs it with the quotes stripped — so `find . "-delete"` and
+`find . -delete` are one call, and only the second was refused. Verified against the real
+binaries: the quoted form removed the file. Arguments now have one layer of matching quotes
+stripped before any rule sees them. The command *name* keeps its quotes, so unquoting can only
+ever refuse more, never admit more.
+
+Three further rules came from measuring 5,165 real Codex commands rather than from reasoning, and
+each was wrong first:
 
 - **`sed` had to be admitted, narrowly.** `sed -n '1,220p' file` is how Codex *reads* — 42% of
   its shell calls — and refusing it left the classifier admitting 20% of real traffic. It is

@@ -51,9 +51,22 @@ enum CodexPatch {
         return input
     }
 
+    /// The patch's lines, however the patch spells the end of one.
+    ///
+    /// **Not `split(separator: "\n")`.** Swift strings are sequences of grapheme clusters and
+    /// `\r\n` is a single one, so splitting on `"\n"` finds no separator in a CRLF patch at all
+    /// and hands back the whole envelope as one line. Nothing then matches a file header or a
+    /// `+`/`-`, which is the original bug this file exists to fix — an edit rendered as an
+    /// anonymous blank row with no diff — reappearing for any patch written with CRLF.
+    private static func envelopeLines(_ patch: String) -> [String] {
+        patch
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map(String.init)
+    }
+
     /// The paths a patch touches, in the order it touches them.
     static func paths(in patch: String) -> [String] {
-        patch.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line in
+        envelopeLines(patch).compactMap { line in
             let line = String(line)
             guard let header = Marker.fileHeaders.first(where: { line.hasPrefix($0) }) else {
                 return nil
@@ -74,9 +87,7 @@ enum CodexPatch {
     static func lines(in patch: String) -> [DiffLine] {
         var lines: [DiffLine] = []
 
-        for raw in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(raw)
-
+        for line in envelopeLines(patch) {
             if line.hasPrefix(Marker.begin) || line.hasPrefix(Marker.end) { continue }
 
             if Marker.fileHeaders.contains(where: { line.hasPrefix($0) })

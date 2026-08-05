@@ -112,9 +112,13 @@ enum AgentDefaults {
 
     static let claudeExecutable = "claude"
     static let codexExecutable = "codex"
+    static let grokExecutable = "grok"
+    static let openCodeExecutable = "opencode"
 
     static let claudeModelFlag = "--model"
     static let codexModelFlag = "--model"
+    static let grokModelFlag = "--model"
+    static let openCodeModelFlag = "--model"
 
     /// Runs enabled hooks without the review Codex otherwise requires.
     ///
@@ -123,12 +127,13 @@ enum AgentDefaults {
     /// It is passed solely when `AppSettings.bypassesCodexHookTrust` is on.
     static let codexBypassHookTrustFlag = "--dangerously-bypass-hook-trust"
 
-    /// How a launch states its permission posture. Claude names one mode; Codex splits the same
-    /// idea across when-to-ask and what-may-happen-without-asking, so it takes two flags.
-    /// `AgentPermissionMode` owns which values pair with which.
+    /// How a launch states its permission posture. Claude and Grok name one mode; Codex splits
+    /// the same idea across when-to-ask and what-may-happen-without-asking, so it takes two
+    /// flags. `AgentPermissionMode` owns which values pair with which.
     static let claudePermissionModeFlag = "--permission-mode"
     static let codexApprovalFlag = "--ask-for-approval"
     static let codexSandboxFlag = "--sandbox"
+    static let grokPermissionModeFlag = "--permission-mode"
 
     static let codexApprovalUntrusted = "untrusted"
     static let codexApprovalOnRequest = "on-request"
@@ -140,7 +145,17 @@ enum AgentDefaults {
 
     /// Model choices offered for Claude: the aliases its `--help` documents, which track the
     /// latest of each family rather than pinning a dated name.
-    static let claudeModels = ["opus", "sonnet", "fable"]
+    ///
+    /// All four the CLI accepts, matching the families its own picker lists at the top level
+    /// (measured against 2.1.221). `haiku` was missing here for as long as this list existed,
+    /// so the fastest model was the one model Threading could not select at all.
+    ///
+    /// The picker's second tier — dated versions such as Opus 4.6 under "More models" — is
+    /// deliberately *not* mirrored. Those ids live only inside the CLI binary, with no local
+    /// listing to read and no per-account access filter, so a copy here would be a hand-kept
+    /// list that goes stale every release while claiming to be the catalog. An account granted
+    /// anything beyond these four surfaces it through `claudeAdditionalModelsKey` instead.
+    static let claudeModels = ["opus", "sonnet", "fable", "haiku"]
 
     /// Fast mode is an Opus-family capability (measured against CLI 2.1.218). Matching the family
     /// name rather than pinning dated ids keeps the check correct as new Opus versions ship — the
@@ -152,6 +167,33 @@ enum AgentDefaults {
     static let claudeSettingsFile = "settings.json"
     static let claudeModelKey = "model"
     static let claudeEffortKey = "effortLevel"
+    static let claudeEffortFlag = "--effort"
+
+    /// The session-level values the installed CLI documents for `--effort` (2.1.222).
+    /// Unlike Codex, Claude does not publish per-model subsets, so these apply to every model
+    /// the same CLI exposes. The string identifiers stay provider-native all the way to launch.
+    static let claudeReasoningEfforts = ["low", "medium", "high", "xhigh", "max"]
+
+    /// The CLI's own per-account state file, beside `settings.json` in the same config directory.
+    ///
+    /// `settings.json` is what the *user* wrote; this is what the CLI cached from the service, so
+    /// it answers two questions the settings file cannot: which models beyond the documented
+    /// aliases this login may select, and which model its organisation defaults to. Both keys are
+    /// undocumented and frequently absent — they were null on two of four logins when this was
+    /// measured — so every read of them is strictly additive and a miss changes nothing.
+    static let claudeStateFile = ".claude.json"
+
+    /// Models this login can use beyond `claudeModels`, each `{value, label, description}`.
+    /// Observed carrying `claude-fable-5[1m]`, which no alias names.
+    static let claudeAdditionalModelsKey = "additionalModelOptionsCache"
+
+    /// The model a managed organisation defaults its logins to. Null on personal accounts, which
+    /// is why it sits *below* the user's own `settings.json` rather than replacing it.
+    static let claudeOrgDefaultModelKey = "orgModelDefaultCache"
+
+    /// The keys an org default has been seen to hide behind when it is an object rather than a
+    /// bare string. Tried in order; an unrecognised shape reads as absent.
+    static let claudeOrgDefaultNestedKeys = ["model", "value"]
 
     /// Claude's own switch for its Remote Control bridge, written into the per-session
     /// `--settings` file rather than the account's config: a settings file is read ahead of the
@@ -170,6 +212,20 @@ enum AgentDefaults {
     /// One-run override keys and values.
     static let codexReasoningEffortKey = "model_reasoning_effort"
     static let codexResearchReasoningEffort = "low"
+
+    /// The model a headless Claude research run asks for. `sonnet`, and measured rather than
+    /// assumed (August 2026, five intent queries incl. one in Swedish, plus the full
+    /// MCP round-trip): sonnet matched haiku's wall clock or beat it (5–10s against 7–16s),
+    /// answered with every plausible page where haiku often named one, honoured the JSON-only
+    /// reply contract that haiku wrapped in a code fence, and cost ~7¢ against ~4¢ per search
+    /// — nothing, for a button clicked occasionally. Codex research states no model at all —
+    /// its knob is reasoning effort above, because a model name would have to come from the
+    /// account's own catalog.
+    static let claudeResearchModel = "sonnet"
+
+    /// Research runs work in a neutral scratch directory, which is not a repository. Codex
+    /// refuses to run outside one unless told this is deliberate.
+    static let codexSkipGitRepoCheckFlag = "--skip-git-repo-check"
     static let codexServiceTierKey = "service_tier"
     static let codexStandardServiceTier = "default"
     static let codexFastServiceTier = "priority"
@@ -309,10 +365,15 @@ enum MCPDefaults {
 
     /// How long a lifecycle hook waits before giving up.
     ///
-    /// Deliberately tiny. These hooks run on the agent's own turn boundaries, so every one of
-    /// them is latency the user feels before their prompt is answered — and nothing depends on
-    /// the reply. An unreachable app must cost a moment, not a turn.
+    /// Deliberately tiny for observational boundaries. An unreachable app must cost a moment,
+    /// not a turn. Turn start has its own timeout below because that reply is an admission
+    /// barrier and therefore does carry correctness.
     static let lifecycleTimeout: TimeInterval = 2
+    /// UserPromptSubmit is an admission barrier. A snapshot can run `rev-parse`, `read-tree`,
+    /// `add`, and `write-tree`; each has GitReviewDefaults' 15-second process bound. Keep the
+    /// hook alive for that full worst case plus transport overhead, or curl could release the
+    /// agent while the baseline was still moving. Other observational hooks stay at 2s.
+    static let turnStartLifecycleTimeout: TimeInterval = 62
 
     /// Also cleaned up when a session is deleted. Kept alongside the retained tokens so a
     /// revoked endpoint leaves no settings file pointing at it.
@@ -324,6 +385,12 @@ enum MCPDefaults {
 
     /// Claude tools are allowlisted wholesale, or every image would raise a permission prompt.
     static let allowedToolsPattern = "mcp__\(serverName)__*"
+
+    /// The full Claude-side name of one tool, for launches that pre-approve a single tool
+    /// rather than the wholesale pattern above — the scoped research runs.
+    static func allowedToolName(_ tool: String) -> String {
+        "mcp__\(serverName)__\(tool)"
+    }
 
     /// Refused rather than read into memory, since the panel shows one image at a time.
     static let maximumImageBytes = 64 * 1024 * 1024
@@ -430,6 +497,28 @@ enum CodexDiscoveryDefaults {
     static let headerReadLimit = 64 * 1024
 }
 
+// MARK: - OpenCode Discovery Defaults
+
+enum OpenCodeDiscoveryDefaults {
+    static let sessionIDPrefix = "ses_"
+    static let sessionListLimit = 20
+    static let pollInterval: TimeInterval = 0.5
+    static let maxAttempts = 20
+
+    /// OpenCode records creation timestamps at millisecond precision. Swift's launch timestamp
+    /// has finer precision and may therefore compare fractionally later even when both reads
+    /// occurred in the same millisecond; ten milliseconds covers only that quantization.
+    static let clockSlack: TimeInterval = 0.01
+}
+
+// MARK: - Grok Discovery Defaults
+
+enum GrokDiscoveryDefaults {
+    static let sessionListLimit = 50
+    static let pollInterval: TimeInterval = 0.5
+    static let maxAttempts = 20
+}
+
 // MARK: - Terminal Padding
 
 /// Inset between the terminal and the edges of its pane.
@@ -465,16 +554,6 @@ enum SidebarDefaults {
     /// dead in open space, which reads as a broken drag rather than as a decision.
     static let maxWidth: CGFloat = 400
     static let defaultWidth: CGFloat = 240
-
-    /// How far past the floor the divider has to be pushed before the column shuts instead of
-    /// stopping dead — see `SidebarSplitViewController.shutPaneIfPushedPast`.
-    ///
-    /// Past the floor the pane stops moving under the pointer, so this distance is travelled
-    /// with no feedback at all: short enough that carrying on past the stop is the whole
-    /// gesture, long enough that letting go a little early does not lose the column. AppKit's
-    /// own rule is *half* the floor — about a hundred points here, far enough into the blind
-    /// zone that the gesture read as gone.
-    static let shutOvershoot: CGFloat = 60
 
     static let rowHeight: CGFloat = 28
     /// Every sidebar dropdown's floor, so the short menus read as the same control as the
@@ -726,6 +805,25 @@ struct SessionFollowersDidChange: AppEvent {
 /// A link was created or withdrawn, or somebody's access was revoked.
 struct SessionSharingDidChange: AppEvent {
     static let name = Notification.Name("sessionSharingDidChange")
+}
+
+/// The live writer mode or controller changed for one shared session.
+struct SessionInputControlDidChange: AppEvent {
+    static let name = Notification.Name("sessionInputControlDidChange")
+    let sessionID: SessionID
+}
+
+/// A collaborator asked the current controller to hand them the input stream.
+struct SessionInputControlRequested: AppEvent {
+    static let name = Notification.Name("sessionInputControlRequested")
+    let sessionID: SessionID
+    let requesterName: String
+}
+
+/// The focused controller is remote and the owner attempted a local terminal gesture.
+struct SessionLocalInputBlocked: AppEvent {
+    static let name = Notification.Name("sessionLocalInputBlocked")
+    let sessionID: SessionID
 }
 
 /// An archive an agent asked for has come due: its turn has ended and it can be filed away.

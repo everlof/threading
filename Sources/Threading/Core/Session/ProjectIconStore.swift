@@ -21,6 +21,16 @@ enum ProjectIconStore {
         let source = NSCache<NSString, NSImage>()
         let display = NSCache<NSString, NSImage>()
         let luminance = OSAllocatedUnfairLock(initialState: [String: CGFloat]())
+
+        /// Which grounds a file has been composed against, so a rewritten file can drop every
+        /// rendition of itself.
+        ///
+        /// The display cache used to hold exactly two entries per file — light and dark — and
+        /// invalidation named both. A rendition now belongs to a *ground*, of which there are as
+        /// many as the app has themes times the states a row can be in, so the keys are recorded
+        /// as they are minted. `NSCache` cannot be enumerated, and an entry left behind under a
+        /// key nothing will ask for again is a leak that a file rewrite makes routine.
+        let composedGrounds = OSAllocatedUnfairLock(initialState: [String: Set<String>]())
     }
 
     private static let caches = Caches()
@@ -95,40 +105,37 @@ enum ProjectIconStore {
     // MARK: - Display Composition
 
     /// The icon as the sidebar draws it: clipped to a continuous-feeling rounded rect, and —
-    /// when its own tone would vanish against the current appearance — set on a small
-    /// opposing backplate. A dark mark on the dark sidebar gets a light plate; a light mark
-    /// on the light sidebar gets a dark one. Cached per file and appearance.
-    static func displayImage(for icon: ProjectIcon, darkAppearance: Bool) -> NSImage? {
-        let key = displayKey(icon.fileName, darkAppearance: darkAppearance)
+    /// when its own tone would vanish against the ground it is drawn on — set on a small
+    /// opposing backplate. A dark mark on a dark sidebar gets a light plate; a light mark on a
+    /// light one gets a dark plate. Cached per file and ground.
+    ///
+    /// **The ground is handed over, not inferred.** This took a `darkAppearance` flag and turned
+    /// it into one of two constants — the tones of the *system* light and dark sidebars — which is
+    /// the right answer for exactly one of the app's themes. See `IconBackplate.Ground`.
+    static func displayImage(for icon: ProjectIcon, on ground: IconBackplate.Ground) -> NSImage? {
+        let key = displayKey(icon.fileName, ground: ground)
         if let cached = caches.display.object(forKey: key) {
             return cached
         }
 
         guard let base = image(for: icon) else { return nil }
 
-        let plated = needsBackplate(
-            luminance: luminance(for: icon),
-            darkAppearance: darkAppearance
-        )
-        let composed = compose(base, plated: plated, darkAppearance: darkAppearance)
+        let plated = needsBackplate(luminance: luminance(for: icon), on: ground)
+        let composed = compose(base, plated: plated, on: ground)
         caches.display.setObject(composed, forKey: key)
+        caches.composedGrounds.withLock {
+            $0[icon.fileName, default: []].insert(ground.cacheKey)
+        }
         return composed
     }
 
-    /// Whether a mark of this tone disappears against the appearance's sidebar.
+    /// Whether a mark of this tone disappears against the sidebar it is drawn on.
     ///
-    /// The rule itself lives in `IconBackplate`, which states it as a separation from the
-    /// ground the mark is actually drawn on. A project tile's ground is always the sidebar's
-    /// surface, so the appearance is a fair proxy for it here — and stating it as one keeps a
-    /// single decision for every plated mark in the app, including the ones whose ground moves
-    /// under them, like a session row's when it is selected.
-    static func needsBackplate(luminance: CGFloat?, darkAppearance: Bool) -> Bool {
-        IconBackplate.isNeeded(
-            markTone: luminance,
-            groundTone: darkAppearance
-                ? IconBackplate.Defaults.darkAppearanceGroundTone
-                : IconBackplate.Defaults.lightAppearanceGroundTone
-        )
+    /// The rule itself lives in `IconBackplate`, which states it as a separation from the ground
+    /// the mark is actually drawn on — one decision for every plated mark in the app, including
+    /// the ones whose ground moves under them, like a session row's when it is selected.
+    static func needsBackplate(luminance: CGFloat?, on ground: IconBackplate.Ground) -> Bool {
+        IconBackplate.isNeeded(markTone: luminance, ground: ground)
     }
 
     /// The icon's alpha-weighted mean luminance over its visible pixels, 0 (black) to 1
@@ -146,14 +153,16 @@ enum ProjectIconStore {
         return luminance
     }
 
-    private static func displayKey(_ fileName: String, darkAppearance: Bool) -> NSString {
-        (fileName + (darkAppearance ? "|dark" : "|light")) as NSString
+    private static func displayKey(_ fileName: String, ground: IconBackplate.Ground) -> NSString {
+        "\(fileName)|\(ground.cacheKey)" as NSString
     }
 
     /// Drops everything derived from a file's pixels, for when the file is rewritten.
     private static func invalidateDerived(fileName: String) {
-        caches.display.removeObject(forKey: displayKey(fileName, darkAppearance: true))
-        caches.display.removeObject(forKey: displayKey(fileName, darkAppearance: false))
+        let grounds = caches.composedGrounds.withLock { $0.removeValue(forKey: fileName) } ?? []
+        for ground in grounds {
+            caches.display.removeObject(forKey: "\(fileName)|\(ground)" as NSString)
+        }
         _ = caches.luminance.withLock { $0.removeValue(forKey: fileName) }
     }
 
@@ -167,7 +176,11 @@ enum ProjectIconStore {
     /// is most of a stem. A plate keeps its own rounded shape either way; only what the ink
     /// is clipped to depends on `fillsItsBounds`, measured once here rather than inside the
     /// handler, which runs again per backing scale.
-    private static func compose(_ base: NSImage, plated: Bool, darkAppearance: Bool) -> NSImage {
+    private static func compose(
+        _ base: NSImage,
+        plated: Bool,
+        on ground: IconBackplate.Ground
+    ) -> NSImage {
         let side = ProjectIconDefaults.displayPointSize
         let isTile = fillsItsBounds(base)
         return NSImage(
@@ -181,10 +194,10 @@ enum ProjectIconStore {
             )
 
             if plated {
-                let plate = darkAppearance
-                    ? ProjectIconDefaults.lightPlateColor
-                    : ProjectIconDefaults.darkPlateColor
-                plate.setFill()
+                // The one place a plate colour is chosen, shared with the session row's mark:
+                // two tables of "which neutral opposes this" is how a project tile and the agent
+                // mark beside it came to be plated by different rules.
+                IconBackplate.plateColor(against: ground).setFill()
                 clip.fill()
             }
 
@@ -293,7 +306,9 @@ enum ProjectIconStore {
     /// A base image composed exactly as the sidebar displays icons — rounded, unplated.
     /// Shared with account avatars, which follow the same shape language.
     static func roundedDisplay(_ base: NSImage) -> NSImage {
-        compose(base, plated: false, darkAppearance: false)
+        // Unplated, so the ground decides nothing here — but the parameter is not optional,
+        // because a ground that may be omitted is a ground that will be.
+        compose(base, plated: false, on: IconBackplate.Ground(.white))
     }
 
     /// Decodes any supported format and re-encodes the largest frame as a small PNG.
@@ -367,14 +382,11 @@ enum ProjectIconDefaults {
     /// still rounded.
     static let tileEdgeOpacity: CGFloat = 0.9
 
-    /// Tones beyond these vanish against the matching appearance's sidebar and earn a plate.
-    static let darkAppearanceLuminanceFloor: CGFloat = 0.4
-    static let lightAppearanceLuminanceCeiling: CGFloat = 0.75
-
-    /// Fixed neutrals, deliberately outside the system palette: a plate exists to *oppose*
-    /// the appearance, and every system colour follows it.
-    static let lightPlateColor = NSColor(white: 0.93, alpha: 0.96)
-    static let darkPlateColor = NSColor(white: 0.16, alpha: 0.92)
+    // The plate's thresholds and its two neutrals live in `IconBackplate`, which is the rule
+    // both the project tiles and the session rows' agent marks now go through. They were
+    // stated here as well — a luminance floor and ceiling per appearance, and a second copy of
+    // the two plate colours — which is how the tile and the mark beside it could plate by
+    // different rules against the same sidebar.
 
     /// Ceiling on a candidate image read into memory, local or fetched.
     static let maximumSourceBytes = 5 * 1024 * 1024

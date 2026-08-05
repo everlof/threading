@@ -164,6 +164,22 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("true \(MCPDefaults.hookMarker)"))
     }
 
+    func testTurnStartAllowsSnapshotBarrierWhileOtherLifecycleHooksStayBrief() {
+        XCTAssertGreaterThan(
+            MCPDefaults.turnStartLifecycleTimeout,
+            GitReviewDefaults.timeout * 4,
+            "the hook must outlive every bounded git process in an unborn-repo snapshot"
+        )
+        XCTAssertTrue(
+            CodexHookInstaller.command(for: .turnStarted)
+                .contains("--max-time \(Int(MCPDefaults.turnStartLifecycleTimeout))")
+        )
+        XCTAssertTrue(
+            CodexHookInstaller.command(for: .turnFinished)
+                .contains("--max-time \(Int(MCPDefaults.lifecycleTimeout))")
+        )
+    }
+
     // MARK: - Permission Hook
 
     func testInstallWritesThePermissionHook() throws {

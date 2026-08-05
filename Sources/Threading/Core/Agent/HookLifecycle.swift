@@ -71,7 +71,13 @@ struct HookLifecycleReport {
     ///
     /// For Claude this is the id Threading minted and already knows. For Codex it is the id the
     /// CLI assigns itself, which is otherwise only recoverable by scanning rollout files.
-    let agentSessionID: String?
+    ///
+    /// Typed at the boundary rather than downstream: this is `TranscriptID`'s domain exactly —
+    /// a runtime's own name for a conversation — and `AgentRuntime` used to re-wrap the raw
+    /// string *and* re-check it for emptiness before storing it. An id present but empty is a
+    /// payload that named nothing, so it is dropped here and the read site keeps one question
+    /// instead of two.
+    let agentSessionID: TranscriptID?
 
     /// The prompt text, on `turnStarted` only.
     let prompt: String?
@@ -104,7 +110,8 @@ struct HookLifecycleReport {
 
         self.sessionID = sessionID
         self.event = event
-        self.agentSessionID = payload["session_id"] as? String
+        self.agentSessionID = (payload["session_id"] as? String)
+            .flatMap { $0.isEmpty ? nil : TranscriptID($0) }
         self.prompt = payload["prompt"] as? String
         self.subagentID = payload["agent_id"] as? String
         self.subagentType = payload["agent_type"] as? String

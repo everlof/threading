@@ -124,10 +124,13 @@ enum CodexHookInstaller {
 
         // Output is discarded and failure swallowed for the same reason as Claude's: a
         // lifecycle report must not be able to say anything back to the model.
+        let timeout = event == .turnStarted
+            ? MCPDefaults.turnStartLifecycleTimeout
+            : MCPDefaults.lifecycleTimeout
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
             + " printf '%s' \"$\(Key.payloadVariable)\" |"
-            + " curl -s --max-time \(Int(MCPDefaults.lifecycleTimeout))"
+            + " curl -s --max-time \(Int(timeout))"
             + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
             + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
     }
@@ -167,8 +170,11 @@ enum CodexHookInstaller {
 
         for event in HookLifecycleEvent.allCases {
             guard let name = event.codexEventName else { continue }
+            let timeout = event == .turnStarted
+                ? MCPDefaults.turnStartLifecycleTimeout
+                : MCPDefaults.lifecycleTimeout
             hooks[name] = foreignEntries(in: hooks[name]) + [
-                entry(command: command(for: event), timeout: MCPDefaults.lifecycleTimeout)
+                entry(command: command(for: event), timeout: timeout)
             ]
         }
 
