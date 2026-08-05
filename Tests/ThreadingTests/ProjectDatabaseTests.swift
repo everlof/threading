@@ -178,6 +178,42 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
     }
 
+    // MARK: - Running Sessions at Quit
+
+    func testRunningSessionsRoundTripInOrder() throws {
+        let database = try makeDatabase()
+        let ids = [SessionID(), SessionID(), SessionID()]
+
+        try database.saveRunningSessionIDs(ids)
+
+        XCTAssertEqual(try database.runningSessionIDs(), ids)
+        XCTAssertNil(
+            try database.load().selectedSessionID,
+            "the record rides app_state without becoming part of the projects load"
+        )
+    }
+
+    func testAnEmptyRunningSessionsListClearsTheRecord() throws {
+        let database = try makeDatabase()
+        try database.saveRunningSessionIDs([SessionID()])
+        try database.saveRunningSessionIDs([])
+
+        XCTAssertTrue(try database.runningSessionIDs().isEmpty)
+    }
+
+    /// Consumed on read, the way `EventLog`'s launch marker is: only a clean quit rewrites the
+    /// record, so one that survived the launch that read it would relaunch sessions the user
+    /// has since closed the first time that launch crashes.
+    func testConsumingTheRunningSessionsClearsThem() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let ids = [SessionID(), SessionID()]
+
+        XCTAssertTrue(manager.saveRunningSessionIDs(ids))
+
+        XCTAssertEqual(manager.consumeRunningSessionIDs(), ids)
+        XCTAssertTrue(manager.consumeRunningSessionIDs().isEmpty, "the first read spends it")
+    }
+
     // MARK: - Fail-Closed Loading
 
     func testMalformedSessionPayloadFailsTheWholeLoadWithoutDeletingRows() throws {

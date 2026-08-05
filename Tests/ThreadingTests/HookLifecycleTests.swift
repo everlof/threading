@@ -436,6 +436,77 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
+    // MARK: - Unattended Launch
+
+    /// A startup relaunch boots with nobody looking, and a resume's TUI repaint is a burst
+    /// over the byte threshold. Read as work, it goes quiet and lands every restored session
+    /// on `needsAttention` — one unread mark and one notification per session, for work
+    /// nobody did.
+    @MainActor
+    func testBootOutputOfAnUnattendedLaunchOpensNoTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
+    @MainActor
+    func testBeingLookedAtEndsTheLaunchGrace() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.isVisible = true
+        tracker.isVisible = false
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .working, "once seen, output means what it always means")
+    }
+
+    /// A reported turn means someone is driving the session — the remote mirror can type into
+    /// an unattended terminal — so from that turn on the session flags like any other.
+    @MainActor
+    func testAReportedTurnEndsTheLaunchGrace() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.noteTurnStarted()
+        XCTAssertEqual(tracker.activity, .working)
+
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention, "a real turn finishing off screen flags")
+    }
+
+    /// Claude notifies once its prompt has sat idle a while, and a session relaunched in the
+    /// background is precisely a prompt sitting idle. A real ask arrives inside a turn, whose
+    /// start already ended the grace.
+    @MainActor
+    func testTheIdlePromptNoticeIsIgnoredWhileUnattended() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.noteAwaitingUser()
+
+        XCTAssertEqual(tracker.activity, .idle)
+        XCTAssertTrue(tracker.reportsOwnActivity, "the report still proves the hooks reached it")
+    }
+
+    @MainActor
+    func testABellDuringAnUnattendedBootRaisesNoFlag() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.recordBell()
+
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
     // MARK: - Background Work Ledger
 
     /// The rule in isolation, without a tracker around it. Both CLIs wake a session when a

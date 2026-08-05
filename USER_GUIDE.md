@@ -595,6 +595,14 @@ own id, which Threading reads back from the rollout file Codex writes on launch.
 assigns its own id; Threading reads the supported JSON session listing for the newest conversation
 in that checkout.
 
+**Sessions that were running when you quit come back on their own.** With **Relaunch sessions
+that were running at quit** on (Settings ▸ General ▸ Startup, the default), the next launch
+resumes them in the background: the last session you had selected opens on screen as before,
+and the rest come up behind it, one per second, most recently used first. Their sidebar rows
+show them idle and ready, and opening one attaches a session that is already running instead
+of resuming it on the click. Only what was live at quit comes back — closed and archived
+sessions stay dormant — and after a crash nothing relaunches automatically.
+
 ### Standalone terminals
 
 Choose **New Terminal** from a project's hover **+** to add a terminal row and start its shell.
@@ -2247,6 +2255,9 @@ than borrowing an unrelated app translation.
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
+- **Relaunch sessions that were running at quit** — the sessions that were live when the app
+  last quit resume in the background at launch, one at a time, so each is already running
+  when you open it; see [Resuming](#resuming)
 - **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
   see [Confirmations](#confirmations)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)

@@ -271,6 +271,34 @@ final class ProjectDatabase {
         try setSelectedSessionID(id)
     }
 
+    /// The sessions that held a live agent when the app last quit, for startup to relaunch.
+    ///
+    /// Read leniently rather than through `corruptRow`: this is derived navigation state whose
+    /// worst failure is a session not coming back, and quarantining the whole store over it
+    /// would trade every project for a convenience.
+    func runningSessionIDs() throws -> [SessionID] {
+        let statement = try database.prepare("SELECT value FROM app_state WHERE key = ?")
+        defer { statement.finalize() }
+        statement.bind(1, ProjectDatabaseSchema.runningSessionsKey)
+
+        guard try statement.step(), let raw = statement.text(0) else { return [] }
+        return raw.split(separator: " ").compactMap { SessionID(uuidString: String($0)) }
+    }
+
+    func saveRunningSessionIDs(_ ids: [SessionID]) throws {
+        guard !ids.isEmpty else {
+            let statement = try database.prepare("DELETE FROM app_state WHERE key = ?")
+            statement.bind(1, ProjectDatabaseSchema.runningSessionsKey)
+            try statement.run()
+            return
+        }
+
+        try database.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.runningSessionsKey)
+            .bind(2, ids.map(\.uuidString).joined(separator: " "))
+            .run()
+    }
+
     // MARK: - Public Methods — Panel Layouts
 
     /// The display panel's tabs for a session, as its own `Codable` payload.
@@ -465,6 +493,8 @@ enum ProjectDatabaseSchema {
     static let version = 3
 
     static let selectedSessionKey = "selectedSessionID"
+
+    static let runningSessionsKey = "runningSessionIDs"
 
     /// Columns exist to be ordered by, filtered on, or joined; everything else is in `data`.
     /// `kind` and `last_active_at` are duplicated out of the payload on purpose — they are what

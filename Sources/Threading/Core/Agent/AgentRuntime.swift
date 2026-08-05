@@ -69,7 +69,8 @@ final class AgentRuntime {
     /// Asks `isRunning` per session rather than filtering the two caches separately, so it
     /// cannot answer differently from the check every other caller makes — a session with both
     /// a terminal and a rendered conversation appears once, and appears by the same rule.
-    private var runningSessionIDs: Set<SessionID> {
+    /// Also what the quit path records for the next launch to relaunch.
+    var runningSessionIDs: Set<SessionID> {
         Set(controllers.keys).union(conversations.keys)
             .filter { isRunning(sessionID: $0) }
     }

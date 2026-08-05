@@ -94,6 +94,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
 
+    /// Paces the startup relaunch of the sessions that were running at the last quit.
+    /// Retained for the stagger's duration; it retires its own timer when the plan is spent.
+    private var startupRelauncher: StartupSessionRelauncher?
+
     /// Exchanges the window's frame with a takeover theme's own chrome and back. Optional
     /// because it needs the real window; every consumer asks with `?.` and reads nil as
     /// "native frame", which is also what it means.
@@ -909,6 +913,36 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
               let sessionID = ProjectStore.shared.selectedSessionID,
               ProjectStore.shared.session(withID: sessionID) != nil else { return }
         sidebarViewController.select(sessionID: sessionID)
+    }
+
+    /// Relaunches, without selecting them, the sessions that were running at the last quit.
+    ///
+    /// The record is consumed before the setting is consulted, so a list written under one
+    /// choice cannot fire under a later one. The selected session is left out when
+    /// `restoreSelectedSession` is already bringing it back through the sidebar — its launch
+    /// is a run-loop turn away, which `hasTerminal` alone would race.
+    func relaunchSessionsFromLastQuit() {
+        let recorded = StateManager.shared.consumeRunningSessionIDs()
+        guard AppSettings.shared.restoresRunningSessions, !recorded.isEmpty else { return }
+
+        let planned = StartupSessionRelaunch.plan(
+            recorded: recorded,
+            sessions: ProjectStore.shared.projects.flatMap(\.sessions),
+            excluding: AppSettings.shared.restoresLastSession
+                ? ProjectStore.shared.selectedSessionID
+                : nil
+        )
+        guard !planned.isEmpty else { return }
+
+        EventLog.shared.record(.session, "Relaunching sessions from last quit", [
+            "count": String(planned.count)
+        ])
+
+        let relauncher = StartupSessionRelauncher(sessionIDs: planned) { [weak self] sessionID in
+            self?.containerViewController.launchInBackground(sessionID: sessionID)
+        }
+        startupRelauncher = relauncher
+        relauncher.start()
     }
 
     /// Selects through the same sidebar path as a local click, so loading state, persistence,

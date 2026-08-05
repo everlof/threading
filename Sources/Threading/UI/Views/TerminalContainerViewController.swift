@@ -636,6 +636,60 @@ final class TerminalContainerViewController: NSViewController {
         controller.startIfNeeded()
     }
 
+    /// Launches a session's agent without putting it on screen, for the startup relaunch.
+    ///
+    /// The surface is built exactly as `show` would build it — same runtime cache, same
+    /// delegate, so the sidebar's dot and the exit handling work unchanged — but it is never
+    /// attached, and the pane keeps whatever it is showing. Selecting the session later takes
+    /// the ordinary `show` path, which finds the terminal in the cache and only attaches.
+    ///
+    /// Laying the view out *before* the launch is load-bearing on the terminal path: SwiftTerm
+    /// clamps an unlaid-out grid to its 2×1 minimum rather than zero, so the deferred-launch
+    /// gate would pass and `forkpty` would take that as the winsize — the agent's TUI boots
+    /// into a two-column window and renders garbage until something resizes it. The frame is
+    /// this pane's own bounds where possible, so the eventual attach is not even a resize.
+    func launchInBackground(sessionID: SessionID) {
+        guard let agentSession = ProjectStore.shared.session(withID: sessionID),
+              !agentSession.isArchived,
+              !AgentRuntime.shared.hasTerminal(sessionID: sessionID) else { return }
+
+        let frame = NSRect(origin: .zero, size: backgroundLaunchSize)
+        let openingPrompt = ConversationContinuation.openingPrompt(for: agentSession)
+
+        if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
+           let project = ProjectStore.shared.project(forSessionID: sessionID) {
+            let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
+            conversation.delegate = self
+            conversation.view.frame = frame
+            conversation.view.layoutSubtreeIfNeeded()
+            conversation.launch()
+            if let openingPrompt, !openingPrompt.isEmpty {
+                conversation.sendInitialPrompt(openingPrompt)
+            }
+            return
+        }
+
+        let controller = AgentRuntime.shared.makeController(for: agentSession)
+        controller.delegate = self
+        controller.view.frame = frame
+        controller.view.layoutSubtreeIfNeeded()
+        // Nobody is looking: the resume's boot repaint must not read as a finished turn and
+        // mark every restored session unread. See the tracker for what ends the grace.
+        controller.activityTracker.noteUnattendedLaunch()
+        controller.launch(initialPrompt: openingPrompt)
+    }
+
+    /// The size a background-launched surface is laid out at before its process starts:
+    /// this pane's, unless the launch outran the window's first real layout.
+    private var backgroundLaunchSize: NSSize {
+        let bounds = view.bounds.size
+        guard bounds.width >= StartupRelaunchDefaults.minimumPaneDimension,
+              bounds.height >= StartupRelaunchDefaults.minimumPaneDimension else {
+            return StartupRelaunchDefaults.fallbackSize
+        }
+        return bounds
+    }
+
     /// Relaunches the currently shown session, used by the dormant placeholder's button.
     func resumeCurrentSession() {
         guard let sessionID = currentSessionID else { return }

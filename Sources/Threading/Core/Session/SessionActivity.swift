@@ -88,6 +88,10 @@ final class SessionActivityTracker {
     /// worth flagging.
     var isVisible: Bool = false {
         didSet {
+            // Being looked at is what ends an unattended launch: from here on the session is
+            // an ordinary one, and its output means what output always means.
+            if isVisible { launchedUnattended = false }
+
             // Looking at a session answers whatever it was asking for. What it goes back to is
             // the turn it is in rather than idle: an agent that asked mid-turn is still working,
             // and nothing else would have said so again until the user's next prompt.
@@ -129,6 +133,17 @@ final class SessionActivityTracker {
     /// Whether the session owns no process at all, which outranks both of the above.
     private var isDormant = false
 
+    /// Whether the session was launched with nobody looking — a startup relaunch, not a click.
+    ///
+    /// Every launch before this one was made by selecting the session, so the tracker could
+    /// assume boot output happens on screen, where it opens no flag. A relaunch in the
+    /// background breaks that: the resume's TUI repaint is a burst over the byte threshold, it
+    /// goes quiet, and the session lands on `needsAttention` — one unread mark and one silent
+    /// notification per restored session, for work nobody did. While this is set, nothing the
+    /// process emits on its own raises a flag or opens an inferred turn; it clears when the
+    /// session is first looked at, or when a turn genuinely begins.
+    private var launchedUnattended = false
+
     private var bytesSinceQuiet = 0
     private var quietTimer: Timer?
 
@@ -139,6 +154,10 @@ final class SessionActivityTracker {
 
     /// Records a chunk of output.
     func recordOutput(byteCount: Int) {
+        // A background relaunch's boot output is a repaint we provoked, exactly like a
+        // resize — except its window ends when the session is seen, not on a timer.
+        if launchedUnattended { return }
+
         if isSuppressed {
             // A redraw we caused. It must not start a session working, but it also must not
             // end one that already is — so an in-flight session keeps its timer alive. A
@@ -208,7 +227,12 @@ final class SessionActivityTracker {
     // MARK: - Reported Activity
 
     /// The agent reported that a turn began.
+    ///
+    /// A turn means someone is driving the session — a prompt typed through the remote
+    /// mirror reaches an unattended terminal too — so the launch grace ends here as surely
+    /// as it does on being looked at.
     func noteTurnStarted() {
+        launchedUnattended = false
         adoptOwnReports()
         turnInFlight = true
         awaitsUser = false
@@ -247,6 +271,11 @@ final class SessionActivityTracker {
     /// state had no way back to `working` until the next prompt.
     func noteAwaitingUser() {
         adoptOwnReports()
+        // Claude raises `Notification` once its prompt has sat idle a while, and a session
+        // relaunched in the background is precisely a prompt sitting idle: honouring it would
+        // flag every restored session a minute after startup. A *real* ask arrives inside a
+        // turn, and the turn's start already ended the grace.
+        guard !launchedUnattended else { return }
         awaitsUser = true
         settle()
     }
@@ -274,7 +303,9 @@ final class SessionActivityTracker {
         if !reportsOwnActivity {
             turnInFlight = false
         }
-        awaitsUser = !isVisible
+        // A bell rung during an unattended boot is part of the boot, not an ask: no prompt
+        // has been submitted for the agent to be asking about.
+        awaitsUser = !isVisible && !launchedUnattended
         settle()
     }
 
@@ -289,6 +320,16 @@ final class SessionActivityTracker {
         pausedOnOwnWork = false
         backgroundWork.forget()
         settle()
+    }
+
+    /// Marks a launch nobody made by hand, so its boot noise raises no flags.
+    ///
+    /// Called before the launch; `markRunning` deliberately leaves the mark alone, since it
+    /// arrives a run-loop pass later. The grace ends at the first look or the first turn, so
+    /// it needs no clearing on `markDormant` either — a session that died unseen keeps it,
+    /// and both ends still apply to the next process.
+    func noteUnattendedLaunch() {
+        launchedUnattended = true
     }
 
     /// Marks the session as running again after being dormant.

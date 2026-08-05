@@ -220,6 +220,7 @@
 		7474CC32311B2E9F4C0E6D69 /* WindowChromeTakeoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B786D110420BB3939A22D0 /* WindowChromeTakeoverTests.swift */; };
 		E92152205173F37F9175091A /* WindowChromeComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EA5D974B1BB1DE1DA60D7FB /* WindowChromeComponentTests.swift */; };
 		ED24B5A8B9FDEC1D9E0ECF58 /* SurfaceBevelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5FD5E0889EC25BC4CF8C7B /* SurfaceBevelTests.swift */; };
+		B563901928AB182F64F90CA7 /* StartupSessionRelaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7292574D2BC701C0C8A8D2B2 /* StartupSessionRelaunchTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -484,6 +485,7 @@
 		15B786D110420BB3939A22D0 /* WindowChromeTakeoverTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WindowChromeTakeoverTests.swift; sourceTree = "<group>"; };
 		2EA5D974B1BB1DE1DA60D7FB /* WindowChromeComponentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WindowChromeComponentTests.swift; sourceTree = "<group>"; };
 		CC5FD5E0889EC25BC4CF8C7B /* SurfaceBevelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SurfaceBevelTests.swift; sourceTree = "<group>"; };
+		7292574D2BC701C0C8A8D2B2 /* StartupSessionRelaunchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StartupSessionRelaunchTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -810,6 +812,7 @@
 				15B786D110420BB3939A22D0 /* WindowChromeTakeoverTests.swift */,
 				2EA5D974B1BB1DE1DA60D7FB /* WindowChromeComponentTests.swift */,
 				CC5FD5E0889EC25BC4CF8C7B /* SurfaceBevelTests.swift */,
+				7292574D2BC701C0C8A8D2B2 /* StartupSessionRelaunchTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1380,6 +1383,7 @@
 				7474CC32311B2E9F4C0E6D69 /* WindowChromeTakeoverTests.swift in Sources */,
 				E92152205173F37F9175091A /* WindowChromeComponentTests.swift in Sources */,
 				ED24B5A8B9FDEC1D9E0ECF58 /* SurfaceBevelTests.swift in Sources */,
+				B563901928AB182F64F90CA7 /* StartupSessionRelaunchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

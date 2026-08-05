@@ -9,7 +9,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 output, because an idle agent writes nothing at all — measured at zero bytes over 19s while
 sitting at its prompt. This works for any program rather than one specific agent.
 
-Four guards keep it honest:
+Five guards keep it honest:
 
 - A **byte threshold** (`workingByteThreshold`), so the terminal echoing typed characters is
   not mistaken for work.
@@ -23,6 +23,17 @@ Four guards keep it honest:
   events are forwarded to it (see the fork's `MacTerminalView.scrollWheel`) and it answers
   each one by repainting its content — the same we-caused-it output as a resize, extended by
   every event so a momentum gesture stays covered.
+- An **unattended-launch grace** (`noteUnattendedLaunch`). The startup relaunch (see
+  [`sessions.md`](sessions.md)) boots sessions with nobody looking, where every earlier
+  launch was a selection — so the tracker could assume boot output happens on screen, where
+  it opens no flag. Unattended, the resume's repaint would read as a turn, go quiet, and
+  land every restored session on `needsAttention` with a notification apiece. While the
+  grace holds, nothing the process emits on its own raises a flag: output opens no inferred
+  turn, a bell does not flag, and Claude's idle-prompt `Notification` — which a relaunched
+  session sitting at its prompt is precisely the shape of — is ignored (it still latches
+  `reportsOwnActivity`, since it does prove the hooks arrived). The grace ends at the first
+  look, or at the first reported turn — the remote mirror can type into an unattended
+  terminal, and from that turn on the session flags like any other.
 
 `needsAttention` is only raised when work finishes in a session that is *not* on screen;
 `AgentRuntime.setVisibleSession` tracks which that is. A terminal bell raises it directly.

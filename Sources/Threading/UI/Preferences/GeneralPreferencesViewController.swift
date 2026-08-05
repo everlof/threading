@@ -14,6 +14,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let claudeAttachmentToggle = ThemedToggle()
     private let codexAttachmentToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
+    private let relaunchSessionsToggle = ThemedToggle()
     private let attentionNotificationToggle = ThemedToggle()
     private let automaticUpdateToggle = ThemedToggle()
 
@@ -97,6 +98,9 @@ final class GeneralPreferencesViewController: NSViewController {
             action: #selector(codexAttachmentDetectionChanged)
         )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
+        configure(relaunchSessionsToggle,
+                  isOn: AppSettings.shared.restoresRunningSessions,
+                  action: #selector(relaunchSessionsChanged))
         for (prompt, toggle) in confirmationToggles {
             configure(toggle,
                       isOn: AppSettings.shared.asks(before: prompt),
@@ -228,7 +232,13 @@ final class GeneralPreferencesViewController: NSViewController {
         ])
 
         let startup = SettingsCard(rows: [
-            SettingsUI.row(title: "Reopen the last session at launch", control: restoreSessionToggle)
+            SettingsUI.row(title: "Reopen the last session at launch", control: restoreSessionToggle),
+            SettingsUI.row(
+                title: "Relaunch sessions that were running at quit",
+                subtitle: "They resume in the background, one at a time, and are already "
+                    + "running when you open them.",
+                control: relaunchSessionsToggle
+            )
         ])
 
         let confirmations = SettingsCard(rows: confirmationRows())
@@ -513,6 +523,10 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func restoreSessionChanged() {
         AppSettings.shared.restoresLastSession = restoreSessionToggle.state == .on
+    }
+
+    @objc private func relaunchSessionsChanged() {
+        AppSettings.shared.restoresRunningSessions = relaunchSessionsToggle.state == .on
     }
 
     @objc private func confirmationChanged(_ sender: ThemedToggle) {

@@ -155,6 +155,44 @@ final class StateManager {
         }
     }
 
+    /// Records which sessions held a live agent at quit, for the next launch to relaunch.
+    @discardableResult
+    func saveRunningSessionIDs(_ ids: [SessionID]) -> Bool {
+        guard writesAreAllowed(for: "running sessions") else { return false }
+        do {
+            try database().saveRunningSessionIDs(ids)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save running sessions: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return false
+        }
+    }
+
+    /// The sessions recorded at the last quit, cleared as they are read.
+    ///
+    /// Consumed rather than kept, the same way `EventLog`'s launch marker is: only a clean quit
+    /// rewrites the record, so a list that outlived the launch that read it would relaunch
+    /// sessions the user has since closed the first time this launch fails to quit cleanly.
+    func consumeRunningSessionIDs() -> [SessionID] {
+        guard case .healthy = persistenceHealth else { return [] }
+        do {
+            let ids = try database().runningSessionIDs()
+            if !ids.isEmpty {
+                try database().saveRunningSessionIDs([])
+            }
+            return ids
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to read running sessions: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return []
+        }
+    }
+
     /// Restores the store, importing a legacy `projects.json` the first time.
     ///
     /// Three outcomes, and the contract is the one the JSON document had: a missing store starts

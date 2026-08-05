@@ -441,6 +441,56 @@ agent to rename it — the opposite of what an instruction such as “give this 
 name” is for. Imports receive nothing because they are existing conversations, and resumes
 receive nothing because the opening was already persisted in the provider transcript.
 
+### The sessions that come back on their own
+
+Quitting with agents running keeps the records and loses the processes — that is the app's
+premise — but it used to mean the next launch began as a sidebar of dormant rows, one resume
+per click. `AppSettings.restoresRunningSessions` (Settings ▸ General ▸ Startup, on by default)
+closes that loop: `applicationShouldTerminate` records `AgentRuntime.runningSessionIDs` just
+before `terminateAll`, and the next launch relaunches those sessions in the background, so
+selecting one attaches an agent that is already up instead of paying the resume on the click.
+The rules, each of which is the answer to a way this goes wrong:
+
+- **The candidate set is what was running at quit, never "every session in the sidebar".**
+  That is what keeps the cost honest: the machine ran exactly those agents side by side a
+  moment before the quit, so bringing the same set back returns it to a load it has
+  demonstrably carried. A store with forty dormant conversations must not boot forty CLIs.
+  `StartupSessionRelaunch.plan` also drops what was deleted or archived since, and orders by
+  `lastActiveAt` — the stagger means the last in line waits the whole line, so the session
+  touched last goes first.
+- **The record is consumed on read** (`StateManager.consumeRunningSessionIDs`), the same
+  pattern as `EventLog`'s launch marker: only a clean quit rewrites it, so a list that
+  outlived the launch that read it would relaunch sessions the user has since closed the
+  first time that launch crashed. After a crash nothing auto-relaunches, which is the
+  conservative direction. It is consumed even with the setting off, so enabling it later
+  cannot act on a list from some earlier quit. `AppRelaunch.discardingState()` skips the
+  quit path deliberately — a reset comes back to nothing running.
+- **Launches are staggered, one per `StartupRelaunchDefaults.staggerInterval`.** The
+  expensive part of a launch is the agent CLI's own boot — a burst of CPU per process — and
+  N of those fired together contend through the app's first seconds, which is also when
+  `MainThreadStallMonitor` is already watching. Spread out, each launch's main-thread slice
+  (the MCP config writes, building and laying out the surface) stays inside its own run-loop
+  turn. The first launch waits a full interval too: that is the restored selected session's
+  head start, and that session is excluded from the plan outright, because its own launch is
+  a run-loop turn away and `hasTerminal` alone would race it.
+- **A background surface is laid out at a real size *before* its PTY starts**
+  (`TerminalContainerViewController.launchInBackground`). SwiftTerm clamps an unlaid-out
+  grid to its 2×1 minimum rather than zero, so the deferred-launch gate — which waits for
+  non-zero dimensions — passes, and `forkpty` takes 2×1 as the winsize: the agent's TUI
+  boots into a two-column window. The frame used is the pane's own bounds, so the eventual
+  attach is not even a resize.
+- **Boot noise raises no flags.** Every launch before this one was made by selecting the
+  session, so the activity tracker could assume boot output happens on screen. Unattended,
+  the resume's repaint would read as a turn, go quiet, and land every restored session on
+  `needsAttention` — one silent notification each. `noteUnattendedLaunch` grants a grace
+  that ends at the first look or the first reported turn; see
+  [`session-activity.md`](session-activity.md).
+
+Everything else is deliberately the ordinary machinery: the background launch uses the same
+`AgentRuntime` caches and the same container delegate as a click, so the sidebar's dot, exit
+handling and the eventual attach (`show` finds the surface cached and only attaches) cannot
+drift from the selected path.
+
 ### Permission mode, per conversation
 
 How much a session may do before it stops to ask, chosen in the composer, overridable from a

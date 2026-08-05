@@ -231,6 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Projects are persisted by ProjectStore as they change, but a coalesced write may
         // still be pending, so it is flushed before the agents are torn down.
         ProjectStore.shared.flushPendingSave()
+        // What is live right now, recorded for the next launch to bring back — necessarily
+        // ahead of `terminateAll`, after which nothing is. `AppRelaunch.discardingState()`
+        // exits without running this on purpose: a reset comes back to nothing running.
+        StateManager.shared.saveRunningSessionIDs(Array(AgentRuntime.shared.runningSessionIDs))
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
@@ -340,6 +344,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func restoreSelectedSessionIfReady() {
         guard mcpServerHasStarted, !isOnboardingActive else { return }
         mainWindowController?.restoreSelectedSession()
+        // Behind the same two gates for the same reasons — every launch reads the MCP port —
+        // and after the selected session, which the user is about to look at and which the
+        // relaunch therefore leaves out. The record is consumed even when the setting is off,
+        // so enabling it later cannot act on a list from some earlier quit.
+        mainWindowController?.relaunchSessionsFromLastQuit()
     }
 
     /// The walkthrough on request — Settings ▸ Advanced. The main window is already visible,

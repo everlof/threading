@@ -55,6 +55,19 @@ final class AppSettings {
         }
     }
 
+    /// Whether the sessions that were running at the last quit are relaunched at startup.
+    ///
+    /// The relaunch happens in the background, one session at a time: rows come back live
+    /// without being selected, so opening one later attaches an agent that is already up
+    /// instead of paying the resume on the click. See `StartupSessionRelaunch`.
+    var restoresRunningSessions: Bool {
+        get { defaults.bool(forKey: Keys.restoresRunningSessions) }
+        set {
+            defaults.set(newValue, forKey: Keys.restoresRunningSessions)
+            notifyChanged()
+        }
+    }
+
     /// Extra context appended to the first message of every new chat.
     ///
     /// Empty means no extra message. It is deliberately app-wide rather than copied into the
@@ -839,6 +852,7 @@ final class AppSettings {
         [
             Keys.defaultAgentKind: AgentDefaults.defaultKind.rawValue,
             Keys.restoresLastSession: true,
+            Keys.restoresRunningSessions: true,
             Keys.confirmsBeforeClosingRunningSession: true,
             Keys.usesTerminalTitleInSidebar: true,
             Keys.groupsSessionsByBranch: true,
@@ -880,6 +894,7 @@ final class AppSettings {
     private enum Keys {
         static let defaultAgentKind = "defaultAgentKind"
         static let restoresLastSession = "restoresLastSession"
+        static let restoresRunningSessions = "restoresRunningSessions"
         static let newChatOpeningMessage = "newChatOpeningMessage"
         /// Read only by `migrateClosingConfirmation`; the setting itself is four prompts now.
         static let confirmsBeforeClosingRunningSession = "confirmsBeforeClosingRunningSession"

@@ -13060,6 +13060,16 @@
         }
       }
     },
+    "Relaunch sessions that were running at quit": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta om konversationer som kördes när appen avslutades"
+          }
+        }
+      }
+    },
     "Render a bounded semantic visualization using Threading’s native UI.": {
       "localizations": {
         "sv": {
@@ -17331,6 +17341,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "De förlorar chatten omedelbart och allt de har öppet stängs. Deras inbjudan var för engångsbruk, så att släppa in dem igen innebär att dela chatten på nytt."
+          }
+        }
+      }
+    },
+    "They resume in the background, one at a time, and are already running when you open them.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De återupptas i bakgrunden, en i taget, och är redan igång när du öppnar dem."
           }
         }
       }
