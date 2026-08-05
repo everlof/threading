@@ -28,6 +28,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private let credentialStore: BrowserCredentialStore
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
+    private var exemptSubmissionOrigins: [String] = []
 
     /// Hosts whose accounts are worth more than a vault without a biometric gate protects.
     ///
@@ -386,6 +387,25 @@ final class ToolsPreferencesViewController: NSViewController {
             }
         }
 
+        exemptSubmissionOrigins = BrowserSubmissionExemptions.shared.exemptOriginKeys
+        rows.append(contentsOf: exemptSubmissionOrigins.enumerated().map { index, origin in
+            let revoke = SettingsUI.button(
+                "Ask Again",
+                target: self,
+                action: #selector(revokeSubmissionExemption(_:))
+            )
+            revoke.tag = index
+            return SettingsUI.row(
+                title: origin,
+                subtitle: L10n.string("""
+                    Forms submit here without asking. This lasts until you quit Threading and is \
+                    never written to disk.
+                    """),
+                control: revoke,
+                localizes: false
+            )
+        })
+
         return SettingsUI.section("Browser Sign-In", SettingsCard(rows: rows))
     }
 
@@ -702,6 +722,12 @@ final class ToolsPreferencesViewController: NSViewController {
             reference,
             for: BrowserCredentialIdentity(originKey: origin.key, label: label)
         )
+        render()
+    }
+
+    @objc private func revokeSubmissionExemption(_ sender: ThemedButton) {
+        guard exemptSubmissionOrigins.indices.contains(sender.tag) else { return }
+        BrowserSubmissionExemptions.shared.revoke(key: exemptSubmissionOrigins[sender.tag])
         render()
     }
 

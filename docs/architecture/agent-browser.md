@@ -492,9 +492,31 @@ a person has to physically answer.
 `BrowserAccessStore`'s persistent grants live in `UserDefaults`, so an agent with shell access can
 `defaults write` both. Neither hole is new and neither yields a password — the vault itself is out
 of the shell's reach, and an entry must exist before a provider choice means anything. It matters
-because it sets the bar for what may be built on top: a per-origin "don't confirm submissions here"
-must **not** live there, or one `defaults write` plus one prompt injection becomes fill-and-submit
-with nobody watching.
+because it set the bar for what could be built on top, which is the next section.
+
+### Submitting without being asked every time
+
+Filling a sign-in and then still asking before the submit is about half the value the vault exists
+for, so `BrowserSubmissionExemptions` is the other half — and the piece that most deserved to be
+built last, because it relaxes a different guarantee than the fill does.
+
+It is **process memory, deliberately not a preference.** The provider choice and the persistent
+origin grants live in `UserDefaults`, which an agent's shell can rewrite with `defaults write`; that
+is tolerable there because neither yields a password. It is not tolerable here — a persisted
+exemption plus a stored credential plus one prompt injection is fill-and-submit with nobody
+watching, which is unattended takeover of whatever that origin is. A store the shell cannot reach at
+all is the only version worth having, so quitting Threading is a complete revocation. That property
+is worth keeping even when someone later asks for it to be remembered across launches.
+
+**Only an origin that already holds a credential may be exempted**, because the exemption extends a
+decision the user already made in Settings for that exact origin. Everywhere else the prompt stays
+the two-answer question it has always been: a "stop asking" that any page could earn is not a
+narrower prompt, it is a disabled one. The second affirmative is offered through `choose`, not a
+suppression box, for the reason the origin grant gives — a remembered answer scoped to one host is
+this prompt's own answer, while a checkbox would remember something about every host at once. The
+prompt stays `.alwaysAsks` in the register. Exemptions are listed and revocable in Settings ▸ Tools,
+and membership is re-checked at each submission rather than captured when granted, so revoking takes
+effect on the next submit.
 
 `browser_fill_credentials` never submits; submission keeps its own confirmation.
 `browser_run_isolated` does not get this tool at all — its checkable promise is that nothing

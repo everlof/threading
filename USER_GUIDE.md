@@ -1777,7 +1777,9 @@ would not mind losing.** Anything that is not on your own machine asks you to co
 throwaway account first, and well-known providers like Google or GitHub are refused outright.
 
 Signing in is still not submitting: an agent that fills a form must still ask before it submits
-one. Remove a stored account at any time from the same page, and **Reset Everything** removes them
+one. On an origin you keep a test credential for, that prompt offers **Allow Until I Quit** — the
+exemption lasts for the rest of the app run, is never written to disk, and is listed with an **Ask
+Again** button on the same settings page. Remove a stored account at any time from the same page, and **Reset Everything** removes them
 all.
 
 ### Letting an agent use a signed-in Chrome

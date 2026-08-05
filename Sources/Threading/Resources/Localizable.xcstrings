@@ -24511,6 +24511,46 @@
           }
         }
       }
+    },
+    "Allow Until I Quit": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåt tills jag avslutar"
+          }
+        }
+      }
+    },
+    "%@\n\nYou keep a test credential for %@. Threading can stop asking about submissions there until you quit.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@\n\nDu har en testinloggning för %@. Threading kan sluta fråga om inskickningar där tills du avslutar."
+          }
+        }
+      }
+    },
+    "Ask Again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fråga igen"
+          }
+        }
+      }
+    },
+    "Forms submit here without asking. This lasts until you quit Threading and is never written to disk.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Formulär skickas in här utan att fråga. Det gäller tills du avslutar Threading och sparas aldrig på disk."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

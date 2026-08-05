@@ -851,21 +851,79 @@ extension AgentToolCoordinator {
             name.isEmpty ? nil : L10n.format("\nControl: %@", name)
         } ?? ""
 
-        let request = ConfirmationRequest(
+        // An origin the user already trusted enough to store a credential for, and which they
+        // have already answered this question for during this run of the app.
+        let origin = browser.currentURL.flatMap(BrowserOrigin.init(url:))
+        if let origin, BrowserSubmissionExemptions.shared.isExempt(origin) {
+            return true
+        }
+
+        // The second affirmative is offered only where an exemption could be granted: on an
+        // origin that already holds a stored credential. Everywhere else this stays the two-answer
+        // question it has always been, because a "stop asking" that any page could earn is not a
+        // narrower prompt, it is a disabled one.
+        let exemptable = origin.map { candidate -> Bool in
+            switch BrowserCredentialPreference.provider {
+            case .systemAutoFill: return false
+            case .threadingVault: return BrowserCredentialStore().hasIdentities(for: candidate)
+            case .onePassword: return !OnePasswordItemStore.identities(for: candidate).isEmpty
+            }
+        } ?? false
+
+        let message = L10n.format("""
+            This can change data outside Threading using the browser's signed-in session.%@
+
+            Approve only if this is part of the task you gave the agent.
+            """, label)
+
+        guard exemptable, let origin else {
+            let request = ConfirmationRequest(
+                prompt: .approveSensitiveBrowserAction,
+                title: L10n.format("%@ on %@?", L10n.string(action), host),
+                message: message,
+                confirmTitle: L10n.string("Allow"),
+                cancelTitle: L10n.string("Deny")
+            )
+            return await withCheckedContinuation { continuation in
+                ConfirmationAlert.ask(request, in: windowProvider()) { allowed in
+                    continuation.resume(returning: allowed)
+                }
+            }
+        }
+
+        // `choose` rather than a suppression box, for the reason the origin grant gives: a
+        // remembered answer scoped to one host is this prompt's own answer, while a "don't ask
+        // again" checkbox would remember something about every host at once. The register marks
+        // this prompt `.alwaysAsks`, and `choose` is what respects that while still offering a
+        // second affirmative.
+        let request = ChoiceRequest(
             prompt: .approveSensitiveBrowserAction,
             title: L10n.format("%@ on %@?", L10n.string(action), host),
             message: L10n.format("""
-                This can change data outside Threading using the browser's signed-in session.%@
+                %@
 
-                Approve only if this is part of the task you gave the agent.
-                """, label),
-            confirmTitle: L10n.string("Allow"),
-            cancelTitle: L10n.string("Deny")
+                You keep a test credential for %@. Threading can stop asking about submissions \
+                there until you quit.
+                """, message, origin.displayName),
+            options: [
+                ConfirmationOption(title: L10n.string("Allow")),
+                ConfirmationOption(title: L10n.string("Allow Until I Quit"))
+            ],
+            cancelTitle: L10n.string("Deny"),
+            style: .informational
         )
 
         return await withCheckedContinuation { continuation in
-            ConfirmationAlert.ask(request, in: windowProvider()) { allowed in
-                continuation.resume(returning: allowed)
+            ConfirmationAlert.choose(request, in: windowProvider()) { chosen in
+                switch chosen {
+                case 0:
+                    continuation.resume(returning: true)
+                case 1:
+                    BrowserSubmissionExemptions.shared.exempt(origin)
+                    continuation.resume(returning: true)
+                default:
+                    continuation.resume(returning: false)
+                }
             }
         }
     }

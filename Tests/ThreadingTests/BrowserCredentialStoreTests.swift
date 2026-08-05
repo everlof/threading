@@ -196,3 +196,73 @@ final class BrowserCredentialStoreTests: XCTestCase {
         )
     }
 }
+
+// MARK: - Submission Exemptions
+
+/// The half of the feature that relaxes the *submission* guarantee rather than the fill.
+@MainActor
+final class BrowserSubmissionExemptionTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        BrowserSubmissionExemptions.shared.revokeAll()
+    }
+
+    override func tearDown() {
+        BrowserSubmissionExemptions.shared.revokeAll()
+        super.tearDown()
+    }
+
+    private func origin(_ string: String) throws -> BrowserOrigin {
+        try XCTUnwrap(BrowserOrigin(url: try XCTUnwrap(URL(string: string))))
+    }
+
+    func testNothingIsExemptUntilItIsGranted() throws {
+        XCTAssertFalse(
+            BrowserSubmissionExemptions.shared.isExempt(try origin("http://localhost:3000"))
+        )
+    }
+
+    /// The same exact-origin rule the vault keeps. An exemption that leaked across ports or hosts
+    /// would be a far worse bug here than a missing credential: it ends in a submitted form.
+    func testAnExemptionIsBoundToOneExactOrigin() throws {
+        let app = try origin("http://localhost:3000")
+        BrowserSubmissionExemptions.shared.exempt(app)
+
+        XCTAssertTrue(BrowserSubmissionExemptions.shared.isExempt(app))
+        XCTAssertFalse(
+            BrowserSubmissionExemptions.shared.isExempt(try origin("http://localhost:3001"))
+        )
+        XCTAssertFalse(
+            BrowserSubmissionExemptions.shared.isExempt(try origin("https://localhost:3000"))
+        )
+        XCTAssertFalse(
+            BrowserSubmissionExemptions.shared.isExempt(try origin("http://127.evil.com:3000"))
+        )
+    }
+
+    /// Revoking takes effect at the next submission, not the next launch, because membership is
+    /// asked rather than captured.
+    func testRevokingRestoresTheQuestion() throws {
+        let app = try origin("http://localhost:3000")
+        BrowserSubmissionExemptions.shared.exempt(app)
+        BrowserSubmissionExemptions.shared.revoke(key: app.key)
+
+        XCTAssertFalse(BrowserSubmissionExemptions.shared.isExempt(app))
+        XCTAssertTrue(BrowserSubmissionExemptions.shared.exemptOriginKeys.isEmpty)
+    }
+
+    /// Nothing about an exemption reaches `UserDefaults`. This is the assertion that keeps the
+    /// store out of reach of `defaults write`, which is the whole reason it is process memory.
+    func testAnExemptionIsNeverWrittenToAnyDefaultsDomain() throws {
+        BrowserSubmissionExemptions.shared.exempt(try origin("http://localhost:3000"))
+
+        for defaults in [UserDefaults.standard, PreferenceStore.shared] {
+            let representation = defaults.dictionaryRepresentation()
+            XCTAssertFalse(
+                representation.values.contains { "\($0)".contains("localhost:3000") },
+                "an exemption reached a defaults domain, where a shell could rewrite it"
+            )
+        }
+    }
+}

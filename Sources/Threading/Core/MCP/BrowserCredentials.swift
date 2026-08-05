@@ -332,3 +332,56 @@ struct BrowserCredentialStore: Sendable {
         }
     }
 }
+
+// MARK: - Submission Exemptions
+
+/// Origins the user has said may submit a form without being asked again — **for as long as this
+/// app run lasts, and no longer**.
+///
+/// Filling a sign-in and then still asking before the submit gets you about half the value the
+/// test-credential vault was built for, so this is the other half. It is also the piece that most
+/// deserved to be built last, because it relaxes a different guarantee than the fill does.
+///
+/// **Why this is process memory and not a preference.** The provider choice and
+/// `BrowserAccessStore`'s persistent grants live in `UserDefaults`, which an agent with shell
+/// access can rewrite with `defaults write` — a limit that is tolerable for those because neither
+/// yields a password. It is *not* tolerable here: a persisted exemption plus a stored credential
+/// plus one prompt injection is fill-and-submit with nobody watching, which is unattended account
+/// takeover of whatever that origin is. A store the shell cannot reach at all is the only version
+/// of this feature worth having, and a process-lifetime one is reachable by nothing but this app.
+/// Quitting Threading is therefore a complete revocation, which is a property worth keeping even
+/// when someone later asks for it to be remembered.
+///
+/// **Only origins that already hold a credential may be exempted.** The exemption is an extension
+/// of a decision the user already made in Settings for that exact origin; offering it anywhere
+/// else would turn one prompt into a general-purpose "stop asking me" for the whole browser.
+@MainActor
+final class BrowserSubmissionExemptions {
+
+    static let shared = BrowserSubmissionExemptions()
+
+    private var origins: Set<String> = []
+
+    /// Whether this origin may submit without asking. Re-checked at every submission rather than
+    /// captured when the exemption was granted, so revoking it in Settings takes effect on the
+    /// next submit rather than the next launch.
+    func isExempt(_ origin: BrowserOrigin) -> Bool {
+        origins.contains(origin.key)
+    }
+
+    func exempt(_ origin: BrowserOrigin) {
+        origins.insert(origin.key)
+    }
+
+    func revoke(key: String) {
+        origins.remove(key)
+    }
+
+    func revokeAll() {
+        origins.removeAll()
+    }
+
+    var exemptOriginKeys: [String] {
+        origins.sorted()
+    }
+}
