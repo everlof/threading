@@ -32,6 +32,9 @@ enum OnePasswordCLI {
         static let passwordField = "password"
 
         static let scheme = "op://"
+
+        /// How long a terminated `op` is given to close the pipe before its reader is abandoned.
+        static let terminationGrace: TimeInterval = 2
     }
 
     // MARK: - Errors
@@ -146,7 +149,11 @@ enum OnePasswordCLI {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: loginShell)
-        process.arguments = ["-l", "-c", "op \(quoted)"]
+        // `exec`, so the process this holds *is* `op` rather than a shell that spawned it.
+        // Without it `terminate()` kills the shell and leaves `op` running with the write end of
+        // the pipe still open — which is both an orphaned process sitting on a Touch ID prompt
+        // and a reader that never sees end-of-file.
+        process.arguments = ["-l", "-c", "exec op \(quoted)"]
 
         let output = Pipe()
         process.standardOutput = output
@@ -158,20 +165,53 @@ enum OnePasswordCLI {
             return nil
         }
 
-        // Read before waiting: a pipe that fills while nothing drains it deadlocks a process that
-        // has not exited yet, and `op read` on a long note is comfortably able to fill one.
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline {
-            usleep(50_000)
+        // Draining has to happen *concurrently with* the timeout, not before it.
+        //
+        // A pipe nothing drains fills and deadlocks the child, so the read cannot simply wait for
+        // exit. But `readDataToEndOfFile` blocks until `op` closes stdout — which is to say until
+        // it exits — so reading first made the deadline below unreachable: an `op` sitting on an
+        // unanswered authorization prompt hung the agent's call forever, which is the one outcome
+        // a timeout existed to prevent.
+        let collected = Collected()
+        let finished = DispatchSemaphore(value: 0)
+        let handle = output.fileHandleForReading
+        DispatchQueue.global(qos: .userInitiated).async {
+            collected.set(handle.readDataToEndOfFile())
+            finished.signal()
         }
-        if process.isRunning {
+
+        guard finished.wait(timeout: .now() + timeout) == .success else {
             process.terminate()
+            // Briefly, so the pipe closes and the reader returns rather than being abandoned
+            // mid-read. Its result is discarded either way: a timed-out read is not an answer.
+            _ = finished.wait(timeout: .now() + Defaults.terminationGrace)
             return nil
         }
-        guard process.terminationStatus == 0 else { return nil }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0, let data = collected.take() else { return nil }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Carries the drained bytes back from the reader thread.
+    ///
+    /// A lock rather than a queue hop because exactly two threads touch it once each, and the
+    /// timeout path has to be able to walk away from a reader that is still blocked.
+    private final class Collected: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data: Data?
+
+        func set(_ value: Data) {
+            lock.lock()
+            data = value
+            lock.unlock()
+        }
+
+        func take() -> Data? {
+            lock.lock()
+            defer { lock.unlock() }
+            return data
+        }
     }
 }
 

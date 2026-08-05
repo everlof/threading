@@ -1361,7 +1361,9 @@ extension AgentToolCoordinator {
                         ))
                         return
                     }
-                    completion(.success("Wait condition satisfied.\n\n" + snapshot.agentText))
+                    completion(.success(browser.scrubFilledSecrets(
+                        "Wait condition satisfied.\n\n" + snapshot.agentText
+                    )))
                 } catch {
                     completion(.failure("Wait failed: \(error.localizedDescription)"))
                 }

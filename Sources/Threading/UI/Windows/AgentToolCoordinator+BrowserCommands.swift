@@ -1380,7 +1380,9 @@ extension AgentToolCoordinator {
                 + note
             if let snapshot = try? await browser.agentSnapshot(),
                browser.agentPageIdentity == authorizedPage {
-                completion(.success(receipt + "\n\n" + snapshot.agentText))
+                completion(.success(browser.scrubFilledSecrets(
+                    receipt + "\n\n" + snapshot.agentText
+                )))
             } else {
                 completion(.failure(
                     "The browser document changed while the navigation result was being read; "

@@ -121,11 +121,11 @@ extension AgentToolCoordinator {
                         ))
                         return
                     }
-                    completion(.success(
+                    completion(.success(browser.scrubFilledSecrets(
                         report.agentText
                             + "\nMeasured URL: "
                             + BrowserURLRedactor.redact(measuredURL.absoluteString)
-                    ))
+                    )))
                 } catch {
                     completion(.failure(
                         "Could not measure page performance: \(error.localizedDescription)"
@@ -197,11 +197,11 @@ extension AgentToolCoordinator {
                         ))
                         return
                     }
-                    completion(.success(
+                    completion(.success(browser.scrubFilledSecrets(
                         report.agentText
                             + "\nAudited URL: "
                             + BrowserURLRedactor.redact(auditedURL.absoluteString)
-                    ))
+                    )))
                 } catch {
                     completion(.failure(
                         "Could not audit page accessibility: \(error.localizedDescription)"

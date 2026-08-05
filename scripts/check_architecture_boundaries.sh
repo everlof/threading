@@ -72,6 +72,43 @@ fi
 # function ran on both sides of the user's answer, so the two agreed by coincidence. The bug that
 # exposed it was in the normalizer — `file:///notes.html` became `https://file:///notes.html`,
 # whose host is the word "file" — and the alert asked about a host that does not exist.
+# Page text on its way to an agent goes through the filled-credential scrubber, every time.
+#
+# `browser_fill_credentials` puts a real password into a real page, and snapshot redaction keys
+# off the field's live `type` attribute — so a page that flips its own input to `type=text`, or
+# copies the value into a div, hands the plaintext back in the very next snapshot. The tab retains
+# what it filled precisely so it can be taken back out again, which only works if every path that
+# returns page text remembers to ask.
+#
+# Four did not. `browser_snapshot` and the mutating-action funnel were scrubbed by hand while
+# `browser_wait`, the navigation receipt, the performance summary and the accessibility audit each
+# returned `agentText` raw — the same omission four times, which is the shape of a rule that wants
+# enforcing rather than remembering. A `scrubFilledSecrets` within three lines is the test, because
+# the call usually wraps a multi-line expression.
+if ! python3 - "${tool_handlers[@]}" <<'PYTHON'; then
+import pathlib, sys
+
+failures = []
+for path in sys.argv[1:]:
+    lines = pathlib.Path(path).read_text().splitlines()
+    for index, line in enumerate(lines):
+        if ".agentText" not in line:
+            continue
+        window = lines[max(0, index - 3):index + 1]
+        if any("scrubFilledSecrets" in candidate for candidate in window):
+            continue
+        failures.append(f"{path}:{index + 1}: {line.strip()}")
+
+for failure in failures:
+    print(failure)
+sys.exit(1 if failures else 0)
+PYTHON
+  echo "architecture-boundary: page text returned to an agent must pass through" >&2
+  echo "  browser.scrubFilledSecrets — a filled credential is otherwise readable from the" >&2
+  echo "  next snapshot the page chooses to expose it in" >&2
+  failed=1
+fi
+
 if rg -nU '\.navigate\(\s*+to:\s*+(?!approved\b)' "${tool_handlers[@]}" --pcre2; then
   echo "architecture-boundary: an agent navigation starts from the approved target, not from" >&2
   echo "  agent-supplied text — use authorizeBrowserTarget and pass what it hands back" >&2

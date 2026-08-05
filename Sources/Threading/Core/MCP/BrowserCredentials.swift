@@ -284,8 +284,17 @@ struct BrowserCredentialStore: Sendable {
 
     // MARK: - Writing
 
-    /// Saves or replaces one entry. Delete-then-add rather than `SecItemUpdate`, so an edit that
-    /// changes nothing but the password cannot leave two items answering for one account.
+    /// Saves one entry, or replaces the value of the one already there.
+    ///
+    /// **Update first, add only when there is nothing to update.** This was delete-then-add, which
+    /// is the shape that loses data: correcting the password on a working credential removed it and
+    /// then tried to add the replacement, so any failure on the add — a locked keychain, a denied
+    /// entitlement — left the account with no credential at all, having had a perfectly good one a
+    /// moment earlier. `SecItemUpdate` changes the value in place or reports that the item is
+    /// absent, and neither answer can destroy what was there.
+    ///
+    /// One item per account either way: the account string is the identity, so an update cannot
+    /// leave two rows answering for one entry.
     func save(
         username: String?,
         password: String,
@@ -299,15 +308,20 @@ struct BrowserCredentialStore: Sendable {
             throw StoreError.malformedEntry
         }
 
-        try? delete(identity)
-
         var query = baseQuery
         query[kSecAttrAccount as String] = identity.account
+
+        let updated = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw StoreError.writeFailed(updated) }
+
         query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
         query[kSecValueData as String] = data
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { throw StoreError.writeFailed(status) }
+        let added = SecItemAdd(query as CFDictionary, nil)
+        guard added == errSecSuccess else { throw StoreError.writeFailed(added) }
     }
 
     func delete(_ identity: BrowserCredentialIdentity) throws {

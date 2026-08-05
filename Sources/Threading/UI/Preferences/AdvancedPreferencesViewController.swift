@@ -221,9 +221,12 @@ final class AdvancedPreferencesViewController: NSViewController {
                 // so moving the app's directories aside would leave every one of them behind
                 // while telling the user their state had been removed.
                 try BrowserCredentialStore().deleteAll()
-                // References, not secrets — but they name the user's 1Password items, and a
-                // reset that left them behind would repopulate the page after a restart.
-                OnePasswordItemStore.removeAll()
+                // The 1Password references deliberately have *no* line here. They live in the
+                // preferences domain, which `AppDataReset` snapshots into the backup and then
+                // removes — so clearing them first would delete them from the recovery copy and
+                // lose them outright if the reset went on to fail. The Keychain call above is not
+                // symmetric with that: keychain items are in neither the domain nor the support
+                // directory, so nothing else would ever remove them.
             }
             let outcome = try AppDataReset.perform(scope, at: Date())
             ThreadingLogger.agent.info(

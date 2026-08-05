@@ -79,6 +79,40 @@ final class BrowserCredentialStoreTests: XCTestCase {
         XCTAssertEqual(try store.secret(for: identity).password, "second-password")
     }
 
+    /// The regression that motivated update-then-add: this used to delete first, so a failed add
+    /// left the account with nothing after it had had a working credential a moment before.
+    /// Asserted through the observable consequence — the old value survives until the new one has
+    /// actually been written — because the failing add cannot be provoked from a test.
+    func testUpdatingAnEntryNeverLeavesItWithoutAValue() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:3000").key,
+            label: "admin"
+        )
+        try store.save(username: "root", password: "first-password", for: identity)
+
+        for round in 1...5 {
+            try store.save(username: "root", password: "password-\(round)", for: identity)
+            // Never a window in which the account exists with no readable secret.
+            XCTAssertEqual(store.identities(for: try origin("http://localhost:3000")).count, 1)
+            XCTAssertEqual(try store.secret(for: identity).password, "password-\(round)")
+        }
+    }
+
+    /// An update must change the value without disturbing the identity it is stored under.
+    func testUpdatingKeepsOneItemUnderTheSameAccount() throws {
+        let identity = BrowserCredentialIdentity(
+            originKey: try origin("http://localhost:3000").key,
+            label: "admin"
+        )
+        try store.save(username: "root", password: "one", for: identity)
+        try store.save(username: "someone-else", password: "two", for: identity)
+
+        XCTAssertEqual(store.identities().map(\.account), [identity.account])
+        let secret = try store.secret(for: identity)
+        XCTAssertEqual(secret.password, "two")
+        XCTAssertEqual(secret.username, "someone-else")
+    }
+
     func testDeletingRemovesOnlyTheNamedAccount() throws {
         let key = try origin("http://localhost:3000").key
         let admin = BrowserCredentialIdentity(originKey: key, label: "admin")
