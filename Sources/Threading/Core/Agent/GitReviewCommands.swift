@@ -47,6 +47,16 @@ enum GitReviewCommands {
         ["diff", "--cached"] + diffFlags(ignoringWhitespace: ignoringWhitespace)
     }
 
+    /// Two immutable trees. Last Turn uses this shape so files that were untracked at either
+    /// endpoint are ordinary tree entries rather than a path-only approximation.
+    static func diff(
+        from oldTree: String,
+        to newTree: String,
+        ignoringWhitespace: Bool = false
+    ) -> [String] {
+        ["diff"] + diffFlags(ignoringWhitespace: ignoringWhitespace) + [oldTree, newTree]
+    }
+
     /// `--format=` suppresses the commit header, leaving pure diff on stdout.
     static func show(_ hash: String, ignoringWhitespace: Bool = false) -> [String] {
         ["show", hash, "--format="] + diffFlags(ignoringWhitespace: ignoringWhitespace)
@@ -85,16 +95,42 @@ enum GitReviewCommands {
         ["diff", "--cached", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv"]
     }
 
-    static func stashCreate() -> [String] {
-        ["stash", "create"]
-    }
-
     static func headHash() -> [String] {
         ["rev-parse", head]
     }
 
     static func verifyCommit(_ ref: String) -> [String] {
         ["rev-parse", "--verify", "--quiet", ref + "^{commit}"]
+    }
+
+    static func verifyTree(_ ref: String) -> [String] {
+        ["rev-parse", "--verify", "--quiet", ref + "^{tree}"]
+    }
+
+    /// The real index is copied only as the tracked-file roster for a private alternate index.
+    /// `--path-format=absolute` also resolves linked-worktree indexes correctly.
+    static func indexPath() -> [String] {
+        ["rev-parse", "--path-format=absolute", "--git-path", "index"]
+    }
+
+    static func readEmptyTree() -> [String] {
+        ["read-tree", "--empty"]
+    }
+
+    /// Refreshes every tracked path and admits non-ignored untracked files into the alternate
+    /// index. The caller supplies `GIT_INDEX_FILE`, so the checkout's real index is untouched.
+    static func addWorkingTreeToIndex() -> [String] {
+        ["add", "-A", "--", "."]
+    }
+
+    static func writeTree() -> [String] {
+        ["write-tree"]
+    }
+
+    /// Materializes the repository's native empty tree object (SHA-1 or SHA-256) without
+    /// assuming the well-known SHA-1 id. Used as unborn HEAD for full working-tree comparisons.
+    static func writeEmptyTree() -> [String] {
+        ["hash-object", "-w", "-t", "tree", "--stdin"]
     }
 
     static func originHead() -> [String] {
@@ -133,18 +169,6 @@ enum GitReviewDefaults {
 
     /// Lines one file's diff draws before truncating with a note.
     static let fileDisplayCap = 400
-
-    /// A file auto-expands only under this many lines…
-    static let autoExpandFileLineLimit = DiffPresentationPolicy.default.fileLineLimit
-    /// …and only until this many lines are expanded across the whole diff.
-    static let autoExpandTotalLineLimit = DiffPresentationPolicy.default.totalLineLimit
-
-    /// A large comparison opens as a file index rather than constructing hundreds of diff-line
-    /// views before the user has chosen a file. Headers remain available and each file can still
-    /// be expanded on demand.
-    static let largeDiffFileThreshold = DiffPresentationPolicy.default.largeFileThreshold
-    static let largeDiffChangedLineThreshold =
-        DiffPresentationPolicy.default.largeChangedLineThreshold
 
     /// Untracked files larger than this get a row but no synthesized preview.
     static let untrackedByteCap = 256 * 1024

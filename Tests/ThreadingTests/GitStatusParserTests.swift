@@ -64,6 +64,65 @@ final class GitStatusParserTests: XCTestCase {
         XCTAssertTrue(status.entries[0].unstaged)
     }
 
+    // MARK: - Malformed and truncated status
+
+    /// A rename's original path arrives as the *next* record, so the cursor must advance past it
+    /// whether or not the rename record itself parsed. Guarding first and consuming second is the
+    /// natural way to write this and the wrong one: the orphaned path record is then read as a
+    /// status record, and every entry after it shifts.
+    func testAMalformedRenameStillConsumesItsOriginalPathRecord() {
+        let status = GitDiffParser.status(fromPorcelainV2: data([
+            "2 R. N... too few fields",
+            "old name.txt",
+            "1 .M N... 100644 100644 100644 1111111 1111111 Sources/After.swift"
+        ]))
+
+        XCTAssertEqual(status.entries.count, 1)
+        XCTAssertEqual(
+            status.entries[0].path, "Sources/After.swift",
+            "the orphaned original-path record was read as a status record"
+        )
+        XCTAssertTrue(status.untracked.isEmpty)
+    }
+
+    /// Output cut off mid-rename: the entry keeps its new path and simply knows no origin.
+    func testARenameAtTheEndOfTruncatedOutputDoesNotRunOffTheEnd() {
+        let status = GitDiffParser.status(fromPorcelainV2: data([
+            "2 R. N... 100644 100644 100644 1111111 1111111 R100 new name.txt"
+        ]))
+
+        XCTAssertEqual(status.entries.count, 1)
+        XCTAssertEqual(status.entries[0].path, "new name.txt")
+        XCTAssertNil(status.entries[0].renamedFrom)
+    }
+
+    /// `-z` does not quote, so a newline inside a path arrives literally — which is the whole
+    /// reason records are split on NUL. A line-based reader silently invents a second file here.
+    func testPathsContainingNewlinesAndTabsSurviveIntact() {
+        let status = GitDiffParser.status(fromPorcelainV2: data([
+            "1 .M N... 100644 100644 100644 1111111 1111111 Sources/two\nlines.swift",
+            "? untracked\twith tab.txt"
+        ]))
+
+        XCTAssertEqual(status.entries.map(\.path), ["Sources/two\nlines.swift"])
+        XCTAssertEqual(status.untracked, ["untracked\twith tab.txt"])
+    }
+
+    /// Short and unrecognised records are skipped, not guessed at.
+    func testTruncatedAndUnknownRecordsAreSkipped() {
+        let status = GitDiffParser.status(fromPorcelainV2: data([
+            "1 .M N... 100644",
+            "1",
+            "u UU N... too short",
+            "?",
+            "x whatever",
+            "1 .M N... 100644 100644 100644 1111111 1111111 Sources/Good.swift"
+        ]))
+
+        XCTAssertEqual(status.entries.map(\.path), ["Sources/Good.swift"])
+        XCTAssertTrue(status.untracked.isEmpty, "a `? ` record naming no file became a row")
+    }
+
     func testEmptyStatus() {
         let status = GitDiffParser.status(fromPorcelainV2: Data())
         XCTAssertTrue(status.entries.isEmpty)

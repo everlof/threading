@@ -23,13 +23,35 @@ enum GitReviewMode: String, Codable, CaseIterable, Sendable {
     case commit
 
     var title: String {
+        title(isTurnInFlight: false)
+    }
+
+    func title(isTurnInFlight: Bool) -> String {
         switch self {
         case .uncommitted: return L10n.string("Uncommitted")
         case .unstaged: return L10n.string("Unstaged")
         case .staged: return L10n.string("Staged")
-        case .lastTurn: return L10n.string("Last Turn")
+        case .lastTurn:
+            return isTurnInFlight ? L10n.string("This Turn") : L10n.string("Last Turn")
         case .branch: return L10n.string("Branch")
         case .commit: return L10n.string("Commits")
+        }
+    }
+
+    var comparisonDescription: String {
+        switch self {
+        case .uncommitted:
+            return L10n.string("HEAD → Working Tree · staged, unstaged, and untracked")
+        case .unstaged:
+            return L10n.string("Index → Working Tree · includes untracked")
+        case .staged:
+            return L10n.string("HEAD → Index")
+        case .lastTurn:
+            return L10n.string("Turn Start → Working Tree")
+        case .branch:
+            return L10n.string("Merge Base → Working Tree")
+        case .commit:
+            return L10n.string("Browse committed changes")
         }
     }
 }
@@ -139,14 +161,12 @@ struct GitRepositoryFile: Sendable {
 /// A snapshot of the checkout at the moment a session started working, against which
 /// "Last Turn" is diffed.
 ///
-/// The snapshot is a `git stash create` commit — an unreferenced object that mutates no ref,
-/// no index and no worktree. Untracked files are recorded separately because a stash commit
-/// does not include them: a file untracked at capture and still untracked now is not the
-/// turn's work.
+/// The snapshot is an unreferenced tree written through a private alternate index. It therefore
+/// includes the exact bytes of tracked, staged, and non-ignored untracked files without moving
+/// a ref or touching the checkout's real index or worktree.
 struct GitTurnBaseline: Sendable {
-    let snapshotHash: String
+    let treeHash: String
     let capturedAt: Date
-    let untrackedPaths: Set<String>
 }
 
 /// One file's bytes at a review request's two endpoints, with what each endpoint is called —

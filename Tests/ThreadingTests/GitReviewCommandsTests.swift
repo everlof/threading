@@ -3,6 +3,18 @@ import XCTest
 
 final class GitReviewCommandsTests: XCTestCase {
 
+    func testModeSetAndLiveTurnNameAreExplicit() {
+        XCTAssertEqual(
+            GitReviewMode.allCases,
+            [.uncommitted, .unstaged, .staged, .lastTurn, .branch, .commit]
+        )
+        XCTAssertEqual(GitReviewMode.lastTurn.title(isTurnInFlight: true), "This Turn")
+        XCTAssertEqual(GitReviewMode.lastTurn.title(isTurnInFlight: false), "Last Turn")
+        XCTAssertEqual(GitReviewMode.uncommitted.comparisonDescription, "HEAD → Working Tree · staged, unstaged, and untracked")
+        XCTAssertEqual(GitReviewMode.unstaged.comparisonDescription, "Index → Working Tree · includes untracked")
+        XCTAssertEqual(GitReviewMode.staged.comparisonDescription, "HEAD → Index")
+    }
+
     func testDiffFlagsAreHygienic() {
         XCTAssertEqual(
             GitReviewCommands.diffFlags,
@@ -66,6 +78,35 @@ final class GitReviewCommandsTests: XCTestCase {
         XCTAssertEqual(
             GitReviewCommands.verifyCommit("origin/main"),
             ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"]
+        )
+    }
+
+    func testTurnSnapshotsUseTwoTreesAndAPrivateIndexVocabulary() {
+        XCTAssertEqual(
+            GitReviewCommands.diff(from: "old", to: "new"),
+            ["diff"] + GitReviewCommands.diffFlags + ["old", "new"]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.verifyTree("abc123"),
+            ["rev-parse", "--verify", "--quiet", "abc123^{tree}"]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.indexPath(),
+            ["rev-parse", "--path-format=absolute", "--git-path", "index"]
+        )
+        XCTAssertEqual(GitReviewCommands.readEmptyTree(), ["read-tree", "--empty"])
+        XCTAssertEqual(GitReviewCommands.addWorkingTreeToIndex(), ["add", "-A", "--", "."])
+        XCTAssertEqual(GitReviewCommands.writeTree(), ["write-tree"])
+        XCTAssertEqual(
+            GitReviewCommands.writeEmptyTree(),
+            ["hash-object", "-w", "-t", "tree", "--stdin"]
+        )
+    }
+
+    func testTurnTreeDiffKeepsWhitespaceFlagAheadOfBothTrees() {
+        XCTAssertEqual(
+            GitReviewCommands.diff(from: "old", to: "new", ignoringWhitespace: true),
+            ["diff"] + GitReviewCommands.diffFlags + ["-w", "old", "new"]
         )
     }
 

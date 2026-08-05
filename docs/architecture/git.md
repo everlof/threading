@@ -38,16 +38,18 @@ when an agent is most likely to have just switched. A standalone terminal update
 cwd, from OSC 7 or the process-directory fallback, because the shell can move between added
 projects while it remains live.
 
-The composer's branch chip therefore offers **checkouts, not branches**
-(`ProjectStore.siblingCheckouts(of:)`): this checkout, any other added checkout of the same
-repository, then `New Worktree…`. It listed the repository's whole `git branch` output once,
+The composer's location chip therefore offers **checkouts, not branches**
+(`ProjectStore.siblingCheckouts(of:)`): its menu opens with this checkout, any other added
+checkout of the same repository, then `New Worktree…`, and the projects sit one layer in under
+*Switch Project* — running here and going elsewhere are not the same act. It listed the repository's whole `git branch` output once,
 which invited picking a branch nothing was standing on — the session then ran in the origin
 checkout anyway while its record claimed the branch that was asked for. A branch with no
 checkout is not a place a session can run; making one is what the worktree item is for.
 
 That item lives *in the menu* rather than in a chip of its own, where it read as a state —
-one of the selected choices in the row — when it is an action. One control, one question:
-which checkout does this session run in.
+one of the selected choices in the row — when it is an action. It closes the run-here section
+rather than opening the navigate-there one, because it is the row that does both: it makes a
+place and then moves the composer to it.
 
 A *session*, though, carries its own branch record (`AgentSession.branch`): captured at
 creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and —
@@ -126,6 +128,18 @@ branch itself the merge-base is HEAD and the mode degrades to Uncommitted, which
 Commit mode is the history browser: a paged `git log --numstat` list (100 a page), one commit
 opened into its own diff with Back returning to the list.
 
+On an unborn branch, Uncommitted uses a repository-native empty tree as the missing HEAD and
+still compares it to the worktree. It must not fall back to `--cached`: a newly staged file can
+be edited again before the first commit, and the regular full-working-copy mode includes those
+latest bytes.
+
+The menu states the endpoints under every name — HEAD→working tree, index→working tree,
+HEAD→index, turn start→working tree, merge base→working tree, or committed history — because
+"staged" and "unstaged" alone are easy to read as filters rather than comparisons. Last Turn
+renames itself **This Turn** while the session has a turn in flight. Mobile exposes the five
+working-copy comparisons and defaults to Uncommitted too; Commits remains the desktop history
+navigator rather than pretending to be another compact diff mode.
+
 The data layer (`GitReviewReader`) shells out on a dedicated queue and completes on main —
 `GitWorktree`'s runner made async, following `ProjectIconResearch`'s shape. Every invocation
 passes `--no-optional-locks`, so a *read never takes `index.lock`* out from under the agent
@@ -134,32 +148,57 @@ add `--no-color --no-ext-diff --no-textconv`; parsing git's porcelain and unifie
 is `GitDiffParser`, pure functions with the fixture traps (C-quoted paths, the trailing tab
 after a path with spaces, `\ No newline` markers, `-z` rename records) pinned by unit tests.
 
-**`git diff` never mentions untracked files**, so the working-tree modes synthesize them:
+**`git diff` never mentions untracked files**, so the ordinary working-tree modes synthesize them:
 `status --porcelain=v2 -z -uall` lists them individually and each becomes an all-added file
 diff read in-process — not `diff --no-index` per file, which would spawn a process per file
 in a freshly scaffolded project. Size-capped (256 KB), binary-sniffed by git's own NUL
-heuristic.
+heuristic. Last Turn does not synthesize: both of its endpoints are complete trees, so a file
+untracked at either boundary is an ordinary tree entry and git reports its exact bytes.
 
-**Last Turn's baseline is `git stash create`** — an unreferenced commit that mutates no ref,
-no index, no worktree; empty output means clean, so HEAD is the baseline. Captured by
-`GitTurnBaselineStore` on the *entering-working* edge (fed from the same
-`sessionStateDidChange` hook that refreshes the branch), because a baseline taken at stop
-would fold the user's own between-turn edits into the next turn. In-memory only: the snapshot
-is gc-prunable, and a persisted hash whose object has vanished is a worse answer after
-relaunch than "No turn recorded yet" — a pruned baseline is detected by `rev-parse --verify`
-and reported as expired, not as an error. `stash create` omits untracked files, so the
-baseline records the untracked path *set*: files untracked then and still untracked now are
-not the turn's work. The residual gap — edits to a file already untracked at turn start —
-shows only in Uncommitted, and that is accepted.
+**Last Turn's baseline is an immutable tree written through a private alternate index.** The
+real index is copied only for its tracked-file roster; `GIT_INDEX_FILE=<temporary>` plus
+`git add -A -- .` overlays the exact worktree bytes and admits non-ignored untracked files,
+then `git write-tree` records the result without moving a ref or touching the checkout's index
+or worktree. A current tree is produced the same way when Last Turn is read, and the comparison
+is tree→tree. This closes the path-set hole of the former `stash create` baseline: modifying or
+deleting a file that was already untracked at turn start is now visible, unchanged untracked
+files are absent, and unborn repositories work the same as repositories with commits.
 
-Rendering reuses the diff machinery: `DiffView` gained a second initializer for numbered
-`GitDiffLine`s (one number column, new side falling back to old — a dual gutter spends a
-narrow pane's width on bookkeeping) while the edit-tool path renders pixel-identically.
-`GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build on first
-expand** — a collapsed file costs one header row, which is what bounds a multi-thousand-line
-branch diff. Small files auto-expand (≤200 lines each, ≤600 cumulative). The mode persists
-with the tab (`PersistedTab.mode`); restore builds the controller but runs no git until the
-tab is actually shown, the browser's deferred-load rule.
+The snapshot is an **admission boundary**, not an activity-edge side effect. Native Chat holds
+provider transport until `GitTurnBaselineStore.prepareTurn` completes. Terminal
+`UserPromptSubmit`/turn-start hooks hold only that lifecycle HTTP response; the CLI cannot run
+the turn's first tool until the tree is stored. Other lifecycle hooks remain immediate. The
+later entering-working notification consumes the prepared edge instead of capturing again;
+an entering-working notification that arrives while preparation is still running consumes the
+in-flight edge as well, so terminal repaint inference cannot start a later second capture;
+an inferred terminal with hooks disabled still has the old entering-working path as a
+best-effort fallback. Answering an agent question from `awaitingUser` resumes the existing
+turn and keeps its original baseline. Captures run concurrently on their own queue, so neither
+an open megabyte diff nor another session's slow checkout can delay turn admission. Starting a
+capture clears the previous baseline, and a failed
+capture records an explicit unavailable state rather than silently showing an older turn.
+
+In-memory only: the unreferenced tree is gc-prunable, and a persisted hash whose object has
+vanished is a worse answer after relaunch than "No turn recorded yet" — a pruned baseline is
+detected by `rev-parse --verify <hash>^{tree}` and reported as expired, not as an unrelated git
+failure.
+
+Rendering shares the `NativeDiffCore` model with edit tools, but not their view-tree shape.
+`DiffView` still gives a short conversation edit one AppKit row per line. Git Review uses
+`GitReviewDiffTextView`: one selectable TextKit document per hunk, with the same syntax roles,
+wrapping and exact per-line context anchors. Change washes are a cached vertical display list:
+TextKit fragments are merged into contiguous added/removed runs when width changes, and drawing
+binary-searches to the visible runs. Per-paragraph backgrounds made TextKit recompute wash geometry
+while scrolling. This distinction is load-bearing — 400 line views are acceptable nowhere in a
+disclosure that must change height synchronously.
+
+`GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build only when a
+virtual table row is materialized**. Text files start expanded, so the first visible file is ready
+to read; an expanded offscreen file is only model state and constructs no text surface. Image
+comparisons retain explicit disclosure because opening one fetches and decodes two endpoint blobs.
+A manual close is an `expansionOverride` and survives watched refreshes. The mode persists with the tab
+(`PersistedTab.mode`); restore builds the controller but runs no git until the tab is actually
+shown, the browser's deferred-load rule.
 
 The collapsed body rule does **not** by itself make the file index cheap. Measurement showed
 `NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds. Progressive
@@ -170,7 +209,35 @@ File comparisons now use a **reusable `ThemedTableView`**. The complete file mod
 for immediate scrolling, while only viewport rows are constructed: the 1,000-file Debug fixture
 creates 14 rows initially and 28 total after a direct jump to the end. That run opens in about
 19 ms and the deep jump takes about 18 ms. A watched redraw preserves the scroll offset and
-expansion overrides; lazily built bodies invalidate the table's automatic row-height cache.
+expansion overrides. The table does not use AppKit automatic heights for file rows: that path
+double-counted a large `NSTextView` during its first fitting pass and retained a 12,082pt row for
+a 6,082pt card. Offscreen rows use cheap width-aware model estimates (line count, wrapping and
+hunk headers); a materialized row replaces its estimate with exact TextKit height keyed by width.
+This both preserves virtualization and keeps the scrollbar stable before the last viewport. Pane
+resize invalidates all estimates together while visible rows remeasure.
+The table's sole column is explicitly fitted in `viewDidLayout`; an autoresizing column does not
+otherwise follow the clip width, which left full-pane rows drawing as narrow intrinsic cards.
+
+**The table is `.plain`, and the pane owns its only margin.** `NSTableView.Style.automatic`
+resolves to `.inset` here, which keeps 16pt at each side of a row and 10pt above the first one.
+Added to the pane's own inset that put every file card 40pt in while the header's mode chip
+started at 12, so the diff read as a column floating inside a wider one. `.plain` with no
+intercell width hands the row the table's full width, leaving `GitReviewVirtualRowHost` to state
+the single inset — the same `Spacing.inset` the stack path gives its commit rows. It is also
+what the `viewDidLayout` column check assumed all along: under `.inset` the column can never
+equal the table's width, so the guard never held and every layout pass re-fitted.
+
+**The gap between cards hangs under each one, not around all of them.** `intercellSpacing` is
+`.zero` and the host insets its content at the bottom instead, because AppKit splits the
+intercell height: half above every row *including the first*, which put the top of the list 3pt
+below the margin the sides were on. The vertical rhythm is `Spacing.inset` from the tab strip to
+the chip, `Spacing.inset` from the chip to the first card, `Spacing.small` between cards.
+
+The header sits on that margin at both ends: the chip's pill is its own ink, and the `···`
+is pulled out by its `opticalHorizontalInset` so the glyph — not the hover surface around it —
+lands where the cards end. Back does the same on the leading side when a commit is open, which
+is why its visibility goes through `setBackVisible(_:)` rather than `isHidden` directly.
+`GitReviewViewTests` holds all of it — chip, cards, overflow, and both gaps — to one measure.
 The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
 `git.review.render-files` spans are documented in [`performance.md`](performance.md).
 
@@ -237,6 +304,30 @@ opens Git Review. When the session has children, a separately clickable working/
 joins the card and opens the Subagents display-pane tab. It remains visible even when there is
 no Git sentence to show, making the surface a session status card rather than forcing child
 navigation back into the conversation.
+
+**The terminal owns the ground around the card; the active app theme owns the card itself.** It
+is an opaque rectangular interpretation of `AppTheme.Material.PopoverStyle`, resolved by
+`ThemedFloatingSurfaceChrome`: the same surface role, edge or bevel, depth, density, and semantic
+glyph family as a popover, without an anchor arrow. System keeps the modern card; Windows 98 gets
+the pale square infotip surface with a dark flat edge, no ambient shadow, compact spacing, and
+one-bit branch/change/model marks; the other period themes recover their authored hard bevels;
+Neo Brutalism and Claymorphism recover their material shadow construction. The content uses
+the theme's chrome ink on that opaque fill, while added and removed totals keep their semantic
+hues through `Design.Diff.on(fill)`. A terminal palette can therefore colour everything around
+the card without leaking through it or turning application chrome into a terminal-native widget.
+
+**The monitor's first read also drives a sidebar spinner, and its lower is delivered to the
+session it was raised for — never to whoever is on screen.** The raise (`.gitStatus` in
+`SessionLoadingState`) used to be lowered only by `onInitialReadComplete`, guarded on the
+session still being current; but the completion holds the monitor weakly and the monitor dies
+with the selection, so switching sessions before the first read of a big checkout landed left
+the abandoned row's spinner raised for the rest of the app's life. Diagnosed as "ghost
+activity": the row draws the same orb for *loading* as for *working*, so a leaked raise reads
+as an agent forever busy in a chat where nothing is happening. Now `updateGitChangeMonitor`
+lowers the previous session's raise as part of tearing its monitor down, the completion lowers
+unconditionally, and `SessionLoadingState.lowerExpired` sits under all of it as a sweep
+(`SessionLoadingDefaults.maxHold`) that ends any raise nobody lowered and journals whose it
+was — an expiry taken is a raiser that leaked, and the log line is its only trace.
 
 **The pointer lights the rows that act, and only those.** The card carries three destinations and
 two facts — Git Review, the Subagents tab, the sharing pane, the agent line, and any extension row
@@ -398,11 +489,12 @@ account whose status line names the model and effort but not the speed.
 Two facts are withheld rather than guessed. **Fast mode is a reading only where Threading sets
 it** — `appendCodexConversationOverrides` is Codex-only, and Claude's fast-mode state belongs to
 its print transport (`AgentModels.defaultFastMode` returns nil for Claude and says why) — so a
-Claude *terminal* session reports no speed at all. **Effort for a Claude terminal session is the
-account's configured value**, what the CLI will inherit, which goes stale the moment the user
-types `/effort`; when their status line prints effort the card hides its own, which is also the
-case where the staleness would have shown. The transcript records what each turn actually ran at
-and is the authoritative source where a conversation is being replayed — see
+Claude *terminal* session reports no speed at all. **Effort for a Claude terminal session is its
+explicit opening choice, then the account's configured value**; the former is pinned with
+`--effort`, while either reading goes stale the moment the user types `/effort`. When their
+status line prints effort the card hides its own, which is also the case where the staleness
+would have shown. The transcript records what each turn actually ran at and is the authoritative
+source where a conversation is being replayed — see
 [`native-conversations.md`](native-conversations.md).
 
 **The model has a third source, and it is the transcript.** The two configuration sources both
@@ -471,11 +563,11 @@ whole run, saying the one thing the terminal does not — the checkout's live to
 
 The card **occludes**, which took two corrections. It sits at the pane's top-right corner over
 whatever the pane is showing, and under a native conversation that is text rather than the empty
-top of a terminal: at `ink.surface`'s 14%, with the view itself at 85% for "quiet at rest", a long
-branch name and a line of the agent's answer were legible through each other. Its fill is now
-flattened against the backdrop (`WindowBackdrop.opaque`) so it keeps the role's colour without the
-role's transparency, and the resting quiet moved to the card's contents. Pinned by
-`ThemedIndicatorsTests.testTheGitCardOccludesThePaneTextItFloatsOver`.
+top of a terminal: at the old backdrop-derived surface's 14%, with the view itself at 85% for
+"quiet at rest", a long branch name and a line of the agent's answer were legible through each
+other. The theme-owned surface role is now flattened against the theme ground before it reaches
+the layer, and the resting quiet belongs only to the card's contents. Pinned by
+`ThemedIndicatorsTests.testTheGitCardUsesOpaqueThemeChromeAboveThePane`.
 
 Auto-refresh forced two things that manual refresh never did. **The reader's place is kept** —
 the scroll offset survives a reload of the same surface (a mode switch or an opened commit is

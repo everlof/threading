@@ -1,6 +1,8 @@
 import Foundation
 
-/// Read-only git queries for the review pane: diffs, status, history and turn snapshots.
+/// Checkout-preserving git operations for the review pane: diffs, status, history and turn
+/// snapshots. Snapshots write unreachable objects through a private alternate index; no
+/// operation here moves a ref or mutates the checkout's real index or worktree.
 ///
 /// Everything runs `git` on a dedicated queue and completes on main — a branch diff can be
 /// megabytes, and neither spawning nor parsing belongs on the thread that draws. Every
@@ -27,6 +29,15 @@ enum GitReviewReader {
     // MARK: - Properties
 
     private static let queue = DispatchQueue(label: "codes.threading.git-review", qos: .userInitiated)
+
+    /// Turn admission must not wait behind a large review already being parsed — or behind a
+    /// different session whose checkout is slow. Each capture owns a UUID-named alternate index,
+    /// and git's object writes are atomic, so independent session baselines can safely overlap.
+    private static let snapshotQueue = DispatchQueue(
+        label: "codes.threading.git-turn-snapshot",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
 
     /// Status summaries feed navigation chrome and must not wait behind a megabyte-scale review
     /// diff already being parsed on `queue`. They are intentionally independent reads: both are
@@ -58,7 +69,8 @@ enum GitReviewReader {
     /// The raw unified-diff patch for a request, exactly as git writes it — for handing the
     /// changes to `git apply`. Reconstructing it from the parsed model would drop the file
     /// headers `git apply` reads (new-file, deleted-file, rename), so it is re-read rather than
-    /// rebuilt. Untracked files are absent, as they are from `git diff` itself. Completion on main.
+    /// rebuilt. Working-tree modes omit synthesized untracked rows; Last Turn is the exception
+    /// because both endpoints are complete trees and git emits those files itself. Completion on main.
     static func rawDiff(
         _ request: DiffRequest,
         in root: URL,
@@ -201,12 +213,14 @@ enum GitReviewReader {
         completion: @escaping @MainActor @Sendable (Result<GitChangeSummary, Failure>) -> Void
     ) {
         perform("git.read.uncommitted-summary", on: summaryQueue, completion) {
-            // The same unborn-HEAD rule as the full uncommitted diff: with nothing to diff
-            // against, the index against the empty tree is everything staged so far.
+            // The same unborn-HEAD rule as the full uncommitted diff: compare the empty tree
+            // to the worktree, not merely to the index. A newly staged file may have been
+            // edited again before the first commit and those latest bytes are still uncommitted.
+            let baseline = hasCommits(in: root)
+                ? GitReviewCommands.head
+                : try emptyTree(in: root)
             let tracked = GitDiffParser.summary(fromNumstat: try run(
-                hasCommits(in: root)
-                    ? GitReviewCommands.diffNumstat(against: GitReviewCommands.head)
-                    : GitReviewCommands.diffNumstatStaged(),
+                GitReviewCommands.diffNumstat(against: baseline),
                 in: root
             ))
             let untracked = try untrackedSummary(in: root)
@@ -224,21 +238,10 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<GitTurnBaseline, Failure>) -> Void
     ) {
-        perform("git.read.create-snapshot", completion) {
-            guard hasCommits(in: root) else { throw Failure.noCommits }
-
-            // `stash create` writes an unreferenced commit and touches nothing else; empty
-            // output means the tree is clean, in which case HEAD itself is the baseline.
-            let created = decodeTrimmed(try run(GitReviewCommands.stashCreate(), in: root))
-            let hash = created.isEmpty
-                ? decodeTrimmed(try run(GitReviewCommands.headHash(), in: root))
-                : created
-
-            let status = GitDiffParser.status(fromPorcelainV2: try run(GitReviewCommands.status(), in: root))
+        perform("git.read.create-snapshot", on: snapshotQueue, completion) {
             return GitTurnBaseline(
-                snapshotHash: hash,
-                capturedAt: Date(),
-                untrackedPaths: Set(status.untracked)
+                treeHash: try workingTreeSnapshot(in: root),
+                capturedAt: Date()
             )
         }
     }
@@ -307,8 +310,9 @@ enum GitReviewReader {
         switch request {
         case .unstaged, .uncommitted, .branch:
             return try tracked + untrackedDiffs(in: root, excluding: [])
-        case .lastTurn(let baseline):
-            return try tracked + untrackedDiffs(in: root, excluding: baseline.untrackedPaths)
+        case .lastTurn:
+            // Both endpoints are trees, so untracked files are already represented exactly.
+            return tracked
         case .staged, .commit:
             return tracked
         }
@@ -338,12 +342,13 @@ enum GitReviewReader {
             return try run(GitReviewCommands.diff(against: nil, ignoringWhitespace: ws), in: root)
 
         case .uncommitted:
-            // On an unborn HEAD there is nothing to diff against, but the index against the
-            // empty tree is exactly "everything staged so far".
+            // On an unborn HEAD, a real empty tree preserves the normal ref→worktree semantics.
+            // `--cached` would stop at the index and miss edits made after a file was staged.
+            let baseline = hasCommits(in: root)
+                ? GitReviewCommands.head
+                : try emptyTree(in: root)
             return try run(
-                hasCommits(in: root)
-                    ? GitReviewCommands.diff(against: GitReviewCommands.head, ignoringWhitespace: ws)
-                    : GitReviewCommands.diffStaged(ignoringWhitespace: ws),
+                GitReviewCommands.diff(against: baseline, ignoringWhitespace: ws),
                 in: root
             )
 
@@ -354,8 +359,16 @@ enum GitReviewReader {
             return try run(GitReviewCommands.diff(against: mergeBase, ignoringWhitespace: ws), in: root)
 
         case .lastTurn(let baseline):
-            guard commitExists(baseline.snapshotHash, in: root) else { throw Failure.baselineExpired }
-            return try run(GitReviewCommands.diff(against: baseline.snapshotHash, ignoringWhitespace: ws), in: root)
+            guard treeExists(baseline.treeHash, in: root) else { throw Failure.baselineExpired }
+            let currentTree = try workingTreeSnapshot(in: root)
+            return try run(
+                GitReviewCommands.diff(
+                    from: baseline.treeHash,
+                    to: currentTree,
+                    ignoringWhitespace: ws
+                ),
+                in: root
+            )
 
         case .commit(let hash):
             return try run(GitReviewCommands.show(hash, ignoringWhitespace: ws), in: root)
@@ -390,16 +403,23 @@ enum GitReviewReader {
         case .unstaged:
             return (.revision(":0", title: L10n.string("Index")), .worktree)
         case .uncommitted:
-            return (.revision(GitReviewCommands.head, title: "HEAD"), .worktree)
+            if hasCommits(in: root) {
+                return (.revision(GitReviewCommands.head, title: "HEAD"), .worktree)
+            }
+            return (
+                .revision(try emptyTree(in: root), title: L10n.string("Empty Tree")),
+                .worktree
+            )
         case .branch:
             let base = try defaultBranch(in: root)
             let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
             return (.revision(mergeBase, title: L10n.string("Merge Base")), .worktree)
         case .lastTurn(let baseline):
-            guard commitExists(baseline.snapshotHash, in: root) else { throw Failure.baselineExpired }
+            guard treeExists(baseline.treeHash, in: root) else { throw Failure.baselineExpired }
+            let currentTree = try workingTreeSnapshot(in: root)
             return (
-                .revision(baseline.snapshotHash, title: L10n.string("Turn Start")),
-                .worktree
+                .revision(baseline.treeHash, title: L10n.string("Turn Start")),
+                .revision(currentTree, title: L10n.string("Working Tree"))
             )
         case .commit(let hash):
             let short = String(hash.prefix(7))
@@ -456,6 +476,47 @@ enum GitReviewReader {
 
     private static func commitExists(_ ref: String, in root: URL) -> Bool {
         (try? run(GitReviewCommands.verifyCommit(ref), in: root)) != nil
+    }
+
+    private static func treeExists(_ ref: String, in root: URL) -> Bool {
+        (try? run(GitReviewCommands.verifyTree(ref), in: root)) != nil
+    }
+
+    /// Writes rather than hard-codes the empty-tree id so SHA-256 repositories get the object
+    /// format they use. The object is unreachable and harmlessly deduplicated by git.
+    private static func emptyTree(in root: URL) throws -> String {
+        decodeTrimmed(try run(
+            GitReviewCommands.writeEmptyTree(),
+            in: root,
+            input: Data()
+        ))
+    }
+
+    /// Writes an immutable tree for the exact working-copy bytes through a temporary alternate
+    /// index. Copying the real index preserves forced-added/ignored tracked paths; `git add -A`
+    /// then replaces its staged contents with the worktree and admits ordinary untracked files.
+    private static func workingTreeSnapshot(in root: URL) throws -> String {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent("threading-git-snapshot-" + UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let alternateIndex = directory.appendingPathComponent("index")
+        let realIndexPath = decodeTrimmed(try run(GitReviewCommands.indexPath(), in: root))
+        if !realIndexPath.isEmpty, fileManager.fileExists(atPath: realIndexPath) {
+            try fileManager.copyItem(
+                at: URL(fileURLWithPath: realIndexPath),
+                to: alternateIndex
+            )
+        }
+
+        let environment = ["GIT_INDEX_FILE": alternateIndex.path]
+        if !fileManager.fileExists(atPath: alternateIndex.path) {
+            _ = try run(GitReviewCommands.readEmptyTree(), in: root, environment: environment)
+        }
+        _ = try run(GitReviewCommands.addWorkingTreeToIndex(), in: root, environment: environment)
+        return decodeTrimmed(try run(GitReviewCommands.writeTree(), in: root, environment: environment))
     }
 
     private static func decodeTrimmed(_ data: Data) -> String {
@@ -542,7 +603,17 @@ enum GitReviewReader {
 
     /// Every read is prefixed with the flags that keep it a read: literal paths, and never
     /// taking `index.lock` out from under the agent.
-    private static func run(_ arguments: [String], in root: URL) throws -> Data {
-        try GitProcess.run(GitReviewCommands.common + arguments, in: root)
+    private static func run(
+        _ arguments: [String],
+        in root: URL,
+        input: Data? = nil,
+        environment: [String: String] = [:]
+    ) throws -> Data {
+        try GitProcess.run(
+            GitReviewCommands.common + arguments,
+            in: root,
+            input: input,
+            environmentOverrides: environment
+        )
     }
 }

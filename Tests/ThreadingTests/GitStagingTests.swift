@@ -198,6 +198,109 @@ final class GitStagingTests: XCTestCase {
         }
     }
 
+    // MARK: - Turn Snapshots
+
+    func testTurnSnapshotPreservesAndThenDiffsPreexistingUntrackedBytes() throws {
+        try write("before\n", to: "notes.txt")
+        let baseline = try snapshot()
+
+        // A path-only baseline used to exclude this completely because it was already
+        // untracked. The tree baseline must report the bytes the turn actually changed.
+        try write("after\n", to: "notes.txt")
+        let file = try XCTUnwrap(try turnDiff(from: baseline).first { $0.path == "notes.txt" })
+        XCTAssertEqual(file.change, .modified)
+        XCTAssertEqual(file.added, 1)
+        XCTAssertEqual(file.removed, 1)
+    }
+
+    func testTurnSnapshotDoesNotAttributeAnUnchangedUntrackedFileToTheTurn() throws {
+        try write("already here\n", to: "notes.txt")
+        let baseline = try snapshot()
+
+        XCTAssertFalse(try turnDiff(from: baseline).contains { $0.path == "notes.txt" })
+    }
+
+    func testTurnSnapshotIncludesFilesCreatedAndDeletedDuringTheTurn() throws {
+        try write("delete me\n", to: "removed.txt")
+        let baseline = try snapshot()
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("removed.txt"))
+        try write("created\n", to: "created.txt")
+
+        let files = try turnDiff(from: baseline)
+        XCTAssertEqual(files.first { $0.path == "removed.txt" }?.change, .deleted)
+        XCTAssertEqual(files.first { $0.path == "created.txt" }?.change, .added)
+    }
+
+    func testTurnSnapshotLeavesTheRealIndexUntouched() throws {
+        try write(Self.edited, to: "app.swift")
+        try git("add", "app.swift")
+        try write("worktree after staging\n", to: "app.swift")
+        let stagedBefore = try output("diff", "--cached")
+
+        _ = try snapshot()
+
+        XCTAssertEqual(try output("diff", "--cached"), stagedBefore)
+        XCTAssertEqual(try output("show", ":app.swift"), Self.edited.trimmingCharacters(in: .newlines))
+    }
+
+    func testTurnSnapshotWorksBeforeTheFirstCommit() throws {
+        let unborn = root.appendingPathComponent("Unborn", isDirectory: true)
+        try FileManager.default.createDirectory(at: unborn, withIntermediateDirectories: true)
+        _ = try GitProcess.run(["init", "--quiet"], in: unborn)
+        try "before\n".write(
+            to: unborn.appendingPathComponent("first.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let baseline = try performValue {
+            GitReviewReader.createSnapshot(in: unborn, completion: $0)
+        }
+        try "after\n".write(
+            to: unborn.appendingPathComponent("first.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let files = try performValue {
+            GitReviewReader.diff(.lastTurn(baseline), in: unborn, completion: $0)
+        }
+
+        XCTAssertEqual(files.first?.path, "first.txt")
+        XCTAssertEqual(files.first?.change, .modified)
+    }
+
+    func testUncommittedUsesLatestWorktreeBytesBeforeTheFirstCommit() throws {
+        let unborn = root.appendingPathComponent("Unborn-Uncommitted", isDirectory: true)
+        try FileManager.default.createDirectory(at: unborn, withIntermediateDirectories: true)
+        _ = try GitProcess.run(["init", "--quiet"], in: unborn)
+        let file = unborn.appendingPathComponent("first.txt")
+        try "staged one\nstaged two\n".write(to: file, atomically: true, encoding: .utf8)
+        _ = try GitProcess.run(["add", "first.txt"], in: unborn)
+        try "working version\n".write(to: file, atomically: true, encoding: .utf8)
+
+        let files = try performValue {
+            GitReviewReader.diff(.uncommitted, in: unborn, completion: $0)
+        }
+        let changed = try XCTUnwrap(files.first { $0.path == "first.txt" })
+
+        XCTAssertEqual(changed.change, .added)
+        var addedTexts: [String] = []
+        for hunk in changed.hunks {
+            for line in hunk.lines where line.kind == .added {
+                addedTexts.append(line.text)
+            }
+        }
+        XCTAssertTrue(addedTexts.contains("working version"))
+        XCTAssertFalse(addedTexts.contains("staged one"))
+
+        let summary = try performValue {
+            GitReviewReader.uncommittedSummary(in: unborn, completion: $0)
+        }
+        XCTAssertEqual(summary.files, 1)
+        XCTAssertEqual(summary.added, 1)
+    }
+
     // MARK: - Helpers
 
     private func stage(hunk index: Int, of file: GitFileDiff) throws {
@@ -228,6 +331,16 @@ final class GitStagingTests: XCTestCase {
 
     private func stagedDiff() throws -> [GitFileDiff] {
         try performValue { GitReviewReader.diff(.staged, in: self.root, completion: $0) }
+    }
+
+    private func snapshot() throws -> GitTurnBaseline {
+        try performValue { GitReviewReader.createSnapshot(in: self.root, completion: $0) }
+    }
+
+    private func turnDiff(from baseline: GitTurnBaseline) throws -> [GitFileDiff] {
+        try performValue {
+            GitReviewReader.diff(.lastTurn(baseline), in: self.root, completion: $0)
+        }
     }
 
     /// Runs an async writer call and fails the test if it reports an error.

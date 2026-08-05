@@ -40,7 +40,10 @@ enum GitDiffParser {
                     entries.append(GitStatus.Entry(path: path, renamedFrom: nil, staged: false, unstaged: true))
                 }
             case "?":
-                untracked.append(String(record.dropFirst(2)))
+                // A truncated `? ` record names no file; an empty path would reach the pane as
+                // a row for nothing.
+                let path = String(record.dropFirst(2))
+                if !path.isEmpty { untracked.append(path) }
             default:
                 break // headers ("#"), ignored ("!")
             }

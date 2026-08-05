@@ -59,6 +59,7 @@ enum GitProcess {
         _ arguments: [String],
         in root: URL,
         input: Data? = nil,
+        environmentOverrides: [String: String] = [:],
         maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
         acceptedExitCodes: Set<Int32> = [0]
     ) throws -> Data {
@@ -85,6 +86,9 @@ enum GitProcess {
         var environment = ProcessInfo.processInfo.environment
         environment["LC_ALL"] = "C"
         environment["GIT_TERMINAL_PROMPT"] = "0"
+        for (name, value) in environmentOverrides {
+            environment[name] = value
+        }
         process.environment = environment
 
         let stdout = Pipe()
