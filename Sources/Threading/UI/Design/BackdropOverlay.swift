@@ -108,9 +108,11 @@ protocol InkSourced {
 ///
 /// # What a subclass must do
 ///
-/// Colour **everything it draws** from the `ink` it is handed, and nothing from `Design.Text.*`.
-/// Surfaces are the same story: a fill from `Design.Surface.*` is calibrated for the chrome's
-/// ground, so a pill that needs one derives it from `ink` instead (see `Design.Ink.surface`).
+/// Colour **everything it draws directly on the backdrop** from the `ink` it is handed, and
+/// nothing from `Design.Text.*`. Surfaces are the same story: a translucent pill drawn as part of
+/// that backdrop derives its fill from `ink` (see `Design.Ink.surface`). A subclass that owns an
+/// opaque app-chrome card above the backdrop instead resolves the whole card through
+/// `ThemedFloatingSurfaceChrome`; it must not mix chrome ink with a terminal-derived fill.
 @MainActor
 class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced {
 

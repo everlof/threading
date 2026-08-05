@@ -4,7 +4,7 @@ import XCTest
 
 /// Draws the archive receipt where it actually appears — above the sidebar's footer, at the
 /// sidebar's width, on the sidebar's own ground — and writes each state out as an image: System
-/// light and dark plus the two deliberately different stock themes, per the component contract
+/// light and dark plus three deliberately different stock themes, per the component contract
 /// in `docs/THEME_BOUNDARY.md`.
 ///
 /// It exists because what this band has to get right is a *relationship* no assertion states:
@@ -34,7 +34,9 @@ final class ToastRenderTests: XCTestCase {
         static let themes: [(name: String, theme: AppTheme)] = [
             ("system", .system),
             ("cyberpunk", AppThemeStyles.cyberpunk),
-            ("swiss", AppThemeStyles.swissMinimalist)
+            ("swiss", AppThemeStyles.swissMinimalist),
+            ("claymorphism", AppThemeStyles.claymorphism),
+            ("win98", AppThemeStyles.win98)
         ]
 
         /// The three receipts the archive can produce: a running session, whose agent stopped; a
@@ -42,10 +44,16 @@ final class ToastRenderTests: XCTestCase {
         /// which names the agent and carries its reason. The third is deliberately the longest —
         /// a three-sentence detail under a wrapped message is where a 240-point column either
         /// still reads as a receipt or turns into a paragraph.
+        ///
+        /// The fourth is the same running receipt with a burst behind it, because what the stack
+        /// has to get right is only visible in a picture: whether two 4-point slivers above a
+        /// card read as more receipts waiting or as a drawing error, and whether a style with
+        /// square corners and a heavy rule (Swiss) still separates the three edges at all.
         enum Story: String, CaseIterable {
             case running
             case dormant
             case agent
+            case queued
         }
     }
 
@@ -93,7 +101,7 @@ final class ToastRenderTests: XCTestCase {
     @MainActor
     private func request(for story: Render.Story, session: AgentSession) -> ToastRequest {
         switch story {
-        case .running:
+        case .running, .queued:
             return SessionCoordinator.archiveToast(for: session, wasRunning: true, undo: {})
         case .dormant:
             return SessionCoordinator.archiveToast(for: session, wasRunning: false, undo: {})
@@ -142,6 +150,14 @@ final class ToastRenderTests: XCTestCase {
             let presenter = ToastPresenter(host: host, above: footer.topAnchor)
             defer { presenter.invalidate() }
             presenter.present(request)
+
+            // A burst, sent the way the sidebar sends one: each carries a way back, so none of
+            // them is thrown away and each waits behind the band as a card edge.
+            if story == .queued {
+                for _ in 0..<ToastDefaults.stackDepth {
+                    presenter.present(self.request(for: story, session: session))
+                }
+            }
 
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()

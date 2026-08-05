@@ -7,6 +7,59 @@ import AppKit
 /// hole. This starts transparent, writes in the theme's label tier, and blinks the theme's
 /// accent — and like `ThemedTextField`, it subclasses rather than redraws, because the field
 /// editor machinery and text layout are not worth reimplementing to gain three colours.
+/// What a run of *selected text* is painted with, wherever text is edited.
+///
+/// The fourth colour in a text view, and the one that stayed AppKit's: `selectedTextAttributes`
+/// defaults to `selectedTextBackgroundColor`, so dragging across a prompt in a lavender window
+/// highlighted it in system blue-grey. Exactly the defect the attachments row had — a framework
+/// default standing in for a decision nobody made, invisible to a lint because no call site
+/// mentions it — found while hardening against that one, and fixed the same way: stated once, in
+/// the component, where no caller has to remember.
+///
+/// The ground is the theme's `selection` role, the same one a selected list row fills with, so a
+/// selection reads as one idea across the window. The foreground is stated too rather than left to
+/// `selectedTextColor`, which is a system near-white and would disappear into a light theme's
+/// selection ground.
+///
+/// **Stating it was not enough; it had to be stated against the right thing.** The foreground was
+/// `Design.Text.label` — the ink for the *chrome's* ground, not for the fill this paints — so under
+/// Windows 98 a selected run came out near-black on a 90%-opaque navy at 1.47:1, and the drag that
+/// selected it appeared to erase the text. Text is the case that *can* state both, so it takes
+/// `SelectionSurface.stated`: the theme's own fill, and the ink measured against it. The result
+/// inverts on its own — white on Windows 98's navy, the ordinary near-black on Christmas's wash.
+///
+/// Dynamic colours, so a live theme switch is answered at the next draw — the attributes
+/// dictionary is set once and never rebuilt. The **ground** is dynamic for the same reason and is
+/// therefore passed as a closure: what a text view sits on moves with the theme too.
+@MainActor
+enum ThemedTextSelection {
+
+    /// `host` is what the selection is painted over. Weakly held: these attributes outlive nothing,
+    /// but they are read by TextKit at arbitrary later moments and a strong capture would make a
+    /// text view own itself.
+    static func attributes(over host: NSView?) -> [NSAttributedString.Key: Any] {
+        let selection = SelectionSurface.dynamic { [weak host] in
+            host?.resolvedGround() ?? Design.Surface.ground
+        }
+        return [
+            .backgroundColor: selection.fill,
+            .foregroundColor: selection.ink.label
+        ]
+    }
+
+    /// The same statement for a field editor — the `NSTextView` AppKit lends an `NSTextField`
+    /// while it is being edited. It is created by the framework, shared between fields and never
+    /// constructed here, so it can only be told at the moment it is handed over.
+    ///
+    /// The **field** is the ground, not the editor: the editor is lent, re-parented and reused, so
+    /// a ground read through it answers for whichever field borrowed it last.
+    static func apply(to editor: NSText, in field: NSView?) {
+        guard let editor = editor as? NSTextView else { return }
+        editor.selectedTextAttributes = attributes(over: field)
+        editor.insertionPointColor = Design.Surface.accent
+    }
+}
+
 class ThemedTextView: NSTextView, ThemedComponent {
 
     private var themeRedraw: ThemeRedraw?
@@ -57,6 +110,7 @@ class ThemedTextView: NSTextView, ThemedComponent {
         drawsBackground = false
         textColor = Design.Text.label
         insertionPointColor = Design.Surface.accent
+        selectedTextAttributes = ThemedTextSelection.attributes(over: self)
         themeRedraw = ThemeRedraw(self)
 
         // **`isVerticallyResizable` alone does not let a text view grow.** `minSize` and `maxSize`

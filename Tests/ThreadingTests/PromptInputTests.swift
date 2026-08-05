@@ -760,6 +760,140 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
+    // MARK: - The Control Row
+
+    /// The reply composer's shape: the box holds the text, the row along its bottom holds what
+    /// the text will be sent with, and the send closes that row.
+    ///
+    /// Everything here was a strip of chips floating on the pane *above* the box, which is what
+    /// made it read as neither part of the conversation nor part of the input — and, because the
+    /// strip sized itself to its content, left the chips clustered against the leading edge with
+    /// the rest of the pane's width empty beside them.
+    func testTheFooterPlacementPutsTheOwnersControlsAndTheSendInsideTheBox() throws {
+        let prompt = PromptView()
+        prompt.submitPlacement = .footer
+
+        let model = ChipView()
+        model.configure(symbolName: "cpu", title: "Opus · 1M")
+        let speed = ChipView()
+        speed.configure(symbolName: "bolt", title: "Standard")
+        let context = NSTextField(labelWithString: "38% context")
+
+        prompt.setFooterControls(leading: [model, speed], trailing: [context])
+        let window = makeWindow(hosting: prompt)
+        _ = window
+        prompt.layoutSubtreeIfNeeded()
+
+        let send = try inlineSubmitButton(in: prompt)
+        XCTAssertFalse(send.isHidden, "The footer placement keeps the send in the box")
+
+        for control in [model, speed, context] as [NSView] {
+            XCTAssertTrue(
+                control.isDescendant(of: prompt),
+                // Qualified: this class has its own `type(_:in:)` helper, which shadows the
+                // global `type(of:)`.
+                "\(Swift.type(of: control)) stayed outside the box it belongs to"
+            )
+            let frame = control.convert(control.bounds, to: prompt)
+            XCTAssertTrue(
+                prompt.bounds.insetBy(dx: -1, dy: -1).contains(frame),
+                "\(Swift.type(of: control)) was placed outside the box's own bounds"
+            )
+        }
+
+        // The row reads leading-group, gap, trailing-group, send — so the meter and the send
+        // reach the box's trailing edge instead of trailing the chips.
+        let inBox = { (view: NSView) in view.convert(view.bounds, to: prompt) }
+        XCTAssertLessThan(inBox(model).maxX, inBox(speed).minX)
+        XCTAssertLessThan(inBox(speed).maxX, inBox(context).minX)
+        XCTAssertLessThan(inBox(context).maxX, inBox(send).minX)
+        XCTAssertGreaterThan(
+            inBox(context).minX - inBox(speed).maxX,
+            inBox(speed).minX - inBox(model).maxX,
+            "Nothing pushed the trailing group to the trailing edge"
+        )
+        XCTAssertLessThan(
+            prompt.bounds.maxX - inBox(send).maxX,
+            Design.Spacing.large,
+            "The send has to finish the row rather than float in from its end"
+        )
+
+        // Under the text, not beside it: the row is a second line of the box. The box is
+        // unflipped, so "under" is the smaller y.
+        let editor = try XCTUnwrap(promptTextView(in: prompt).enclosingScrollView)
+        XCTAssertLessThanOrEqual(
+            inBox(model).maxY,
+            inBox(editor).minY + 1,
+            "The control row overlapped the text it belongs to"
+        )
+    }
+
+    /// The row is the box's own chrome, so it comes out of the box's minimum height rather than
+    /// adding to it. Added, an empty reply box opened at a hundred points — a paragraph of
+    /// height asking for one line — and every composer without a row would have had to be
+    /// re-measured to compensate.
+    func testTheControlRowFitsInsideTheBoxsRestingHeightRatherThanOnTopOfIt() throws {
+        let plain = PromptView()
+        let withRow = PromptView()
+        withRow.submitPlacement = .footer
+        withRow.setFooterControls(leading: [ChipView()], trailing: [])
+
+        for prompt in [plain, withRow] {
+            _ = makeWindow(hosting: prompt)
+            prompt.layoutSubtreeIfNeeded()
+        }
+
+        XCTAssertEqual(
+            plain.frame.height,
+            Design.Size.inputHeight,
+            accuracy: 1,
+            "A composer with no control row still opens at exactly one input"
+        )
+        XCTAssertGreaterThan(
+            withRow.frame.height,
+            plain.frame.height,
+            "The row has to be visible in the box's height"
+        )
+        XCTAssertLessThan(
+            withRow.frame.height - plain.frame.height,
+            Design.Size.chipHeight + Design.Spacing.medium,
+            "The row cost more than the row"
+        )
+
+        // And the cap still means the same thing: the *box* stops at `inputMaxHeight`, so the
+        // row cannot push a full composer past what the pane budgeted for it.
+        withRow.stringValue = Array(repeating: "en rad text", count: 40).joined(separator: "\n")
+        withRow.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            withRow.frame.height,
+            Design.Size.inputMaxHeight,
+            accuracy: 1,
+            "A box with a control row grew past the cap the pane budgeted"
+        )
+    }
+
+    /// The send did not move surfaces, only rows — so Return still sends, exactly as it does
+    /// with the glyph in the corner.
+    func testTheFooterPlacementKeepsReturnOnTheSend() throws {
+        let prompt = PromptView()
+        prompt.submitPlacement = .footer
+        prompt.setFooterControls(leading: [ChipView()], trailing: [])
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        type("one", in: window)
+        pressReturn(holding: .shift, in: window)
+        type("two", in: window)
+        XCTAssertTrue(submitted.isEmpty, "Shift-Return sent the reply")
+
+        pressReturn(in: window)
+        XCTAssertEqual(submitted, ["one\ntwo"])
+    }
+
     /// The setting overrides the surface's own answer, in the direction people ask for it most:
     /// a brief that sends on Return.
     func testTheSettingCanMakeReturnSendTheBriefAsWell() throws {
@@ -898,9 +1032,15 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(submitted, ["hej"])
     }
 
-    /// The whole shape of the composer's action row, from the outside: one primary that says
-    /// its chord, one secondary beside it, and a prompt that keeps Return.
-    func testComposerSendsFromItsPrimaryButtonAndItsChordRatherThanFromReturn() throws {
+    /// The opening composer and the reply composer are one box, so Return sends here exactly as
+    /// it does in a reply.
+    ///
+    /// It used to be the other way round: the placement was `.outside`, Return was a line break,
+    /// and a titled primary named `⌘↩` because a glyph could not. The concern that motivated
+    /// that — a brief is several lines, and a Return-send spends one on an accidental launch —
+    /// is answered by `PromptReturnKey` now, which is a setting the user can find rather than a
+    /// difference between two boxes they use minutes apart.
+    func testTheComposerSendsOnReturnAndOnTheChordFromInsideTheBox() throws {
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
         composer.updatePromptCustomization(for: ProjectID())
@@ -911,24 +1051,60 @@ final class PromptInputTests: XCTestCase {
         )
         let textView = try promptTextView(in: prompt)
 
-        let start = try XCTUnwrap(
+        let send = try inlineSubmitButton(in: prompt)
+        XCTAssertFalse(send.isHidden, "The composer has to keep its send inside the box")
+        // A glyph has no face to write a chord on, so the tooltip carries it — and is the only
+        // name the control has, since a titled button is what used to say both.
+        XCTAssertEqual(send.toolTip, "Send · ⌘Return")
+        XCTAssertEqual(send.accessibilityLabel(), "Send · ⌘Return", "an unnamed send is unusable")
+        XCTAssertNil(
             descendants(of: composer.view).first {
                 $0.accessibilityIdentifier() == "composer.session-start.submit"
-            } as? ThemedButton,
-            "The composer has to offer its send outside the box"
+            },
+            "there is no send button beside the box any more"
         )
-        XCTAssertEqual(start.emphasis, .primary, "the one action this screen is for")
-        XCTAssertEqual(start.shortcut, KeyboardShortcut(key: "\r", modifiers: .command))
-        XCTAssertEqual(start.accessibilityTitle(), "Start session")
 
-        let importButton = try XCTUnwrap(
-            descendants(of: composer.view)
-                .compactMap { $0 as? ThemedButton }
-                .first { $0.toolTip == "Import conversation" }
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        // Shift-Return is the line break under every setting, which is what keeps a brief
+        // writable in a box that sends on Return.
+        type("a task", in: window)
+        pressReturn(holding: .shift, in: window)
+        type("and its context", in: window)
+        XCTAssertEqual(prompt.stringValue, "a task\nand its context")
+        XCTAssertTrue(submitted.isEmpty)
+
+        pressReturn(in: window)
+        XCTAssertEqual(submitted, ["a task\nand its context"], "Return did not send the brief")
+
+        // The chord belongs to the *field*, which is why it survived the button that used to
+        // name it: it is handled in `keyDown` and reaches nothing else on the way.
+        pressReturn(holding: .command, in: window)
+        XCTAssertEqual(submitted.count, 2)
+
+        send.performClick()
+        XCTAssertEqual(submitted.count, 3, "the glyph and the keys have to send the same thing")
+        XCTAssertEqual(submitted.last, "a task\nand its context")
+    }
+
+    /// The other half of the setting, in the composer that used to have this behaviour by
+    /// construction: a user who writes long briefs says so once, on the Keyboard page, and
+    /// Return goes back to being a line break in every box.
+    func testTheSettingGivesReturnBackToTheBriefInTheComposer() throws {
+        AppSettings.shared.promptReturnKey = .startsNewLine
+
+        let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
+        _ = composer.view
+        composer.updatePromptCustomization(for: ProjectID())
+
+        let window = makeWindow(hosting: composer.view)
+        let prompt = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? PromptView }.first
         )
-        XCTAssertEqual(importButton.emphasis, .secondary, "the quieter of the two offers")
+        let textView = try promptTextView(in: prompt)
 
-        // What the user types, including the line breaks that used to launch a session.
         var submitted: [String] = []
         prompt.onSubmit = { submitted.append($0) }
         XCTAssertTrue(window.makeFirstResponder(textView))
@@ -937,65 +1113,484 @@ final class PromptInputTests: XCTestCase {
         pressReturn(in: window)
         type("and its context", in: window)
         XCTAssertEqual(prompt.stringValue, "a task\nand its context")
-        XCTAssertTrue(submitted.isEmpty)
+        XCTAssertTrue(submitted.isEmpty, "Return launched a session the setting said to keep editing")
 
-        // Through the window, as AppKit routes a key equivalent — the caret is in the prompt,
-        // and the button still has to hear the chord.
-        XCTAssertTrue(
-            window.performKeyEquivalent(with: try returnKey(holding: .command, in: window))
+        pressReturn(holding: .command, in: window)
+        XCTAssertEqual(submitted, ["a task\nand its context"], "⌘Return has to send under every setting")
+
+        XCTAssertFalse(
+            try inlineSubmitButton(in: prompt).isHidden,
+            "the setting decides the key, not where the send control lives"
         )
-        XCTAssertEqual(submitted, ["a task\nand its context"])
-
-        start.performClick()
-        XCTAssertEqual(submitted.count, 2, "the button and the chord have to send the same thing")
-        XCTAssertEqual(submitted.last, "a task\nand its context")
     }
 
-    /// The action row, drawn.
+    /// The composer's column, drawn.
     ///
-    /// What matters here is a *relationship* — one loud button naming its chord beside one quiet
-    /// one — and a relationship between neighbouring shapes is visible in a picture and in no
-    /// assertion anyone would write. The import button is put into the state discovery gives it
-    /// rather than mocked: same hidden flag, same counted title.
-    func testComposerActionRowRendersOnePrimaryNamingItsChordBesideOneSecondary() throws {
+    /// What matters is a *relationship* — chips above the box, the choices and the reading on the
+    /// box's own row, one quiet offer underneath — and a relationship between neighbouring shapes
+    /// is visible in a picture and in no assertion anyone would write. The import button is put
+    /// into the state discovery gives it rather than mocked: same hidden flag, same counted title.
+    func testComposerRendersItsChoicesInsideTheBoxAndImportQuietlyUnderIt() throws {
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
         composer.updatePromptCustomization(for: ProjectID())
 
         let window = makeWindow(hosting: composer.view)
+
+        // Looked up through `arrangedSubviews` as well as the tree: a stack with
+        // `detachesHiddenViews` takes a hidden arranged view **out of the hierarchy**, and both
+        // the import row and the usage reading start switched off.
+        let subtree = [composer.view] + descendants(of: composer.view)
+        let arranged = subtree.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews)
+        let controls = subtree + arranged
+
+        // The row carries the offer's visibility, not the button: a hidden view keeps its
+        // constraints, so a button hidden inside a shown row leaves the column ending in a gap.
+        let importRow = try XCTUnwrap(
+            controls.first { $0.accessibilityIdentifier() == "composer.session-start.import-row" }
+        )
         let importButton = try XCTUnwrap(
-            descendants(of: composer.view)
+            descendants(of: importRow)
                 .compactMap { $0 as? ThemedButton }
                 .first { $0.toolTip == "Import conversation" }
         )
+        importRow.isHidden = false
         importButton.isHidden = false
         importButton.title = ComposerDefaults.importTitle(count: 90)
 
-        try captureAppFixture(window, named: "composer-action-row")
-
-        let start = try XCTUnwrap(
-            descendants(of: composer.view).first {
-                $0.accessibilityIdentifier() == "composer.session-start.submit"
-            } as? ThemedButton
+        let usage = try XCTUnwrap(
+            controls.first {
+                $0.accessibilityIdentifier() == "composer.session-start.usage"
+            } as? NSTextField
         )
+        usage.isHidden = false
+        usage.stringValue = "5h 43% · 7d 73%"
+
+        try captureAppFixture(window, named: "composer-column")
+
         let prompt = try XCTUnwrap(
             descendants(of: composer.view).compactMap { $0 as? PromptView }.first
         )
+        XCTAssertTrue(usage.isDescendant(of: prompt), "the reading belongs inside the box")
 
         // Converted into the composer's own space, which is unflipped: below means *less* y.
-        let sendBox = composer.view.convert(start.bounds, from: start)
+        let importBox = composer.view.convert(importButton.bounds, from: importButton)
         let promptBox = composer.view.convert(prompt.bounds, from: prompt)
         XCTAssertLessThan(
-            sendBox.maxY,
+            importBox.maxY,
             promptBox.minY,
-            "the send has to sit under the box rather than inside it"
+            "the import offer has to sit under the box"
+        )
+        XCTAssertEqual(importButton.emphasis, .tertiary, "the quietest tier there is")
+    }
+
+    func testComposerCapabilityResolverKeepsOpaqueArgumentsAndAcceptsAliases() throws {
+        let capability = ComposerCapability(
+            id: "claude.command:review",
+            name: "review",
+            aliases: ["inspect"],
+            kind: .command,
+            trigger: .slash,
+            presentation: .turn
+        )
+
+        let invocation = try XCTUnwrap(ComposerCapabilityResolver.invocation(
+            in: "  /INSPECT  --path \"Sources/My File.swift\"  ",
+            capabilities: [capability]
+        ))
+        XCTAssertEqual(invocation.capability.id, capability.id)
+        XCTAssertEqual(invocation.arguments, "--path \"Sources/My File.swift\"")
+        XCTAssertEqual(invocation.sourceText, "/INSPECT  --path \"Sources/My File.swift\"")
+    }
+
+    func testSlashCompletionKeepsTheTextViewFocusedAndReturnOnlyInsertsFirst() throws {
+        let prompt = PromptView()
+        prompt.composerCapabilities = [
+            ComposerCapability(
+                id: "command:context",
+                name: "context",
+                description: "Show context usage",
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
+            ),
+            ComposerCapability(
+                id: "skill:release",
+                name: "release",
+                description: "Prepare a release",
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
+            )
+        ]
+        var submissionCount = 0
+        var changeCount = 0
+        prompt.onSubmit = { _ in submissionCount += 1 }
+        prompt.onChange = { _ in changeCount += 1 }
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+        prompt.focusAtEnd()
+
+        type("/", in: window)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(window.firstResponder === textView)
+        let root = try XCTUnwrap(window.contentView)
+        let menu = try XCTUnwrap(descendants(of: root).first {
+            $0.accessibilityRole() == .menu
+        })
+        XCTAssertEqual(
+            descendants(of: menu).filter { $0.accessibilityRole() == .menuItem }.count,
+            1,
+            "A slash query must not mix in dollar-triggered skills"
+        )
+
+        let changesBeforeAcceptance = changeCount
+        pressReturn(in: window)
+        XCTAssertEqual(prompt.stringValue, "/context ")
+        XCTAssertEqual(
+            changeCount,
+            changesBeforeAcceptance + 1,
+            "Accepting a completion is one edit, so draft persistence must update once"
+        )
+        XCTAssertEqual(submissionCount, 0, "Accepting a completion must not run it")
+        XCTAssertTrue(window.firstResponder === textView)
+        XCTAssertFalse(descendants(of: root).contains { $0.accessibilityRole() == .menu })
+
+        pressReturn(in: window)
+        XCTAssertEqual(submissionCount, 1)
+    }
+
+    func testComposerCompletionQueryOnlyOwnsTheLeadingTokenAndRanksAliases() throws {
+        let capabilities = [
+            ComposerCapability(
+                id: "command:compact",
+                name: "compact",
+                description: "Reduce context",
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
+            ),
+            ComposerCapability(
+                id: "command:review",
+                name: "review",
+                aliases: ["inspect"],
+                kind: .command,
+                trigger: .slash,
+                presentation: .turn
+            ),
+            ComposerCapability(
+                id: "skill:inspect",
+                name: "inspector",
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
+            )
+        ]
+
+        let query = try XCTUnwrap(ComposerCompletionQuery.parse("/ins", caretUTF16Offset: 4))
+        XCTAssertEqual(query.replacementRange, NSRange(location: 0, length: 4))
+        XCTAssertEqual(query.suggestions(from: capabilities).map(\.id), ["command:review"])
+        XCTAssertNil(ComposerCompletionQuery.parse("/review files", caretUTF16Offset: 13))
+
+        let skillQuery = try XCTUnwrap(ComposerCompletionQuery.parse("$i", caretUTF16Offset: 2))
+        XCTAssertEqual(skillQuery.suggestions(from: capabilities).map(\.id), ["skill:inspect"])
+    }
+
+    func testComposerCatalogBoundsProviderMetadataAndRenderedSuggestions() throws {
+        let many = (0..<400).map { index in
+            ComposerCapability(
+                id: "command:\(index)",
+                name: "command-\(index)",
+                description: "A command",
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
+            )
+        }
+        let bounded = ComposerCapabilityCatalogPolicy.normalize(many)
+        XCTAssertTrue(bounded.wasTruncated)
+        XCTAssertEqual(
+            bounded.capabilities.count,
+            ComposerCapabilityCatalogPolicy.maximumCapabilities
+        )
+
+        let hostile = ComposerCapabilityCatalogPolicy.normalize([
+            ComposerCapability(
+                id: "skill:hostile",
+                name: "hostile",
+                description: String(repeating: "payload", count: 10_000),
+                argumentHint: String(repeating: "argument", count: 1_000),
+                aliases: (0..<100).map { "alias-\($0)" },
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
+            )
+        ])
+        let safe = try XCTUnwrap(hostile.capabilities.first)
+        XCTAssertTrue(hostile.wasTruncated)
+        XCTAssertLessThanOrEqual(
+            safe.description.utf8.count,
+            ComposerCapabilityCatalogPolicy.maximumDescriptionUTF8Bytes
+        )
+        XCTAssertLessThanOrEqual(
+            safe.aliases.count,
+            ComposerCapabilityCatalogPolicy.maximumAliases
+        )
+
+        let query = try XCTUnwrap(ComposerCompletionQuery.parse("/", caretUTF16Offset: 1))
+        XCTAssertEqual(
+            query.suggestions(from: many).count,
+            ComposerCapabilityCatalogPolicy.maximumRenderedSuggestions
+        )
+
+        let skillRows = [
+            ComposerCapability(
+                id: "claude.command:provisional",
+                name: "provisional",
+                kind: .command,
+                isAvailableInSkillCatalog: true,
+                trigger: .slash,
+                presentation: .command
+            ),
+            ComposerCapability(
+                id: "claude.skill:release",
+                name: "release",
+                kind: .skill,
+                trigger: .slash,
+                presentation: .turn
+            ),
+        ]
+        XCTAssertEqual(
+            query.suggestions(from: many + skillRows, matching: .skill).map(\.id),
+            skillRows.map(\.id),
+            "The skill filter must run before the rendered-row limit"
+        )
+    }
+
+    func testDisabledCompletionAnnouncesItsUnavailableReason() {
+        let row = PromptCompletionRowTestingSupport.makeRow(capability: ComposerCapability(
+            id: "skill:blocked",
+            name: "blocked",
+            displayName: "Blocked skill",
+            description: "Ordinary description",
+            kind: .skill,
+            trigger: .dollar,
+            presentation: .turn,
+            availability: .unavailable(reason: "Disabled by project policy")
+        ))
+
+        XCTAssertEqual(
+            row.accessibilityLabel(),
+            "$blocked, Blocked skill, Disabled by project policy"
+        )
+        XCTAssertEqual(row.accessibilityHelp(), "Disabled by project policy")
+    }
+
+    func testAppCommandsReplaceDisabledExpectationsWithoutShadowingProviderCommands() throws {
+        let providerStatus = ComposerCapability(
+            id: "provider.command:status",
+            name: "status",
+            kind: .command,
+            trigger: .slash,
+            presentation: .command
+        )
+        let retained = ConversationComposerCommands.addingAppCommands(
+            to: [providerStatus]
         )
         XCTAssertEqual(
-            sendBox.minY,
-            composer.view.convert(importButton.bounds, from: importButton).minY,
-            accuracy: 1,
-            "the two buttons have to sit on one line"
+            retained.filter { $0.name == "status" }.map(\.id),
+            [providerStatus.id],
+            "An enabled live provider command remains authoritative"
         )
+
+        let disabledStatus = ComposerCapability(
+            id: "provider.terminal:status",
+            name: "status",
+            kind: .command,
+            trigger: .slash,
+            presentation: .command,
+            availability: .unavailable(reason: "Terminal only")
+        )
+        let disabledSkills = ComposerCapability(
+            id: "provider.terminal:skills",
+            name: "skills",
+            kind: .command,
+            trigger: .slash,
+            presentation: .command,
+            availability: .unavailable(reason: "Terminal only")
+        )
+        let checkoutSkill = ComposerCapability(
+            id: "provider.skill:release",
+            name: "release",
+            kind: .skill,
+            trigger: .dollar,
+            presentation: .turn
+        )
+        let augmented = ConversationComposerCommands.addingAppCommands(
+            to: [disabledStatus, disabledSkills, checkoutSkill]
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(augmented.first { $0.name == "status" }).id,
+            ConversationComposerCommands.statusID
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(augmented.first { $0.name == "skills" }).id,
+            ConversationComposerCommands.skillsID
+        )
+        XCTAssertTrue(augmented.filter { $0.name == "status" || $0.name == "skills" }
+            .allSatisfy(\.isEnabled))
+    }
+
+    func testCodexKnownTerminalCommandsHaveAnExplicitNativeFallbackExpectation() {
+        let expected = Set([
+            "permissions", "ide", "keymap", "vim", "setup-default-sandbox",
+            "sandbox-add-read-dir", "agent", "apps", "plugins", "hooks", "clear",
+            "rename", "archive", "delete", "copy", "diff", "exit", "experimental",
+            "approve", "memories", "skills", "import", "feedback", "init", "logout",
+            "mcp", "mention", "model", "fast", "plan", "goal", "personality", "ps",
+            "stop", "fork", "app", "side", "raw", "resume", "new", "status", "usage",
+            "debug-config", "statusline", "title", "theme", "pets"
+        ])
+
+        XCTAssertEqual(Set(CodexComposerCatalog.terminalOnly.map(\.name)), expected)
+        XCTAssertTrue(CodexComposerCatalog.terminalOnly.allSatisfy { capability in
+            !capability.isEnabled
+                && capability.trigger == .slash
+                && capability.unavailableReason?.isEmpty == false
+        })
+        XCTAssertEqual(
+            CodexComposerCatalog.terminalOnly.first { $0.name == "agent" }?.aliases,
+            ["subagents"]
+        )
+        XCTAssertEqual(
+            CodexComposerCatalog.terminalOnly.first { $0.name == "exit" }?.aliases,
+            ["quit"]
+        )
+    }
+
+    func testRemoteParticipantEnvelopePreservesLeadingSlashSyntaxOnlyForClaude() {
+        XCTAssertEqual(
+            ConversationTransportText.message(
+                "/future-command exact arguments",
+                participantDisplayName: "Ada",
+                preservesLeadingSlash: true
+            ),
+            "/future-command exact arguments"
+        )
+        XCTAssertEqual(
+            ConversationTransportText.message(
+                "Please inspect this",
+                participantDisplayName: "Ada",
+                preservesLeadingSlash: true
+            ),
+            "Message from Ada in the shared chat:\nPlease inspect this"
+        )
+        XCTAssertEqual(
+            ConversationTransportText.message(
+                "/unknown-codex-prompt",
+                participantDisplayName: "Ada",
+                preservesLeadingSlash: false
+            ),
+            "Message from Ada in the shared chat:\n/unknown-codex-prompt"
+        )
+    }
+
+    func testCompletionPointerChoosesOnReleaseAndAllowsDragAway() throws {
+        var choices = 0
+        let row = PromptCompletionRowTestingSupport.makeRow(
+            capability: ComposerCapability(
+                id: "command:context",
+                name: "context",
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
+            ),
+            onChoose: { choices += 1 }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 54),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = row
+
+        func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: type,
+                location: point,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            ))
+        }
+
+        let inside = NSPoint(x: 20, y: 20)
+        let outside = NSPoint(x: window.frame.width + 20, y: 20)
+        row.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside))
+        XCTAssertEqual(choices, 0, "mouse-down must not commit a completion")
+        row.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: outside))
+        row.mouseUp(with: try mouseEvent(.leftMouseUp, at: outside))
+        XCTAssertEqual(choices, 0, "dragging away must cancel the press")
+
+        row.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside))
+        row.mouseUp(with: try mouseEvent(.leftMouseUp, at: inside))
+        XCTAssertEqual(choices, 1)
+        window.close()
+    }
+
+    func testFocusedWatcherKeepsEditableDraftWhileSubmissionIsDisabled() throws {
+        let prompt = PromptView()
+        var submissions: [String] = []
+        prompt.onSubmit = { submissions.append($0) }
+        prompt.stringValue = "A domain expert's unfinished answer"
+        prompt.isSubmissionEnabled = false
+        prompt.submissionDisabledReason = "Anna is controlling"
+
+        prompt.submit()
+
+        XCTAssertTrue(submissions.isEmpty)
+        XCTAssertEqual(prompt.stringValue, "A domain expert's unfinished answer")
+        let button = try inlineSubmitButton(in: prompt)
+        XCTAssertFalse(button.isEnabled)
+        XCTAssertEqual(button.toolTip, "Anna is controlling")
+
+        prompt.isSubmissionEnabled = true
+        prompt.submit()
+        XCTAssertEqual(submissions, ["A domain expert's unfinished answer"])
+    }
+
+    func testContextOnlyCommentStagesAsSendableComposerContentAndClearsWithTurn() throws {
+        let prompt = PromptView()
+        let comment = ConversationContextAttachment(
+            id: UUID(uuidString: "A9143D6F-B539-468D-8CD7-B244CFC50E26")!,
+            kind: .comment,
+            source: .attachment,
+            title: "layout.png",
+            comment: "The spacing above the toolbar feels too large.",
+            locator: "attachments/layout.png"
+        )
+        var submittedContexts: [[ConversationContextAttachment]] = []
+        prompt.onSubmit = { _ in submittedContexts.append(prompt.contextAttachments) }
+
+        prompt.addContextAttachment(comment)
+        prompt.addContextAttachment(comment)
+
+        XCTAssertEqual(prompt.contextAttachments, [comment], "the same receipt must stage once")
+        XCTAssertTrue(try inlineSubmitButton(in: prompt).isEnabled)
+        prompt.submit()
+        XCTAssertEqual(submittedContexts, [[comment]])
+
+        prompt.clear()
+        XCTAssertTrue(prompt.contextAttachments.isEmpty)
+        XCTAssertFalse(try inlineSubmitButton(in: prompt).isEnabled)
     }
 
     private func inlineSubmitButton(in prompt: PromptView) throws -> ThemedButton {

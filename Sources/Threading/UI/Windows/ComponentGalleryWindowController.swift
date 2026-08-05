@@ -86,6 +86,9 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserFindBar",
         "ChipView",
         "ConversationContextRailView",
+        "ConversationHandoffView",
+        "CompareInspectorView",
+        "ExecutionAuditEventView",
         "FileActivityMapView",
         "GlyphView",
         "HoverPopoverScheduler",
@@ -98,6 +101,7 @@ final class ComponentGalleryViewController: NSViewController {
         "NavigatorGridItemView",
         "PaneFooterView",
         "PaneHeaderView",
+        "PromptCompletionPresenter",
         "PromptView",
         "SearchMatchLabel",
         "SemanticSceneView",
@@ -105,6 +109,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ShortcutRecorderView",
         "SidebarBackdropView",
         "SidebarBrandView",
+        "SplitIconButtonView",
         "SubagentSummaryView",
         "SubmissionStatusView",
         "ThreadingMarkView",
@@ -115,7 +120,9 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedCheckbox",
         "ThemedClipView",
         "ThemedControl",
+        "ThemedDisclosureRow",
         "ThemedFileIconView",
+        "ThemedFloatingGlyphView",
         "ThemedOutlineView",
         "ThemedPopUp",
         "ThemedPopover",
@@ -126,7 +133,9 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
+        "ListSelectionStrength",
         "ThemedTableHeaderView",
+        "ThemedTableRowView",
         "ThemedTableView",
         "ThemedTabItemView",
         "ThemedTabStripView",
@@ -154,6 +163,7 @@ final class ComponentGalleryViewController: NSViewController {
     /// it more than once.
     private var toastPresenter: ToastPresenter?
     private var galleryPopover: ThemedPopover?
+    private let galleryCompletionPresenter = PromptCompletionPresenter()
 
     /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
     /// pass that built the section.
@@ -245,7 +255,11 @@ final class ComponentGalleryViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        root.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
         root.appearance = appearanceMode.appearance
         view = root
 
@@ -384,7 +398,11 @@ final class ComponentGalleryViewController: NSViewController {
         scroll.hasVerticalScroller = true
         scroll.automaticallyAdjustsContentInsets = false
         scroll.documentView = document
-        scroll.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        scroll.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
 
         NSLayoutConstraint.activate([
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
@@ -462,6 +480,37 @@ final class ComponentGalleryViewController: NSViewController {
         ) { _ in }
         disabledCheckbox.isEnabled = false
         let checkboxRow = row([checkbox, mixedCheckbox, disabledCheckbox])
+
+        let disclosureTitle = NSTextField(labelWithString: L10n.string("Advanced details"))
+        disclosureTitle.applyFont(.control)
+        disclosureTitle.textColor = Design.Text.label
+        let disclosureSummary = NSTextField(
+            labelWithString: L10n.string("A full-width keyboard and VoiceOver control")
+        )
+        disclosureSummary.applyFont(.subheading)
+        disclosureSummary.textColor = Design.Text.secondary
+        let disclosureContent = NSStackView(views: [disclosureTitle, disclosureSummary])
+        disclosureContent.orientation = .vertical
+        disclosureContent.alignment = .leading
+        disclosureContent.spacing = Design.Spacing.hairline
+        let disclosure = ThemedDisclosureRow(content: disclosureContent)
+        disclosure.setAccessibilityLabel(L10n.string("Advanced details"))
+        let disclosureDetail = smallLabel(
+            L10n.string("Expanded content remains owned by the surrounding settings card.")
+        )
+        disclosureDetail.isHidden = true
+        disclosure.onToggle = { [weak self, weak disclosureDetail] isExpanded in
+            disclosureDetail?.isHidden = !isExpanded
+            self?.showReceipt(L10n.string(
+                isExpanded ? "Expanded advanced details." : "Collapsed advanced details."
+            ))
+        }
+        let disclosureStory = NSStackView(views: [disclosure, disclosureDetail])
+        disclosureStory.orientation = .vertical
+        disclosureStory.alignment = .leading
+        disclosureStory.spacing = Design.Spacing.small
+        disclosure.widthAnchor.constraint(equalTo: disclosureStory.widthAnchor).isActive = true
+        disclosureStory.widthAnchor.constraint(equalToConstant: 420).isActive = true
 
         let segmented = ThemedSegmentedControl()
         let segmentTitles = [
@@ -630,6 +679,11 @@ final class ComponentGalleryViewController: NSViewController {
                     checkboxRow
                 ),
                 story(
+                    "ThemedDisclosureRow",
+                    "A full-width collapsible header with hover, focus, keyboard, and accessibility states.",
+                    disclosureStory
+                ),
+                story(
                     "ThemedSegmentedControl",
                     "Two or three fixed choices with selection, arrows, and radio-group accessibility.",
                     segmented
@@ -663,8 +717,134 @@ final class ComponentGalleryViewController: NSViewController {
                     "ToolbarButtonGroupView",
                     "Related toolbar actions spaced as a set, the way the window's own trailing controls are.",
                     groupedActions
+                ),
+                story(
+                    "SplitIconButtonView",
+                    "One plate, two halves: hover each in turn — the raise stays inside the shared silhouette.",
+                    makeSplitButtonStory()
+                ),
+                story(
+                    "ExecutionAuditEventView",
+                    "One audit row per source, resting and selected: the ledger's fixed grid of category, phase, operation and fidelity.",
+                    makeExecutionAuditStory()
+                ),
+                story(
+                    "ConversationHandoffView",
+                    "A continuation path across runtimes: the direct source is offered as an action, the older stops stay as provenance.",
+                    makeConversationHandoffStory()
                 )
             ]
+        )
+    }
+
+    /// The audit story's own measurements. The row is given a width because the ledger's grid is
+    /// the thing being shown: at the story stack's natural width the four columns would be spaced
+    /// by whatever this fixture's longest summary happens to be.
+    private enum AuditStory {
+        static let rowWidth: CGFloat = 460
+        static let durationMilliseconds = 128
+    }
+
+    /// The two states a reader has to tell apart at a glance — resting and selected — across the
+    /// sources the ledger carries. The records are stated here rather than read from a live
+    /// ledger: a story is a fixture, and a row that needed a running audit store to draw would
+    /// make this window depend on a session.
+    private func makeExecutionAuditStory() -> NSView {
+        let rows: [NSView] = [
+            (ExecutionAuditRecord.Source.providerStream, false),
+            (ExecutionAuditRecord.Source.threadingMCP, false),
+            (ExecutionAuditRecord.Source.permissionBroker, true)
+        ].map { source, isSelected in
+            let view = ExecutionAuditEventView()
+            view.configure(
+                record: Self.auditStoryRecord(source: source),
+                isSelected: isSelected
+            )
+            view.widthAnchor.constraint(
+                equalToConstant: AuditStory.rowWidth
+            ).isActive = true
+            return view
+        }
+
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        return stack
+    }
+
+    private static func auditStoryRecord(
+        source: ExecutionAuditRecord.Source
+    ) -> ExecutionAuditRecord {
+        let shape: (
+            category: ExecutionAuditRecord.Category,
+            phase: ExecutionAuditRecord.Phase,
+            operation: String,
+            summary: String,
+            fidelity: ExecutionAuditRecord.Fidelity
+        )
+        switch source {
+        case .providerStream:
+            shape = (.tool, .completed, "Edit", "Design.swift, 2 hunks", .exact)
+        case .threadingMCP:
+            shape = (.browser, .progressed, "browser_click", "Sign in, #submit", .canonicalized)
+        case .permissionBroker:
+            shape = (.permission, .allowed, "Bash", "git status", .exactWithRedactions)
+        }
+
+        return ExecutionAuditRecord(
+            id: UUID(),
+            sessionID: SessionID(),
+            sequence: 1,
+            timestamp: Date(timeIntervalSince1970: 0),
+            source: source,
+            provider: nil,
+            category: shape.category,
+            phase: shape.phase,
+            operation: shape.operation,
+            callID: nil,
+            summary: shape.summary,
+            input: nil,
+            output: nil,
+            durationMilliseconds: AuditStory.durationMilliseconds,
+            fidelity: shape.fidelity,
+            redactions: [],
+            previousDigest: nil,
+            digest: ""
+        )
+    }
+
+    /// A three-stop path, the shortest one that shows everything the view says at once: where the
+    /// conversation started, the direct source it offers to open, and that the middle of a longer
+    /// path can have been compacted away.
+    private func makeConversationHandoffStory() -> NSView {
+        let endpoints = [
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .claude,
+                model: "claude-opus-4-1",
+                title: nil
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .codex,
+                model: "gpt-5",
+                title: nil
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .claude,
+                model: "claude-opus-4-1",
+                title: nil
+            )
+        ]
+        guard let handoff = ConversationHandoff(endpoints: endpoints, omittedEndpointCount: 1)
+        else { return NSView() }
+
+        return ConversationHandoffView(
+            handoff: handoff,
+            canOpenSource: true,
+            onOpenSource: nil
         )
     }
 
@@ -746,6 +926,40 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     /// A toolbar button whose only job is to report that it was pressed.
+    /// The Open In control as the pane header carries it: the app's own icon on the press, and a
+    /// narrower chevron welded to it for the day the answer is different.
+    ///
+    /// Here because the thing worth looking at is what happens *between* the halves — each raises
+    /// inside the plate's own silhouette rather than drawing a rounded rect of its own, so
+    /// pointing at one does not cut the control in two. Finder stands in because every Mac has
+    /// it; in the header this is whichever editor was reached for last.
+    private func makeSplitButtonStory() -> NSView {
+        let open = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: L10n.string("Open in external app")
+        )
+        if let finder = ExternalApps.app(id: ExternalApps.finderID),
+           let icon = ExternalAppLauncher.shared.icon(for: finder) {
+            open.setImage(icon, accessibility: L10n.format("Open in %@", finder.name))
+        }
+        open.onPress = { [weak self] in
+            self?.showReceipt(L10n.format("Pressed %@.", L10n.string("Open in external app")))
+        }
+
+        let choose = ThemedIconButton(
+            symbolName: DesignSymbols.chevron,
+            accessibility: L10n.string("Choose an app to open in"),
+            target: .splitMenu
+        )
+        choose.onPress = { [weak self] in
+            self?.showReceipt(
+                L10n.format("Pressed %@.", L10n.string("Choose an app to open in"))
+            )
+        }
+
+        return row([SplitIconButtonView(action: open, chevron: choose)])
+    }
+
     private func galleryToolbarButton(symbol: String, label: String) -> ThemedIconButton {
         let button = ThemedIconButton(symbolName: symbol, accessibility: L10n.string(label))
         button.onPress = { [weak self] in
@@ -833,6 +1047,34 @@ final class ComponentGalleryViewController: NSViewController {
             )
         }
 
+        // The chat surface's shape, which the growing-composer story above cannot show: what a
+        // message is sent *with* lives on a row inside the box, and the send closes that row.
+        let replyPrompt = PromptView()
+        replyPrompt.fontSurface = .conversation
+        replyPrompt.showsImageAttachments = true
+        replyPrompt.submitPlacement = .footer
+        replyPrompt.placeholder = L10n.string("Reply to the agent")
+
+        let galleryModelChip = ChipView()
+        galleryModelChip.configure(symbolName: "cpu", title: L10n.string("Opus · 1M"))
+        galleryModelChip.itemsProvider = { [] }
+        let gallerySpeedChip = ChipView()
+        gallerySpeedChip.configure(symbolName: "bolt.fill", title: L10n.string("Standard"))
+        gallerySpeedChip.itemsProvider = { [] }
+        let galleryContextMeter = NSTextField(labelWithString: L10n.string("37% context"))
+        galleryContextMeter.applyFont(.subheading)
+        galleryContextMeter.textColor = Design.Text.tertiary
+
+        replyPrompt.setFooterControls(
+            leading: [galleryModelChip, gallerySpeedChip],
+            trailing: [galleryContextMeter]
+        )
+        replyPrompt.onSubmit = { [weak self] text in
+            self?.showReceipt(
+                L10n.format("PromptView submitted “%@”.", String(text.prefix(80)))
+            )
+        }
+
         let contextRail = ConversationContextRailView(mode: .composer)
         contextRail.setAttachments([
             ConversationContextAttachment(
@@ -910,6 +1152,12 @@ final class ComponentGalleryViewController: NSViewController {
                     "PromptView",
                     "Growing composer, submission, paste, and file-drop behavior.",
                     prompt
+                ),
+                story(
+                    "PromptView · control row",
+                    "The chat reply's shape: what the message is sent with sits inside the box, "
+                        + "and the send finishes the row.",
+                    replyPrompt
                 ),
                 story(
                     "ConversationContextRailView",
@@ -1011,6 +1259,13 @@ final class ComponentGalleryViewController: NSViewController {
                     row(glyphSamples())
                 ),
                 story(
+                    "ThemedFloatingGlyphView",
+                    "The marks app-owned floating content names semantically. Switch to a period "
+                        + "theme: every one of them drops its SF Symbol for the one-bit mark that "
+                        + "material draws instead.",
+                    row(floatingGlyphSamples())
+                ),
+                story(
                     "SubmissionStatusView",
                     "How a submitted thing ended. Press each: the wording and the glyph carry "
                         + "the outcome, so it survives Differentiate Without Colour — and every "
@@ -1074,11 +1329,41 @@ final class ComponentGalleryViewController: NSViewController {
         return [inline, toolbar, capped]
     }
 
+    /// The whole semantic set, in the pairings the popover and the corner card already use, so a
+    /// theme's period marks can be read against each other rather than one at a time in the app.
+    /// `.plan` is drawn here before a feature names it: the gallery is where a mark that does not
+    /// hold up is meant to be found.
+    private func floatingGlyphSamples() -> [NSView] {
+        let marks: [(String, ThemedFloatingGlyphView.ClassicGlyph)] = [
+            ("folder", .folder),
+            ("arrow.triangle.branch", .branch),
+            ("arrow.left.arrow.right", .handoff),
+            ("circle.fill", .status),
+            ("plusminus", .changes),
+            ("cpu", .model),
+            ("list.bullet.rectangle", .plan)
+        ]
+        return marks.map { symbolName, classicGlyph in
+            let mark = ThemedFloatingGlyphView(
+                systemSymbolName: symbolName,
+                classicGlyph: classicGlyph,
+                pointSize: Design.Symbol.toolbar
+            )
+            mark.tintColor = Design.Text.secondary
+            return mark
+        }
+    }
+
     private func makePresentationSection() -> NSView {
         let alert = button("Open alert", action: #selector(showGalleryAlert(_:)))
         alert.setAccessibilityIdentifier("gallery.presentation.alert")
         let popover = button("Open popover", action: #selector(showGalleryPopover(_:)))
         popover.setAccessibilityIdentifier("gallery.presentation.popover")
+        let completions = button(
+            "Open completions",
+            action: #selector(showGalleryCompletions(_:))
+        )
+        completions.setAccessibilityIdentifier("gallery.presentation.completions")
         let hoverPolicies = makeHoverPolicySample()
 
         return section(
@@ -1094,6 +1379,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedPopover & ThemedPopoverChromeView",
                     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
                     popover
+                ),
+                story(
+                    "PromptCompletionPresenter",
+                    "Non-key command and skill suggestions that keep the composer focused while keyboard selection moves.",
+                    completions
                 ),
                 story(
                     "HoverPopoverScheduler",
@@ -1184,10 +1474,13 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSubagentSummarySample()
                 ),
                 story(
-                    "ImageCompareView",
+                    "ImageCompareView & CompareInspectorView",
                     "Two renderings of one asset. Drag the seam or arrow-key it, and pick a "
-                        + "mode from the chip — Fade held at the middle is the onion skin, "
-                        + "Difference answers whether anything changed at all.",
+                        + "mode from the chip: Fade held at the middle is the onion skin, "
+                        + "Difference answers whether anything changed at all. The button "
+                        + "beside the chip opens the same comparison at the window's size, "
+                        + "where Escape closes it and hands back the mode and the scrub it "
+                        + "was left at.",
                     makeImageCompareSample()
                 ),
                 story(
@@ -1205,13 +1498,16 @@ final class ComponentGalleryViewController: NSViewController {
                     makeFileIconSample()
                 ),
                 story(
-                    "ThemedTableView & ThemedTableHeaderView",
-                    "Select rows and resize the themed header columns.",
+                    "ThemedTableView, ThemedTableRowView & ThemedTableHeaderView",
+                    "Select rows and resize the themed header columns. The selected row is the "
+                        + "theme's, not AppKit's: switch the theme above and the fill follows it, "
+                        + "except under System, where the row hands the highlight back.",
                     tableScroll
                 ),
                 story(
                     "ThemedOutlineView",
-                    "Expand, collapse, select, and scroll a hierarchy.",
+                    "Expand, collapse, select, and scroll a hierarchy — selected rows themed by "
+                        + "the same row view the table above uses.",
                     outlineScroll
                 ),
                 story(
@@ -1265,9 +1561,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "ToastView",
                     "A receipt for something already done, with the way back on it. Press Show "
                         + "to send one into the pane below: it slides in above the footer, holds "
-                        + "while the pointer is on it, and leaves by itself otherwise. Agent "
-                        + "sends the same receipt for an archive nobody clicked — it names who "
-                        + "did it, carries their reason, and holds more than twice as long.",
+                        + "while the pointer is on it, and leaves by itself otherwise. Press it "
+                        + "again before that one leaves and the second waits its turn behind the "
+                        + "first, as a card edge above it. Agent sends the same receipt for an "
+                        + "archive nobody clicked — it names who did it, carries their reason, "
+                        + "and holds more than twice as long.",
                     makeToastSample()
                 )
             ]
@@ -2137,6 +2435,40 @@ final class ComponentGalleryViewController: NSViewController {
 
     @objc private func closeGalleryPopover(_ sender: ThemedButton) {
         galleryPopover?.close()
+    }
+
+    @objc private func showGalleryCompletions(_ sender: ThemedButton) {
+        if galleryCompletionPresenter.isVisible {
+            galleryCompletionPresenter.dismiss()
+            return
+        }
+        let items = [
+            ComposerCapability(
+                id: "gallery.command:compact",
+                name: "compact",
+                description: L10n.string("Compact the conversation context"),
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
+            ),
+            ComposerCapability(
+                id: "gallery.skill:release",
+                name: "release",
+                displayName: L10n.string("Release"),
+                description: L10n.string("Browse skills available in this conversation"),
+                argumentHint: "[version]",
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
+            )
+        ]
+        galleryCompletionPresenter.present(
+            items: items,
+            selectedIndex: 0,
+            from: sender,
+            onChoose: { [weak self] _ in self?.galleryCompletionPresenter.dismiss() },
+            onDismiss: {}
+        )
     }
 
     @objc private func chooseExtensionDirectory() {

@@ -105,6 +105,14 @@ enum ThemeBoundaryAudit {
             return field.isEditable || field.isBezeled || field.drawsBackground
         }
 
+        // A list's row is where "nobody wrote anything" turns into a colour. AppKit builds a
+        // plain `NSTableRowView` for a delegate that declines to supply one, and that row fills
+        // its selection from the system accent — the defect this audit could not see, because
+        // every class in the tree was legitimate and the wrong pixels came from a permitted one.
+        // `ThemedTableView` now creates the themed row itself, so a bare row reaching a rendered
+        // tree means a list got its rows from somewhere this boundary does not reach.
+        if view is NSTableRowView { return !(view is ThemedComponent) }
+
         if view is NSImageView { return false }
         if view is NSControl { return true }
 

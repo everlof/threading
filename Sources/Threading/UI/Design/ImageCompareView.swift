@@ -76,6 +76,10 @@ final class ImageCompareView: NSView {
     /// with the scrub already in hand.
     var preferredFirstResponder: NSView { canvas }
 
+    /// Whether the surface still draws the controls row under its canvas. False once a host has
+    /// taken the controls with `hostControls()`.
+    private(set) var carriesControls = true
+
     var mode: ImageCompareMode {
         get { canvas.mode }
         set {
@@ -118,8 +122,33 @@ final class ImageCompareView: NSView {
     /// The height the surface wants at `width`: the fitted canvas (capped), the controls row,
     /// and the spacing between them. What a review row uses to size an expanded body.
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
-        let controls = showsControls ? Design.Size.chipHeight + Design.Spacing.small : 0
+        let showsRow = carriesControls && showsControls
+        let controls = showsRow ? Design.Size.chipHeight + Design.Spacing.small : 0
         return canvas.preferredCanvasHeight(forWidth: width) + controls
+    }
+
+    /// Hands the surface's own controls to a host that will place them itself, and stops the
+    /// surface drawing a row for them.
+    ///
+    /// One call rather than two accessors and a flag, because taking the controls and giving up
+    /// the row are the same act: a host that took them and forgot to detach would leave a chip
+    /// in two places, and one that detached without placing them would lose the modes entirely.
+    ///
+    /// The controls stay wired to this surface — the chip still switches *its* mode and the
+    /// button still expands *this* comparison. What the host gains is where they sit. The Compare
+    /// tab uses it to put them in a header, above the scroll view rather than inside it: below
+    /// the canvas they were part of the scrolled content, so the modes scrolled off a tall
+    /// screenshot exactly when a reader had got far enough down it to want another one.
+    @discardableResult
+    func hostControls() -> (mode: NSView, expansion: NSView) {
+        guard carriesControls else { return (modeChip, expandButton) }
+        carriesControls = false
+        modeChip.removeFromSuperview()
+        expandButton.removeFromSuperview()
+        NSLayoutConstraint.deactivate(attachedConstraints)
+        NSLayoutConstraint.activate(hostedConstraints)
+        updateControls()
+        return (modeChip, expandButton)
     }
 
     /// Opens this comparison in the window's inspector, and answers whether it opened. A surface
@@ -170,23 +199,34 @@ final class ImageCompareView: NSView {
         NSLayoutConstraint.activate([
             canvas.topAnchor.constraint(equalTo: topAnchor),
             canvas.leadingAnchor.constraint(equalTo: leadingAnchor),
-            canvas.trailingAnchor.constraint(equalTo: trailingAnchor),
-            modeChip.topAnchor.constraint(
-                equalTo: canvas.bottomAnchor, constant: Design.Spacing.small
-            ),
-            modeChip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            modeChip.bottomAnchor.constraint(equalTo: bottomAnchor),
-            // The row is the chip's height, so the shorter button centres on it rather than
-            // deciding a second baseline of its own.
-            expandButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            expandButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
-            expandButton.leadingAnchor.constraint(
-                greaterThanOrEqualTo: modeChip.trailingAnchor, constant: Design.Spacing.small
-            )
+            canvas.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
+        NSLayoutConstraint.activate(attachedConstraints)
 
         updateControls()
     }
+
+    /// The canvas and the row beneath it, which is the surface as it ships.
+    private lazy var attachedConstraints: [NSLayoutConstraint] = [
+        modeChip.topAnchor.constraint(
+            equalTo: canvas.bottomAnchor, constant: Design.Spacing.small
+        ),
+        modeChip.leadingAnchor.constraint(equalTo: leadingAnchor),
+        modeChip.bottomAnchor.constraint(equalTo: bottomAnchor),
+        // The row is the chip's height, so the shorter button centres on it rather than
+        // deciding a second baseline of its own.
+        expandButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+        expandButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
+        expandButton.leadingAnchor.constraint(
+            greaterThanOrEqualTo: modeChip.trailingAnchor, constant: Design.Spacing.small
+        )
+    ]
+
+    /// The canvas alone, once a host has taken the controls: nothing is left to reserve a row
+    /// for, so the surface is exactly the comparison.
+    private lazy var hostedConstraints: [NSLayoutConstraint] = [
+        canvas.bottomAnchor.constraint(equalTo: bottomAnchor)
+    ]
 
     /// The controls row: the mode chip, and the way to open the comparison larger.
     ///
@@ -214,16 +254,10 @@ final class ImageCompareView: NSView {
         modeChip.configure(symbolName: Self.symbol(for: mode), title: Self.name(for: mode))
     }
 
-    /// The chip names the answer — which comparison is on — not the setting.
-    static func name(for mode: ImageCompareMode) -> String {
-        switch mode {
-        case .wipeHorizontal: return L10n.string("Wipe ↔")
-        case .wipeVertical: return L10n.string("Wipe ↕")
-        case .fade: return L10n.string("Fade")
-        case .difference: return L10n.string("Difference")
-        case .sideBySide: return L10n.string("Side by Side")
-        }
-    }
+    /// The chip names the answer — which comparison is on — not the setting. The words are the
+    /// mode's own (`ImageCompareMode.title`), so an exported comparison labels its buttons with
+    /// the same ones.
+    static func name(for mode: ImageCompareMode) -> String { mode.title }
 
     private static func symbol(for mode: ImageCompareMode) -> String {
         switch mode {

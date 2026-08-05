@@ -9,14 +9,56 @@ import AppKit
 /// See `Design` for the vocabulary this belongs to.
 final class ChipView: ThemedControl {
 
+    private enum ClassicLayout {
+        static let edge: CGFloat = 2
+        static let arrowWidth: CGFloat = 18
+        static let textInset: CGFloat = 5
+        static let triangleWidth: CGFloat = 7
+        static let triangleHeight: CGFloat = 4
+    }
+
+    enum HeightStyle {
+        /// A compact chooser among other compact controls.
+        case compact
+        /// A chooser sharing a row with a single-line text field.
+        case field
+
+        fileprivate var value: CGFloat {
+            switch self {
+            case .compact: return Design.Size.chipHeight
+            case .field: return Design.Size.fieldHeight
+            }
+        }
+    }
+
     // MARK: - Properties
 
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let chevronView = NSImageView()
+    private let contentStack = NSStackView()
+    private var contentLeadingConstraint: NSLayoutConstraint?
+    private var contentTrailingConstraint: NSLayoutConstraint?
+    private var configuredIcon: NSImage?
+    private var appliedChoiceStyle: AppTheme.Material.ChoiceStyle?
 
-    private var isPresentingMenu = false { didSet { updateBackground() } }
+    private var isPresentingMenu = false {
+        didSet {
+            updateBackground()
+            needsDisplay = true
+        }
+    }
     private var menuSession: AnyObject?
+    private var heightConstraint: NSLayoutConstraint?
+
+    var heightStyle: HeightStyle = .compact {
+        didSet {
+            guard heightStyle != oldValue else { return }
+            heightConstraint?.constant = heightStyle.value
+            invalidateIntrinsicContentSize()
+            updateBackground()
+        }
+    }
 
     /// Widens the chip to its full contents while hovered, so a label truncated to fit the row
     /// (`Default m…`) becomes readable. Held so it can be removed on exit.
@@ -36,8 +78,12 @@ final class ChipView: ThemedControl {
     var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Design.Size.chipHeight)
+        NSSize(width: NSView.noIntrinsicMetric, height: heightStyle.value)
     }
+
+    /// A neighbouring reading can align to the title's ink rather than the pill's geometric
+    /// centre. The icon and chevron do not define a text baseline.
+    var contentFirstBaselineAnchor: NSLayoutYAxisAnchor { titleLabel.firstBaselineAnchor }
 
     override var isEnabled: Bool {
         didSet { updateBackground() }
@@ -48,6 +94,18 @@ final class ChipView: ThemedControl {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
+    }
+
+    /// ThemeRedraw invalidates drawing, while a chooser style also changes which children take
+    /// part and how much trailing room the independent arrow button owns.
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        needsLayout = true
+    }
+
+    override func layout() {
+        updateChoiceStyleIfNeeded()
+        super.layout()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -67,7 +125,8 @@ final class ChipView: ThemedControl {
     private func setupViews() {
         applySurface(
             fill: Design.Surface.controlResting,
-            radius: .pill(height: Design.Size.chipHeight)
+            radius: .pill(height: heightStyle.value),
+            controlGlow: true
         )
 
         iconView.imageScaling = .scaleProportionallyDown
@@ -91,24 +150,39 @@ final class ChipView: ThemedControl {
         titleLabel.setAccessibilityElement(false)
         chevronView.setAccessibilityElement(false)
 
-        let stack = NSStackView(views: [iconView, titleLabel, chevronView])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = Design.Spacing.tight + 1
-        stack.setCustomSpacing(Design.Spacing.tight, after: titleLabel)
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        for view in [iconView, titleLabel, chevronView] {
+            contentStack.addArrangedSubview(view)
+        }
+        contentStack.orientation = .horizontal
+        contentStack.alignment = .centerY
+        contentStack.spacing = Design.Spacing.tight + 1
+        contentStack.setCustomSpacing(Design.Spacing.tight, after: titleLabel)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(stack)
+        addSubview(contentStack)
 
+        let heightConstraint = heightAnchor.constraint(equalToConstant: heightStyle.value)
+        self.heightConstraint = heightConstraint
+        let leading = contentStack.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: Design.Spacing.medium
+        )
+        let trailing = contentStack.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -Design.Spacing.medium
+        )
+        contentLeadingConstraint = leading
+        contentTrailingConstraint = trailing
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
+            leading,
+            trailing,
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightConstraint,
             iconView.widthAnchor.constraint(equalToConstant: Design.Symbol.control),
             iconView.heightAnchor.constraint(equalToConstant: Design.Symbol.control)
         ])
 
+        updateChoiceStyleIfNeeded()
         updateBackground()
     }
 
@@ -127,8 +201,9 @@ final class ChipView: ThemedControl {
 
     /// The image variant, for marks that are not SF Symbols — an agent's brand icon.
     func configure(icon: NSImage?, title: String) {
+        configuredIcon = icon
         iconView.image = icon
-        iconView.isHidden = icon == nil
+        iconView.isHidden = icon == nil || choiceStyle == .dropdown
         titleLabel.stringValue = title
         toolTip = title
     }
@@ -262,15 +337,107 @@ final class ChipView: ThemedControl {
     /// it directly left the resting fill recorded forever, and a chip hovered while the theme
     /// changed was swept back to resting under the pointer until the mouse moved again.
     private func updateBackground(focused explicitFocus: Bool? = nil) {
+        updateChoiceStyleIfNeeded()
         let focused = explicitFocus ?? (window?.firstResponder === self)
-        applySurface(
-            fill: isHovered || isPresentingMenu
-                ? Design.Surface.controlHover
-                : Design.Surface.controlResting,
-            radius: .pill(height: Design.Size.chipHeight),
-            border: focused ? Design.Surface.accent : nil
-        )
+        switch choiceStyle {
+        case .chip:
+            applySurface(
+                fill: isHovered || isPresentingMenu
+                    ? Design.Surface.controlHover
+                    : Design.Surface.controlResting,
+                radius: .pill(height: heightStyle.value),
+                border: focused ? Design.Surface.accent : nil,
+                controlGlow: true
+            )
+        case .dropdown:
+            // The editable/value half of a Win32 combo is a white sunken well. The arrow is a
+            // separate raised button drawn below, not a modern glyph floating in a gray pill.
+            applySurface(
+                fill: Design.Surface.field,
+                radius: .fixed(0),
+                bevel: .sunken
+            )
+        }
         alphaValue = isEnabled ? 1 : 0.5
+        needsDisplay = true
+    }
+
+    private var choiceStyle: AppTheme.Material.ChoiceStyle {
+        AppThemePalette.current.material(for: effectiveAppearance).choiceStyle
+    }
+
+    private func updateChoiceStyleIfNeeded() {
+        let style = choiceStyle
+        guard style != appliedChoiceStyle else { return }
+        appliedChoiceStyle = style
+
+        switch style {
+        case .chip:
+            titleLabel.applyFont(.control)
+            iconView.isHidden = configuredIcon == nil
+            chevronView.isHidden = false
+            contentLeadingConstraint?.constant = Design.Spacing.medium
+            contentTrailingConstraint?.constant = -Design.Spacing.medium
+        case .dropdown:
+            titleLabel.applyFont(.controlRegular)
+            // SF Symbols are a modern platform vocabulary. The native combo carries only its
+            // value and the small filled arrow; the menu rows remain free to carry their marks.
+            iconView.isHidden = true
+            chevronView.isHidden = true
+            contentLeadingConstraint?.constant = ClassicLayout.textInset
+            contentTrailingConstraint?.constant = -(
+                ClassicLayout.arrowWidth + ClassicLayout.textInset
+            )
+        }
+        invalidateIntrinsicContentSize()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard choiceStyle == .dropdown else { return }
+
+        let arrowRect = NSRect(
+            x: bounds.maxX - ClassicLayout.edge - ClassicLayout.arrowWidth,
+            y: ClassicLayout.edge,
+            width: ClassicLayout.arrowWidth,
+            height: max(0, bounds.height - ClassicLayout.edge * 2)
+        )
+        _ = ThemedSurface.draw(
+            arrowRect,
+            fill: Design.Surface.controlResting,
+            radius: 0,
+            bevel: isPresentingMenu ? .sunken : .automatic
+        )
+
+        let centre = NSPoint(x: arrowRect.midX, y: arrowRect.midY - 1)
+        let triangle = NSBezierPath()
+        triangle.move(to: NSPoint(
+            x: centre.x - ClassicLayout.triangleWidth / 2,
+            y: centre.y + ClassicLayout.triangleHeight / 2
+        ))
+        triangle.line(to: NSPoint(
+            x: centre.x + ClassicLayout.triangleWidth / 2,
+            y: centre.y + ClassicLayout.triangleHeight / 2
+        ))
+        triangle.line(to: NSPoint(x: centre.x, y: centre.y - ClassicLayout.triangleHeight / 2))
+        triangle.close()
+        Design.Text.label.setFill()
+        triangle.fill()
+
+        guard window?.firstResponder === self else { return }
+        let valueRect = NSRect(
+            x: ClassicLayout.textInset - 1,
+            y: ClassicLayout.edge + 2,
+            width: max(
+                0,
+                arrowRect.minX - ClassicLayout.textInset * 2
+            ),
+            height: max(0, bounds.height - ClassicLayout.edge * 2 - 4)
+        )
+        let focus = NSBezierPath(rect: valueRect)
+        focus.lineWidth = 1
+        focus.setLineDash([1, 1], count: 2, phase: 0)
+        Design.Text.label.setStroke()
+        focus.stroke()
     }
 
     /// Pins the chip to its full contents while hovered, so a label the row squeezed into an

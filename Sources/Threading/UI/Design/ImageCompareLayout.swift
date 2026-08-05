@@ -27,6 +27,22 @@ enum ImageCompareMode: String, CaseIterable, Codable {
         case .difference, .sideBySide: return false
         }
     }
+
+    /// What the mode is called wherever it is named — the chip on the surface, and the row of
+    /// buttons in an exported comparison.
+    ///
+    /// It lives on the mode rather than on the view because the export has no view: the page a
+    /// comparison is written to has to label its own modes, and reaching through `ImageCompareView`
+    /// for the words would put a main-actor hop in the middle of packaging a file.
+    var title: String {
+        switch self {
+        case .wipeHorizontal: return L10n.string("Wipe ↔")
+        case .wipeVertical: return L10n.string("Wipe ↕")
+        case .fade: return L10n.string("Fade")
+        case .difference: return L10n.string("Difference")
+        case .sideBySide: return L10n.string("Side by Side")
+        }
+    }
 }
 
 /// The geometry of one compare rendering, computed pure so it can be pinned by unit tests.

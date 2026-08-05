@@ -8,10 +8,20 @@ import AppKit
 /// is the only value any call site ever wanted; the ones that forgot were bugs waiting
 /// for a styled theme to expose them.
 ///
-/// Selection is deliberately *not* claimed: an unemphasized source-list row's fill and the
-/// emphasized accent are system behaviours the sidebar already curates per row
-/// (`applyTextColors`), and a second owner for the same pixels is how the first one broke.
+/// Selection is not claimed *here*, because a list's rows are the only thing that can draw it:
+/// see `ThemedTableRowView`, which a list hands back from `rowViewForRow:` and the sidebar
+/// answers its own way. How *strongly* they draw it is this file's, and every list's:
+/// `ListSelectionStrength`.
 class ThemedTableView: NSTableView, ThemedComponent {
+
+    private lazy var selectionStrength = ListSelectionStrength(self)
+
+    /// See `ListSelectionStrength.fixtureIsKey`. Restated on both classes rather than shared,
+    /// for the reason `ThemedOutlineView` gives: `NSOutlineView` is already an `NSTableView`.
+    var fixtureIsKey: Bool? {
+        get { selectionStrength.fixtureIsKey }
+        set { selectionStrength.fixtureIsKey = newValue }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -21,6 +31,28 @@ class ThemedTableView: NSTableView, ThemedComponent {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        selectionStrength.apply()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        selectionStrength.followWindow()
+    }
+
+    /// See `ThemedTableRowDefaults.rowView(for:from:owner:)` — this is where a list that says
+    /// nothing about selection still gets the theme's row.
+    override func makeView(
+        withIdentifier identifier: NSUserInterfaceItemIdentifier,
+        owner: Any?
+    ) -> NSView? {
+        ThemedTableRowDefaults.rowView(
+            for: identifier,
+            recycling: super.makeView(withIdentifier: identifier, owner: owner)
+        )
     }
 
     override func validateProposedFirstResponder(
@@ -33,6 +65,205 @@ class ThemedTableView: NSTableView, ThemedComponent {
             return true
         }
         return super.validateProposedFirstResponder(responder, for: event)
+    }
+}
+
+// MARK: - Selection Strength
+
+/// **A list draws its selection at the strength of its window, never of the focus inside it.**
+///
+/// AppKit's rule is the other one: `NSTableRowView.isEmphasized` follows the *first responder*,
+/// so a list that does not hold focus shows the quiet fill — a flat grey under **System**, and
+/// whatever each theme holds back for `accentMuted` elsewhere. That is right for an app where a
+/// click leaves focus in the list it landed in, and this is not one. Selecting a session attaches
+/// its controller and calls `focusTerminal`, so the row a click had just selected was demoted a
+/// turn later, into a fill a hair from the hover wash; the second click selected nothing new,
+/// presented no session, took no focus, and was the one that appeared to work. *First tap hovers,
+/// second tap selects*, for a pane that had been showing the right session since the first.
+///
+/// It is the second report of one defect. `ThemedIconButton.mouseDown` used to take first
+/// responder, which recoloured a **different** row's selection and read as random (see
+/// `design-system.md`); that was fixed by having one control stop taking focus, which left every
+/// other way of taking it — the terminal, the composer, a web view, the next thing — still able
+/// to reintroduce it. So the rule is stated where it cannot be missed instead of defended at each
+/// place focus moves.
+///
+/// **Here is the last point every row passes through.** A row class cannot carry it: the row that
+/// gets this wrong is the one nobody wrote, since a delegate returning no row view is handed a
+/// plain `NSTableRowView`. `ThemedTableView` and `ThemedOutlineView`, by contrast, are provably
+/// every list in the app — subclassing `NSTableView` or `NSOutlineView` anywhere else fails
+/// `scripts/check_theme_boundaries.sh`, which is what makes this a construction rather than
+/// another fix. Rows stay dumb: they read `isEmphasized` and draw.
+@MainActor
+final class ListSelectionStrength {
+
+    /// Key state stated by a fixture. An unshown test window is never key, and the emphasized
+    /// selection is the state worth asserting, so without this the rule is unrenderable outside
+    /// a window ordered on screen — which `Threading-Fast` is built to avoid.
+    var fixtureIsKey: Bool? {
+        didSet { apply() }
+    }
+
+    private weak var table: NSTableView?
+    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+
+    init(_ table: NSTableView) {
+        self.table = table
+    }
+
+    deinit {
+        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// Re-asserted from `viewWillDraw`, which is the last moment before any row of this list
+    /// paints and therefore the one place that covers every way a row can arrive demoted: AppKit
+    /// lowering all of them when the list resigns, and a row built later while scrolling. Rows
+    /// already holding the right answer are left alone, so this costs a comparison per visible
+    /// row and no invalidation.
+    func apply() {
+        guard let table else { return }
+
+        let emphasized = drawsAsKey
+        table.enumerateAvailableRowViews { row, _ in
+            guard row.isEmphasized != emphasized else { return }
+            row.isEmphasized = emphasized
+        }
+    }
+
+    /// The window's own transitions, which nothing else would repaint: to AppKit an unfocused
+    /// list is unemphasized before and after its window comes back, so it has no change to report
+    /// and no row to invalidate. Applied directly rather than by invalidating the list, because
+    /// raising a row's emphasis is what marks that row for display.
+    func followWindow() {
+        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
+        windowStateObservations = []
+
+        defer { apply() }
+        guard let window = table?.window else { return }
+
+        for name in [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didResignKeyNotification
+        ] {
+            windowStateObservations.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.apply() }
+            })
+        }
+    }
+
+    /// A list with no window yet draws its key form, the same answer `WindowChromeButton` gives:
+    /// a fixture is not a background window.
+    private var drawsAsKey: Bool {
+        guard let window = table?.window else { return fixtureIsKey ?? true }
+        return fixtureIsKey ?? window.isKeyWindow
+    }
+}
+
+// MARK: - Row
+
+/// The row a themed list is selected in, replacing the plain `NSTableRowView` AppKit builds for
+/// a list whose delegate hands back none.
+///
+/// AppKit's selection is the **system** accent — blue on nearly every Mac, and read from the
+/// user's settings rather than from the window — so a list that says nothing lights a stock blue
+/// bar in the middle of a themed pane. Reported against the attachments pane, whose lavender
+/// window had a Finder-blue row in it; nothing there had claimed selection, and nothing had to
+/// for the blue to appear. Every list that leaves the question alone has the same defect, which
+/// is why the answer is a component rather than a fix at one call site.
+///
+/// The fill is the theme's `selection` role — the accent held far enough back that the row's own
+/// label tiers still read over it, so a row states its selection without restating its contents.
+/// That is deliberately *not* the sidebar's answer — `SidebarHoverRowView` fills with the accent
+/// at full strength, because the selected session is the window's subject and a list inside a pane
+/// answering at the same strength would put two selections in one window with equal weight.
+///
+/// **"Held far enough back" was a description, and is now a construction.** It was true of every
+/// theme that happened to author a wash and false of the two that authored a near-opaque fill:
+/// Windows 98's 90% navy put the chrome's near-black label on it at 1.47:1, Platinum's 88% blue at
+/// 3.70:1. Nothing caught it because the row draws the fill and the *cells* are feature code —
+/// nine view controllers inking themselves from `Design.Text`, as anything on the chrome's ground
+/// should. `SelectionSurface.quiet` is the strength a surface takes when it cannot reach the ink
+/// of what it contains: it holds the authored fill back until that ink reads, and leaves themes
+/// that already kept the promise exactly as they were authored.
+///
+/// Under **System** it defers to `super` entirely, so the stock selection — the user's own
+/// accent, its emphasized and unemphasized strengths, its vibrancy — is untouched.
+class ThemedTableRowView: NSTableRowView, ThemedComponent {
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard !AppThemeLibrary.current.isSystem else {
+            return super.drawSelection(in: dirtyRect)
+        }
+        guard isSelected else { return }
+
+        // The ground is measured rather than assumed: the same row class is drawn in the
+        // attachments pane, in Git Review's file list and inside a settings sheet, and how far the
+        // fill has to be held back depends on what is under it. `resolvedGround` is the walk that
+        // already answers this for every other derived colour in the app.
+        SelectionSurface.quiet(over: resolvedGround()).fill.setFill()
+        selectionPath.fill()
+    }
+
+    /// The theme's control corner, inset just off the row's edges so the fill reads as a surface
+    /// the row is sitting on rather than as a band ruled across the list — and so a rounded
+    /// theme's corner has somewhere to turn. The same silhouette rule the sidebar's rows follow,
+    /// at a list's scale rather than a source list's.
+    private var selectionPath: NSBezierPath {
+        let shape = bounds.insetBy(
+            dx: ThemedTableRowDefaults.selectionInsetX,
+            dy: ThemedTableRowDefaults.selectionInsetY
+        )
+        let radius = Design.Radius.control(fitting: shape.size)
+        return NSBezierPath(roundedRect: shape, xRadius: radius, yRadius: radius)
+    }
+}
+
+enum ThemedTableRowDefaults {
+    /// Enough to keep the fill off the list's edges without pulling it in from the row's
+    /// content, which starts one `small` step in.
+    static let selectionInsetX: CGFloat = Design.Spacing.hairline
+    /// The same 1pt the sidebar's rows leave, so two consecutive selected rows read as two.
+    static let selectionInsetY: CGFloat = Design.Spacing.hairline / 2
+
+    /// AppKit's own key for a list's row view, held here because its Swift binding was obsoleted
+    /// in Swift 3 while the constant itself was not: `NSTableView.h` still declares
+    /// `NSTableViewRowViewKey` and still pins it to this string.
+    static let rowViewKey = NSUserInterfaceItemIdentifier("NSTableViewRowViewKey")
+
+    /// **Every list in this app selects through `ThemedTableRowView`, including the lists that
+    /// never say so.**
+    ///
+    /// A row view is *created*, not asked for: a delegate that returns nothing from
+    /// `rowViewForRow:` — or a list whose delegate has no such method at all — is handed a plain
+    /// `NSTableRowView`, which fills its selected row with the **system** accent. That was live
+    /// in four panes at once (see `ThemedTableRowView`), and not one of them contained a line to
+    /// review: the defect was the absence of one, which is the single thing a source lint cannot
+    /// see and a reviewer cannot read.
+    ///
+    /// So the answer is taken away from the call sites. AppKit asks
+    /// `makeView(withIdentifier:owner:)` for `rowViewKey` before falling back to its own class,
+    /// and `ThemedTableView`/`ThemedOutlineView` are provably every list in the app — subclassing
+    /// `NSTableView` or `NSOutlineView` anywhere else fails `scripts/check_theme_boundaries.sh`.
+    /// A delegate that *does* state a row still wins, because AppKit asks it first and only lands
+    /// here when it declines; that is what leaves the sidebar's louder row (`SidebarHoverRowView`)
+    /// alone while its unselectable headings quietly take this one.
+    ///
+    /// `recycling` is `super`'s answer, taken first so the reuse queue keeps working: after the
+    /// first screenful it hands back the rows this list already made, which are these.
+    static func rowView(
+        for identifier: NSUserInterfaceItemIdentifier,
+        recycling recycled: NSView?
+    ) -> NSView? {
+        if let recycled { return recycled }
+        guard identifier == rowViewKey else { return nil }
+
+        let row = ThemedTableRowView()
+        row.identifier = identifier
+        return row
     }
 }
 
@@ -111,6 +342,14 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
     /// an `NSMenu`, so the outline's part shrinks to resolving the row under the gesture.
     var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
 
+    private lazy var selectionStrength = ListSelectionStrength(self)
+
+    /// See `ListSelectionStrength.fixtureIsKey`.
+    var fixtureIsKey: Bool? {
+        get { selectionStrength.fixtureIsKey }
+        set { selectionStrength.fixtureIsKey = newValue }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
@@ -119,6 +358,28 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        selectionStrength.apply()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        selectionStrength.followWindow()
+    }
+
+    /// See `ThemedTableRowDefaults.rowView(for:from:owner:)` — this is where a list that says
+    /// nothing about selection still gets the theme's row.
+    override func makeView(
+        withIdentifier identifier: NSUserInterfaceItemIdentifier,
+        owner: Any?
+    ) -> NSView? {
+        ThemedTableRowDefaults.rowView(
+            for: identifier,
+            recycling: super.makeView(withIdentifier: identifier, owner: owner)
+        )
     }
 
     override func rightMouseDown(with event: NSEvent) {

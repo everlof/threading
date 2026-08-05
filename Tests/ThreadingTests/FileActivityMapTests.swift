@@ -122,6 +122,34 @@ final class FileActivityMapTests: XCTestCase {
         XCTAssertTrue(touches.allSatisfy { $0.kind == .edit })
     }
 
+    /// A patch written with CRLF endings still names the same files.
+    ///
+    /// Swift strings are sequences of grapheme clusters and `\r\n` is a **single** one, so
+    /// `split(separator: "\n")` finds no separator anywhere in a CRLF patch: the whole envelope
+    /// came back as one line, nothing matched a file header, and `paths` returned `[]` — not a
+    /// path with a stray carriage return, no path at all. `lines` collapsed the same way, so a
+    /// Codex edit rendered as an anonymous row with no diff, which is precisely the bug
+    /// `CodexPatch` was written to fix, reappearing for anything CRLF.
+    func testACRLFPatchNamesTheSameFilesAsAnLFOne() {
+        let patch = [
+            "*** Begin Patch",
+            "*** Update File: Sources/a.swift",
+            "@@",
+            "-old",
+            "+new",
+            "*** Add File: Sources/b.swift",
+            "+created",
+            "*** End Patch"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(
+            CodexPatch.paths(in: patch),
+            ["Sources/a.swift", "Sources/b.swift"],
+            "a carriage return survived onto the path"
+        )
+        XCTAssertEqual(CodexPatch.firstPath(in: patch), "Sources/a.swift")
+    }
+
     func testDirectoryLevelAndUnparsedToolsStaySilent() {
         // A Grep names a directory, not the files read inside it; a Bash command would need
         // the shell parsed. Guessing marks poisons the true ones.

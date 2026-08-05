@@ -223,13 +223,21 @@ final class ThemedProgressBar: NSView, ThemedComponent {
         themeRedraw = ThemeRedraw(self)
     }
 
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        invalidateIntrinsicContentSize()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Layout.height)
+        NSSize(
+            width: NSView.noIntrinsicMetric,
+            height: usesClassicProgress ? ThemedProgressDrawing.classicHeight : Layout.height
+        )
     }
 
     override func isAccessibilityElement() -> Bool { true }
@@ -240,6 +248,10 @@ final class ThemedProgressBar: NSView, ThemedComponent {
     override func accessibilityValue() -> Any? { min(max(progress, 0), 1) }
 
     override func draw(_ dirtyRect: NSRect) {
+        if usesClassicProgress {
+            drawClassicProgress()
+            return
+        }
         Design.Surface.controlResting.setFill()
         bounds.fill()
 
@@ -247,5 +259,58 @@ final class ThemedProgressBar: NSView, ThemedComponent {
         guard fraction > 0 else { return }
         Design.Surface.accent.setFill()
         NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height).fill()
+    }
+
+    /// The default Win32 progress control was a sunken trough filled with discrete blocks;
+    /// `PBS_SMOOTH` was an opt-in style. The material states that choice directly so a custom
+    /// nineties theme can request it without every hard-bevel system being mistaken for Win32.
+    private func drawClassicProgress() {
+        ThemedProgressDrawing.drawSegmented(
+            in: bounds,
+            fraction: progress,
+            tint: Design.Surface.accent
+        )
+    }
+
+    private var usesClassicProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .segmented
+    }
+}
+
+/// Shared classic progress anatomy. Usage meters used to bypass `ThemedProgressBar` and thereby
+/// kept drawing a modern navy pill under Windows 98 even after the theme had explicitly chosen
+/// segmented progress. Geometry lives here so every determinate gauge answers the same material.
+@MainActor
+enum ThemedProgressDrawing {
+    static let classicHeight: CGFloat = 14
+    private static let edge: CGFloat = 2
+    private static let segmentWidth: CGFloat = 7
+    private static let segmentGap: CGFloat = 2
+
+    static func drawSegmented(in bounds: NSRect, fraction: Double, tint: NSColor) {
+        _ = ThemedSurface.draw(
+            bounds,
+            fill: Design.Surface.controlResting,
+            radius: 0,
+            bevel: .sunken
+        )
+
+        let track = bounds.insetBy(dx: edge, dy: min(edge, bounds.height / 3))
+        let clamped = min(max(fraction, 0), 1)
+        guard clamped > 0, track.width > 0, track.height > 0 else { return }
+        let limit = track.minX + track.width * clamped
+        let stride = segmentWidth + segmentGap
+        tint.setFill()
+
+        var x = track.minX
+        while x + segmentWidth / 2 <= limit {
+            NSRect(
+                x: x,
+                y: track.minY,
+                width: min(segmentWidth, track.maxX - x),
+                height: track.height
+            ).fill()
+            x += stride
+        }
     }
 }

@@ -65,22 +65,6 @@ enum ToastDefaults {
         NSLayoutConstraint.Priority.defaultLow.rawValue - 10
     )
 
-    /// The countdown rail: how thick it is, and how far its underside sits above the band's
-    /// bottom edge. It lives *inside* the band's bottom inset rather than under the content, so
-    /// showing the clock costs the band no height.
-    static let dwellRailThickness: CGFloat = 2
-    static let dwellRailBottomInset: CGFloat = Design.Spacing.tight
-
-    /// How much accent the rail carries.
-    ///
-    /// Held back, because a full-strength accent ruled across a card is a progress bar, and this
-    /// is a thing you are meant to notice only if you are already looking for it — the receipt's
-    /// words are what the band is for. At full strength under System it drew a saturated blue
-    /// line under two lines of grey text, which is the loudest thing on the sidebar reporting the
-    /// least. Increase Contrast takes the whole reduction back: a faint tint is the first thing
-    /// that preference exists to undo.
-    static let dwellRailOpacity: CGFloat = 0.5
-
     /// How many receipts may wait behind the one on screen.
     ///
     /// Bounded because the queue is measured in *dwells*: at four deep the last band arrives
@@ -89,6 +73,28 @@ enum ToastDefaults {
     /// action is the one the user has had longest to miss, and for the archive the way back is
     /// still in Settings, which is what the band's own detail line says.
     static let queueLimit = 3
+
+    /// How far each waiting receipt stands above the one in front of it.
+    ///
+    /// One step of the scale, because all that has to be visible is a card edge: a rule plus the
+    /// fill it carries is enough to read as another surface, and anything deeper spends the list
+    /// the band floats over on a thing nobody opened.
+    static let stackStep: CGFloat = Design.Spacing.tight
+
+    /// How much narrower each waiting receipt is than the one in front of it, per side.
+    ///
+    /// Stepped in on **both** sides. Offset in one direction it reads as a page sliding off a
+    /// desk — a band that is slipping — where the same card centred behind the front one reads
+    /// as the next in a deck, which is what it is.
+    static let stackInset: CGFloat = Design.Spacing.small
+
+    /// How many edges are drawn, however many are waiting.
+    ///
+    /// The stack answers *is this the only one*, not *how many*: two edges say another is coming
+    /// and a third is a distinction nobody counts at a glance. It is also the only honest answer
+    /// — the queue is bounded and drops from the front when a burst overruns it, so a depth read
+    /// as a count would be promising receipts the queue has already thrown away.
+    static let stackDepth = 2
 }
 
 // MARK: - Request
@@ -269,13 +275,19 @@ final class ToastView: NSView {
     // MARK: - The Clock, Drawn
 
     /// Starts the countdown the band shows for its own dwell, from full.
-    ///
-    /// From full rather than from where it stopped, because that is what the clock behind it
-    /// does: releasing a held band schedules a *fresh* dwell rather than the remainder of the
-    /// old one, and a rail resuming from a third full would promise less time than the band has.
     func startDwell(_ duration: TimeInterval) {
         isDwellRunning = true
         dwellRail.run(for: duration)
+    }
+
+    /// Picks the countdown back up where the pointer stopped it, over what is left of the clock.
+    ///
+    /// From where it stopped rather than from full, because that is what the clock behind it does:
+    /// releasing a held band schedules the remainder of its dwell rather than a fresh one, and a
+    /// rail refilling as the pointer leaves would promise time the band no longer has.
+    func resumeDwell(_ remaining: TimeInterval) {
+        isDwellRunning = true
+        dwellRail.resume(for: remaining)
     }
 
     /// Freezes the countdown where it stands — the pointer is on the band and its clock stopped.
@@ -351,15 +363,13 @@ final class ToastView: NSView {
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
 
-            // The rail runs under the words, aligned with their ink, and sits *in* the band's
-            // own bottom inset rather than in a row of its own: the clock says nothing the
-            // content says, so it must not make the band any taller than the receipt is.
-            dwellRail.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            dwellRail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            dwellRail.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -ToastDefaults.dwellRailBottomInset
-            )
+            // Flush to three edges, and no inset anywhere: the clock is the band's own bottom
+            // border, tinted, rather than a rule laid across the band's field. It sits *in* the
+            // band's bottom inset rather than in a row of its own, so it says nothing the
+            // content says and makes the band no taller than the receipt is.
+            dwellRail.leadingAnchor.constraint(equalTo: leadingAnchor),
+            dwellRail.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dwellRail.bottomAnchor.constraint(equalTo: bottomAnchor)
         ]
 
         var lastText: NSView = messageLabel
@@ -423,12 +433,24 @@ final class ToastView: NSView {
 
 // MARK: - Dwell Rail
 
-/// The band's clock, drawn: a hairline in the accent that empties as the dwell runs down.
+/// The band's clock, drawn: ordinarily the band's own bottom border in the accent, emptying as
+/// the dwell runs down. A material asking for segmented progress instead gets the native grammar
+/// of its period: a sunken block control. Windows exposed a separate smooth-progress style; its
+/// default control was blocks, so a one-pixel continuously shrinking line is explicitly the
+/// modern answer that a classic material should not inherit.
 ///
 /// A band that leaves on its own is the one surface in the window whose *remaining* time is
 /// worth knowing — the receipt is only useful while the way back is still on it, and without
 /// this the only way to learn how long that is was to lose it once. Drawn as a line rather than
 /// as a number because it is read at the edge of vision, on a band nobody opened.
+///
+/// **It rides the band's edge rather than floating in its padding.** Held a step in from three
+/// sides and a step up from the bottom, it was a rule between nothing and nothing — a stray
+/// underline beneath the way back, which is what it looked like it belonged to. Pinned flush and
+/// clipped to the band's own silhouette, it is a second edge on top of the first: the accent runs
+/// exactly where the border runs, curves into the corners the border curves into, and takes the
+/// weight the theme rules everything else at. What it leaves behind as it drains is the band's
+/// own border, which is why it needs no track drawn under it.
 ///
 /// It empties towards the leading edge, so the ink that is left is under the words rather than
 /// under the button: the last thing to disappear is beside the thing being reported.
@@ -442,10 +464,16 @@ private final class ToastDwellRail: NSView, ThemedComponent {
 
     private enum Animation {
         static let key = "dwell"
-        static let path = "transform.scale.x"
+        static let path = "strokeEnd"
     }
 
-    private let ink = CALayer()
+    private let ink = CAShapeLayer()
+
+    /// The band's silhouette, so the line's ends follow the corners the band's own border does.
+    ///
+    /// A mask rather than `masksToBounds` on the band: the band's rounded rect is the shape being
+    /// followed, and clipping the *band* to its bounds would take its glow with it.
+    private let silhouette = CALayer()
     private var themeRedraw: ThemeRedraw?
 
     // MARK: - Initialization
@@ -455,10 +483,16 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
 
-        // Anchored at the leading edge so scaling it down eats the line from the trailing end.
-        ink.anchorPoint = CGPoint(x: 0, y: 0.5)
-        ink.cornerCurve = .continuous
+        // CAShapeLayer fills paths black by default. This path is intentionally open — its only
+        // content is the stroked lower contour — so a fill would close the two tangents with a
+        // solid chord and paint the bottom third of the toast black.
+        ink.fillColor = nil
         layer?.addSublayer(ink)
+
+        silhouette.anchorPoint = CGPoint(x: 0, y: 0)
+        silhouette.cornerCurve = .continuous
+        silhouette.backgroundColor = NSColor.black.cgColor
+        layer?.mask = silhouette
 
         themeRedraw = ThemeRedraw(self)
         setAccessibilityElement(false)
@@ -475,8 +509,22 @@ private final class ToastDwellRail: NSView, ThemedComponent {
 
     // MARK: - Layout
 
+    /// Flat and ordinarily rounded themes need only two rules of height. A large-radius material
+    /// owns enough of the lower corner to follow it: the rail joins halfway around the
+    /// bottom-left corner, crosses the bottom edge, and leaves halfway around the bottom-right.
+    ///
+    /// `Design.Radius.border` rather than a thickness of its own, because a style states how
+    /// heavily it rules as surely as it states its palette — the same token `SeparatorView`
+    /// weighs itself with, and the reason a theme change remeasures this view (`ThemeRedraw`)
+    /// instead of only repainting it.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: ToastDefaults.dwellRailThickness)
+        if usesClassicProgress {
+            return NSSize(width: NSView.noIntrinsicMetric, height: Classic.height)
+        }
+        let height = followsPanelContour
+            ? Design.Radius.panel + contourWidth / 2
+            : Design.Radius.border * 2
+        return NSSize(width: NSView.noIntrinsicMetric, height: height)
     }
 
     override func layout() {
@@ -484,25 +532,148 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         // The model geometry only: a running drain is a transform on top of this, and assigning
         // bounds mid-animation would move the line without touching what it is scaling from.
         withoutImplicitAnimation {
-            ink.bounds = CGRect(origin: .zero, size: bounds.size)
-            ink.position = CGPoint(x: 0, y: bounds.midY)
-            // The pill token rather than half the height: a style that squares its cards squares
-            // this too, which is a point of difference at two points tall and the rule anyway.
-            ink.cornerRadius = Design.Radius.pill(height: bounds.height)
+            ink.frame = bounds
+            if usesClassicProgress {
+                layer?.mask = nil
+                let track = classicTrackRect
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: track.minX + Classic.edge, y: track.midY))
+                path.addLine(to: CGPoint(x: max(track.minX + Classic.edge, track.maxX - Classic.edge), y: track.midY))
+                ink.lineWidth = max(1, track.height - Classic.edge * 2)
+                ink.lineCap = .butt
+                ink.lineDashPattern = [
+                    NSNumber(value: Double(Classic.segmentWidth)),
+                    NSNumber(value: Double(Classic.segmentGap))
+                ]
+                ink.path = path
+                return
+            }
+            ink.lineDashPattern = nil
+            if followsPanelContour {
+                // A clay surface has no straight bottom edge from x=0 to x=width: both ends are
+                // corners. Stroke the actual lower outline so every fraction remains visible and
+                // the clock reads as part of the card rather than as a pill laid inside it.
+                layer?.mask = nil
+                ink.lineWidth = contourWidth
+                ink.lineCap = .round
+                ink.path = lowerContourPath
+                return
+            }
+
+            layer?.mask = silhouette
+            // A layer draws its border *above* its sublayers, so a line lying in the band's
+            // bottom rule would be painted out by the band's own edge. It sits one rule up,
+            // where the two together read as a single tinted border.
+            let rule = Design.Radius.border
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: rule * 1.5))
+            path.addLine(to: CGPoint(x: bounds.width, y: rule * 1.5))
+            ink.lineWidth = rule
+            ink.lineCap = .butt
+            ink.path = path
+
+            // Tall enough to carry the corner it is following. Only the bottom of this shape
+            // does any clipping; the rest stands above the line and touches nothing.
+            let radius = Design.Radius.panel
+            silhouette.bounds = CGRect(
+                x: 0,
+                y: 0,
+                width: bounds.width,
+                height: max(bounds.height, radius * 2)
+            )
+            silhouette.position = .zero
+            silhouette.cornerRadius = radius
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        ink.backgroundColor = inkColour.cgColor
+        if usesClassicProgress {
+            ThemedSurface.draw(
+                classicTrackRect,
+                fill: Design.Surface.controlResting,
+                radius: 0,
+                bevel: .sunken
+            )
+        }
+        ink.strokeColor = inkColour.cgColor
     }
 
-    /// The accent, held back — and handed over whole under Increase Contrast. Re-derived on every
-    /// redraw rather than stored, so a live theme switch takes the hue with it.
-    private var inkColour: NSColor {
-        let accent = Design.Surface.accent
-        guard !Design.Accessibility.increasesContrast else { return accent }
-        return accent.withAlphaComponent(ToastDefaults.dwellRailOpacity)
+    private enum Classic {
+        static let height: CGFloat = 14
+        static let horizontalInset: CGFloat = 3
+        static let verticalInset: CGFloat = 2
+        static let edge: CGFloat = 2
+        static let segmentWidth: CGFloat = 7
+        static let segmentGap: CGFloat = 2
     }
+
+    private var usesClassicProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .segmented
+    }
+
+    private var classicTrackRect: NSRect {
+        bounds.insetBy(dx: Classic.horizontalInset, dy: Classic.verticalInset)
+    }
+
+    private var followsPanelContour: Bool {
+        // The curved rail earns its height only on an intentionally large corner. At the
+        // ordinary 8–18 point radii it turned a small rounding decision into a coloured side
+        // stroke; those themes keep the compact bottom rule. Clay's 32-point card (and a custom
+        // material at the same scale) gives the contour enough room to read as part of the edge.
+        Design.Radius.panel >= Design.Spacing.large
+    }
+
+    private var contourWidth: CGFloat {
+        max(3, Design.Radius.border * 2)
+    }
+
+    /// The toast's lower outline, inset by half the stroke so the accent replaces its edge.
+    /// It joins each corner halfway around rather than climbing to the side tangent: tinting the
+    /// whole quarter-circle made a countdown look like a partial side border. The path order is
+    /// also the countdown order: `strokeEnd` retracts from the right corner towards the left.
+    private var lowerContourPath: CGPath {
+        let inset = contourWidth / 2
+        let outerRadius = min(
+            Design.Radius.panel,
+            max(0, min(bounds.width, bounds.height * 2) / 2)
+        )
+        let radius = max(0, outerRadius - inset)
+        let centreY = inset + radius
+        let leftCentre = CGPoint(x: inset + radius, y: centreY)
+        let rightCentre = CGPoint(x: max(leftCentre.x, bounds.width - inset - radius), y: centreY)
+
+        let path = CGMutablePath()
+        let leftStart = CGFloat.pi * 1.25
+        path.move(to: CGPoint(
+            x: leftCentre.x + cos(leftStart) * radius,
+            y: leftCentre.y + sin(leftStart) * radius
+        ))
+        path.addArc(
+            center: leftCentre,
+            radius: radius,
+            startAngle: leftStart,
+            endAngle: .pi * 1.5,
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rightCentre.x, y: inset))
+        path.addArc(
+            center: rightCentre,
+            radius: radius,
+            startAngle: .pi * 1.5,
+            endAngle: .pi * 1.75,
+            clockwise: false
+        )
+        return path
+    }
+
+    /// The accent, whole. Re-derived on every redraw rather than stored, so a live theme switch
+    /// takes the hue with it.
+    ///
+    /// It used to be held back to half strength, because a saturated line ruled across a card's
+    /// field is the loudest thing on a sidebar reporting the least. On the edge that reasoning
+    /// inverts: the line adds no ink the band was not already spending on its border, and half an
+    /// accent over a hairline is not a quieter clock, it is a smudged one.
+    private var inkColour: NSColor { Design.Surface.accent }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -513,8 +684,45 @@ private final class ToastDwellRail: NSView, ThemedComponent {
 
     /// Drains the rail over `duration`, from full.
     func run(for duration: TimeInterval) {
+        drain(from: 1, over: duration)
+    }
+
+    /// Drains what `hold` left standing over `duration` — the rest of a clock the pointer stopped.
+    ///
+    /// The line carries on from where it froze, at the pace it was going: the remainder it is
+    /// given is the remainder the timer is on, and both were read at the same instant.
+    func resume(for duration: TimeInterval) {
+        drain(from: heldFraction, over: duration)
+    }
+
+    /// Stops the rail where it stands, holding what is left of it on screen.
+    ///
+    /// The animation comes off whether or not there is a presentation layer to read it from: a
+    /// layer that has never been committed to the render server has nothing on screen to freeze,
+    /// and a drain left running on a clock that has stopped is the one outcome worth ruling out.
+    func hold() {
+        let held: Any = ink.presentation()?.value(forKeyPath: Animation.path) ?? heldFraction
         ink.removeAnimation(forKey: Animation.key)
-        withoutImplicitAnimation { ink.setValue(1, forKeyPath: Animation.path) }
+        let fraction = (held as? NSNumber)?.doubleValue ?? heldFraction
+        withoutImplicitAnimation { ink.strokeEnd = CGFloat(fraction) }
+    }
+
+    func stop() {
+        ink.removeAnimation(forKey: Animation.key)
+        isHidden = true
+    }
+
+    // MARK: - Private Methods
+
+    /// How much of the line is standing, per the model layer — which is where `hold` puts what it
+    /// froze, and what an uncommitted layer has instead of a presentation to read.
+    private var heldFraction: Double {
+        Double(ink.strokeEnd)
+    }
+
+    private func drain(from start: Double, over duration: TimeInterval) {
+        ink.removeAnimation(forKey: Animation.key)
+        withoutImplicitAnimation { ink.strokeEnd = CGFloat(start) }
 
         // Reduce Motion takes the rail away rather than freezing it full: a still line is not a
         // slower countdown, it is a band claiming a clock it is not showing. The dwell itself is
@@ -526,7 +734,7 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         isHidden = false
 
         let drain = CABasicAnimation(keyPath: Animation.path)
-        drain.fromValue = 1
+        drain.fromValue = start
         drain.toValue = 0
         drain.duration = duration
         // Linear: time passes at one speed, and an eased countdown reports a pace nothing has.
@@ -536,24 +744,6 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         ink.add(drain, forKey: Animation.key)
     }
 
-    /// Stops the rail where it stands, holding what is left of it on screen.
-    ///
-    /// The animation comes off whether or not there is a presentation layer to read it from: a
-    /// layer that has never been committed to the render server has nothing on screen to freeze,
-    /// and a drain left running on a clock that has stopped is the one outcome worth ruling out.
-    func hold() {
-        let held: Any = ink.presentation()?.value(forKeyPath: Animation.path) ?? 1
-        ink.removeAnimation(forKey: Animation.key)
-        withoutImplicitAnimation { ink.setValue(held, forKeyPath: Animation.path) }
-    }
-
-    func stop() {
-        ink.removeAnimation(forKey: Animation.key)
-        isHidden = true
-    }
-
-    // MARK: - Private Methods
-
     /// A layer animates every property it is handed unless told otherwise, and each of these
     /// assignments is a *correction* to what is on screen rather than a change to report.
     private func withoutImplicitAnimation(_ body: () -> Void) {
@@ -561,6 +751,47 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         CATransaction.setDisableActions(true)
         body()
         CATransaction.commit()
+    }
+}
+
+// MARK: - The Stack
+
+/// A receipt still waiting its turn, drawn as the edge of the card it is about to be.
+///
+/// Nothing with a way back on it may be thrown away to make room for the next report, so bursts
+/// queue (see `ToastPresenter.present`) — and until this, the queue was invisible. A band that
+/// was the only one and a band with three behind it looked exactly alike, so the only way to
+/// learn another was coming was to read one, watch it leave, and be handed a second: the user
+/// who turns away as the first band lands has no way to know they are turning away from more
+/// than one.
+///
+/// It is the **same card** as the band in front, a step up and a step in on either side, so all
+/// that shows of it is its top edge. Not a dimmed copy: what is behind the band is a receipt
+/// exactly like it, and the depth is carried by the offset and by the front band's own glow
+/// falling across it, which is where a card behind a card gets its depth anywhere else too.
+///
+/// It carries no words and takes no clicks — the receipt it stands for says its piece when its
+/// turn comes, which is also why nothing here is announced: VoiceOver is read each band as it
+/// arrives, so the stack is telling the eye what the ear is already promised.
+private final class ToastStackEdgeView: NSView {
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(false)
+
+        // No glow of its own: the band in front already casts one over the whole group, and a
+        // second shadow under a 4-point sliver is a smudge rather than a lift.
+        applySurface(
+            fill: Design.Surface.elevated,
+            radius: .panel,
+            border: Design.Surface.border
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 
@@ -596,8 +827,16 @@ final class ToastPresenter {
     /// the queue rather than by sitting through it.
     var queued: [ToastRequest] { pending }
 
+    /// The edges standing behind the band, front to back — one per waiting receipt, capped at
+    /// `ToastDefaults.stackDepth`. Readable for `queued`'s reason: what the stack says is state,
+    /// and a test should be able to ask for it rather than read it out of a picture.
+    private(set) var stackEdges: [NSView] = []
+
     /// The interval behind the current clock. Readable for the same reason as `queued`: choosing
     /// the request's dwell over the pane default is state, and tests should not sleep to infer it.
+    ///
+    /// After the pointer has held a band, this is what was *left* of its dwell rather than the
+    /// whole of it — see `holdOpen`.
     private(set) var scheduledDwell: TimeInterval?
 
     private weak var host: NSView?
@@ -605,6 +844,10 @@ final class ToastPresenter {
     private var bottomConstraint: NSLayoutConstraint?
     private var dismissal: Timer?
     private var pending: [ToastRequest] = []
+
+    /// What was left of the band's dwell when the pointer stopped its clock. Written when the
+    /// pointer arrives and spent when it leaves; nil whenever a clock is running.
+    private var heldRemainder: TimeInterval?
 
     // MARK: - Initialization
 
@@ -638,7 +881,9 @@ final class ToastPresenter {
     ///   arriving behind its own progress message is the case.
     ///
     /// The queue is bounded (`ToastDefaults.queueLimit`), because a receipt that surfaces most of
-    /// a minute after the click is news rather than a receipt.
+    /// a minute after the click is news rather than a receipt. What is waiting is **visible**:
+    /// each one stands behind the band as a card edge (`ToastStackEdgeView`), so a band with more
+    /// coming no longer looks like the last thing that happened.
     func present(_ request: ToastRequest) {
         guard host != nil else { return }
 
@@ -654,6 +899,7 @@ final class ToastPresenter {
         while pending.count > ToastDefaults.queueLimit {
             pending.removeFirst()
         }
+        refreshStack(animated: true)
     }
 
     /// Takes the current band away early — the action was taken, or what it reported no longer
@@ -661,18 +907,34 @@ final class ToastPresenter {
     func dismiss() {
         guard let toast = current else { return }
         stopClock()
+        toast.stopDwell()
         current = nil
+
+        // The stack leaves with the band it stands behind, and is handed to the departure rather
+        // than kept: its edges are pinned to a band that is on its way out, and the receipt
+        // arriving next builds its own from what is left waiting.
+        let leaving: [NSView] = [toast] + stackEdges
+        stackEdges = []
 
         bottomConstraint?.constant = -ToastDefaults.hostInset - ToastDefaults.rise
         let host = self.host
+        guard Design.Motion.vanish > 0 else {
+            leaving.forEach { $0.alphaValue = 0 }
+            host?.layoutSubtreeIfNeeded()
+            leaving.forEach { $0.removeFromSuperview() }
+            bottomConstraint = nil
+            showNext()
+            return
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.vanish
             context.allowsImplicitAnimation = true
-            toast.animator().alphaValue = 0
+            leaving.forEach { $0.animator().alphaValue = 0 }
             host?.layoutSubtreeIfNeeded()
-        }, completionHandler: { [weak self, weak toast] in
+        }, completionHandler: { [weak self, leaving] in
             MainActor.assumeIsolated {
-                toast?.removeFromSuperview()
+                leaving.forEach { $0.removeFromSuperview() }
+                if self?.current == nil { self?.bottomConstraint = nil }
                 // After the departure rather than during it: the next receipt sliding up through
                 // the one leaving is two bands on screen, which is the thing the queue exists to
                 // avoid.
@@ -690,6 +952,12 @@ final class ToastPresenter {
         current?.stopDwell()
         current?.removeFromSuperview()
         current = nil
+        removeStack()
+        // A stack handed to a departure is no longer this presenter's to name, and a pane being
+        // torn down must not have to wait out an animation to be rid of it.
+        host?.subviews
+            .compactMap { $0 as? ToastStackEdgeView }
+            .forEach { $0.removeFromSuperview() }
         bottomConstraint = nil
     }
 
@@ -743,14 +1011,24 @@ final class ToastPresenter {
             toast.widthAnchor.constraint(lessThanOrEqualToConstant: ToastDefaults.maxWidth)
         ])
 
-        toast.alphaValue = 0
+        // Built before the arrival rather than after it, so a band that is already the front of a
+        // queue rises with its stack behind it instead of growing one a frame later.
+        refreshStack(animated: false)
+
+        let arriving: [NSView] = [toast] + stackEdges
+        arriving.forEach { $0.alphaValue = 0 }
         host.layoutSubtreeIfNeeded()
 
         bottomConstraint.constant = -ToastDefaults.hostInset
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Design.Motion.appear
-            context.allowsImplicitAnimation = true
-            toast.animator().alphaValue = 1
+        if Design.Motion.appear > 0 {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Design.Motion.appear
+                context.allowsImplicitAnimation = true
+                arriving.forEach { $0.animator().alphaValue = 1 }
+                host.layoutSubtreeIfNeeded()
+            }
+        } else {
+            arriving.forEach { $0.alphaValue = 1 }
             host.layoutSubtreeIfNeeded()
         }
 
@@ -772,35 +1050,119 @@ final class ToastPresenter {
         current?.stopDwell()
         current?.removeFromSuperview()
         current = nil
+        removeStack()
         bottomConstraint = nil
+    }
+
+    /// Squares the stack behind the band with what is actually waiting.
+    ///
+    /// Grown from the front, because the z-order is the whole illusion: an edge added for a
+    /// receipt that arrived later belongs *behind* the ones already standing there, and
+    /// `addSubview(_:positioned:relativeTo:)` puts a view directly under whichever one it is
+    /// handed — so each new edge goes under the last, and the first goes under the band.
+    private func refreshStack(animated: Bool) {
+        guard let host, let toast = current else { return removeStack() }
+
+        let wanted = min(pending.count, ToastDefaults.stackDepth)
+        while stackEdges.count > wanted {
+            stackEdges.removeLast().removeFromSuperview()
+        }
+        guard stackEdges.count < wanted else { return }
+
+        var arrived: [NSView] = []
+        while stackEdges.count < wanted {
+            let depth = CGFloat(stackEdges.count + 1)
+            let edge = ToastStackEdgeView()
+            host.addSubview(edge, positioned: .below, relativeTo: stackEdges.last ?? toast)
+
+            // Pinned to the band's own two edges rather than given a height of its own: the card
+            // behind *is* the same card, lifted, so everything below the band's top edge is
+            // behind an opaque surface however tall the receipt in front turns out to be — and
+            // the theme's corner radius never has to be measured into a constant here.
+            NSLayoutConstraint.activate([
+                edge.topAnchor.constraint(
+                    equalTo: toast.topAnchor,
+                    constant: -ToastDefaults.stackStep * depth
+                ),
+                edge.bottomAnchor.constraint(
+                    equalTo: toast.bottomAnchor,
+                    constant: -ToastDefaults.stackStep * depth
+                ),
+                edge.leadingAnchor.constraint(
+                    equalTo: toast.leadingAnchor,
+                    constant: ToastDefaults.stackInset * depth
+                ),
+                edge.trailingAnchor.constraint(
+                    equalTo: toast.trailingAnchor,
+                    constant: -ToastDefaults.stackInset * depth
+                )
+            ])
+            stackEdges.append(edge)
+            arrived.append(edge)
+        }
+
+        // A fade rather than a slide: the band does not move when something lines up behind it,
+        // and an edge sliding out from under a receipt somebody is reading is motion drawing the
+        // eye away from the thing the motion is *about*.
+        guard animated, Design.Motion.appear > 0 else { return }
+        arrived.forEach { $0.alphaValue = 0 }
+        host.layoutSubtreeIfNeeded()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.appear
+            context.allowsImplicitAnimation = true
+            arrived.forEach { $0.animator().alphaValue = 1 }
+        }
+    }
+
+    /// Takes the stack away outright — the band it stood behind is going with no departure of its
+    /// own, or there is no band left to stand behind.
+    private func removeStack() {
+        stackEdges.forEach { $0.removeFromSuperview() }
+        stackEdges.removeAll()
     }
 
     /// Starts the band's clock, and the countdown it shows for it. One method, because a rail
     /// draining on a band whose timer says something else is worse than no rail at all.
+    ///
+    /// A band the pointer was holding picks its clock back up rather than starting a new one: the
+    /// dwell is the time a receipt gets to be read, and time spent reading it under the pointer is
+    /// that time being used. Restarting instead meant a pointer crossing the band on its way
+    /// somewhere else bought the receipt a whole second dwell, and a band leant on and released
+    /// twice never had to leave at all.
     private func scheduleDismissal() {
+        let resumed = heldRemainder
         stopClock()
         guard let current else { return }
-        let interval = current.request.dwell ?? dwell
+        let interval = resumed ?? (current.request.dwell ?? dwell)
         scheduledDwell = interval
         dismissal = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.dismiss() }
         }
-        current.startDwell(interval)
+        resumed == nil ? current.startDwell(interval) : current.resumeDwell(interval)
     }
 
     /// The pointer is on the band, so the clock stops: a way back that expires while it is being
     /// reached for is worse than no way back, because the reach is the moment the person has
     /// already decided.
+    ///
+    /// What was left of it is kept, because the pointer leaving is not a new receipt — the timer
+    /// is read for the remainder before it is cancelled, so the clock the band goes back on is
+    /// the one it came off.
     private func holdOpen() {
+        let remainder = dismissal.map { max(0, $0.fireDate.timeIntervalSinceNow) }
         stopClock()
+        heldRemainder = remainder
         current?.holdDwell()
     }
 
+    /// Ends the current clock outright. The remainder goes with it: what is kept across a pause is
+    /// written by `holdOpen` alone, so a band arriving after one cannot inherit it.
     private func stopClock() {
         dismissal?.invalidate()
         dismissal = nil
         scheduledDwell = nil
+        heldRemainder = nil
     }
 
     /// The band takes no focus and disappears by itself, so without this it is invisible to

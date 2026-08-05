@@ -47,6 +47,16 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         /// rather than taking a colour of its own — which on a filled primary is the only way
         /// to stay legible against the accent.
         static let shortcutAlpha: CGFloat = 0.7
+
+        /// Ordinary mixed-case ink, for finding where a title's band of ink sits in its face:
+        /// an ascender and a round letter, so the band runs from the overshoot just below the
+        /// baseline up to a lowercase ascender — which is what a button title actually inks.
+        ///
+        /// Measured from this rather than from the button's own title deliberately. Reading the
+        /// real title would put the chord somewhere different on "Apply" than on "Add", since a
+        /// descender drags the measured band down half a point, and a row of buttons would
+        /// disagree with itself.
+        static let opticalReference = "bo"
     }
 
     /// Where a plain symbol button's *title* starts, for a sibling row that carries no symbol
@@ -103,7 +113,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         didSet { contentChanged() }
     }
 
-    private var titleFont: NSFont { font ?? Design.Typography.control() }
+    private var buttonStyle: AppTheme.Material.ButtonStyle {
+        AppThemePalette.current.material(for: effectiveAppearance).buttonStyle
+    }
+
+    /// What is painted may follow a theme's display convention; what accessibility and the
+    /// action model expose remains the authored title below.
+    private var displayTitle: String {
+        switch buttonStyle.textTransform {
+        case .none: return title
+        case .uppercase: return title.uppercased()
+        }
+    }
+
+    private var titleFont: NSFont {
+        font ?? Design.Typography.button(style: buttonStyle)
+    }
 
     /// One set of attributes for measuring and for drawing, and a paragraph style that forbids
     /// wrapping. Without it `NSString.draw(in:)` wraps to the rect it is given, so a title
@@ -112,11 +137,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     private var titleAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        return [.font: titleFont, .foregroundColor: foreground, .paragraphStyle: paragraph]
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: foreground,
+            .paragraphStyle: paragraph
+        ]
+        if buttonStyle.tracking != 0 { attributes[.kern] = buttonStyle.tracking }
+        return attributes
     }
 
     private var titleWidth: CGFloat {
-        title.isEmpty ? 0 : ceil(title.size(withAttributes: [.font: titleFont]).width)
+        displayTitle.isEmpty ? 0 : ceil(displayTitle.size(withAttributes: titleAttributes).width)
     }
 
     /// The chord this button answers to, drawn on its face — `⌘↩` beside "Start session".
@@ -417,13 +448,41 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // ring around it, the same silhouette as the well underneath.
         let corner = appliedSurfaceRadius ?? Design.Radius.control(fitting: bounds.size)
 
+        // Clay's controls are separate lifted objects, not flat drawings on a lifted card. The
+        // material may state that tighter depth independently from the broad panel shadow; a
+        // pressed control drops the outer lift while the existing sunken drawing reports press.
+        let collapsesOnHover = isHovered && buttonStyle.collapseShadowOnHover
+        applyThemeControlGlow(isBordered && !isPressed && !collapsesOnHover, radius: corner)
+
+        // The hit target stays put while the face travels, exactly like the translated CSS
+        // control in the references. AppKit's Y axis points up, while the authored response
+        // uses screen/CSS coordinates where positive Y means down.
+        let offset = visualOffset
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        context?.translateBy(x: offset.x, y: -offset.y)
+        defer { context?.restoreGState() }
+
+        let raisedPrimary = isProminent && buttonStyle.primaryTreatment == .raised
+        let faceBounds = raisedPrimary ? bounds.insetBy(dx: 1, dy: 1) : bounds
+
+        // A Win32 default button is not a blue action. It is the same raised button face as its
+        // siblings, set apart by one additional dark frame around the bevel. The frame is always
+        // present because "default" is the dialog's action hierarchy, while the dotted inset
+        // below is keyboard focus and may move independently.
+        if raisedPrimary {
+            dimmed(primaryColor).setFill()
+            bounds.fill()
+        }
+
         let focusShape: ThemedSurface.Shape
         if isBordered {
             focusShape = ThemedSurface.draw(
-                bounds,
+                faceBounds,
                 fill: surfaceFill,
-                border: isProminent ? nil : Design.Surface.border,
-                radius: corner
+                border: surfaceBorder,
+                radius: corner,
+                bevel: isPressed ? .sunken : .automatic
             )
         } else if isHovered || isPressed {
             // A plain button carries no surface at rest and lifts under the pointer — the design
@@ -440,12 +499,32 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             focusShape = ThemedSurface.Shape(rect: bounds, radius: corner)
         }
 
-        drawKeyboardFocus(
-            around: focusShape,
-            color: isProminent ? Design.Text.selected : Design.Surface.accent
-        )
+        // A prominent button keeps a band of its own fill outside the ring. Stroked on the edge,
+        // the way a bordered button's is, the ring replaces the outermost points of the accent
+        // with `Text.selected` — a near-ground tone, by definition — so the fill ends 2pt in on
+        // every side and the pill reads 4pt shorter and 4pt narrower than the secondary beside
+        // it. That is what a quit dialog looked like: Cancel and Quit, plainly different sizes,
+        // on every theme, with nothing in the picture saying "focus". A bordered button asks for
+        // no band, because the edge its ring lands on is a hairline rather than the surface.
+        if raisedPrimary {
+            drawClassicKeyboardFocus(in: faceBounds)
+        } else {
+            // In the tone the title is already cut from, because that tone is the one measured to
+            // read on this button's own face. Stroking the ring in `primaryColor` instead — the
+            // colour of the *fill* on a filled primary — is a ring painted on itself: the band
+            // above kept the silhouette honest and the ring inside it then disappeared, so a
+            // focused Quit and an unfocused one were the same picture.
+            drawKeyboardFocus(
+                around: focusShape,
+                color: isProminent ? foreground : Design.Surface.accent,
+                keepingEdge: isProminent ? Design.Accessibility.focusRingWidth : 0
+            )
+        }
 
-        let content = bounds.insetBy(dx: isBordered ? Layout.titleInset : Layout.plainInset, dy: 0)
+        let content = faceBounds.insetBy(
+            dx: isBordered ? Layout.titleInset : Layout.plainInset,
+            dy: 0
+        )
         let titleWidth = self.titleWidth
         let imageWidth = image == nil ? 0 : Layout.imageSize
         let gap = titleWidth > 0 && imageWidth > 0 ? Layout.imageTitleGap : 0
@@ -472,8 +551,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // under a serif theme family the bounding rect runs several points taller and every
         // title quietly sat that much above centre.
         let height = lineHeight(of: titleFont)
+        let titleTop = content.midY + height / 2
 
-        if !title.isEmpty {
+        if !displayTitle.isEmpty {
             // Drawn into whatever is left rather than into the measured width, so a squeezed
             // button truncates instead of wrapping — and measured and drawn with the *same*
             // attributes, which is what went wrong first: measuring in the regular weight and
@@ -483,10 +563,10 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             // The chord keeps its own width out of that: a hint is what the title truncates
             // *around*, never over.
             let available = max(0, content.maxX - x - shortcutWidth - shortcutGap)
-            (title as NSString).draw(
+            (displayTitle as NSString).draw(
                 in: NSRect(
                     x: x,
-                    y: content.midY - height / 2,
+                    y: titleTop - height,
                     width: available,
                     height: height
                 ),
@@ -497,10 +577,11 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
         guard shortcutWidth > 0 else { return }
         let shortcutHeight = lineHeight(of: shortcutFont)
+        let top = shortcutRectTop(titleTop: title.isEmpty ? nil : titleTop, centre: content.midY)
         (shortcutText as NSString).draw(
             in: NSRect(
                 x: x,
-                y: content.midY - shortcutHeight / 2 + shortcutOpticalDrop,
+                y: top - shortcutHeight,
                 width: max(0, content.maxX - x),
                 height: shortcutHeight
             ),
@@ -514,23 +595,51 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         ceil(font.ascender - font.descender + font.leading)
     }
 
-    /// How far below the line-box centre this chord's *ink* wants to sit.
+    /// Where the chord's drawing rect starts, so the hint reads as part of the title's line
+    /// rather than as a second thing floating beside it.
     ///
-    /// A chord is symbols, not prose: `↩` carries no descender and its arrow rides near the cap
-    /// line, so on the line box's centre it floats visibly high beside the title — the higher
-    /// the quieter the theme's font, since the glyph comes from a fallback face either way.
-    /// Measuring the drawn line's path bounds centres what is actually inked; for a lettered
-    /// chord like `⌘K` the correction is a fraction of a point, so nothing else moves.
-    private var shortcutOpticalDrop: CGFloat {
-        let text = shortcutText
-        guard !text.isEmpty else { return 0 }
+    /// Two corrections, and both were arrived at by rendering the thing and looking at it.
+    ///
+    /// **The baseline.** `NSString.draw(in:)` sets its line down from the rect's *top* by the
+    /// layout manager's offset for the font it was handed. That offset is neither the ascender
+    /// nor `ceil` of it — under New York at 12pt it is 11 against an ascender of 11.43 — so it
+    /// is asked for rather than computed, and it answers for the **nominal** font, which is what
+    /// keeps a chord whose `⌘` and `↩` arrive from a fallback face landing where the theme's own
+    /// face says.
+    ///
+    /// **The drop.** A shared baseline is still not enough, because `⌘` is drawn a good deal
+    /// taller than the caps around it and stops short of the baseline, so all of that excess
+    /// sticks out of the top of the line. Under SF that is invisible — the title's own `t` and
+    /// `i` reach nearly as high — but under a serif face, whose ascenders are shorter, the hint
+    /// visibly floats. So the chord's band of ink is centred on the band a title inks, which
+    /// costs SF a fifth of a point and a serif theme three fifths, matching what the eye wants
+    /// in both.
+    ///
+    /// A `nil` title has no line to join, so its chord centres its ink on the button instead.
+    private func shortcutRectTop(titleTop: CGFloat?, centre: CGFloat) -> CGFloat {
+        let manager = NSLayoutManager()
+        let chord = inkBand(of: shortcutText, in: shortcutFont)
+        let baseline: CGFloat
+        if let titleTop {
+            let reference = inkBand(of: Layout.opticalReference, in: titleFont)
+            let drop = chord.map { $0.midY - (reference?.midY ?? $0.midY) } ?? 0
+            baseline = titleTop - manager.defaultBaselineOffset(for: titleFont) - drop
+        } else {
+            baseline = centre - (chord?.midY ?? 0)
+        }
+        return baseline + manager.defaultBaselineOffset(for: shortcutFont)
+    }
+
+    /// What a string actually inks, relative to its own baseline — the glyph paths rather than
+    /// the font's reserved extremes, since it is the ink that has to line up.
+    private func inkBand(of text: String, in font: NSFont) -> CGRect? {
+        guard !text.isEmpty else { return nil }
         let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: text, attributes: [.font: shortcutFont])
+            NSAttributedString(string: text, attributes: [.font: font])
         )
         let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-        guard !ink.isNull, ink.height > 0 else { return 0 }
-        let lineBoxCentre = (shortcutFont.ascender + shortcutFont.descender) / 2
-        return ink.midY - lineBoxCentre
+        guard !ink.isNull, ink.height > 0 else { return nil }
+        return ink
     }
 
     /// The hint's ink: the title's colour, stepped back rather than replaced — see
@@ -596,11 +705,40 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     private var surfaceFill: NSColor {
         if isProminent {
+            if buttonStyle.primaryTreatment == .raised {
+                return dimmed(Design.Surface.controlResting)
+            }
+            if buttonStyle.primaryTreatment == .outlined {
+                return isPressed || isHovered
+                    ? primaryColor.withAlphaComponent(1 - Layout.pressedDim)
+                    : .clear
+            }
             return isPressed || isHovered
-                ? Design.Surface.accent.withAlphaComponent(Layout.pressedDim)
-                : Design.Surface.accent
+                ? primaryColor.withAlphaComponent(Layout.pressedDim)
+                : primaryColor
         }
         return dimmed(isPressed || isHovered ? Design.Surface.controlHover : Design.Surface.controlResting)
+    }
+
+    private var surfaceBorder: NSColor? {
+        guard isProminent else { return Design.Surface.border }
+        if buttonStyle.primaryTreatment == .raised { return nil }
+        if buttonStyle.primaryTreatment == .outlined { return primaryColor }
+        return buttonStyle.primaryBorderRole.map(AppThemePalette.color)
+    }
+
+    private var primaryColor: NSColor {
+        AppThemePalette.color(buttonStyle.primaryRole)
+    }
+
+    private var visualOffset: NSPoint {
+        if isPressed {
+            return NSPoint(x: buttonStyle.pressedOffsetX, y: buttonStyle.pressedOffsetY)
+        }
+        if isHovered {
+            return NSPoint(x: buttonStyle.hoverOffsetX, y: buttonStyle.hoverOffsetY)
+        }
+        return .zero
     }
 
     /// The frame's horizontal padding around the title and glyph — the bordered shape's title
@@ -622,10 +760,30 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     private var foreground: NSColor {
         if let contentTintColor { return dimmed(contentTintColor) }
-        if isProminent { return dimmed(Design.Surface.ground) }
+        if isProminent {
+            if buttonStyle.primaryTreatment == .raised { return dimmed(Design.Text.label) }
+            if buttonStyle.primaryTreatment == .outlined { return dimmed(primaryColor) }
+            if buttonStyle.primaryRole == .accent { return dimmed(Design.Text.selected) }
+            return dimmed(Design.Text.on(primaryColor).label)
+        }
         // A plain button is a mark until it is wanted, so it rests in the secondary tier and
         // steps up on hover — the design system's "quiet until relevant", in one control.
         if !isBordered { return dimmed(isHovered ? Design.Text.label : Design.Text.secondary) }
         return dimmed(Design.Text.label)
+    }
+
+    /// Classic keyboard focus is a one-pixel dotted inset, not the accent-coloured rounded
+    /// outline used by current macOS controls. It sits inside the face, leaving both raised edge
+    /// and default-action frame intact.
+    private func drawClassicKeyboardFocus(in face: NSRect) {
+        guard hasKeyboardFocus else { return }
+        let rect = face.insetBy(dx: 4.5, dy: 4.5)
+        guard rect.width > 0, rect.height > 0 else { return }
+
+        let path = NSBezierPath(rect: rect)
+        path.lineWidth = 1
+        path.setLineDash([1, 1], count: 2, phase: 0)
+        dimmed(Design.Text.label).setStroke()
+        path.stroke()
     }
 }

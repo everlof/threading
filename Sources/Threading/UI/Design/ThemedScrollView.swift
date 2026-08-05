@@ -297,6 +297,50 @@ class ThemedClipView: NSClipView, ThemedComponent {
 /// Scrollers retain AppKit's behavior and presentation policy while `ThemedScroller` replaces
 /// their two drawing parts under an authored theme. System delegates those parts straight back
 /// to AppKit, so the identity theme remains genuinely native rather than an imitation.
+struct NestedScrollGestureRouter {
+    private enum Axis {
+        case horizontal
+        case vertical
+    }
+
+    private var axis: Axis?
+
+    /// Locks one trackpad gesture to the axis it began on, including its momentum tail.
+    ///
+    /// During momentum, content moves underneath a stationary pointer. AppKit can therefore
+    /// retarget later events from the conversation to a nested Markdown table or code block.
+    /// Re-deciding from every tiny tail delta lets horizontal noise consume the rest of a
+    /// vertical flick, which feels like the conversation hit an invisible stop.
+    mutating func forwardsToAncestor(
+        deltaX: CGFloat,
+        deltaY: CGFloat,
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase
+    ) -> Bool {
+        let phased = !phase.isEmpty || !momentumPhase.isEmpty
+        let beginsDirectGesture = phase.contains(.began)
+        if beginsDirectGesture || !phased || axis == nil {
+            if deltaX != 0 || deltaY != 0 {
+                axis = abs(deltaY) >= abs(deltaX) ? .vertical : .horizontal
+            }
+        }
+
+        let forwards = axis == .vertical
+        // A direct `.ended` commonly arrives before a separate momentum `.began`. Keep the
+        // axis across that seam; the next direct `.began` always replaces it when no momentum
+        // follows, while an unphased mouse-wheel event makes its own one-event decision above.
+        let ends = phase.contains(.cancelled)
+            || momentumPhase.contains(.ended)
+            || momentumPhase.contains(.cancelled)
+        if ends || !phased { axis = nil }
+        return forwards
+    }
+
+    mutating func reset() {
+        axis = nil
+    }
+}
+
 class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
     enum SurfaceRole {
@@ -325,6 +369,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// programmatic scrolls from being mistaken for the user leaving. Scroller-thumb drags
     /// never pass through `scrollWheel` — watch the live-scroll notifications for those.
     var onUserScroll: (() -> Void)?
+    private var nestedGestureRouter = NestedScrollGestureRouter()
     private let appEvents = AppEventObservations()
 
     override init(frame frameRect: NSRect) {
@@ -376,11 +421,16 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
     override func scrollWheel(with event: NSEvent) {
         if forwardsVerticalScrollToAncestor,
-           abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
-           let ancestorScrollView {
+           nestedGestureRouter.forwardsToAncestor(
+               deltaX: event.scrollingDeltaX,
+               deltaY: event.scrollingDeltaY,
+               phase: event.phase,
+               momentumPhase: event.momentumPhase
+           ), let ancestorScrollView {
             ancestorScrollView.scrollWheel(with: event)
             return
         }
+        if !forwardsVerticalScrollToAncestor { nestedGestureRouter.reset() }
 
         onUserScroll?()
         super.scrollWheel(with: event)

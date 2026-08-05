@@ -9,6 +9,19 @@ import XCTest
 /// outliving the thing it reports — so most of this file is the presenter rather than the view.
 /// Reduce Motion is forced on throughout, so the arrival and the departure take no time at all
 /// and the only waiting left in here is the dwell itself.
+///
+/// **Every test that sets a long `dwell` must end with `presenter.invalidate()`**, and this is
+/// not tidiness. The dwell is a real `Timer` on the main run loop. `deinit` cancels it, but
+/// `invalidate()`'s own documentation says why that is not enough here: AppKit may extend a
+/// local object's lifetime past its lexical scope while its layer work is committed, so a
+/// presenter left to fall out of scope can still be alive with a 30-second timer armed. What
+/// fires 30 seconds later fires inside whatever *other* test is running by then, against a
+/// fixture that has been torn down.
+///
+/// It read exactly like an environment problem: `ToastTests` dying mid-run with no crash report
+/// and no failing assertion, passing whenever it was run on its own, and naming a different test
+/// than the one that armed the timer. Four tests here already called `invalidate()`; five did
+/// not, and those five are the ones that set `dwell = 30`.
 @MainActor
 final class ToastTests: XCTestCase {
 
@@ -359,7 +372,7 @@ final class ToastTests: XCTestCase {
     /// Asserted on the clock rather than by waiting out the dwell: a test's pointer is wherever
     /// the developer left it, so the band's own staleness correction — right in the app, where
     /// the pointer really is on it — would take a synthesised hover straight back off again.
-    func testThePointerHoldsTheBandsClockAndReleasingItRestartsIt() throws {
+    func testThePointerHoldsTheBandsClockAndReleasingItPutsTheBandBackOnOne() throws {
         let (host, bottom, _) = pane()
         let presenter = ToastPresenter(host: host, above: bottom)
         presenter.dwell = 0.05
@@ -376,6 +389,42 @@ final class ToastTests: XCTestCase {
 
         waitForRunLoop(0.4)
         XCTAssertNil(presenter.current)
+    }
+
+    /// The pointer *pauses* the dwell rather than refunding it. A band released after being leant
+    /// on goes back on the clock it came off: crossing a receipt on the way somewhere else must
+    /// not buy it a second full dwell, and a band leant on twice would then never have to leave.
+    func testReleasingTheBandResumesItsClockRatherThanRestartingIt() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        XCTAssertEqual(presenter.scheduledDwell, 30)
+
+        let spent: TimeInterval = 0.3
+        waitForRunLoop(spent)
+        toast.mouseEntered(with: NSEvent())
+
+        // Held time is not spent time: were it charged, what is left below would be short by this
+        // as well, which is what tells the two apart.
+        let held: TimeInterval = 0.5
+        waitForRunLoop(held)
+        toast.mouseExited(with: NSEvent())
+
+        let resumed = try XCTUnwrap(presenter.scheduledDwell)
+        XCTAssertLessThan(
+            resumed,
+            presenter.dwell - spent / 2,
+            "the pointer leaving handed the band a fresh dwell"
+        )
+        XCTAssertGreaterThan(
+            resumed,
+            presenter.dwell - spent - held / 2,
+            "the band was charged for the time the pointer held it"
+        )
+        presenter.invalidate()
     }
 
     // MARK: - The clock, drawn
@@ -398,8 +447,9 @@ final class ToastTests: XCTestCase {
         XCTAssertTrue(toast.showsDwellCountdown, "what is left of the band's time vanished with it")
 
         toast.mouseExited(with: NSEvent())
-        XCTAssertTrue(toast.isDwellRunning, "the clock restarted and the rail did not")
+        XCTAssertTrue(toast.isDwellRunning, "the clock resumed and the rail did not")
         presenter.dismiss()
+        presenter.invalidate()
     }
 
     /// Under Reduce Motion the rail goes rather than freezing full: a still line is not a slower
@@ -415,6 +465,7 @@ final class ToastTests: XCTestCase {
         XCTAssertFalse(toast.showsDwellCountdown)
         XCTAssertTrue(toast.isDwellRunning, "Reduce Motion shortened the band's life instead")
         presenter.dismiss()
+        presenter.invalidate()
     }
 
     // MARK: - A burst
@@ -449,6 +500,7 @@ final class ToastTests: XCTestCase {
 
         try XCTUnwrap(buttons(in: second).first).performClick()
         XCTAssertEqual(undone, ["Two"], "the queue ran the wrong receipt's undo")
+        presenter.invalidate()
     }
 
     /// Nothing to lose, so nothing waits: the newer report is the one that describes the state
@@ -484,6 +536,127 @@ final class ToastTests: XCTestCase {
             "the newest receipt was the one dropped"
         )
         presenter.dismiss()
+        presenter.invalidate()
+    }
+
+    // MARK: - The stack
+
+    /// A band with something waiting behind it must not look like the last thing that happened.
+    /// The queue is why a receipt is never thrown away, and undrawn it is a promise nobody can
+    /// see: the user who turns away as the first band lands is turning away from more than one.
+    func testAWaitingReceiptStandsBehindTheBandAsACardEdge() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “One”"))
+        XCTAssertTrue(presenter.stackEdges.isEmpty, "a band with nothing behind it drew a stack")
+
+        presenter.present(archiveRequest(message: "Archived “Two”"))
+        host.layoutSubtreeIfNeeded()
+
+        let toast = try XCTUnwrap(presenter.current)
+        let edge = try XCTUnwrap(presenter.stackEdges.first)
+        XCTAssertEqual(presenter.stackEdges.count, 1, "one waiting receipt, one edge")
+        XCTAssertGreaterThan(
+            edge.frame.maxY,
+            toast.frame.maxY,
+            "the edge is entirely behind the band, so nothing says another is coming"
+        )
+        XCTAssertLessThan(
+            edge.frame.width,
+            toast.frame.width,
+            "the card behind is as wide as the one in front, which reads as one thick band"
+        )
+        XCTAssertEqual(
+            edge.frame.midX,
+            toast.frame.midX,
+            accuracy: 0.5,
+            "stepped in on one side only, the stack reads as a band slipping rather than a deck"
+        )
+
+        let order = host.subviews
+        XCTAssertLessThan(
+            try XCTUnwrap(order.firstIndex(of: edge)),
+            try XCTUnwrap(order.firstIndex(of: toast)),
+            "the waiting receipt drew over the one being read"
+        )
+        presenter.invalidate()
+    }
+
+    /// The stack answers *is this the only one*, not *how many* — and it is the only honest
+    /// answer, since the queue drops from the front when a burst overruns its bound.
+    func testTheStackStopsAtItsDepthHoweverManyAreWaiting() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        for index in 0...(ToastDefaults.queueLimit + 1) {
+            presenter.present(archiveRequest(message: "Archived “\(index)”"))
+        }
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(presenter.queued.count, ToastDefaults.queueLimit)
+        XCTAssertEqual(presenter.stackEdges.count, ToastDefaults.stackDepth)
+
+        // Each one further up and further in than the one in front of it, and behind it in the
+        // pane — three facts that are the same illusion.
+        let cards: [NSView] = [try XCTUnwrap(presenter.current)] + presenter.stackEdges
+        for (front, behind) in zip(cards, cards.dropFirst()) {
+            XCTAssertGreaterThan(behind.frame.maxY, front.frame.maxY)
+            XCTAssertLessThan(behind.frame.width, front.frame.width)
+            XCTAssertLessThan(
+                try XCTUnwrap(host.subviews.firstIndex(of: behind)),
+                try XCTUnwrap(host.subviews.firstIndex(of: front))
+            )
+        }
+        presenter.invalidate()
+    }
+
+    /// The stack thins as the queue does, and the last band stands alone — an edge left behind a
+    /// receipt with nothing after it promises a report that never arrives.
+    func testTheStackThinsAsTheQueueDoesAndLeavesWithTheLastBand() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        for index in 0..<3 {
+            presenter.present(archiveRequest(message: "Archived “\(index)”"))
+        }
+        XCTAssertEqual(presenter.stackEdges.count, 2)
+
+        presenter.dismiss()
+        waitForRunLoop(0.2)
+        XCTAssertEqual(presenter.current?.request.message, "Archived “1”")
+        XCTAssertEqual(presenter.stackEdges.count, 1, "the stack kept an edge for a receipt shown")
+
+        presenter.dismiss()
+        waitForRunLoop(0.2)
+        XCTAssertEqual(presenter.current?.request.message, "Archived “2”")
+        XCTAssertTrue(presenter.stackEdges.isEmpty)
+
+        presenter.dismiss()
+        waitForRunLoop(0.2)
+        XCTAssertNil(presenter.current)
+        XCTAssertEqual(host.subviews.count, 1, "the stack outlived every band it stood behind")
+        presenter.invalidate()
+    }
+
+    /// Teardown takes the stack with the band, synchronously — the presenter's own reason for
+    /// `invalidate()`, and the edges are pinned to a band that is about to stop existing.
+    func testTeardownTakesTheStackWithTheBand() {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “One”"))
+        presenter.present(archiveRequest(message: "Archived “Two”"))
+        XCTAssertEqual(presenter.stackEdges.count, 1)
+
+        presenter.invalidate()
+
+        XCTAssertTrue(presenter.stackEdges.isEmpty)
+        XCTAssertEqual(host.subviews.count, 1, "an edge was left standing behind nothing")
     }
 
     // MARK: - Helpers

@@ -190,7 +190,9 @@ private final class ThemedTextFieldCell: NSTextFieldCell {
     }
 
     /// The field editor is placed by these two, not by `drawingRect`, so text would jump on
-    /// click without them.
+    /// click without them — and coloured by them, for the reason `ThemedTextSelection` states:
+    /// the editor is AppKit's own view, shared between every field in the window, so the moment
+    /// it is handed over is the only place it can be told what a selection looks like here.
     override func select(
         withFrame rect: NSRect,
         in controlView: NSView,
@@ -203,6 +205,9 @@ private final class ThemedTextFieldCell: NSTextFieldCell {
             withFrame: adjusted(rect), in: controlView, editor: editor,
             delegate: delegate, start: start, length: length
         )
+        // *After* `super`, which is the whole subtlety: AppKit configures the shared editor as it
+        // hands it over, and anything said first is overwritten by the field it is being lent to.
+        ThemedTextSelection.apply(to: editor, in: controlView)
     }
 
     override func edit(
@@ -216,6 +221,7 @@ private final class ThemedTextFieldCell: NSTextFieldCell {
             withFrame: adjusted(rect), in: controlView, editor: editor,
             delegate: delegate, event: event
         )
+        ThemedTextSelection.apply(to: editor, in: controlView)
     }
 }
 

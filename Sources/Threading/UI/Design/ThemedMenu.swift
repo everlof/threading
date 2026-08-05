@@ -132,6 +132,12 @@ enum ThemedMenuPresenter {
               presentation.entries.contains(where: \.isItem)
         else { return nil }
 
+        // This overlay draws inside the window; a popover is a child window above it. One left
+        // open would cover the dropdown and eat the clicks meant for its rows, so opening a
+        // menu closes the popovers hanging off the same window — see
+        // `ThemedPopover.closeAll(presentedFrom:)`.
+        ThemedPopover.closeAll(presentedFrom: window)
+
         return ThemedMenuSession(
             presentation: presentation,
             source: source,
@@ -146,6 +152,15 @@ enum ThemedMenuPresenter {
 
     static func dismiss(_ token: AnyObject?) {
         (token as? ThemedMenuSession)?.close()
+    }
+
+    /// Whether a dropdown is up in `window` right now.
+    ///
+    /// A dropdown is a view rather than a window, so nothing about the window itself says one
+    /// is open — and `ThemedPopover`, which would draw over it, has to ask. Counted per open
+    /// session rather than read off the view tree, so a menu still fading out is already gone.
+    static func isMenuOpen(in window: NSWindow) -> Bool {
+        ThemedMenuSession.open.allObjects.contains { $0.window === window }
     }
 
     /// The press-drag-release idiom: the button went down on the source control and is still
@@ -218,15 +233,31 @@ extension ThemedMenuEntry {
 enum ThemedMenuLayout {
     static let gap: CGFloat = Design.Spacing.tight
     static let screenInset: CGFloat = Design.Spacing.small
-    static let maximumHeight: CGFloat = 360
+    /// The tallest panel a window may carry — a share of the window rather than a flat number.
+    /// The cap was a flat 360, set when the longest menu was half its eventual size; by the
+    /// time the session row's menu had grown, it overflowed that cap in every ordinarily sized
+    /// window, which made scrolling the *normal* state and put Delete Session below the fold
+    /// on every right-click. A menu's ceiling is the window it serves: a tall window shows the
+    /// whole list, and the floor keeps a cramped window exactly where the flat cap left it.
+    static let maximumHeightRatio: CGFloat = 0.75
+    static let maximumHeightFloor: CGFloat = 360
     static let maximumWidth: CGFloat = 440
 
+    static func maximumHeight(in bounds: NSRect) -> CGFloat {
+        max(maximumHeightFloor, bounds.height * maximumHeightRatio)
+    }
+
+    /// `whenClipped` is given the clamped height and answers with the one to use, which is how
+    /// a panel that cannot show every row ends on half a row instead of on a clean edge. It is
+    /// passed in rather than read from the entries so this stays plain geometry a test can call;
+    /// `ThemedMenuMetrics.clippedHeight(for:atMost:)` is what every caller hands it.
     static func frame(
         anchor: NSRect,
         desiredSize: NSSize,
         in bounds: NSRect,
         flipped: Bool,
-        gap: CGFloat = ThemedMenuLayout.gap
+        gap: CGFloat = ThemedMenuLayout.gap,
+        whenClipped: (CGFloat) -> CGFloat = { $0 }
     ) -> NSRect {
         let width = min(desiredSize.width, max(0, bounds.width - screenInset * 2))
         let x = min(
@@ -244,10 +275,13 @@ enum ThemedMenuLayout {
             roomAfter = anchor.minY - bounds.minY - gap - screenInset
         }
 
-        let opensAfter = roomAfter >= min(desiredSize.height, maximumHeight)
+        let opensAfter = roomAfter >= min(desiredSize.height, maximumHeight(in: bounds))
             || roomAfter >= roomBefore
         let available = max(0, opensAfter ? roomAfter : roomBefore)
-        let height = min(desiredSize.height, maximumHeight, available)
+        // The side is chosen against the clamped height, then the peek is taken out of it:
+        // shortening a panel never changes which side it had room on.
+        let clamped = min(desiredSize.height, maximumHeight(in: bounds), available)
+        let height = clamped < desiredSize.height ? whenClipped(clamped) : clamped
 
         let y: CGFloat
         if flipped {
@@ -274,7 +308,8 @@ enum ThemedMenuLayout {
         desiredSize: NSSize,
         in bounds: NSRect,
         flipped: Bool,
-        firstRowInset: CGFloat
+        firstRowInset: CGFloat,
+        whenClipped: (CGFloat) -> CGFloat = { $0 }
     ) -> NSRect {
         let width = min(desiredSize.width, maximumWidth, max(0, bounds.width - screenInset * 2))
         var x = parentPanel.maxX - submenuOverlap
@@ -283,11 +318,12 @@ enum ThemedMenuLayout {
         }
         x = min(max(x, bounds.minX + screenInset), bounds.maxX - screenInset - width)
 
-        let height = min(
+        let clamped = min(
             desiredSize.height,
-            maximumHeight,
+            maximumHeight(in: bounds),
             max(0, bounds.height - screenInset * 2)
         )
+        let height = clamped < desiredSize.height ? whenClipped(clamped) : clamped
         let y: CGFloat
         if flipped {
             y = min(
@@ -310,8 +346,14 @@ enum ThemedMenuLayout {
 @MainActor
 private final class ThemedMenuSession: NSObject {
 
+    /// The sessions currently up, which is how `ThemedMenuPresenter.isMenuOpen(in:)` answers
+    /// for a window. Weak, and dropped in `finish`, so the roster ends where the session does
+    /// rather than where its exit animation does. Held per session rather than per window
+    /// because a menu can be let go and a sibling's opened by the same click.
+    static let open = NSHashTable<ThemedMenuSession>.weakObjects()
+
     private weak var source: NSView?
-    private weak var window: NSWindow?
+    fileprivate weak var window: NSWindow?
     private let overlay: ThemedMenuOverlayView
     private let onChoose: (Int, ThemedMenuItem) -> Void
     private let onDismiss: () -> Void
@@ -355,7 +397,10 @@ private final class ThemedMenuSession: NSObject {
             desiredSize: NSSize(width: menuWidth, height: menuHeight),
             in: root.bounds,
             flipped: root.isFlipped,
-            gap: gap
+            gap: gap,
+            whenClipped: {
+                ThemedMenuMetrics.clippedHeight(for: presentation.entries, atMost: $0)
+            }
         )
         overlay = ThemedMenuOverlayView(
             frame: root.bounds,
@@ -366,6 +411,7 @@ private final class ThemedMenuSession: NSObject {
 
         super.init()
 
+        Self.open.add(self)
         overlay.menuSource = source
         overlay.onDismiss = { [weak self] in self?.closeFromUser() }
         overlay.onChoose = { [weak self] index, item in self?.choose(index: index, item: item) }
@@ -415,7 +461,7 @@ private final class ThemedMenuSession: NSObject {
 
     func dragUpdated(_ event: NSEvent) {
         guard !isClosed else { return }
-        overlay.dragHighlight(atWindowPoint: event.locationInWindow)
+        overlay.pointerHighlight(atWindowPoint: event.locationInWindow)
     }
 
     func dragEnded(_ event: NSEvent) {
@@ -447,6 +493,7 @@ private final class ThemedMenuSession: NSObject {
     private func finish(exit: ThemedMenuExit) {
         guard !isClosed else { return }
         isClosed = true
+        Self.open.remove(self)
         NotificationCenter.default.removeObserver(self)
         if let window, window.firstResponder === overlay, let source {
             window.makeFirstResponder(source)
@@ -513,6 +560,12 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// Where the pointer last was, in overlay coordinates — fed by `mouseMoved`, read by the
     /// safe-travel corridor and the close-grace check.
     private var lastPointerPoint: NSPoint?
+    /// Where the pointer stood, in window coordinates, when a panel last scrolled under it.
+    /// Scrolling delivers `mouseEntered` to whichever row slides under a stationary pointer —
+    /// the list's motion, not the hand's — and a highlight that walks the menu while the user
+    /// scrolls it is answering a question nobody asked. While this is set, rows may not take
+    /// the highlight from hover; the pointer buys it back by actually moving.
+    private var scrollFreezePoint: NSPoint?
     /// A pointer highlight held back while the pointer travels toward an open submenu,
     /// applied the moment the travel visibly stops being travel.
     private var pendingTravelHighlight: (column: Int, entry: Int)?
@@ -610,7 +663,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
         // A submenu is anchored to where its parent row was at open; a parent that scrolls
         // under it would leave the panel beside the wrong row, so scrolling closes deeper.
         surface.onScrolled = { [weak self] in
-            self?.closeColumns(from: index + 1)
+            self?.columnDidScroll(deeperThan: index)
         }
         columns.append(MenuColumn(
             host: host,
@@ -653,7 +706,30 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
     override func mouseMoved(with event: NSEvent) {
         lastPointerPoint = convert(event.locationInWindow, from: nil)
+        if let freeze = scrollFreezePoint,
+           hypot(event.locationInWindow.x - freeze.x, event.locationInWindow.y - freeze.y)
+               > ThemedMenuMotion.scrollHoverTolerance {
+            // The pointer moved for real after a scroll. Crossing into the row now under it
+            // fires no fresh `mouseEntered` — that row has believed itself hovered since the
+            // scroll delivered its enter — so the landing is re-answered from position.
+            scrollFreezePoint = nil
+            pointerHighlight(atWindowPoint: event.locationInWindow)
+        }
         resolveTravel()
+    }
+
+    /// A panel scrolled: its rows moved, the pointer did not. The freeze keeps hover from
+    /// claiming the highlight until the pointer visibly moves, the armed hover-open dies
+    /// because the row it was resting on is no longer where the rest happened, and deeper
+    /// panels close because the row they hang off has slid away from under them. The freeze
+    /// point is read at the scroll rather than from `lastPointerPoint`: a pointer that has
+    /// not moved since the menu opened has produced no `mouseMoved` to remember.
+    private func columnDidScroll(deeperThan index: Int) {
+        if let window {
+            scrollFreezePoint = window.mouseLocationOutsideOfEventStream
+        }
+        submenuOpenTimer?.invalidate()
+        closeColumns(from: index + 1)
     }
 
     /// A closing menu takes no more events. Hit testing alone does not cover tracking areas,
@@ -869,8 +945,12 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
     // MARK: - Press-Drag-Release Tracking
 
-    func dragHighlight(atWindowPoint point: NSPoint) {
+    /// Lands the highlight on the row under a window point — the press-drag browse, and the
+    /// re-landing after a scroll freeze ends, both of which know a position rather than a row.
+    /// Either caller *is* the pointer moving, so whatever freeze was standing is over.
+    func pointerHighlight(atWindowPoint point: NSPoint) {
         guard !isTearingDown else { return }
+        scrollFreezePoint = nil
         for (index, column) in columns.enumerated().reversed() {
             if let row = column.surface.row(underWindowPoint: point), row.item.isEnabled {
                 pointerHighlighted(columnIndex: index, entryIndex: row.entryIndex)
@@ -904,13 +984,13 @@ private final class ThemedMenuOverlayView: ThemedControl {
         chooseHighlighted()
     }
 
-    private func setHighlight(columnIndex: Int, entryIndex: Int?) {
+    private func setHighlight(columnIndex: Int, entryIndex: Int?, scrollIntoView: Bool = true) {
         // Tracking areas keep firing while the closed menu fades — hit testing does not
         // silence them — and a highlight moving on a menu that has already answered reads
         // as the menu still being open.
         guard !isTearingDown, columns.indices.contains(columnIndex) else { return }
         columns[columnIndex].highlightedIndex = entryIndex
-        columns[columnIndex].surface.highlight(entryIndex)
+        columns[columnIndex].surface.highlight(entryIndex, scrollIntoView: scrollIntoView)
         if let row = columns[columnIndex].surface.row(at: entryIndex) {
             NSAccessibility.post(element: row, notification: .focusedUIElementChanged)
         }
@@ -999,7 +1079,8 @@ private final class ThemedMenuOverlayView: ThemedControl {
             desiredSize: size,
             in: bounds,
             flipped: isFlipped,
-            firstRowInset: ThemedMenuMetrics.outerInset
+            firstRowInset: ThemedMenuMetrics.outerInset,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
         )
         let index = addColumn(
             entries: entries,
@@ -1077,6 +1158,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// back while the pointer is visibly on its way into the panel it already opened.
     private func pointerHighlighted(columnIndex: Int, entryIndex: Int) {
         guard !isTearingDown, columns.indices.contains(columnIndex) else { return }
+        // A row lit by the list scrolling under a still pointer is not a landing. The freeze
+        // ends only in `mouseMoved`, which re-answers the landing itself — so a suppressed
+        // enter is never the last word on where the pointer is.
+        guard scrollFreezePoint == nil else { return }
         // Every landing restates its own claim: whichever close was pending, the pointer has
         // just said something newer.
         submenuCloseTimer?.invalidate()
@@ -1111,7 +1196,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
     private func applyPointerHighlight(columnIndex: Int, entryIndex: Int) {
         pendingTravelHighlight = nil
         travelApex = nil
-        setHighlight(columnIndex: columnIndex, entryIndex: entryIndex)
+        // No scroll-into-view: a pointer highlight names a row already under the pointer, and
+        // nudging a half-visible row fully in moves the list under a hand that did not ask —
+        // during a wheel gesture it visibly fights the wheel.
+        setHighlight(columnIndex: columnIndex, entryIndex: entryIndex, scrollIntoView: false)
         scheduleOpenIfParent(columnIndex: columnIndex, entryIndex: entryIndex)
     }
 
@@ -1238,15 +1326,22 @@ enum ThemedMenuMetrics {
     /// the panel instead of grazing its border.
     static let outerInset: CGFloat = Design.Spacing.small
     static let rowHeight: CGFloat = 28
-    static let subtitleRowHeight: CGFloat = 42
+    /// Taller than the ink it holds, and deliberately so: a title and its subtitle are drawn as
+    /// one centred block, so everything above this beyond that block becomes the gap to the row
+    /// stacked against it. At 42 the two gaps came out ~18pt within a pair against ~24pt between
+    /// them and the pairs did not read as pairs; 46 buys a little over 2:1, which is the point at
+    /// which proximity does the grouping on its own — no rules, no alternating fill, both of
+    /// which would have fought the hover pill this row draws at full bleed.
+    static let subtitleRowHeight: CGFloat = 46
     /// How far a row's fill sits inside its own slot, so two *adjacent* filled rows are parted
     /// by a hairline rather than meeting.
     ///
     /// Rows are stacked edge to edge, and a fill drawn at the row's full height therefore shares
-    /// an edge with the row above it. One filled row never showed this; the account menu does,
-    /// where the checked account is filled and the pointer is on the row directly under it —
+    /// an edge with the row above it. One filled row never showed this; two adjacent ones did —
     /// the two capsules fused into a single pinched blob, with their corner radii reading as a
-    /// dent in one shape instead of the gap between two.
+    /// dent in one shape instead of the gap between two. A menu still gets there whenever a
+    /// parent row holds the menu path while the pointer is on the row directly under it, during
+    /// the grace its submenu is given to close.
     ///
     /// Half a hairline each side, so the gap the pair opens is the whole one. Same arithmetic,
     /// and the same 1pt, as the sidebar's `hoverHighlightInsetY`.
@@ -1325,15 +1420,51 @@ enum ThemedMenuMetrics {
         previewInset(hasImageColumn: hasImageColumn) + (hasPreviewColumn ? previewSlot : 0)
     }
 
-    static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
-        entries.reduce(outerInset * 2) { total, entry in
-            switch entry {
-            case .separator:
-                return total + separatorHeight
-            case .item(let item):
-                return total + (item.subtitle?.isEmpty == false ? subtitleRowHeight : rowHeight)
-            }
+    static func height(of entry: ThemedMenuEntry) -> CGFloat {
+        switch entry {
+        case .separator:
+            return separatorHeight
+        case .item(let item):
+            return item.subtitle?.isEmpty == false ? subtitleRowHeight : rowHeight
         }
+    }
+
+    static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
+        entries.reduce(outerInset * 2) { $0 + height(of: $1) }
+    }
+
+    /// The height to settle on when a panel cannot show every row: the tallest one within
+    /// `limit` that cuts a row across the middle.
+    ///
+    /// A clamped menu is free to land on a row boundary, and one that does looks like the whole
+    /// menu. The session row's menu grew past `ThemedMenuLayout.maximumHeight` and ended on a
+    /// clean edge, so Copy Session ID and Delete Session were simply not there as far as the
+    /// screen was concerned — the scroller only appears while the pointer is inside the panel,
+    /// which is too late to tell someone the list continues. Half a row is the signal that
+    /// reads before anything is touched, and it costs nothing but the half row.
+    ///
+    /// Only items are cut. A separator sliced down its middle reads as a stray rule against the
+    /// panel's edge rather than as a row with more below it, so one is carried whole into the
+    /// hidden part and the item above it does the peeking.
+    static func clippedHeight(for entries: [ThemedMenuEntry], atMost limit: CGFloat) -> CGFloat {
+        let budget = limit - outerInset * 2
+        var consumed: CGFloat = 0
+        var peeked: CGFloat?
+
+        for entry in entries {
+            let height = height(of: entry)
+            if case .item = entry {
+                let candidate = consumed + height / 2
+                guard candidate <= budget else { break }
+                peeked = candidate
+            }
+            consumed += height
+        }
+
+        // Nothing fits even half a row — a panel shortened to that would say less than the
+        // clamped one does. Keep the limit and let the scroller carry it.
+        guard let peeked else { return limit }
+        return peeked + outerInset * 2
     }
 
     static func width(for entries: [ThemedMenuEntry], minimum: CGFloat) -> CGFloat {
@@ -1377,6 +1508,11 @@ enum ThemedMenuMotion {
     /// actually on wins. Without a deadline, parking the pointer between panels would pin the
     /// menu to a highlight it has visibly left.
     static let safeTravelStall: TimeInterval = 0.35
+    /// How far the pointer must actually travel, after a panel has scrolled under it, before
+    /// hover may claim the highlight again. Scrolling hands `mouseEntered` to whichever row
+    /// slides under a stationary pointer; the tolerance is hysteresis for a physical mouse
+    /// nudged while its wheel turns, not an allowance for deliberate movement.
+    static let scrollHoverTolerance: CGFloat = 4
 }
 
 private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
@@ -1502,11 +1638,11 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         document.needsLayout = true
     }
 
-    func highlight(_ index: Int?) {
+    func highlight(_ index: Int?, scrollIntoView: Bool = true) {
         for (entryIndex, row) in rows {
             row.isKeyboardHighlighted = entryIndex == index
         }
-        if let row = row(at: index) {
+        if scrollIntoView, let row = row(at: index) {
             row.scrollToVisible(row.bounds)
         }
     }
@@ -1840,23 +1976,44 @@ private final class ThemedMenuRowView: ThemedControl {
         return alpha
     }
 
+    /// A text role at `contentAlpha`, **scaling** the role's own alpha rather than replacing it.
+    ///
+    /// `withAlphaComponent` sets alpha outright, so calling it with the 1 an ordinary enabled row
+    /// reports did not leave the colour alone — it overwrote whatever transparency the role
+    /// carried. Every label tier below `label` is defined *as* an alpha: `tertiaryLabel` is the
+    /// label colour at 0.45 in a styled theme and `NSColor.tertiaryLabelColor` at roughly 0.26
+    /// under the system one. Both arrived at the drawing call as fully opaque, so a menu's
+    /// subtitle was painted in exactly the title's black and the pair had only 1pt of size and
+    /// one weight step between them. That is most of why a subtitle row read as two titles.
+    ///
+    /// Multiplying also keeps a *dimmed* row dimmer than an enabled one, which replacing did not:
+    /// at `disabledDimming` the old call pushed a 0.26 subtitle up to 0.45.
+    private func ink(_ base: NSColor, _ alpha: CGFloat) -> NSColor {
+        guard alpha < 1 else { return base }
+        guard let resolved = base.usingColorSpace(.sRGB) else {
+            return base.withAlphaComponent(alpha)
+        }
+        return resolved.withAlphaComponent(resolved.alphaComponent * alpha)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        // Every fill takes the same silhouette: one shape, drawn at three strengths. The inset
+        // Every fill takes the same silhouette: one shape, drawn at two strengths. The inset
         // is what keeps a filled row off the one stacked against it.
         let fillRect = bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.fillInset)
 
+        // **A checked row is not a filled row.** The check states what is on; the fill states
+        // where the pointer or the keyboard is, and only one row can be that at a time. Painting
+        // both meant a menu of toggles came up three-quarters filled before it had been touched —
+        // and the role it filled with, `selection`, is the ground behind selected *text*: at
+        // Win98's near-opaque navy or the System theme's accent it read as three highlighted rows
+        // fighting the one the pointer was actually on.
+        //
         // The open-submenu fill is the menu path: the parent stays lit while the pointer is
         // anywhere in the chain it opened, which is what keeps a three-panel menu readable.
         if isKeyboardHighlighted || pressed || openSubmenuSurface != nil {
             ThemedSurface.draw(
                 fillRect,
                 fill: Design.Surface.controlHover,
-                radius: Design.Radius.control
-            )
-        } else if selected {
-            ThemedSurface.draw(
-                fillRect,
-                fill: Design.Surface.selection,
                 radius: Design.Radius.control
             )
         } else if isDisabledHover {
@@ -1874,8 +2031,13 @@ private final class ThemedMenuRowView: ThemedControl {
         }
 
         let alpha = contentAlpha
-        let label = Design.Text.label.withAlphaComponent(alpha)
-        let secondary = Design.Text.secondary.withAlphaComponent(alpha)
+        let label = ink(Design.Text.label, alpha)
+        // `secondary` rather than `tertiary`, deliberately. A subtitle here is not decoration —
+        // it is the sentence that says what a permission mode will *do* — and rendered against
+        // these titles `tertiary` read as disabled rather than as support. The separation the
+        // pair was missing comes from `ink` no longer flattening this role to opaque black, and
+        // from the rhythm, not from taking the copy down another tier.
+        let secondary = ink(Design.Text.secondary, alpha)
 
         if selected {
             drawCheckMark(
@@ -1920,9 +2082,23 @@ private final class ThemedMenuRowView: ThemedControl {
         )
         let titleFont = Design.Typography.control()
         let titleHeight = ceil(titleFont.boundingRectForFont.height)
+        let subtitleFont = Design.Typography.detail()
+        let subtitleHeight = ceil(subtitleFont.boundingRectForFont.height)
         let hasSubtitle = item.subtitle?.isEmpty == false
+        // The two lines are placed as **one block, centred** — not each against `midY`
+        // separately, which is what this did before. Independently, they sat 4pt apart inside a
+        // row whose neighbours it touches edge to edge, so the gap to the *next row's* title came
+        // out barely wider than the gap to a title's own subtitle: ~18pt against ~24pt. At that
+        // ratio proximity states nothing and the menu reads as one evenly stacked column of
+        // alternating weights rather than as pairs.
+        //
+        // Stacked flush, because `boundingRectForFont.height` already carries the font's internal
+        // leading — the gap between the lines is inside the boxes, and adding another one on top
+        // is what re-opens the problem. Centring the block pools the row's remaining space at its
+        // two edges, where it separates rows, instead of splitting it around the text.
+        let blockBottom = bounds.midY - (titleHeight + subtitleHeight) / 2
         let titleY = hasSubtitle
-            ? bounds.midY + Design.Spacing.hairline
+            ? blockBottom + subtitleHeight
             : bounds.midY - titleHeight / 2
         let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
         let textWidth = max(
@@ -1935,16 +2111,14 @@ private final class ThemedMenuRowView: ThemedControl {
         )
 
         if let subtitle = item.subtitle, !subtitle.isEmpty {
-            let font = Design.Typography.detail()
-            let height = ceil(font.boundingRectForFont.height)
             (subtitle as NSString).draw(
                 in: NSRect(
                     x: x,
-                    y: bounds.midY - height - Design.Spacing.hairline,
+                    y: blockBottom,
                     width: textWidth,
-                    height: height
+                    height: subtitleHeight
                 ),
-                withAttributes: [.font: font, .foregroundColor: secondary]
+                withAttributes: [.font: subtitleFont, .foregroundColor: secondary]
             )
         }
     }

@@ -21,9 +21,23 @@ final class PromptView: NSView, ThemedComponent {
     private let scrollView = ThemedScrollView()
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
     private let submitButton = ThemedButton()
+
+    /// The control row along the bottom of the box — see `SubmitPlacement.footer`.
+    private let footerRow = NSStackView()
+
+    /// What pushes the trailing group to the far edge of that row. A view rather than a
+    /// stack-view distribution: the two groups are pinned to their own edges and the gap
+    /// between them is whatever is left, which is the only arrangement that holds when the
+    /// leading group empties itself down to nothing.
+    private let footerSpacer = NSView()
+    private let completionPresenter = PromptCompletionPresenter()
     private var attachments: [PromptImageAttachment] = []
     private(set) var contextAttachments: [ConversationContextAttachment] = []
     private var isTextFocused = false
+    private var completionSuggestions: [ComposerCapability] = []
+    private var completionQuery: ComposerCompletionQuery?
+    private var selectedCompletionIndex = 0
+    private var completionKindFilter: ComposerCapability.Kind?
 
     /// Drives the growth. Held so the height can be recomputed as the text changes.
     private var heightConstraint: NSLayoutConstraint?
@@ -33,6 +47,15 @@ final class PromptView: NSView, ThemedComponent {
     /// rebuilt, since only one may be active at a time.
     private var contentTrailingBesideSubmit: NSLayoutConstraint?
     private var contentTrailingToEdge: NSLayoutConstraint?
+
+    /// What holds the submit glyph in the box's corner. Deactivated when the glyph moves into
+    /// the control row, where the row places it instead.
+    private var submitPinnedConstraints: [NSLayoutConstraint] = []
+
+    /// The box's own top and bottom padding, held because a box with a control row under its
+    /// text is padded differently from one whose only content is a single centred line.
+    private var contentTop: NSLayoutConstraint?
+    private var contentBottom: NSLayoutConstraint?
 
     /// Called when the prompt is submitted, by Return or by the button.
     var onSubmit: ((String) -> Void)?
@@ -45,6 +68,28 @@ final class PromptView: NSView, ThemedComponent {
     /// prompt that turns an existing reference or image into a comment.
     var onRequestContextComment: ((ConversationContextAttachment) -> Void)?
     var onRequestImageComment: ((String) -> Void)?
+
+    /// Disables only the send action. The editor remains live so a watcher can keep a private
+    /// draft while somebody else controls the shared input stream.
+    var isSubmissionEnabled = true {
+        didSet { updateSubmitState() }
+    }
+
+    /// Why the send will not fire, said on the glyph rather than left to be guessed. Falls back
+    /// to what the glyph says at rest — see `PromptViewDefaults.submitTitle`.
+    var submissionDisabledReason: String? {
+        didSet {
+            submitButton.toolTip = submissionDisabledReason ?? PromptViewDefaults.submitTitle
+            updateSubmitState()
+        }
+    }
+
+    /// Actions advertised by the live provider. Assigning a replacement catalog immediately
+    /// refreshes an open query, which matters when Claude broadcasts `commands_changed` or a
+    /// Codex skill is enabled while this composer already contains its trigger.
+    var composerCapabilities: [ComposerCapability] = [] {
+        didSet { updateCompletions() }
+    }
 
     /// Placeholder shown while empty. Set before the view is added.
     var placeholder: String = "" {
@@ -62,14 +107,28 @@ final class PromptView: NSView, ThemedComponent {
         /// Outside, as a button the owner places and titles. Return breaks the line and only
         /// ⌘Return sends.
         ///
-        /// For a composer whose prompt is a *brief* rather than a message: a task worth
-        /// describing is several lines and a paragraph or two of context, and Return-sends
-        /// turns every one of those line breaks into an accidental launch. Worse than in a
-        /// chat, where the same slip posts half a sentence: here it spawns an agent in a real
-        /// checkout against half a brief, and there is no unsend. The button that takes the
-        /// glyph's place has room to name the chord, which the glyph never did — the shortcut
-        /// and the affordance move together on purpose.
+        /// For the two *fields* that are not composers: the inspector's note and Help ▸ Report
+        /// a Problem. Neither sends anywhere on its own — each is a paragraph attached to a
+        /// report that the surrounding sheet submits — so there is no send to put in the box,
+        /// and Return inside them is ordinary typing.
+        ///
+        /// It was the session composer's placement too, for a reason that no longer holds here:
+        /// a brief is several lines and Return-sends turned each break into an accidental
+        /// launch. `AppSettings.promptReturnKey` answers that now, and the composer shares the
+        /// reply's box — see `docs/architecture/design-system.md`.
         case outside
+
+        /// Inside, on a control row along the bottom of the box, at the end of it. Return
+        /// sends, exactly as `.inside` — the send did not move, only the row it sits on.
+        ///
+        /// The row is what the placement is really for: the settings a message is sent *with*
+        /// — which model, how hard it should think, how fast — belong to the message, so they
+        /// belong inside the thing the message is written in. Left outside they became a strip
+        /// of chips floating on the pane above the composer, reading as neither part of the
+        /// conversation nor part of the input. Every chat client that has grown model choice
+        /// has arrived at the same place: the box holds the text, the row under it holds what
+        /// the text will be sent with, and the send closes the row.
+        case footer
     }
 
     /// Defaults to `.inside`, because that is what every composer here was before there was a
@@ -111,6 +170,7 @@ final class PromptView: NSView, ThemedComponent {
 
             updateSubmitState()
             updateHeight()
+            updateCompletions()
         }
     }
 
@@ -148,6 +208,7 @@ final class PromptView: NSView, ThemedComponent {
 
         setupTextView()
         setupAttachmentStrip()
+        setupFooterRow()
 
         submitButton.image = NSImage(
             systemSymbolName: DesignSymbols.submit,
@@ -155,6 +216,7 @@ final class PromptView: NSView, ThemedComponent {
         )
         submitButton.isBordered = false
         submitButton.contentTintColor = Design.Text.tertiary
+        submitButton.toolTip = PromptViewDefaults.submitTitle
         submitButton.target = self
         submitButton.action = #selector(submit)
         submitButton.translatesAutoresizingMaskIntoConstraints = false
@@ -167,6 +229,12 @@ final class PromptView: NSView, ThemedComponent {
         contentStack.addArrangedSubview(contextRail)
         contentStack.addArrangedSubview(attachmentScrollView)
         contentStack.addArrangedSubview(scrollView)
+        contentStack.addArrangedSubview(footerRow)
+
+        // The row takes the stack's own step rather than a tighter one. Closed up to `small` it
+        // sat nearer the text than the box's padding held it off its own edges, and the two
+        // rows read as crowded against each other inside a box with room to spare. Equal air
+        // above the text, between the two rows, and under the pills is the whole rhythm.
 
         contextRail.onRemove = { [weak self] attachment in
             self?.removeContextAttachment(id: attachment.id)
@@ -182,37 +250,50 @@ final class PromptView: NSView, ThemedComponent {
         height.priority = .defaultHigh
         heightConstraint = height
 
+        let top = contentStack.topAnchor.constraint(
+            equalTo: topAnchor,
+            constant: PromptViewDefaults.verticalInset
+        )
+        let bottom = contentStack.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -PromptViewDefaults.verticalInset
+        )
+        contentTop = top
+        contentBottom = bottom
+
+        submitPinnedConstraints = [
+            submitButton.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Design.Spacing.inset
+            ),
+            // Pinned to the bottom rather than centred: as the box grows the control stays
+            // beside the line being typed, which is where the eye already is.
+            submitButton.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -PromptViewDefaults.submitBottomInset
+            )
+        ]
+
         NSLayoutConstraint.activate([
             height,
+            top,
+            bottom,
 
             contentStack.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: Design.Spacing.inset
-            ),
-            contentStack.topAnchor.constraint(
-                equalTo: topAnchor,
-                constant: PromptViewDefaults.verticalInset
-            ),
-            contentStack.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -PromptViewDefaults.verticalInset
             ),
             attachmentScrollView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             attachmentScrollView.heightAnchor.constraint(
                 equalToConstant: Design.Size.promptAttachmentThumbnail
             ),
             scrollView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            footerRow.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            footerRow.heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
 
-            submitButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
-            // Pinned to the bottom rather than centred: as the box grows the control stays
-            // beside the line being typed, which is where the eye already is.
-            submitButton.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -PromptViewDefaults.submitBottomInset
-            ),
             submitButton.widthAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize),
             submitButton.heightAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize)
-        ])
+        ] + submitPinnedConstraints)
 
         contentTrailingBesideSubmit = contentStack.trailingAnchor.constraint(
             equalTo: submitButton.leadingAnchor,
@@ -225,16 +306,64 @@ final class PromptView: NSView, ThemedComponent {
         applySubmitPlacement()
     }
 
-    /// Shows or hides the inline glyph, and gives the text the width the glyph is no longer
-    /// using. Both constraints exist from setup; only the one that matches the placement is
-    /// ever active.
+    private func setupFooterRow() {
+        footerRow.orientation = .horizontal
+        footerRow.alignment = .centerY
+        footerRow.spacing = Design.Spacing.small
+        footerRow.detachesHiddenViews = true
+        footerRow.translatesAutoresizingMaskIntoConstraints = false
+        footerRow.isHidden = true
+
+        footerSpacer.translatesAutoresizingMaskIntoConstraints = false
+        footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        footerSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        footerRow.addArrangedSubview(footerSpacer)
+    }
+
+    /// Puts the submit glyph where the placement says, and gives the text the width whatever
+    /// left the box's trailing edge is no longer using.
+    ///
+    /// Every constraint exists from setup; only the pair matching the placement is ever active,
+    /// because a placement can change after the box is on screen — the component gallery does
+    /// exactly that.
     private func applySubmitPlacement() {
         let isInside = submitPlacement == .inside
+        let isFooter = submitPlacement == .footer
 
-        submitButton.isHidden = !isInside
+        submitButton.isHidden = submitPlacement == .outside
+        footerRow.isHidden = !isFooter
+
+        // The glyph belongs to one host at a time. Reparented rather than duplicated so the
+        // button keeps its target, its tooltip, and whatever enabled state it was left in.
+        if isFooter, submitButton.superview !== footerRow {
+            NSLayoutConstraint.deactivate(submitPinnedConstraints)
+            submitButton.removeFromSuperview()
+            footerRow.addArrangedSubview(submitButton)
+        } else if !isFooter, submitButton.superview !== self {
+            footerRow.removeArrangedSubview(submitButton)
+            submitButton.removeFromSuperview()
+            addSubview(submitButton)
+            NSLayoutConstraint.activate(submitPinnedConstraints)
+        }
+
         contentTrailingBesideSubmit?.isActive = isInside
         contentTrailingToEdge?.isActive = !isInside
+
+        // A box with a row under its text is padded like a panel; one whose whole content is a
+        // single line is padded to centre that line in `Design.Size.inputHeight`.
+        contentTop?.constant = verticalInset
+        contentBottom?.constant = -verticalInset
+
         needsLayout = true
+        updateHeight()
+    }
+
+    /// The box's own top and bottom padding, which the control row changes — see
+    /// `PromptViewDefaults.footerVerticalInset`.
+    private var verticalInset: CGFloat {
+        submitPlacement == .footer
+            ? PromptViewDefaults.footerVerticalInset
+            : PromptViewDefaults.verticalInset
     }
 
     /// Resolves the user's setting against this composer's own default, at the keystroke.
@@ -250,7 +379,9 @@ final class PromptView: NSView, ThemedComponent {
         switch AppSettings.promptReturnKey {
         case .sends: true
         case .startsNewLine: false
-        case .matchesComposer: submitPlacement == .inside
+        // `.footer` is `.inside` with the glyph on a row rather than in a corner: the send is
+        // still in the box, so Return still sends.
+        case .matchesComposer: submitPlacement != .outside
         }
     }
 
@@ -311,12 +442,16 @@ final class PromptView: NSView, ThemedComponent {
         textView.isAutomaticTextReplacementEnabled = false
 
         textView.onSubmit = { [weak self] in self?.submit() }
+        textView.onCompletionKey = { [weak self] event in
+            self?.handleCompletionKey(event) ?? false
+        }
         textView.submitsOnReturn = { [weak self] in self?.submitsOnReturn() ?? true }
         textView.onAttach = { [weak self] paths in self?.insertAttachments(paths) }
         textView.onFocusChange = { [weak self] focused in
             guard let self, self.isTextFocused != focused else { return }
             self.isTextFocused = focused
             self.updateSurface()
+            if !focused { self.dismissCompletions() }
         }
 
         scrollView.documentView = textView
@@ -336,6 +471,7 @@ final class PromptView: NSView, ThemedComponent {
         super.layout()
         layoutAttachmentStrip()
         updateHeight()
+        completionPresenter.reposition()
     }
 
     /// Once thumbnails occupy the top of the composer, a second image can land on them rather
@@ -346,7 +482,10 @@ final class PromptView: NSView, ThemedComponent {
         super.viewDidMoveToWindow()
 
         unregisterDraggedTypes()
-        guard window != nil else { return }
+        guard window != nil else {
+            dismissCompletions()
+            return
+        }
         registerForDraggedTypes([.fileURL, .png, .tiff])
     }
 
@@ -369,6 +508,38 @@ final class PromptView: NSView, ThemedComponent {
     func focusAtEnd() {
         focus()
         textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    }
+
+    /// The owner's controls on the box's bottom row, under `SubmitPlacement.footer`.
+    ///
+    /// `leading` reads as what the message will be sent *with* — model, effort, speed — and
+    /// `trailing` as what it has cost so far, beside the send. Both are the owner's own views:
+    /// this component owns the row's geometry and knows nothing about what a provider offers.
+    ///
+    /// A hidden control is detached rather than left as a gap, so a provider offering no
+    /// choices at all leaves the row to the send glyph rather than to a row of holes.
+    func setFooterControls(leading: [NSView], trailing: [NSView]) {
+        for view in footerRow.arrangedSubviews
+        where view !== footerSpacer && view !== submitButton {
+            footerRow.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for (index, view) in leading.enumerated() {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            footerRow.insertArrangedSubview(view, at: index)
+        }
+
+        // Placed against the spacer rather than at a counted index: the send glyph may or may
+        // not be on this row, and the trailing group belongs beside it either way.
+        let spacerIndex = footerRow.arrangedSubviews.firstIndex(of: footerSpacer) ?? leading.count
+        for (offset, view) in trailing.enumerated() {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            footerRow.insertArrangedSubview(view, at: spacerIndex + 1 + offset)
+        }
+
+        needsLayout = true
+        updateHeight()
     }
 
     /// Adds files through the same path used by paste and drop.
@@ -403,6 +574,129 @@ final class PromptView: NSView, ThemedComponent {
         contextRail.setAttachments([])
         updateSubmitState()
         updateHeight()
+    }
+
+    /// Opens the skill half of the live catalog from the app-owned `/skills` command. The
+    /// provider's native trigger is inserted so accepting a row follows the exact same path as
+    /// typing `$` by hand.
+    func showSkillCompletions() {
+        guard let trigger = composerCapabilities.first(where: {
+            $0.isAvailableInSkillCatalog
+        })?.trigger else {
+            return
+        }
+        stringValue = String(trigger.prefix)
+        focusAtEnd()
+        completionKindFilter = .skill
+        updateCompletions()
+    }
+
+    // MARK: - Command and Skill Completion
+
+    private func updateCompletions() {
+        guard textView.selectedRange().length == 0,
+              let query = ComposerCompletionQuery.parse(
+                  textView.string,
+                  caretUTF16Offset: textView.selectedRange().location
+              ) else {
+            dismissCompletions()
+            return
+        }
+
+        let previousSelectionID = completionSuggestions.indices.contains(selectedCompletionIndex)
+            ? completionSuggestions[selectedCompletionIndex].id
+            : nil
+        let suggestions = query.suggestions(
+            from: composerCapabilities,
+            matching: completionKindFilter
+        )
+        guard !suggestions.isEmpty else {
+            dismissCompletions()
+            return
+        }
+
+        completionQuery = query
+        completionSuggestions = suggestions
+        if let previousSelectionID,
+           let matchingIndex = suggestions.firstIndex(where: {
+               $0.id == previousSelectionID && $0.isEnabled
+           }) {
+            selectedCompletionIndex = matchingIndex
+        } else {
+            selectedCompletionIndex = firstEnabledCompletionIndex(in: suggestions) ?? 0
+        }
+
+        completionPresenter.present(
+            items: suggestions,
+            selectedIndex: selectedCompletionIndex,
+            from: self,
+            onChoose: { [weak self] index in self?.acceptCompletion(at: index) },
+            onDismiss: { [weak self] in self?.clearCompletionState() }
+        )
+    }
+
+    private func handleCompletionKey(_ event: NSEvent) -> Bool {
+        guard completionPresenter.isVisible, !completionSuggestions.isEmpty else { return false }
+
+        switch event.keyCode {
+        case PromptViewDefaults.escapeKeyCode:
+            dismissCompletions()
+            return true
+        case PromptViewDefaults.upArrowKeyCode:
+            moveCompletionSelection(by: -1)
+            return true
+        case PromptViewDefaults.downArrowKeyCode:
+            moveCompletionSelection(by: 1)
+            return true
+        case PromptViewDefaults.tabKeyCode, PromptViewDefaults.returnKeyCode,
+             PromptViewDefaults.keypadEnterKeyCode:
+            acceptCompletion(at: selectedCompletionIndex)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func moveCompletionSelection(by offset: Int) {
+        guard !completionSuggestions.isEmpty else { return }
+        var candidate = selectedCompletionIndex
+        for _ in completionSuggestions.indices {
+            candidate = (candidate + offset + completionSuggestions.count)
+                % completionSuggestions.count
+            if completionSuggestions[candidate].isEnabled {
+                selectedCompletionIndex = candidate
+                completionPresenter.select(candidate)
+                return
+            }
+        }
+    }
+
+    private func acceptCompletion(at index: Int) {
+        guard completionSuggestions.indices.contains(index),
+              completionSuggestions[index].isEnabled,
+              let completionQuery else { return }
+        let capability = completionSuggestions[index]
+        textView.insertText(
+            capability.invocationText + " ",
+            replacementRange: completionQuery.replacementRange
+        )
+        dismissCompletions()
+    }
+
+    private func firstEnabledCompletionIndex(in suggestions: [ComposerCapability]) -> Int? {
+        suggestions.firstIndex(where: \.isEnabled)
+    }
+
+    private func dismissCompletions() {
+        completionPresenter.dismiss()
+        clearCompletionState()
+    }
+
+    private func clearCompletionState() {
+        completionQuery = nil
+        completionSuggestions = []
+        selectedCompletionIndex = 0
+        completionKindFilter = nil
     }
 
     /// Attachments are intentionally not drafts: raw clipboard images live in a temporary
@@ -450,6 +744,7 @@ final class PromptView: NSView, ThemedComponent {
     /// owner: it has to submit *this* prompt's value, attachments included, rather than reading
     /// `stringValue` and quietly dropping the images.
     @objc func submit() {
+        guard isSubmissionEnabled else { return }
         onSubmit?(submissionValue)
     }
 
@@ -595,14 +890,17 @@ final class PromptView: NSView, ThemedComponent {
             .isEmpty
         let hasContent = hasText || !attachments.isEmpty || !contextAttachments.isEmpty
 
-        submitButton.contentTintColor = hasContent ? Design.Surface.accent : Design.Text.tertiary
+        submitButton.isEnabled = hasContent && isSubmissionEnabled
+        submitButton.contentTintColor = hasContent && isSubmissionEnabled
+            ? Design.Surface.accent
+            : Design.Text.tertiary
     }
 
     private func updateSurface() {
         // The prompt is where text is typed, so under a bevel material it reads sunken — a
         // carved well, like every text field.
         applySurface(
-            fill: Design.Surface.panel,
+            fill: Design.Surface.field,
             radius: .panel,
             border: isTextFocused ? Design.Surface.accent : Design.Surface.border,
             borderWidth: isTextFocused
@@ -620,19 +918,27 @@ final class PromptView: NSView, ThemedComponent {
 
         layoutManager.ensureLayout(for: container)
         let textHeight = layoutManager.usedRect(for: container).height
-        let chrome = PromptViewDefaults.verticalInset * 2
+        let chrome = verticalInset * 2
         let attachmentHeight = attachments.isEmpty
             ? 0
             : Design.Size.promptAttachmentThumbnail + Design.Spacing.medium
         let contextHeight = contextAttachments.isEmpty
             ? 0
             : Design.Size.chipHeight + Design.Spacing.medium
-        let textFitted = min(
-            max(textHeight + chrome, minimumHeight),
-            max(Design.Size.inputMaxHeight, minimumHeight)
-        )
+        let footerHeight = footerRow.isHidden
+            ? 0
+            : Design.Size.chipHeight + contentStack.spacing
 
-        let fitted = textFitted + attachmentHeight + contextHeight
+        // The control row comes *out of* the minimum rather than adding to it, which is the
+        // opposite of the attachment strip above: a strip is content the user put there and
+        // must not shrink the field they are typing in, while the row is the box's own chrome
+        // and is present from the first keystroke. Adding it instead opened an empty reply box
+        // at a hundred points — a paragraph of height asking for one line.
+        let textFloor = max(0, minimumHeight - footerHeight)
+        let cap = max(Design.Size.inputMaxHeight - footerHeight, textFloor)
+        let textFitted = min(max(textHeight + chrome, textFloor), cap)
+
+        let fitted = textFitted + attachmentHeight + contextHeight + footerHeight
 
         // Past the cap the box stops growing, so the scroller has to take over. Decided before
         // the height guard below, because the box is already at its cap by the time the text
@@ -640,7 +946,7 @@ final class PromptView: NSView, ThemedComponent {
         // needs a scroller is the one run that never reaches this line. Still compared before
         // assigning: `hasVerticalScroller` re-tiles the scroll view, and `layout()` calls
         // through here, so an unconditional write is a layout loop.
-        let needsScroller = textFitted >= max(Design.Size.inputMaxHeight, minimumHeight)
+        let needsScroller = textFitted >= cap
         if scrollView.hasVerticalScroller != needsScroller {
             scrollView.hasVerticalScroller = needsScroller
         }
@@ -1017,6 +1323,7 @@ extension PromptView: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         updateSubmitState()
         updateHeight()
+        updateCompletions()
         onChange?(textView.string)
     }
 }
@@ -1036,6 +1343,11 @@ private final class PromptTextView: ThemedTextView {
 
     /// Return, without a modifier — or ⌘Return, always.
     var onSubmit: (() -> Void)?
+
+    /// Gives the owning composer first refusal for navigation/acceptance while a completion
+    /// panel is visible. Marked text bypasses this hook so IME candidate selection remains
+    /// entirely inside the input method.
+    var onCompletionKey: ((NSEvent) -> Bool)?
 
     /// Whether a bare Return sends, asked at the keystroke. Answering `false` leaves Return to
     /// the editor and keeps ⌘Return as the only way to send from the keyboard.
@@ -1129,6 +1441,9 @@ private final class PromptTextView: ThemedTextView {
     /// used without one — the chord belongs to the *field*, and only reaches a key equivalent
     /// when someone put one in the same window.
     override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), onCompletionKey?(event) == true {
+            return
+        }
         guard event.keyCode == PromptViewDefaults.returnKeyCode else {
             super.keyDown(with: event)
             return
@@ -1279,11 +1594,31 @@ enum PromptAttachment {
 enum PromptViewDefaults {
     static let submitSize: CGFloat = 18
 
+    /// What the send glyph says when it is asked, and the only name it has.
+    ///
+    /// A glyph has no face to write a chord on — which is the one thing the titled button that
+    /// used to sit outside the session composer could do — so the tooltip carries `⌘Return`
+    /// instead. It doubles as the control's accessible name: `ThemedButton` reads the tooltip
+    /// for a button with no title, and an unnamed send is unusable from VoiceOver.
+    static var submitTitle: String { L10n.string("Send · ⌘Return") }
+
     /// Keeps a one-line prompt vertically centred in `Design.Size.inputHeight`.
     static let verticalInset: CGFloat = 13
     static let submitBottomInset: CGFloat = 13
 
+    /// The padding a box with a control row uses instead.
+    ///
+    /// 13 exists to centre one line in a 44pt box and means nothing once there is a second row
+    /// under that line: kept, it padded the text by a line's worth of air at the top and left
+    /// the row crowding the bottom edge. A panel's own step reads as one box holding two rows.
+    static let footerVerticalInset: CGFloat = Design.Spacing.medium
+
     static let returnKeyCode: UInt16 = 36
+    static let keypadEnterKeyCode: UInt16 = 76
+    static let tabKeyCode: UInt16 = 48
+    static let escapeKeyCode: UInt16 = 53
+    static let upArrowKeyCode: UInt16 = 126
+    static let downArrowKeyCode: UInt16 = 125
 
     static let attachmentPrefix = "threading-attachment-"
     static let attachmentExtension = "png"

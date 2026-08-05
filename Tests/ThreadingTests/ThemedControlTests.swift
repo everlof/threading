@@ -566,11 +566,13 @@ final class ThemedControlTests: XCTestCase {
 
     /// Two *adjacent* filled rows keep a hairline of panel between them.
     ///
-    /// The account menu shows both fills at once — the checked login is filled, and the pointer
-    /// sits on the row under it. Drawn at the row's full height those capsules share an edge and
-    /// fuse into one pinched blob, with the corner radii reading as a dent rather than as the gap
-    /// between two shapes. Asserted off the pixels, because the claim is about what the two rows
-    /// look like together and each row on its own was always right.
+    /// A menu reaches that pair whenever the highlight and a press part company — the keyboard
+    /// moved the highlight off the row the pointer is resting on, and that row is then pressed —
+    /// or while a parent row holds the menu path through the grace its submenu is given to
+    /// close. Drawn at the row's full height those capsules share an edge and fuse into one
+    /// pinched blob, with the corner radii reading as a dent rather than as the gap between two
+    /// shapes. Asserted off the pixels, because the claim is about what the two rows look like
+    /// together and each row on its own was always right.
     func testThemedMenuPartsTwoFilledRowsWithAHairline() throws {
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
@@ -605,12 +607,91 @@ final class ThemedControlTests: XCTestCase {
         ))
         defer { ThemedMenuPresenter.dismiss(token) }
 
-        // The first row opens checked *and* highlighted; one arrow down moves the highlight to
-        // the row beneath it, which is the account menu's ordinary state.
-        try XCTUnwrap(window.firstResponder).keyDown(with: try keyEvent("", keyCode: 125))
-
         // The overlay is laid out by frames during the window's display cycle, which an
         // offscreen render never enters — so the pass is forced.
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        let rows = descendants(in: root).filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.count, 3)
+        let frames = rows.map { root.convert($0.bounds, from: $0) }
+
+        // The first row opens highlighted; the pointer, already resting on the row beneath it
+        // when the keyboard moved the highlight away, presses it. Nothing new is hovered, so
+        // both rows are filled at once — which is the state the inset exists for.
+        rows[1].mouseDown(with: try mouseEvent(
+            .leftMouseDown,
+            at: NSPoint(x: frames[1].midX, y: frames[1].midY),
+            in: window
+        ))
+
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: rep)
+
+        // Well inside the fill's right end: past every title, and clear of the corner arc that
+        // rounds the capsule's own edge.
+        let probeX = frames[0].maxX - Design.Spacing.pane
+        let highlighted = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].midY), in: root)
+        let pressed = try colour(of: rep, at: NSPoint(x: probeX, y: frames[1].midY), in: root)
+        // The third row is filled by nothing, so it is what bare panel looks like here.
+        let bare = try colour(of: rep, at: NSPoint(x: probeX, y: frames[2].midY), in: root)
+        let between = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].minY), in: root)
+
+        XCTAssertNotEqual(highlighted.hexString, bare.hexString, "the highlighted row drew no fill")
+        XCTAssertNotEqual(pressed.hexString, bare.hexString, "the pressed row drew no fill")
+        XCTAssertEqual(
+            between.hexString,
+            bare.hexString,
+            "the two fills met — a filled row has to stop short of the row stacked against it"
+        )
+    }
+
+    /// **A checked row is not a highlighted row.** The check says what is on; the fill says
+    /// where the pointer or the keyboard is, and only one row can be that at a time.
+    ///
+    /// The sidebar's arrangement menu is three toggles and a chosen order, so it came up with
+    /// three of its five rows filled in the theme's `selection` — the ground behind selected
+    /// *text*, which Win98 holds at a near-opaque navy — before it had been touched. Whichever
+    /// row the pointer was actually on then had nothing left to say.
+    func testAThemedMenuChecksARowRatherThanFillingIt() throws {
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        root.appearance = appearance
+        let source = NSView(frame: NSRect(x: 24, y: 250, width: 240, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView = root
+        defer { window.close() }
+
+        // The highlight opens on the first row, so the checked one is left saying only what a
+        // checked row says on its own.
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "Sort by Recent Activity")),
+                    .item(ThemedMenuItem(title: "Sort by Order Added", isSelected: true)),
+                    .item(ThemedMenuItem(title: "Sort by Name"))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
         markNeedingLayout(root)
         root.layoutSubtreeIfNeeded()
 
@@ -621,22 +702,34 @@ final class ThemedControlTests: XCTestCase {
         let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
         root.cacheDisplay(in: root.bounds, to: rep)
 
-        // Well inside the fill's right end: past every title, and clear of the corner arc that
-        // rounds the capsule's own edge.
         let probeX = frames[0].maxX - Design.Spacing.pane
-        let checked = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].midY), in: root)
-        let hovered = try colour(of: rep, at: NSPoint(x: probeX, y: frames[1].midY), in: root)
-        // The third row is filled by nothing, so it is what bare panel looks like here.
+        let highlighted = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].midY), in: root)
+        let checked = try colour(of: rep, at: NSPoint(x: probeX, y: frames[1].midY), in: root)
         let bare = try colour(of: rep, at: NSPoint(x: probeX, y: frames[2].midY), in: root)
-        let between = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].minY), in: root)
 
-        XCTAssertNotEqual(checked.hexString, bare.hexString, "the checked row drew no fill")
-        XCTAssertNotEqual(hovered.hexString, bare.hexString, "the highlighted row drew no fill")
+        XCTAssertNotEqual(highlighted.hexString, bare.hexString, "the highlighted row drew no fill")
         XCTAssertEqual(
-            between.hexString,
+            checked.hexString,
             bare.hexString,
-            "the two fills met — a filled row has to stop short of the row stacked against it"
+            "a checked row painted itself as though the pointer were on it"
         )
+
+        // And the check is genuinely there — "no fill" must not be reached by marking nothing.
+        // The glyph is a thin diagonal, so its column is scanned rather than sampled at a point.
+        var inked = 0
+        let box = NSRect(
+            x: frames[1].minX + ThemedMenuMetrics.contentInset,
+            y: frames[1].midY - ThemedMenuMetrics.checkSize / 2,
+            width: ThemedMenuMetrics.checkSize,
+            height: ThemedMenuMetrics.checkSize
+        )
+        for x in stride(from: box.minX, through: box.maxX, by: 0.5) {
+            for y in stride(from: box.minY, through: box.maxY, by: 0.5) {
+                let pixel = try colour(of: rep, at: NSPoint(x: x, y: y), in: root)
+                if pixel.hexString != bare.hexString { inked += 1 }
+            }
+        }
+        XCTAssertGreaterThan(inked, 0, "the checked row drew neither a fill nor a check")
     }
 
     func testThemedMenuSurfaceUsesTheSourceViewsLocalAppearance() throws {
@@ -738,6 +831,184 @@ final class ThemedControlTests: XCTestCase {
         )
         XCTAssertGreaterThan(above.minY, lowAnchor.maxY)
         XCTAssertGreaterThanOrEqual(above.minX, bounds.minX + ThemedMenuLayout.screenInset)
+    }
+
+    /// A clamped panel that happens to end on a row boundary looks like the whole menu. The
+    /// session row's menu grew past the maximum and did exactly that, so Copy Session ID and
+    /// Delete Session were invisible until something scrolled — which nothing invited.
+    func testAMenuTooTallToShowEveryRowCutsTheLastOneInHalf() {
+        let bounds = NSRect(x: 0, y: 0, width: 400, height: 900)
+        let cap = ThemedMenuLayout.maximumHeight(in: bounds)
+        let entries = (0..<32).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let natural = ThemedMenuMetrics.height(for: entries)
+        XCTAssertGreaterThan(natural, cap)
+
+        let panel = ThemedMenuLayout.frame(
+            anchor: NSRect(x: 40, y: 820, width: 40, height: 26),
+            desiredSize: NSSize(width: 200, height: natural),
+            in: bounds,
+            flipped: false,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+        )
+
+        XCTAssertLessThanOrEqual(panel.height, cap)
+        // The peek is paid for out of one row, never out of two.
+        XCTAssertGreaterThan(panel.height, cap - ThemedMenuMetrics.rowHeight)
+        XCTAssertEqual(
+            (panel.height - ThemedMenuMetrics.outerInset * 2)
+                .truncatingRemainder(dividingBy: ThemedMenuMetrics.rowHeight),
+            ThemedMenuMetrics.rowHeight / 2,
+            accuracy: 0.5,
+            "the clipped panel ends on a whole row, so nothing on screen says the list continues"
+        )
+    }
+
+    /// The peek is for menus that are actually cut. A menu with room for every row is left
+    /// alone — half a row hanging off a complete list would promise something that is not there.
+    func testAMenuWithRoomForEveryRowIsNotCut() {
+        let entries = (0..<4).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let natural = ThemedMenuMetrics.height(for: entries)
+
+        let panel = ThemedMenuLayout.frame(
+            anchor: NSRect(x: 40, y: 700, width: 40, height: 26),
+            desiredSize: NSSize(width: 200, height: natural),
+            in: NSRect(x: 0, y: 0, width: 400, height: 900),
+            flipped: false,
+            whenClipped: { height in
+                XCTFail("a menu that fits was treated as clipped")
+                return height
+            }
+        )
+
+        XCTAssertEqual(panel.height, natural, accuracy: 0.5)
+    }
+
+    /// A separator is carried whole into the hidden part: sliced down its middle it reads as a
+    /// stray rule along the panel's edge, which says nothing about there being more below.
+    func testTheCutFallsOnARowRatherThanOnASeparator() {
+        var entries: [ThemedMenuEntry] = []
+        for index in 0..<24 {
+            entries.append(.item(ThemedMenuItem(title: "Row \(index)")))
+            entries.append(.separator)
+        }
+        let clipped = ThemedMenuMetrics.clippedHeight(
+            for: entries,
+            atMost: ThemedMenuLayout.maximumHeightFloor
+        )
+
+        // Where the rows stop being visible: the panel's own padding sits at both ends, so the
+        // content the scroller shows ends one inset above the panel's lower edge.
+        let cut = clipped - ThemedMenuMetrics.outerInset * 2
+        var consumed: CGFloat = 0
+        for entry in entries {
+            let height = ThemedMenuMetrics.height(of: entry)
+            if consumed + height > cut {
+                XCTAssertTrue(entry.isItem, "the cut fell on a separator")
+                XCTAssertEqual(cut - consumed, height / 2, accuracy: 0.5)
+                return
+            }
+            consumed += height
+        }
+        XCTFail("the panel was not clipped at all")
+    }
+
+    /// The wiring, not the arithmetic: a presented panel takes the peek rather than the bare
+    /// clamp, which is the part a refactor of the presenter could drop without any geometry
+    /// test noticing.
+    func testAPresentedPanelTakesThePeekRatherThanTheBareClamp() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 900))
+        let source = NSView(frame: NSRect(x: 24, y: 820, width: 160, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        let entries = (0..<24).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 190),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        let panel = try menuFrame(in: root)
+        ThemedMenuPresenter.dismiss(token)
+
+        XCTAssertEqual(
+            panel.height,
+            ThemedMenuMetrics.clippedHeight(
+                for: entries,
+                atMost: ThemedMenuLayout.maximumHeight(in: root.bounds)
+            ),
+            accuracy: 0.5
+        )
+    }
+
+    /// The cap follows the window. It was a flat 360, set when the longest menu was half its
+    /// eventual size; once the session menu outgrew it, scrolling became the normal state and
+    /// Delete Session sat below the fold on every right-click. A tall window now shows the
+    /// whole list, and a cramped one keeps the old floor.
+    func testTheMenuHeightCapFollowsTheWindow() {
+        let tall = NSRect(x: 0, y: 0, width: 600, height: 1200)
+        XCTAssertEqual(
+            ThemedMenuLayout.maximumHeight(in: tall),
+            tall.height * ThemedMenuLayout.maximumHeightRatio
+        )
+
+        let cramped = NSRect(x: 0, y: 0, width: 600, height: 400)
+        XCTAssertEqual(
+            ThemedMenuLayout.maximumHeight(in: cramped),
+            ThemedMenuLayout.maximumHeightFloor
+        )
+
+        // A session-menu-sized list fits whole where the flat cap would have cut it.
+        let entries = (0..<18).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let natural = ThemedMenuMetrics.height(for: entries)
+        XCTAssertGreaterThan(natural, ThemedMenuLayout.maximumHeightFloor)
+        let panel = ThemedMenuLayout.frame(
+            anchor: NSRect(x: 40, y: 1100, width: 40, height: 26),
+            desiredSize: NSSize(width: 200, height: natural),
+            in: tall,
+            flipped: false,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+        )
+        XCTAssertEqual(
+            panel.height,
+            natural,
+            accuracy: 0.5,
+            "a window with room still clipped the menu"
+        )
+    }
+
+    /// A submenu is clamped by the same two limits and hides its tail the same way — the Theme
+    /// list is long enough to reach both.
+    func testASubmenuTooTallToShowEveryRowCutsTheLastOneInHalf() {
+        let entries = (0..<24).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let natural = ThemedMenuMetrics.height(for: entries)
+
+        let panel = ThemedMenuLayout.submenuFrame(
+            parentPanel: NSRect(x: 40, y: 400, width: 200, height: 300),
+            rowFrame: NSRect(x: 40, y: 600, width: 200, height: ThemedMenuMetrics.rowHeight),
+            desiredSize: NSSize(width: 200, height: natural),
+            in: NSRect(x: 0, y: 0, width: 600, height: 900),
+            flipped: false,
+            firstRowInset: ThemedMenuMetrics.outerInset,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+        )
+
+        XCTAssertEqual(
+            (panel.height - ThemedMenuMetrics.outerInset * 2)
+                .truncatingRemainder(dividingBy: ThemedMenuMetrics.rowHeight),
+            ThemedMenuMetrics.rowHeight / 2,
+            accuracy: 0.5
+        )
     }
 
     /// A menu opened by a secondary click lands on the pointer, not on its view.
@@ -891,6 +1162,172 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(dismissed, "a submenu choice should close the whole menu")
 
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
+    }
+
+    /// Wheeling a clamped menu slides rows under a stationary pointer, and AppKit hands each
+    /// arrival a `mouseEntered`. That is the list's motion, not the hand's: the highlight must
+    /// stay where the pointer last put it, and Return must answer with the row the user chose,
+    /// not whichever one the scroll parked under the cursor.
+    func testScrollingAMenuDoesNotHandTheHighlightToTheRowThatSlidUnderThePointer() throws {
+        let fixture = try clampedMenuFixture()
+        defer {
+            ThemedMenuPresenter.dismiss(fixture.token)
+            fixture.window.close()
+        }
+
+        // The menu opens with its first row highlighted. Scroll the panel, then deliver the
+        // enter the scroll hands to the row now under the pointer.
+        scroll(fixture.scrollView, by: ThemedMenuMetrics.rowHeight * 2)
+        fixture.rows[5].mouseEntered(with: try enterEvent(
+            at: windowCentre(of: fixture.rows[5]),
+            in: fixture.window
+        ))
+
+        fixture.overlay.keyDown(with: try keyEvent("\r", keyCode: 36))
+        XCTAssertEqual(
+            fixture.chosen(),
+            "Row 0",
+            "the scroll handed the highlight to the row that slid under the pointer"
+        )
+    }
+
+    /// The freeze ends the moment the pointer actually moves — and the landing is re-answered
+    /// from position, because the row under the pointer got no fresh enter: it has believed
+    /// itself hovered since the scroll delivered its `mouseEntered`.
+    func testPointerMovementAfterAScrollLandsTheHighlightOnTheRowUnderIt() throws {
+        let fixture = try clampedMenuFixture()
+        defer {
+            ThemedMenuPresenter.dismiss(fixture.token)
+            fixture.window.close()
+        }
+
+        scroll(fixture.scrollView, by: ThemedMenuMetrics.rowHeight * 2)
+        fixture.rows[5].mouseEntered(with: try enterEvent(
+            at: windowCentre(of: fixture.rows[5]),
+            in: fixture.window
+        ))
+
+        // Any visible row whose centre is clear of the freeze tolerance around wherever the
+        // machine's real pointer happens to be — rows sit a full row apart, so at most one
+        // candidate can be too close.
+        let freeze = fixture.window.mouseLocationOutsideOfEventStream
+        let target = try XCTUnwrap(
+            [fixture.rows[4], fixture.rows[6]].first { row in
+                let centre = windowCentre(of: row)
+                return hypot(centre.x - freeze.x, centre.y - freeze.y)
+                    > ThemedMenuMotion.scrollHoverTolerance * 2
+            }
+        )
+        fixture.overlay.mouseMoved(with: try mouseEvent(
+            .mouseMoved,
+            at: windowCentre(of: target),
+            in: fixture.window
+        ))
+
+        fixture.overlay.keyDown(with: try keyEvent("\r", keyCode: 36))
+        XCTAssertEqual(
+            fixture.chosen(),
+            target.accessibilityTitle(),
+            "moving after a scroll should land the highlight on the row under the pointer"
+        )
+    }
+
+    /// A pointer highlight names a row that is already under the pointer, so it must not
+    /// scroll — nudging the half-peeked row fully in moves the list under a hand that did not
+    /// ask, and during a wheel gesture it visibly fights the wheel. Keyboard travel keeps the
+    /// scroll-into-view: a row arrowed to below the fold has to come on screen.
+    func testAPointerHighlightLeavesTheScrollAloneWhereKeyboardTravelWouldNot() throws {
+        let fixture = try clampedMenuFixture()
+        defer {
+            ThemedMenuPresenter.dismiss(fixture.token)
+            fixture.window.close()
+        }
+        let clip = fixture.scrollView.contentView
+        XCTAssertEqual(clip.bounds.origin.y, 0)
+
+        // The clamped panel ends on the half-peeked row: visible, but not wholly.
+        let visible = clip.documentVisibleRect
+        let peeked = try XCTUnwrap(
+            fixture.rows.first { row in
+                row.frame.intersects(visible) && !visible.contains(row.frame)
+            },
+            "a clamped menu should have a half-peeked row"
+        )
+        peeked.mouseEntered(with: try enterEvent(
+            at: windowCentre(of: peeked),
+            in: fixture.window
+        ))
+        XCTAssertEqual(
+            clip.bounds.origin.y,
+            0,
+            "hovering the half-peeked row scrolled the menu under the pointer"
+        )
+
+        for _ in fixture.rows { fixture.overlay.keyDown(with: try keyEvent("", keyCode: 125)) }
+        XCTAssertGreaterThan(
+            clip.bounds.origin.y,
+            0,
+            "keyboard travel below the fold no longer scrolls its row into view"
+        )
+    }
+
+    /// A menu tall enough to clamp against its root and scroll, presented and laid out, with
+    /// its rows in entry order and the choice recorded by title.
+    private func clampedMenuFixture() throws -> (
+        window: NSWindow,
+        overlay: NSView,
+        rows: [NSView],
+        scrollView: NSScrollView,
+        token: AnyObject,
+        chosen: () -> String?
+    ) {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 500))
+        let source = NSView(frame: NSRect(x: 24, y: 460, width: 160, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+
+        var chosen: String?
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: (0..<24).map {
+                    .item(ThemedMenuItem(title: "Row \($0)"))
+                },
+                minimumWidth: 160
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in chosen = item.title },
+            onDismiss: {}
+        ))
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        let overlay = try XCTUnwrap(window.firstResponder as? NSView)
+        let rows = descendants(in: root).filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.count, 24)
+        let scrollView = try XCTUnwrap(rows[0].enclosingScrollView)
+        XCTAssertTrue(
+            scrollView.contentView.documentVisibleRect.height
+                < ThemedMenuMetrics.height(for: (0..<24).map {
+                    .item(ThemedMenuItem(title: "Row \($0)"))
+                }),
+            "the fixture's menu fits — nothing here scrolls"
+        )
+        return (window, overlay, rows, scrollView, token, { chosen })
+    }
+
+    private func scroll(_ scrollView: NSScrollView, by delta: CGFloat) {
+        let clip = scrollView.contentView
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: clip.bounds.origin.y + delta))
+        scrollView.reflectScrolledClipView(clip)
     }
 
     /// Pressing a parent row (a click, or an accessibility press) opens its submenu rather
@@ -1324,31 +1761,56 @@ final class ThemedControlTests: XCTestCase {
 
     // MARK: - Pop-Up Theming
 
-    /// A stock `NSPopUpButton` draws the system bezel whatever the theme is. This one draws its
-    /// fill from the theme's own `controlResting`, which is not a shade of grey but part of the
-    /// style: Cyberpunk holds its neon accent far down so every control glows faintly green,
-    /// where Swiss is a neutral wash on paper.
+    /// A stock `NSPopUpButton` draws the system bezel whatever the theme is. This one lays down
+    /// the theme's own `controlResting`, which is what makes a control read as part of a style
+    /// rather than as an AppKit control sitting inside one.
     ///
-    /// Sampled from the control's own drawing rather than from a composited page — the fill is
-    /// translucent by design, and what is being claimed here is which colour it lays down.
-    func testThePopUpFillTakesTheThemeSurface() {
-        func fill(under theme: AppTheme) -> NSColor {
+    /// Compared against the role itself rather than against a hue: the fill used to be asserted
+    /// *green*, because Cyberpunk happened to hold its neon accent down there, and rebuilding
+    /// that theme against its reference then broke a test about pop-ups. What the pop-up owes the
+    /// theme is the colour the theme states, whatever colour that is.
+    ///
+    /// Sampled from the control's own drawing rather than from a composited page, and the
+    /// channels are compared *over white*: a 5%-alpha fill is worth a step or two of an 8-bit
+    /// channel, so its raw components quantise far too coarsely to compare directly, while the
+    /// composite they actually produce does not.
+    func testThePopUpFillTakesTheThemeSurface() throws {
+        func drawnFill(under theme: AppTheme) throws -> (drawn: NSColor, role: NSColor) {
             AppThemePalette.set(theme)
             let popUp = ThemedPopUp(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
-            let rep = popUp.bitmapImageRepForCachingDisplay(in: popUp.bounds)!
+            let rep = try XCTUnwrap(popUp.bitmapImageRepForCachingDisplay(in: popUp.bounds))
             popUp.cacheDisplay(in: popUp.bounds, to: rep)
             // Inside the fill, clear of the border, the chevron and any title.
-            return rep.colorAt(x: 60, y: 13)!.usingColorSpace(.sRGB)!
+            return (
+                try XCTUnwrap(rep.colorAt(x: 60, y: 13)?.usingColorSpace(.sRGB)),
+                try XCTUnwrap(Design.Surface.controlResting.usingColorSpace(.sRGB))
+            )
         }
 
-        let cyber = fill(under: AppThemeStyles.cyberpunk)
-        XCTAssertGreaterThan(cyber.greenComponent, cyber.redComponent + 0.5,
-                             "Cyberpunk's pop-up is not drawn in its neon")
+        func overWhite(_ color: NSColor) -> [CGFloat] {
+            let alpha = color.alphaComponent
+            return [color.redComponent, color.greenComponent, color.blueComponent]
+                .map { $0 * alpha + (1 - alpha) }
+        }
 
-        let swiss = fill(under: AppThemeStyles.swissMinimalist)
-        XCTAssertEqual(swiss.redComponent, swiss.greenComponent, accuracy: 0.02)
-        XCTAssertEqual(swiss.greenComponent, swiss.blueComponent, accuracy: 0.02,
-                       "Swiss's pop-up is not the neutral wash the style calls for")
+        for theme in [AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+            let (drawn, role) = try drawnFill(under: theme)
+
+            XCTAssertEqual(
+                drawn.alphaComponent,
+                role.alphaComponent,
+                accuracy: 0.01,
+                "\(theme.name)'s pop-up did not lay its control fill down at the theme's weight"
+            )
+            for (drawnChannel, roleChannel) in zip(overWhite(drawn), overWhite(role)) {
+                XCTAssertEqual(
+                    drawnChannel,
+                    roleChannel,
+                    accuracy: 0.01,
+                    "\(theme.name)'s pop-up is not drawn in its own control colour"
+                )
+            }
+        }
     }
 
     /// The other half of a style's identity is its silhouette. Swiss squares every corner, so the
@@ -1369,6 +1831,98 @@ final class ThemedControlTests: XCTestCase {
                           "a rounded theme filled the pop-up's corner")
     }
     // MARK: - Button
+
+    func testAButtonPaintsTheThemesActionCaseTrackingAndWeightWithoutRenamingIt() {
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+        let button = ThemedButton(title: "Start", target: nil, action: nil)
+        let empty = ThemedButton(title: "", target: nil, action: nil)
+        let style = AppThemeStyles.bauhaus.material.buttonStyle
+        let expectedTitleWidth = ceil(
+            ("START" as NSString).size(withAttributes: [
+                .font: Design.Typography.control(weight: style.fontWeight.appKitWeight),
+                .kern: style.tracking
+            ]).width
+        )
+
+        XCTAssertEqual(
+            button.intrinsicContentSize.width - empty.intrinsicContentSize.width,
+            expectedTitleWidth,
+            accuracy: 0.5,
+            "the button did not measure the same transformed title it paints"
+        )
+        XCTAssertEqual(
+            button.accessibilityTitle(),
+            "Start",
+            "a display convention leaked into the button's accessible name"
+        )
+    }
+
+    func testOutlinedAndFilledPrimaryTreatmentsProduceDifferentSurfaces() throws {
+        func interiorAlpha(under theme: AppTheme) throws -> CGFloat {
+            AppThemePalette.set(theme)
+            let button = ThemedButton(title: "Go", target: nil, action: nil)
+            button.isProminent = true
+            button.frame = NSRect(x: 0, y: 0, width: 120, height: 26)
+            let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: rep)
+            let scale = CGFloat(rep.pixelsWide) / button.bounds.width
+            return try XCTUnwrap(
+                rep.colorAt(x: Int(12 * scale), y: Int(button.bounds.midY * scale))
+            ).alphaComponent
+        }
+
+        XCTAssertLessThan(
+            try interiorAlpha(under: AppThemeStyles.artDeco),
+            0.1,
+            "Art Deco's reference-outline action was filled"
+        )
+        XCTAssertGreaterThan(
+            try interiorAlpha(under: AppThemeStyles.neoBrutalism),
+            0.9,
+            "Neo Brutalism's reference-filled action became transparent"
+        )
+    }
+
+    func testWindows98ControlsPaintNativeFieldsDropdownsAndDefaultButtons() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        let prompt = PromptView(frame: NSRect(x: 0, y: 0, width: 240, height: 80))
+        let promptCG = try XCTUnwrap(prompt.layer?.backgroundColor)
+        let promptFill = try XCTUnwrap(NSColor(cgColor: promptCG))
+        XCTAssertEqual(promptFill.usingColorSpace(.sRGB)?.hexString, "#FFFFFF")
+
+        let chip = ChipView(frame: NSRect(x: 0, y: 0, width: 160, height: 26))
+        chip.configure(symbolName: "folder", title: "")
+        chip.layoutSubtreeIfNeeded()
+        let chipRep = try XCTUnwrap(chip.bitmapImageRepForCachingDisplay(in: chip.bounds))
+        chip.cacheDisplay(in: chip.bounds, to: chipRep)
+        assertRGB(
+            try colour(of: chipRep, at: NSPoint(x: 30, y: 13), in: chip),
+            equals: NSColor(hex: "#FFFFFF")!,
+            message: "the combo value well did not stay white"
+        )
+        assertRGB(
+            try colour(of: chipRep, at: NSPoint(x: 145, y: 6), in: chip),
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "the combo arrow was not its own button-face control"
+        )
+
+        let button = ThemedButton(title: "", target: nil, action: nil)
+        button.isProminent = true
+        button.frame = NSRect(x: 0, y: 0, width: 100, height: 26)
+        let buttonRep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+        button.cacheDisplay(in: button.bounds, to: buttonRep)
+        assertRGB(
+            try colour(of: buttonRep, at: NSPoint(x: 50, y: 13), in: button),
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "the default action remained a modern accent-filled button"
+        )
+        assertRGB(
+            try colour(of: buttonRep, at: NSPoint(x: 0, y: 13), in: button),
+            equals: NSColor(hex: "#000000")!,
+            message: "the default action lost its classic outer frame"
+        )
+    }
 
     /// A pressable control has to behave like `NSButton` at the call sites it replaces: a click
     /// inside fires once, and a click that wanders off before releasing fires not at all.
@@ -1887,7 +2441,7 @@ final class ThemedControlTests: XCTestCase {
             "New Session must remain directly after the active page tab"
         )
 
-        // The session's four actions travel as one group, so the row cannot space them as
+        // The session's five actions travel as one group, so the row cannot space them as
         // unrelated controls. Found through the Context button rather than by taking the first
         // group in the row: the header carries a second one — the "Open in" pair — and "the
         // first group" silently became that the day it was added.
@@ -1898,7 +2452,7 @@ final class ThemedControlTests: XCTestCase {
         )
         XCTAssertEqual(
             descendants(in: group).compactMap { $0 as? ThemedIconButton }.count,
-            4,
+            5,
             "the session actions group lost one of its buttons"
         )
 
@@ -1998,12 +2552,29 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(ids.contains("settings.remote-access.page"))
         XCTAssertTrue(ids.contains("settings.remote-access.enabled"))
         XCTAssertTrue(ids.contains("settings.remote-access.connection-mode"))
+        XCTAssertTrue(ids.contains("settings.remote-access.owner-relay-fallback"))
+        XCTAssertTrue(ids.contains("settings.remote-access.keep-relay-ready"))
+        XCTAssertTrue(ids.contains("settings.remote-access.input-control-default"))
         XCTAssertTrue(ids.contains("settings.remote-access.status"))
         XCTAssertTrue(ids.contains("settings.remote-access.pair"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 
     func testRemoteAccessSetupPageRendersInBothAppearances() throws {
+        let previousMode = AppSettings.shared.remoteAccessConnectionMode
+        let previousEnabled = AppSettings.shared.remoteAccessEnabled
+        let previousFallback = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
+        let previousKeepReady = AppSettings.shared.remoteAccessKeepsRelayReady
+        AppSettings.shared.remoteAccessConnectionMode = .tailscaleAndRelay
+        AppSettings.shared.remoteAccessEnabled = false
+        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = false
+        AppSettings.shared.remoteAccessKeepsRelayReady = false
+        defer {
+            AppSettings.shared.remoteAccessConnectionMode = previousMode
+            AppSettings.shared.remoteAccessEnabled = previousEnabled
+            AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = previousFallback
+            AppSettings.shared.remoteAccessKeepsRelayReady = previousKeepReady
+        }
         let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
         }
@@ -2042,6 +2613,11 @@ final class ThemedControlTests: XCTestCase {
                 host.layer?.backgroundColor = Design.Surface.ground.cgColor
                 AppThemeRefresh.repaint(host)
                 host.layoutSubtreeIfNeeded()
+                if let scrollView = controller.view as? NSScrollView {
+                    scrollView.contentView.scroll(to: .zero)
+                    scrollView.reflectScrolledClipView(scrollView.contentView)
+                    host.layoutSubtreeIfNeeded()
+                }
                 png = try? renderedPNG(of: host)
             }
 
@@ -2179,31 +2755,32 @@ final class ThemedControlTests: XCTestCase {
         static let chosenWidthOffset: CGFloat = 97
     }
 
-    /// Drags the sidebar's divider to `pointerX` through the loop AppKit actually runs for a
-    /// divider, and answers whether the column ended up shut.
+    /// Drags a split divider to `pointerX` through the loop AppKit actually runs for one.
     ///
     /// `setPosition` — what the other collapse tests here use — takes the item's Auto Layout
     /// path and cannot see any of this: past the floor the divider stops dead and the pointer
     /// travels on alone, and it is that overshoot, invisible in every frame, that decides
-    /// whether the column shuts. The events are queued on the window *before* the loop is
+    /// whether the pane shuts. The events are queued on the window *before* the loop is
     /// entered, because `mouseDown(with:)` does not return until it has pulled its own mouse-up.
     @MainActor
-    private func dragSidebarDivider(
+    private func dragDivider(
+        at index: Int,
         to pointerX: CGFloat,
         in controller: MainWindowController
-    ) throws -> Bool {
+    ) throws {
         let window = try XCTUnwrap(controller.window)
         let splitView = controller.splitViewController.splitView
-        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
-        let pane = sidebarItem.viewController.view
+        let leadingPane = try XCTUnwrap(splitView.arrangedSubviews[index])
         func inWindow(_ x: CGFloat) -> NSPoint {
             splitView.convert(NSPoint(x: x, y: splitView.frame.midY), to: nil)
         }
 
         var queued: [NSEvent] = []
-        var x = pane.frame.maxX
-        while x > pointerX + DividerDragFixture.step {
-            x -= DividerDragFixture.step
+        var x = leadingPane.frame.maxX
+        // Toward the target in either direction — the sidebar's divider shuts it leftward,
+        // the panel's shuts it rightward — through every width on the way.
+        while abs(x - pointerX) > DividerDragFixture.step {
+            x += DividerDragFixture.step * (pointerX > x ? 1 : -1)
             queued.append(try mouseEvent(.leftMouseDragged, at: inWindow(x), in: window))
         }
         queued.append(try mouseEvent(.leftMouseDragged, at: inWindow(pointerX), in: window))
@@ -2214,12 +2791,22 @@ final class ThemedControlTests: XCTestCase {
         )
         for event in queued { window.postEvent(event, atStart: false) }
 
-        let grab = pane.frame.maxX + splitView.dividerThickness / 2
+        let grab = leadingPane.frame.maxX + splitView.dividerThickness / 2
         splitView.mouseDown(with: try mouseEvent(.leftMouseDown, at: inWindow(grab), in: window))
         window.contentView?.layoutSubtreeIfNeeded()
-        // The shut is animated, like the toolbar's.
+        // The shut runs a turn after the release, through the shared transition route.
         RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard))
         window.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    /// The sidebar's copy of the drag, answering whether the column ended up shut.
+    @MainActor
+    private func dragSidebarDivider(
+        to pointerX: CGFloat,
+        in controller: MainWindowController
+    ) throws -> Bool {
+        try dragDivider(at: 0, to: pointerX, in: controller)
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
         return sidebarItem.isCollapsed
     }
 
@@ -2253,7 +2840,7 @@ final class ThemedControlTests: XCTestCase {
     /// AppKit's own rule wants *half the floor* — around a hundred points past a column that
     /// has already stopped moving, every one of them without feedback, which is how "it does not
     /// collapse any more" gets reported about a gesture that technically still works.
-    /// `SidebarDefaults.shutOvershoot` is where the push becomes an answer instead.
+    /// `PaneTransition.shutOvershoot` is where the push becomes an answer instead.
     @MainActor
     func testPushingTheDividerPastTheSidebarShutsIt() throws {
         let (controller, floor) = try windowAtSidebarFloor()
@@ -2261,7 +2848,7 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(toggle.isSelected, "the toggle did not start out lit for a visible sidebar")
 
         let shut = try dragSidebarDivider(
-            to: floor - SidebarDefaults.shutOvershoot - DividerDragFixture.margin,
+            to: floor - PaneTransition.shutOvershoot - DividerDragFixture.margin,
             in: controller
         )
 
@@ -2284,7 +2871,7 @@ final class ThemedControlTests: XCTestCase {
         let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
 
         let shut = try dragSidebarDivider(
-            to: floor - SidebarDefaults.shutOvershoot + DividerDragFixture.margin,
+            to: floor - PaneTransition.shutOvershoot + DividerDragFixture.margin,
             in: controller
         )
 
@@ -2295,6 +2882,189 @@ final class ThemedControlTests: XCTestCase {
             accuracy: 1,
             "the sidebar did not come to rest at the floor the drag pushed it to"
         )
+    }
+
+    /// The same gesture at the window's other edge shuts the display panel.
+    ///
+    /// The panel's floor is its 48pt chrome, so its shut threshold is half the floor rather
+    /// than the full overshoot — the full one lies 12pt *outside the window*, a release the
+    /// pointer cannot reach when the window's edge meets the screen's
+    /// (`PaneTransition.dragShutsPane`).
+    @MainActor
+    func testPushingTheDividerPastTheDisplayPanelShutsIt() throws {
+        let (controller, pane, displayItem) = try windowWithDisplayPanelOpen()
+        let toggle = try XCTUnwrap(controller.displayPaneToolbarButton)
+        XCTAssertTrue(toggle.isSelected, "the toggle did not start out lit for a visible panel")
+
+        try dragDivider(
+            at: controller.splitViewController.splitViewItems.count - 2,
+            to: pane.frame.maxX - panelShutThreshold(displayItem) + DividerDragFixture.margin,
+            in: controller
+        )
+
+        XCTAssertTrue(
+            displayItem.isCollapsed,
+            "the divider pushed past the panel's floor stopped dead"
+        )
+        XCTAssertFalse(
+            toggle.isSelected,
+            "the toolbar's panel toggle stayed lit for a panel that had been shut"
+        )
+    }
+
+    /// And stopping at the panel's floor leaves it standing, exactly as the sidebar's does.
+    @MainActor
+    func testStoppingAtTheDisplayPanelsFloorLeavesItOpen() throws {
+        let (controller, pane, displayItem) = try windowWithDisplayPanelOpen()
+
+        try dragDivider(
+            at: controller.splitViewController.splitViewItems.count - 2,
+            to: pane.frame.maxX - panelShutThreshold(displayItem) - DividerDragFixture.margin,
+            in: controller
+        )
+
+        XCTAssertFalse(displayItem.isCollapsed, "the panel shut on a drag inside its threshold")
+        XCTAssertEqual(
+            pane.frame.width,
+            displayItem.minimumThickness,
+            accuracy: 1,
+            "the panel did not come to rest at the floor the drag pushed it to"
+        )
+    }
+
+    /// A fresh window with the panel revealed, its width already the divider's own answer.
+    @MainActor
+    private func windowWithDisplayPanelOpen() throws -> (
+        MainWindowController, NSView, NSSplitViewItem
+    ) {
+        let (controller, _) = try windowAtSidebarFloor()
+        let window = try XCTUnwrap(controller.window)
+        let displayItem = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+
+        controller.setDisplayPaneVisible(true)
+        // The reveal restores the stored width through the transition route's deferred turns.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard))
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertFalse(displayItem.isCollapsed, "the panel never opened, so nothing can shut it")
+
+        let pane = try XCTUnwrap(
+            controller.splitViewController.splitView.arrangedSubviews.last
+        )
+        return (controller, pane, displayItem)
+    }
+
+    /// Where a release means "shut" for the panel: the floor less the capped overshoot.
+    private func panelShutThreshold(_ item: NSSplitViewItem) -> CGFloat {
+        item.minimumThickness - min(PaneTransition.shutOvershoot, item.minimumThickness / 2)
+    }
+
+    /// The gesture's arithmetic, stated once: the overshoot, capped at half the floor so a
+    /// shallow pane's shut point stays inside the window.
+    @MainActor
+    func testTheShutThresholdNeverLiesOutsideTheWindow() {
+        // A deep floor affords the full overshoot...
+        XCTAssertFalse(PaneTransition.dragShutsPane(thickness: 148, floor: 207))
+        XCTAssertTrue(PaneTransition.dragShutsPane(thickness: 146, floor: 207))
+        // ...and a shallow one halves itself rather than asking for a release past the edge.
+        XCTAssertFalse(PaneTransition.dragShutsPane(thickness: 25, floor: 48))
+        XCTAssertTrue(PaneTransition.dragShutsPane(thickness: 23, floor: 48))
+    }
+
+    /// The drawer's divider takes the same push. Its height constraint clamps at the floor
+    /// while the hand keeps going, so the overshoot lives only in the container's running
+    /// total — driven through the divider callbacks' seams, because a synthesized `NSEvent`
+    /// cannot carry the `deltaY` the real strip reports.
+    @MainActor
+    func testPushingTheDrawersDividerPastItsFloorShutsIt() throws {
+        let fixture = try drawerSession()
+        defer { fixture.tearDown() }
+        let container = fixture.container
+        XCTAssertTrue(container.isShellDrawerOpen, "the fixture's drawer never opened")
+
+        // One pull down to the floor, then the overshoot past it.
+        container.drawerDividerDragged(by: ShellDrawerHeight.stored - drawerFloor)
+        container.drawerDividerDragged(
+            by: PaneTransition.shutOvershoot + DividerDragFixture.margin
+        )
+        container.drawerDividerDragEnded()
+
+        XCTAssertFalse(container.isShellDrawerOpen, "the drawer stopped dead at its floor")
+        XCTAssertEqual(
+            ShellDrawerHeight.stored,
+            drawerFloor,
+            accuracy: 1,
+            "the drawer recorded the overshoot as a height, so it would reopen shorter"
+        )
+    }
+
+    /// And a pull that stops at the floor — or drifts a little past it — leaves it open,
+    /// exactly as the window's other panes do.
+    @MainActor
+    func testStoppingAtTheDrawersFloorLeavesItOpen() throws {
+        let fixture = try drawerSession()
+        defer { fixture.tearDown() }
+        let container = fixture.container
+
+        container.drawerDividerDragged(
+            by: ShellDrawerHeight.stored - drawerFloor
+                + PaneTransition.shutOvershoot - DividerDragFixture.margin
+        )
+        container.drawerDividerDragEnded()
+
+        XCTAssertTrue(
+            container.isShellDrawerOpen,
+            "the drawer shut on a drag that only reached its floor"
+        )
+    }
+
+    /// The least the drawer can be — `TerminalContainerViewController.drawerFloor`, restated
+    /// because the container keeps its own private.
+    private var drawerFloor: CGFloat {
+        ShellDrawerDefaults.minimumHeight + ThemedTabStripView.bandHeight
+    }
+
+    private struct DrawerFixture {
+        let container: TerminalContainerViewController
+        let tearDown: () -> Void
+    }
+
+    /// A real project and session with the drawer open on its shell tab — unwindowed, so the
+    /// shell never spawns — and the developer's own drawer height put back on teardown, since
+    /// `ShellDrawerHeight` lives in the real defaults.
+    @MainActor
+    private func drawerSession() throws -> DrawerFixture {
+        let previousHeight = ShellDrawerHeight.stored
+        // Pinned before the container reads it, so the drag arithmetic below is the test's
+        // rather than whatever height this machine's drawer was last left at.
+        ShellDrawerHeight.stored = ShellDrawerDefaults.defaultHeight
+            + ThemedTabStripView.bandHeight
+
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(
+                "threading-drawer-drag-\(UUID().uuidString)", isDirectory: true
+            )
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: folder)
+        let session = try XCTUnwrap(
+            store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Drawer")
+        )
+
+        let container = TerminalContainerViewController()
+        container.view.frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+        container.view.layoutSubtreeIfNeeded()
+        // The pane's subject, stated without launching its agent: the drawer is per-session.
+        container.setCurrentSessionForTesting(session.id)
+        container.openShellDrawer()
+        container.view.layoutSubtreeIfNeeded()
+
+        return DrawerFixture(container: container) {
+            container.closeShellDrawer(for: session.id)
+            container.setCurrentSessionForTesting(nil)
+            store.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: folder)
+            ShellDrawerHeight.stored = previousHeight
+        }
     }
 
     /// The column has no ceiling of its own — only the one the terminal implies.
@@ -2331,6 +3101,63 @@ final class ThemedControlTests: XCTestCase {
             controller.splitViewController.splitViewItems[1].viewController.view.frame.width,
             MainWindowDefaults.minContentWidth,
             "the sidebar took width the terminal had said it needed"
+        )
+    }
+
+    /// A pane's contents may say how wide they would like to be. They may not say how wide the
+    /// *pane* is.
+    ///
+    /// The composer's column fills its pane up to `ComposerDefaults.contentWidth`, and stated as
+    /// an equality at `.defaultHigh` beside a required cap that reads, to Auto Layout, as "this
+    /// pane is at most 784 wide" — a claim that outranks the priority a split view holds its
+    /// panes at. In a 1200pt window the terminal was pinned at 784 and the sidebar could not be
+    /// dragged below 415: the divider stopped dead 200pt above its floor, and pushing on shut the
+    /// column instead. The host here claims its width the way a split item does, at 250, so a
+    /// column that outranks it fails this.
+    @MainActor
+    func testTheComposerColumnDoesNotCapThePaneItFills() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 1_200, height: 600))
+        let pane = NSView()
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(pane)
+
+        let composer = SessionComposerViewController()
+        composer.view.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(composer.view)
+
+        let paneWidth = pane.trailingAnchor.constraint(equalTo: root.trailingAnchor)
+        paneWidth.priority = NSLayoutConstraint.Priority(250)
+
+        NSLayoutConstraint.activate([
+            pane.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            pane.topAnchor.constraint(equalTo: root.topAnchor),
+            pane.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            paneWidth,
+            composer.view.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            composer.view.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            composer.view.topAnchor.constraint(equalTo: pane.topAnchor),
+            composer.view.bottomAnchor.constraint(equalTo: pane.bottomAnchor)
+        ])
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            pane.frame.width,
+            root.frame.width,
+            accuracy: 1,
+            "the composer's column held its pane below the width the pane asked for"
+        )
+
+        // And the cap itself still holds, which is the other half: the column stops at its
+        // measure rather than running the full width of a wide pane.
+        let column = try XCTUnwrap(
+            descendant(withIdentifier: "composer.session-start.content", in: composer.view),
+            "the composer's prompt column was not found"
+        )
+        XCTAssertEqual(
+            column.frame.width,
+            ComposerDefaults.contentWidth,
+            accuracy: 1,
+            "the column did not stop at the width it is capped to"
         )
     }
 
@@ -2629,32 +3456,39 @@ final class ThemedControlTests: XCTestCase {
         AppThemePalette.set(AppThemeStyles.cyberpunk)
         Design.Accessibility.increaseContrastOverrideForTesting = false
 
-        let regularControl = try resolvedLayerColor(Design.Surface.controlResting)
         let regularInk = Design.Text.on(Design.Surface.ground)
         let regularInkBorderAlpha = regularInk.border.alphaComponent
         let regularWidth = Design.Radius.border
 
         Design.Accessibility.increaseContrastOverrideForTesting = true
 
-        let strongControl = try resolvedLayerColor(Design.Surface.controlResting)
         let strongInk = Design.Text.on(Design.Surface.ground)
 
-        XCTAssertGreaterThan(strongControl.alphaComponent, regularControl.alphaComponent)
         XCTAssertGreaterThan(strongInk.secondary.alphaComponent, regularInk.secondary.alphaComponent)
         XCTAssertGreaterThan(strongInk.border.alphaComponent, regularInkBorderAlpha)
         XCTAssertGreaterThan(Design.Radius.border, regularWidth)
         XCTAssertEqual(Design.Accessibility.focusRingWidth, 3)
 
+        // The faint *fills* are read under a theme that authors faint ones. Only a translucent
+        // role has anything to strengthen: `Design.Accessibility.color` leaves an opaque authored
+        // colour exactly as the theme wrote it, since nothing is won by making a solid surface
+        // more solid — and Cyberpunk's control fill became one of those when that theme was
+        // rebuilt against its reference.
         AppThemePalette.set(AppThemeStyles.swissMinimalist)
         Design.Accessibility.increaseContrastOverrideForTesting = false
+        let regularControl = try resolvedLayerColor(Design.Surface.controlResting)
         let regularDivider = try resolvedLayerColor(Design.Surface.divider)
         Design.Accessibility.increaseContrastOverrideForTesting = true
+        let strongControl = try resolvedLayerColor(Design.Surface.controlResting)
         let strongDivider = try resolvedLayerColor(Design.Surface.divider)
+        XCTAssertGreaterThan(strongControl.alphaComponent, regularControl.alphaComponent)
         XCTAssertGreaterThan(strongDivider.alphaComponent, regularDivider.alphaComponent)
     }
 
     func testAccessibilityRefreshReappliesRecordedLayerSurfaces() throws {
-        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        // A theme whose control fill is authored translucent: the claim is that a *recorded*
+        // surface is re-resolved, and only a faint role visibly moves when it is.
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
         Design.Accessibility.increaseContrastOverrideForTesting = false
 
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
@@ -2674,7 +3508,69 @@ final class ThemedControlTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(increased.alphaComponent, regular.alphaComponent)
-        XCTAssertEqual(view.layer?.borderWidth, Design.Radius.border)
+        XCTAssertEqual(view.layer?.borderWidth, Design.Radius.controlBorder)
+    }
+
+    /// Structural cards and compact controls may be constructed at different scales. Bauhaus's
+    /// reference uses four-point card ink and two-point button ink, while old themes inherit one
+    /// weight for both; `applySurface` must preserve that semantic split even when both are square.
+    func testAppliedSurfacesRouteStructuralAndControlBorderWeightsSeparately() {
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 40))
+        panel.applySurface(
+            fill: Design.Surface.panel,
+            radius: .panel,
+            border: Design.Surface.border
+        )
+        let control = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
+        control.applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .control,
+            border: Design.Surface.border
+        )
+
+        XCTAssertEqual(Design.Radius.border, 4)
+        XCTAssertEqual(Design.Radius.controlBorder, 2)
+        XCTAssertEqual(panel.layer?.borderWidth, 4)
+        XCTAssertEqual(control.layer?.borderWidth, 2)
+
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+        control.reapplyRecordedSurfaceForTesting()
+        XCTAssertEqual(Design.Radius.border, 4)
+        XCTAssertEqual(Design.Radius.controlBorder, 4)
+        XCTAssertEqual(control.layer?.borderWidth, 4, "nil did not inherit structural weight")
+    }
+
+    /// Pattern is a backdrop role, not an automatic side effect of a colour or square corner.
+    /// The same Bauhaus ground can fill a broad pane and a compact surface; only the former may
+    /// wear the reference's dot field, and switching to a flat theme must remove the live layer.
+    func testAppliedBackdropPatternIsExplicitAndThemeRefreshable() throws {
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+
+        let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
+        backdrop.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
+        let compact = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        compact.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+
+        let pattern = try XCTUnwrap(
+            backdrop.layer?.sublayers?.first { $0.name == "threading.backdropPattern" }
+        )
+        XCTAssertEqual(pattern.opacity, 0.20, accuracy: 0.001)
+        XCTAssertNil(
+            compact.layer?.sublayers?.first { $0.name == "threading.backdropPattern" }
+        )
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        backdrop.reapplyRecordedSurfaceForTesting()
+        XCTAssertNil(
+            backdrop.layer?.sublayers?.first { $0.name == "threading.backdropPattern" },
+            "a flat theme inherited the previous theme's pattern layer"
+        )
     }
 
     /// The sheet buttons depend on this: Return confirms, Escape cancels, and nothing else in the
@@ -2817,6 +3713,93 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// A chord and the title it names ink the **same band**, so the two read as a single line
+    /// rather than as a hint floating above some words.
+    ///
+    /// This is asserted against a *serif* theme because that is the only place it can go wrong:
+    /// `⌘` and `↩` are absent from New York, so they arrive from a fallback face whose metrics
+    /// are not the theme's. The drawing used to answer that by centring the chord's inked path
+    /// on its own line box and adding the correction to `y` — in a view that is not flipped, so
+    /// the hint rose by the fraction of a point it should have dropped, and its taller fallback
+    /// ascent lifted it further. Under SF the title and the chord resolve to one face and the
+    /// two errors cancelled to nothing, which is why it shipped: `⌘↩` sat a point and a quarter
+    /// above "Start session" under every serif theme and was square under the default one.
+    ///
+    /// Measured from the ink rather than from the code's own arithmetic: each line's baseline is
+    /// recovered by taking where its lowest ink actually landed and subtracting how far below the
+    /// baseline that font puts it.
+    func testAShortcutInksTheSameBandAsItsTitle() throws {
+        let previous = AppThemeLibrary.current
+        addTeardownBlock { AppThemeLibrary.apply(previous) }
+
+        // Six device pixels per point: the offset being guarded against is a fraction of one.
+        let scale: CGFloat = 6
+        let title = "Start session"
+        let chord = KeyboardShortcut(key: "\r", modifiers: .command)
+
+        for (name, theme) in [("system", AppTheme.system), ("serif", AppThemeStyles.newsprint)] {
+            AppThemeLibrary.apply(theme)
+            let button = ThemedButton(title: title, target: nil, action: nil)
+            // Unbordered, so the alpha channel holds the ink and nothing else.
+            button.isBordered = false
+            button.shortcut = chord
+            let size = button.intrinsicContentSize
+            button.frame = NSRect(origin: .zero, size: size)
+
+            let rep = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(size.width * scale),
+                pixelsHigh: Int(size.height * scale),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ))
+            rep.size = size
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            button.draw(button.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+
+            // Every inked column, and the lowest row each one reaches.
+            var inkRows: [Int: (Int, Int)] = [:]
+            for x in 0..<rep.pixelsWide {
+                for y in 0..<rep.pixelsHigh
+                where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.2 {
+                    let seen = inkRows[x] ?? (y, y)
+                    inkRows[x] = (min(seen.0, y), max(seen.1, y))
+                }
+            }
+            let inked = inkRows.keys.sorted()
+            XCTAssertFalse(inked.isEmpty, "\(name): the button drew nothing")
+
+            // The chord is the ink beyond the widest gap — `Layout.shortcutGap` is wider than
+            // any space inside the words.
+            let split = zip(inked, inked.dropFirst()).max { $0.1 - $0.0 < $1.1 - $1.0 }?.1 ?? 0
+            func bandCentre(_ columns: [Int]) -> CGFloat {
+                let rows = columns.compactMap { inkRows[$0] }
+                let top = CGFloat(rows.map(\.0).min() ?? 0) / scale
+                let bottom = CGFloat((rows.map(\.1).max() ?? 0) + 1) / scale
+                return (top + bottom) / 2
+            }
+
+            let titleCentre = bandCentre(inked.filter { $0 < split })
+            let chordCentre = bandCentre(inked.filter { $0 >= split })
+
+            // A quarter point: comfortably above what the ink threshold can invent, and well
+            // under the point the hint was floating by when this was written.
+            XCTAssertEqual(
+                chordCentre, titleCentre, accuracy: 0.25,
+                "\(name): the chord's ink is centred \(titleCentre - chordCentre)pt above the title's"
+            )
+        }
+    }
+
+
     /// A title is measured to size the button and drawn inside that size, so the two must use the
     /// *same* attributes. They did not: measured in the regular weight, drawn in the medium one,
     /// which left "Add Project" a hair too wide for its own rect — `NSString.draw(in:)` wraps, so
@@ -2882,6 +3865,39 @@ final class ThemedControlTests: XCTestCase {
 
         XCTAssertLessThan(fillAlpha(enabled: false), fillAlpha(enabled: true),
                           "a disabled button drew a louder surface than an enabled one")
+    }
+
+    /// A translucent Bauhaus secondary showed its title twice: once on the face and once in the
+    /// hard shadow behind it. The primary hid the same mistake only because its red fill is
+    /// opaque. A drawn control therefore casts depth from a transparent path-only companion,
+    /// never from the layer containing its text and glyph.
+    func testAButtonShadowComesFromAShapeOnlyCompanionLayer() throws {
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+        let button = ThemedButton(
+            frame: NSRect(x: 0, y: 0, width: 110, height: Design.Size.chipHeight)
+        )
+        button.title = "Ordinary"
+
+        let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+        button.cacheDisplay(in: button.bounds, to: rep)
+
+        XCTAssertEqual(button.layer?.shadowOpacity, 0, "the text-bearing layer still casts depth")
+        let shadow = try XCTUnwrap(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.primary" }
+        )
+        XCTAssertNotNil(shadow.shadowPath, "the companion has no face silhouette")
+        XCTAssertNil(shadow.contents, "the shadow companion copied the button artwork")
+        XCTAssertNil(shadow.backgroundColor, "the shadow companion covers translucent faces")
+
+        AppThemePalette.set(.system)
+        button.needsDisplay = true
+        button.cacheDisplay(in: button.bounds, to: rep)
+        XCTAssertFalse(
+            button.layer?.sublayers?.contains {
+                $0.name == "threading.controlGlow.primary"
+            } ?? false,
+            "switching away from a lifted theme kept the companion shadow"
+        )
     }
 
     // MARK: - Search Match
@@ -3225,6 +4241,198 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    // MARK: - Split Control
+
+    /// Two halves of one thing draw **one** silhouette.
+    ///
+    /// The Open In control was two `ThemedIconButton`s in a group, and the group is right for
+    /// four buttons that act on four different things. These two act on one, so spaced apart they
+    /// read as an app's icon with an unrelated chevron beside it — and the hover said so out
+    /// loud, each half raising a rounded rect of its own with a seam down the middle of a control
+    /// the pointer had just claimed was single.
+    func testTheSplitControlDrawsOneSurfaceAcrossBothHalves() throws {
+        AppThemePalette.set(.system)
+        let control = splitControl()
+        let samples = try surfaceSamples(across: control)
+
+        XCTAssertGreaterThan(
+            samples.first?.alphaComponent ?? 0, 0.05,
+            "the plate is not drawn at all — the rest of this test would pass on empty air"
+        )
+        for sample in samples {
+            XCTAssertEqual(
+                sample, samples[0],
+                "the plate changes colour across its own width — the halves are drawing "
+                    + "surfaces of their own again"
+            )
+        }
+    }
+
+    /// Hovering raises the half under the pointer and nothing else, **inside** the plate.
+    ///
+    /// Both halves of the claim matter. The raise has to be visible — a split control whose two
+    /// targets look identical is a control that will be pressed wrong — and it has to stop at the
+    /// plate's own outline, which is what the corner sample is for: a half filling its own square
+    /// rect squares off the plate's rounded end, which is the seam again at the other edge.
+    func testHoveringRaisesOnlyTheHalfUnderThePointerAndStaysInsideThePlate() throws {
+        AppThemePalette.set(.system)
+
+        for (name, hovered) in [("press", \SplitIconButtonView.action),
+                                ("chevron", \SplitIconButtonView.chevron)] {
+            let control = splitControl()
+            let resting = try surfaceSamples(across: control)
+
+            control[keyPath: hovered].mouseEntered(with: hoverEvent())
+            let raised = try surfaceSamples(across: control)
+
+            let lit = zip(resting, raised).filter { $0.0 != $0.1 }.count
+            XCTAssertGreaterThan(lit, 0, "hovering the \(name) half raised nothing")
+            XCTAssertLessThan(
+                lit, resting.count,
+                "hovering the \(name) half raised the whole plate — the other half is a "
+                    + "separate target and has to keep saying so"
+            )
+
+            for corner in try cornerSamples(of: control) {
+                XCTAssertLessThan(
+                    corner.alphaComponent, 0.5,
+                    "the \(name) half's raise squared off the plate's corner — it is drawing "
+                        + "its own rect rather than filling inside the shared silhouette"
+                )
+            }
+        }
+    }
+
+    /// The plate is furniture; the halves are the buttons. Announcing all three would report one
+    /// control as three objects, and announcing only the plate would lose the two names that say
+    /// what each press does.
+    func testTheSplitControlAnnouncesItsHalvesAndNotItself() {
+        let control = splitControl()
+
+        XCTAssertFalse(control.isAccessibilityElement())
+        XCTAssertEqual(control.accessibilityRole(), .group)
+        XCTAssertTrue(control.action.isAccessibilityElement())
+        XCTAssertEqual(control.action.accessibilityTitle(), "Open in Finder")
+        XCTAssertEqual(control.chevron.accessibilityTitle(), "Choose an app")
+
+        var opened = 0
+        control.action.onPress = { opened += 1 }
+        XCTAssertTrue(control.action.accessibilityPerformPress())
+        XCTAssertEqual(opened, 1, "the press half does nothing when VoiceOver presses it")
+    }
+
+    /// The plate is read from the ink at draw time, so a session on another palette — or a live
+    /// theme switch — recolours it with nothing recorded to go stale.
+    func testTheSplitControlFollowsTheBackdropItIsDrawnOn() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+
+        WindowBackdrop.set(.terminal(NSColor(hex: "#0B0B0F")!))
+        let control = splitControl()
+        let onNight = try surfaceSamples(across: control)
+
+        WindowBackdrop.set(.terminal(NSColor(hex: "#FAFAF7")!))
+        let onPaper = try surfaceSamples(across: control)
+
+        XCTAssertNotEqual(
+            onNight.first, onPaper.first,
+            "the plate kept the colour it was first drawn in — it is not reading its ink"
+        )
+    }
+
+    /// One plate, welded: the halves share an edge and the plate is exactly as wide as they are.
+    /// A gap here is the group this control replaced.
+    func testTheSplitControlIsExactlyItsTwoHalvesWide() {
+        let control = splitControl()
+
+        XCTAssertEqual(control.action.frame.maxX, control.chevron.frame.minX, accuracy: 0.5)
+        XCTAssertEqual(
+            control.frame.width,
+            Design.Size.toolbarButtonWidth + Design.Size.splitMenuWidth,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(control.frame.height, Design.Size.toolbarButtonHeight, accuracy: 0.5)
+    }
+
+    /// A control laid out and drawn the way the header draws it, in a window that is never shown.
+    private func splitControl() -> SplitIconButtonView {
+        let control = SplitIconButtonView(
+            action: ThemedIconButton(
+                symbolName: "arrow.up.forward.app",
+                accessibility: "Open in Finder"
+            ),
+            chevron: ThemedIconButton(
+                symbolName: DesignSymbols.chevron,
+                accessibility: "Choose an app",
+                target: .splitMenu
+            )
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 60))
+        host.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            control.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        return control
+    }
+
+    /// The plate's fill along its middle row, sampled inside its own border and past the corners
+    /// so the curve is never what a comparison is reading.
+    private func surfaceSamples(across control: SplitIconButtonView) throws -> [NSColor] {
+        let rep = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+        control.cacheDisplay(in: control.bounds, to: rep)
+
+        // The rep is sized in pixels; on a Retina backing that is twice the points the geometry
+        // is stated in, and sampling in points would read the wrong column.
+        let scale = CGFloat(rep.pixelsWide) / control.bounds.width
+        // Above the glyphs rather than through them: the icon and the chevron are centred in a
+        // 16pt slot in a 28pt plate, so a row taken across the middle reads *artwork* and would
+        // report a seam in every state including the ones that have none. Below the plate's own
+        // border, and inset past its corners, so the curve is never what is being compared.
+        let row = Int((Design.Spacing.tight * scale).rounded())
+        let inset = Design.Radius.control(fitting: control.bounds.size) + 1
+
+        return try stride(from: inset, to: control.bounds.width - inset, by: 2).map { x in
+            try XCTUnwrap(
+                rep.colorAt(x: Int((x * scale).rounded()), y: row),
+                "the plate could not be sampled at \(x)"
+            ).usingColorSpace(.sRGB)!
+        }
+    }
+
+    /// The four outermost pixels, which a rounded plate leaves clear and a square fill does not.
+    private func cornerSamples(of control: SplitIconButtonView) throws -> [NSColor] {
+        let rep = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+        control.cacheDisplay(in: control.bounds, to: rep)
+
+        return try [(0, 0), (rep.pixelsWide - 1, 0),
+                    (0, rep.pixelsHigh - 1), (rep.pixelsWide - 1, rep.pixelsHigh - 1)]
+            .map { try XCTUnwrap(rep.colorAt(x: $0.0, y: $0.1)) }
+    }
+
+    private func hoverEvent() -> NSEvent {
+        NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )!
+    }
+
     // MARK: - Content Surfaces
 
     func testThemedContentContainersStartTransparent() {
@@ -3527,6 +4735,54 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(localEvents, 1, "A horizontal gesture escaped the code block")
     }
 
+    func testNestedScrollKeepsVerticalMomentumLockedWhenTailTurnsDiagonal() {
+        var router = NestedScrollGestureRouter()
+
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 1,
+            deltaY: 18,
+            phase: .began,
+            momentumPhase: []
+        ))
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 5,
+            deltaY: 2,
+            phase: .changed,
+            momentumPhase: []
+        ), "diagonal noise stole an in-flight vertical gesture")
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 0,
+            deltaY: 0,
+            phase: .ended,
+            momentumPhase: []
+        ), "the direct-gesture end discarded the axis before momentum began")
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 4,
+            deltaY: 1,
+            phase: [],
+            momentumPhase: .began
+        ), "momentum did not inherit the gesture's vertical axis")
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 3,
+            deltaY: 1,
+            phase: [],
+            momentumPhase: .changed
+        ), "the momentum tail changed destination under a stationary pointer")
+        XCTAssertTrue(router.forwardsToAncestor(
+            deltaX: 0,
+            deltaY: 0,
+            phase: [],
+            momentumPhase: .ended
+        ))
+
+        XCTAssertFalse(router.forwardsToAncestor(
+            deltaX: 12,
+            deltaY: 1,
+            phase: .began,
+            momentumPhase: []
+        ), "a new horizontal gesture inherited the previous vertical lock")
+    }
+
     /// A wrapper that only changes its type name is not a themed component. The process-tree
     /// header used to be such a seam; pin that it now paints a role from the active theme.
     func testThemedTableHeaderPaintsTheActiveTheme() {
@@ -3707,6 +4963,9 @@ final class ThemedControlTests: XCTestCase {
                 "BrowserFindBar",
                 "ChipView",
                 "ConversationContextRailView",
+                "ConversationHandoffView",
+                "CompareInspectorView",
+                "ExecutionAuditEventView",
                 "FileActivityMapView",
                 "GlyphView",
                 "HoverPopoverScheduler",
@@ -3719,6 +4978,7 @@ final class ThemedControlTests: XCTestCase {
                 "NavigatorGridItemView",
                 "PaneFooterView",
                 "PaneHeaderView",
+                "PromptCompletionPresenter",
                 "PromptView",
                 "SearchMatchLabel",
                 "SemanticSceneView",
@@ -3726,6 +4986,7 @@ final class ThemedControlTests: XCTestCase {
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
                 "SidebarBrandView",
+                "SplitIconButtonView",
                 "SubagentSummaryView",
                 "SubmissionStatusView",
                 "ThreadingMarkView",
@@ -3736,7 +4997,9 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedCheckbox",
                 "ThemedClipView",
                 "ThemedControl",
+                "ThemedDisclosureRow",
                 "ThemedFileIconView",
+                "ThemedFloatingGlyphView",
                 "ThemedOutlineView",
                 "ThemedPopUp",
                 "ThemedPopover",
@@ -3747,7 +5010,9 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedSegmentedControl",
                 "ThemedSpinner",
                 "ThemedSplitView",
+                "ListSelectionStrength",
                 "ThemedTableHeaderView",
+                "ThemedTableRowView",
                 "ThemedTableView",
                 "ThemedTabItemView",
                 "ThemedTabStripView",
@@ -3767,6 +5032,7 @@ final class ThemedControlTests: XCTestCase {
                 "WindowBackdrop",
                 "WindowChromeButton",
                 "WindowChromeFrameView",
+                "WindowCommandBandView",
                 "WindowTitleBandView"
             ]
         )
@@ -4036,6 +5302,27 @@ final class ThemedControlTests: XCTestCase {
             ),
             "no pixel at \(point)"
         )
+    }
+
+    private func assertRGB(
+        _ actual: NSColor,
+        equals expected: NSColor,
+        accuracy: CGFloat = 2.0 / 255.0,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let actual = actual.usingColorSpace(.sRGB),
+              let expected = expected.usingColorSpace(.sRGB) else {
+            XCTFail("could not resolve sampled colours", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(actual.redComponent, expected.redComponent,
+                       accuracy: accuracy, message, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, expected.greenComponent,
+                       accuracy: accuracy, message, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, expected.blueComponent,
+                       accuracy: accuracy, message, file: file, line: line)
     }
 
     private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {

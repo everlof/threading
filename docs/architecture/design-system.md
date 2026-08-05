@@ -68,14 +68,14 @@ Components so far:
 
 | | |
 |---|---|
-| `ChipView` | A flat pill that opens a menu. The standard way to offer a choice — see the chip/segment rule below. |
+| `ChipView` | A compact chooser that opens a menu. It is a flat pill by default; a material may request the classic square dropdown anatomy: sunken value well, separate raised arrow button, regular control text, and no SF-symbol decoration. |
 | `ConversationContextRailView` | The compact reference/comment receipts shared by the Chat composer and sent-message transcript. It groups a large batch into quiet count chips, then uses the themed menu for inspection, removal, re-reference, and comment actions. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
 | `ThemedControl` | The base for a control that draws itself from the theme. |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
 | `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. |
-| `ThemedButton` | A drop-in `NSButton`: bordered, plain, or accent-filled — `emphasis` names those three as primary/secondary/tertiary, and `shortcut` draws the chord it answers to on its own face. |
+| `ThemedButton` | A drop-in `NSButton`: bordered, plain, or prominent — `emphasis` names those three as primary/secondary/tertiary, `buttonStyle.primaryTreatment` decides whether a primary is filled, outlined, or a classic raised default action, and `shortcut` draws the chord it answers to on its own face. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
 | `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. The settings sidebar deliberately stays simpler: it filters its page destinations live and leaves the pane already being read in place until a destination is chosen. |
@@ -98,7 +98,7 @@ Components so far:
 | `SplitIconButtonView` | Two actions on **one** plate: a press, and a chevron welded to it that offers the other ways to take it — the pane header's Open in control. Its counterpart above is the right container for buttons that act on different things; this is for two halves of one thing, which read as an icon and an unrelated chevron the moment they are spaced apart. The surface is drawn once, here, and the halves draw none (`ThemedIconButton.drawsSurface`): a raised half fills *inside* the plate's silhouette, clipped to it, so the outer end keeps the plate's corner and the join is a straight edge that exists only under the pointer. Nothing is drawn between them at rest. The halves are deliberately unequal (`Design.Size.splitMenuWidth`) — the press is the point, the chevron the exception. See [`external-apps.md`](external-apps.md). |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. A middle-button click closes a closable tab on release without selecting it first; dragging away cancels, and other auxiliary buttons keep their own meaning. |
-| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. A host that pins **both** of the strip's edges says so with `fillsHostWidth`: the default `.defaultHigh` hugging is what lets a control placed *after* the tabs follow them, and in a host that has no such control it is a *maximum on the host* — it capped the display panel at its own tab titles (see [`mcp-and-display.md`](mcp-and-display.md)). |
+| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right / Close All Tabs), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. A host that pins **both** of the strip's edges says so with `fillsHostWidth`: the default `.defaultHigh` hugging is what lets a control placed *after* the tabs follow them, and in a host that has no such control it is a *maximum on the host* — it capped the display panel at its own tab titles (see [`mcp-and-display.md`](mcp-and-display.md)). |
 | `ThemedDisclosureRow` | The header of a collapsible run of rows — the settings kit's folded cards (`SettingsUI.disclosureCard`/`disclosureRow`) are built on it. A real `ThemedControl`: whole-row click with slip-off cancel, Space/Return, focus ring, hover lift, pointing-hand cursor, and a `disclosureTriangle` accessibility role whose value is the expansion state. The chevron leads in a fixed slot so every header's title starts on one line, and it re-tints at draw time so a live theme switch reaches it. The caller's interactive accessory (a toggle, a Remove All button) stays a **sibling**, never a child: the row is one accessibility element, and a control nested inside it would vanish from the accessibility tree. Replaced Storage's hand-rolled click-gesture fold, which no keyboard or assistive technology could operate. Setting `isExpanded` does not fire `onToggle`, so an owner restores state without re-entrancy. |
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. The role states a *slot* (layout: what the padding is measured from) and a *point size* (optics: what the symbol is configured at) — see the 2026-07-31 note for why those are two numbers. `setImage` is its one documented exception to "a symbol": artwork whose silhouette is not ours — an installed application's own icon, which is what the header's Open in control wears (see [`external-apps.md`](external-apps.md)). Foreign artwork is capped to the slot (`GlyphView.slot`); `setSymbol` clears the cap and configures to fit. |
 | `GlyphView` | A tinted glyph on the device pixel grid — `NSImageView` minus the fractional placement, inside `ThemedIconButton` and `ThemedTabItemView`. A symbol's natural size is fractional by design, so an image view centres it at a half-point offset: slight softness at 2×, a smeared stroke at 1×. This view centres the same rect and then `backingAlignedRect`s it (inward — nearest can push an edge past `bounds`, and a view clips its own drawing) before handing it to `TemplateImageDrawing`. Decorative; the control around it carries the name. |
@@ -112,16 +112,32 @@ Components so far:
 | `PairingCodeImage` | The Remote Access QR code, drawn rather than scaled up from `CIQRCodeGenerator`: Chromium's geometry (dots at 0.8 of the pitch, rounded finder patterns), a four-module quiet zone Core Image does not supply, and a plate and ink carrying the accent's hue at a stated saturation. The only artwork here a *machine* has to read, so it is tested by decoding the render, not by asserting on the constants that drew it. |
 | `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line and one `ThemedButton`; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock pausing while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. The pointer **pauses** the dwell rather than refunding it: the timer's remaining interval is read before it is cancelled and rescheduled when the pointer leaves, because time spent reading a receipt under the pointer is that receipt's time being used — restarting meant a pointer crossing the band en route somewhere else bought it a whole second dwell, and a band leant on twice never had to leave. The dwell is also *drawn*: the band's own bottom border, in the accent, drains as the clock runs, freezes with it under the pointer, and carries on from where it froze — at the same pace, since the line's remainder and the timer's are read at one instant. It is a layer animation for `ThemedSpinner`'s reason, it lives inside the band's existing bottom inset so showing the clock costs no height, and Reduce Motion removes it rather than freezing it full — a still rail is a band claiming a countdown it is not showing. **It rides the edge rather than floating in the padding**: held a step in from three sides it was a rule between nothing and nothing, read as an underline belonging to the way back under it. Pinned flush, masked to the band's own silhouette so its ends follow the corners, and weighed at `Design.Radius.border` like every other rule the theme draws, it is a second edge on top of the first — which is also why it needs no track: what it leaves behind as it drains is the band's own border. A layer draws its border above its sublayers, so the line sits one rule *inside* the edge rather than on it, or the band's own border would paint it out. The band's words argue for **no** width at all (`ToastDefaults.contentWidthPriority`, hugging and compression both): pinned inside a host, a wrapping label's 750 outranked the sidebar's own holding priority, and the column jumped wider as a receipt arrived and back again as it left. The presenter's own fill pin sits *below* every pane's holding priority for the mirror-image jump (`ToastDefaults.fillPriority`): in a sidebar dragged wider than the band's required `maxWidth` cap the pin cannot be satisfied by the band, and at `defaultHigh` the solver satisfied it with the *column* instead — the sidebar snapped in to cap-plus-insets as the receipt arrived and sprang back when it left. Anything **waiting** behind the band is drawn rather than merely queued: one `ToastStackEdgeView` per waiting receipt, capped at two, each the same card a step up and a step in on both sides, pinned to the band's own top *and* bottom so no theme's corner radius becomes a constant here — see the queue paragraph below. |
 | `ThemedPopover` | Every app-owned anchored transient surface. It owns the themed body and arrow, preferred-edge placement with screen-edge flip and clamp, parent-window movement, live theme changes, transient/semitransient dismissal, Escape, accessibility announcement, and focus return. Content remains an ordinary view controller. Native application and context menus do not use it. The chrome is **one closed outline** — body and arrow walked as a single path, filled once and stroked once (`ThemedPopoverLayout.outline`); drawing them as two paths and repainting their seam erased the tails of the arrow's own sides, a border gap a picture showed and no assertion did (now one does, on drawn pixels). A popover also cannot outlive its owner or its anchor: `deinit` detaches a still-shown panel — a child window its parent *retains*, so a dropped reference otherwise floats forever with its monitors gone — and the next interaction anywhere closes one whose anchor left the window, since a sidebar reload discards rows without a pointer exit. Hover-presented sites drive it through `HoverPopoverScheduler`, whose `Policy` states the site's open dwell, close grace, and whether pointing at the popover itself holds it open — the sidebar's cards dwell and close on exit, the toolbar's usage pill is instant both ways while it shows the native reading and flips to a held policy the moment an extension composes actionable content in, an extension row's detail dwells, grants a grace and holds because it carries actions. Timing is configuration beside the site's other measurements, not four copies of timer code. |
+| `ThemedFloatingSurfaceChrome` / `ThemedFloatingGlyphView` | The rectangular and semantic-content halves of that same material grammar for an app-owned card inside another view. The resolver applies the popover style's opaque surface role, edge/bevel, material depth, and density; the glyph view selects SF Symbols or the theme's simple one-bit marks. `GitStatusOverlayView` uses both, so a terminal remains the ground around the card without becoming the card's visual owner. |
 | `ThemedAlert` | Every app-owned modal statement, confirmation, choice, error, and text prompt. It owns themed severity, copy, accessory, suppression choice, button hover/press/focus, Return policy, universal Escape, sheet/modal presentation, accessibility, and focus return. `ConfirmationAlert`, `NoticeAlert`, and `TextPromptAlert` remain the semantic policy layer above it. |
 | `MediaInspectorView` / `MediaInspectorCanvas` | The in-window inspection surface for visible files. Images use an app-owned renderer with fit/actual/custom zoom, anchored pinch, pan, collection navigation and a thumbnail rail. PDFKit and embedded `QLPreviewView` live only inside `MediaInspectorDocumentView`, a named `SystemChromeBoundary`; System Quick Look is an action-menu fallback rather than the primary route. It installs through `InWindowOverlay`, not by pinning to the content view's top: under a full-size content view that is the top of the window, and this header opened under the traffic lights. It fills with `Design.Surface.elevated`, **not** `ground` — the ground is by definition what the window behind it is already filled with, so in a dark palette the inspector's header simply continued the window's own, and a screenshot of the running app showed the two as one surface. The canvas's focus ring is shown only under keyboard traversal (`KeyboardFocusOrigin`): the inspector hands the canvas focus as it opens, because the arrows, the zoom keys and Escape all belong there, and an unconditional ring drew an accent rectangle around the whole window the moment a thumbnail was clicked. |
 | `InWindowOverlay` / `InWindowOverlayHosting` | The one place that decides where a covering surface starts. A window drawing full-size content has no room at `contentView.topAnchor` — the traffic lights float over it — and a takeover dress puts the app's own title and command bands in the same place. The helper asks the window's root for its `overlayArea` guide and falls back to `safeAreaLayoutGuide` for a root that states none (a fixture, the gallery). See [`window-chrome.md`](window-chrome.md); the rule is the panes' "nothing pins to `topAnchor`", arrived at a second time by the transient surfaces. It also installs the **scrim** under that surface, and hands back an `InWindowOverlay.Presentation` owning both: the two views arrive and leave together, where before each session removed its own surface and a wash added beside it would have had to be remembered on the close, the Escape and the replacement path separately. The wash reaches *further* than the surface — `overlayScrimArea`, everything below whatever draws the window's own buttons, which in native dress is the whole content view and in a takeover starts under the app's title band. That difference is the point: the strip the surface has to clear is app-drawn chrome (session tabs, panel toggles, the sidebar's top corner), and left lit it stacked on the surface's own header with a hairline between them and read as one window. A modal may dim a way out of the window; it may not cover one. Clicking the wash runs the same dismissal the close button does — required rather than defaulted at the call site, since a scrim swallows every click it covers. It draws `Design.Surface.overlayScrim`, the one fill here deliberately *not* derived from a theme role: every authored shade in this app is a bevel edge (`#808080` under Windows 98), and a mid-grey wash barely dims a light window while it lifts a dark one. |
-| `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side captions and a mode chip. The captions are given a band **outside** the images before anything is fitted, never a pill over them: printed on the picture they hid the pixels the comparison exists to show, and at rest they sat exactly where the wipe starts, so reading a label meant scrubbing it out from under. Position carries the mapping — old at the start of the scrub's travel, new at its end, above and below it for the vertical wipe, over each image in side by side — the new side is inked a step darker, and difference names the pair `old → new` centred rather than splitting two titles across edges that mode has no sides for. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. The caption's clearance from the surface's edge (`captionMargin`) is a step above the gap under it: equal to the gap, the title sat as close to the border — the focus ring is two points of it — as to the picture it names, and the pair read as one crowded line. The controls row carries one more thing: the button that opens the comparison in `CompareInspectorView`, on wherever the surface is inline, off in the one place it would offer to open what is already open. |
+| `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side captions and a mode chip. The captions are given a band **outside** the images before anything is fitted, never a pill over them: printed on the picture they hid the pixels the comparison exists to show, and at rest they sat exactly where the wipe starts, so reading a label meant scrubbing it out from under. Position carries the mapping — old at the start of the scrub's travel, new at its end, above and below it for the vertical wipe, over each image in side by side — the new side is inked a step darker, and difference names the pair `old → new` centred rather than splitting two titles across edges that mode has no sides for. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. The caption's clearance from the surface's edge (`captionMargin`) is a step above the gap under it: equal to the gap, the title sat as close to the border — the focus ring is two points of it — as to the picture it names, and the pair read as one crowded line. The controls row carries one more thing: the button that opens the comparison in `CompareInspectorView`, on wherever the surface is inline, off in the one place it would offer to open what is already open. `hostControls()` hands that row's two controls to a host that will place them itself and stops the surface reserving a row under the canvas — one call rather than two accessors and a flag, because taking the controls and giving up the row are the same act: a host that took them and forgot to detach would leave a chip in two places, and one that detached without placing them would lose the modes entirely. The controls stay wired to the surface they came from; what the host gains is where they sit. The Compare tab uses it to lift them out of its scroll view (see [`mcp-and-display.md`](mcp-and-display.md)). |
 | `CompareInspectorView` | The expanded comparison: the pair named once in an inspector header (`Design.Size.inspectorHeaderHeight`, the media inspector's band, so the two open at one height) and `ImageCompareView` given the whole window under it. The surface inside is the *same component*, not a second implementation of a wipe — which is the point: inline it is inside somebody else's height, capped so one tall screenshot does not become the page; opened, it fits the window, and the mode chip is the chip the user has already used. `CompareInspectorPresenter` is `MediaInspectorPresenter`'s rule again — one session per window, presented into the window's own themed hierarchy rather than a panel, so it follows a live theme change and takes no key-window status from the session behind it. Escape closes it from any child, since AppKit offers key equivalents down the tree. Closing **hands back** the mode and the scrub as a `CompareInspectorResult`: the surface it was opened from carries on from there rather than snapping back to whatever it was opened at, and a host listening for `onModeChange` is told, so a persisted mode is persisted. Focus returns to the source, then to the responder before it, then to the window — a comparison switched to a static mode declines first responder, and leaving the removed inspector holding it would strand every key press in a view no longer in the tree. It takes the media inspector's presentation whole: `elevated` rather than `ground` so it is a surface *over* the window instead of more of it, the dimming scrim under it with the ground around it closing it, and `ImageCompareCanvas`'s ring held back until a key press asks for it, since the scrub takes focus as the surface opens and that ring follows the canvas's own bounds — here, the window's. |
 
 `ToastPresenter` teardown is synchronous: `invalidate()` cancels its timer and layer drain before
 removing the band, with `deinit` as the fallback. Short-lived render hosts invalidate explicitly;
 AppKit may extend a local object's debug lifetime beyond its lexical scope while layer work is
 still committed.
+
+`ThemedPopover`'s presentation is material data, not a hard-coded speech bubble.
+`AppTheme.Material.PopoverStyle` chooses a triangle or stemless anchor, a semantic floating fill,
+a flat/absent/material edge, native/authored/automatic/no shadow, regular or compact geometry,
+and System or classic semantic glyphs. A stemmed popover remains one closed outline, preserving
+the border continuity described in the component table; a material edge requires the stemless
+shape so `ThemedSurface` can interpret the same hard or soft bevel panels use. Authored depth is
+drawn inside a transparent gutter in the child window, preventing the window from clipping hard
+offset shadows or paired soft light. Theme and appearance changes re-place the live panel because
+stem, density, and shadow gutter change geometry as well as pixels.
+`ThemedFloatingSurfaceChrome` consumes the rectangular subset of the same style for embedded
+floating cards: it deliberately ignores arrow placement, while preserving the surface role,
+edge/bevel, material depth, and density. `ThemedFloatingGlyphView` preserves the style's semantic
+glyph choice across both forms. This is one authored floating-surface grammar, not a second theme
+field whose values can drift from popovers.
 
 **A component is its interaction contract, not its resting render.** Before a new component is
 finished, walk it through pointer, keyboard, assistive technology, and the ordinary AppKit host
@@ -223,6 +239,34 @@ resolves what its dismissing click landed on, and when that is a `ThemedMenuOpen
 menu is open, whose click stays a toggle-close — it hands the press over, drag and release
 included, so the menu moves between siblings the way menu-bar titles have always traded one click.
 
+**A pane's contents may say how wide they would like to be; they may not say how wide the pane
+is.** A centred column is usually written as "the pane's width, capped" — an equality against the
+container at `.defaultHigh` beside a required maximum. Auto Layout reads that pair as a statement
+about the *container*: the composer's column said the terminal pane is at most 784pt wide, at a
+priority that outranks the 250/260 a split view holds its panes at, so in a 1200pt window the
+sidebar could not be dragged below 415pt — its divider stopped 200pt above its own floor, and
+pushing on shut the column instead. Both halves of the fix are needed and both are in
+`ComposerDefaults`: the measurement drops below every holding priority
+(`columnMeasurePriority`), and the stack's own hugging drops below *that*
+(`columnHuggingPriority`), or the column starts hugging its widest row instead of filling.
+`testTheComposerColumnDoesNotCapThePaneItFills` states the rule against a host that claims its
+width the way a split item does.
+
+**A menu too tall for its panel cuts its last row in half.** `ThemedMenuLayout` clamps a panel
+twice — to `maximumHeight(in:)` and to the room on the side it opened — and either clamp is free
+to land on a row boundary, at which point the menu looks complete. The session row's menu grew
+past the cap and did exactly that: Copy Session ID, Move to Account and Delete Session were below
+the edge, and nothing on screen said so, because the scroller only appears once the pointer is
+inside the panel. The cap itself is window-relative (`maximumHeightRatio` of the window, floored
+at the old flat 360): the flat cap was set when the longest menu was half its eventual size, and
+once the session menu outgrew it, scrolling was the *normal* state in every ordinarily sized
+window with the destructive item permanently below the fold. A tall window now shows the whole
+list; a cramped one keeps exactly the behaviour the flat cap gave it. `ThemedMenuMetrics.clippedHeight(for:atMost:)` takes the clamped height down to the
+nearest half row, and `frame`/`submenuFrame` apply it through `whenClipped` only when the panel is
+actually cut — half a row hanging off a complete list would promise rows that do not exist. Only
+items are cut; a separator sliced down its middle reads as a stray rule against the panel's edge,
+so it is carried whole into the hidden part and the item above it peeks.
+
 **A dropdown and a popover never share a window; the dropdown wins.** `ThemedMenuPresenter`
 draws inside the window's content view — that is what lets it escape a scroll view and take no
 key status — while `ThemedPopover` hangs a child *window* above the same window. So a popover is
@@ -248,6 +292,24 @@ the standoff, because the gap exists to clear a button's edge and a pointer has 
 applies is the *gesture's* knowledge, so it travels with the report — `ThemedTabItemView` hands
 its strip an anchor rather than a bare "a menu was asked for", and the accessibility
 show-menu route, which has no pointer behind it, asks for `.control`.
+
+**Scrolling a menu moves the rows, not the hand, and the highlight belongs to the hand.** A
+row's hover *is* the menu's highlight, and hover is a tracking-area fact: wheel a clamped menu
+(the session row's is the one that overflows `ThemedMenuLayout.maximumHeight`) and AppKit hands
+`mouseEntered` to every row that slides under the stationary pointer, so the highlight walked
+the list as the list moved — and each landing re-armed the submenu hover-open while the scroll
+closed the panels it opened, so Session Options flickered in and out on the way past. Worse,
+a highlight also used to `scrollToVisible` unconditionally, so a scroll-induced landing on the
+half-peeked row answered the wheel by scrolling *against* it. Three rules close this, all in
+`ThemedMenuOverlayView`: a scroll records the pointer's position and freezes hover-driven
+highlights until the pointer moves past `ThemedMenuMotion.scrollHoverTolerance` (`mouseMoved`
+then re-lands the highlight from position, because the row under the pointer got no fresh
+enter — it has believed itself hovered since the scroll); a scroll kills the armed hover-open;
+and only *keyboard* highlights scroll their row into view — a pointer highlight names a row
+already under the pointer. This is deliberately menu-local: `PointerTracking`'s contract
+("only ever answers *left*, never *arrived*") stays untouched, because a chip sliding under
+the pointer keeping its hover invitation is the behaviour the overlay-handoff rule above
+depends on.
 
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
@@ -466,8 +528,8 @@ the two answer the same question and must not disagree:
 **What a message is sent *with* goes in the box, on `.footer`'s row.** Model, permission mode,
 reasoning effort and speed are properties of the next message, so they belong inside the thing
 that message is being written in — leading group for the choices, trailing group for the context
-meter, and the send closing the row. Model then mode opens the group, matching the opening
-composer's own first two chips; see
+meter, and the send closing the row. Model then mode then effort opens the group, matching the
+opening composer wherever its selected model publishes levels; see
 [`native-conversations.md`](native-conversations.md) for what choosing a mode there actually
 does per provider. Outside, as the strip of chips this replaced, they read as belonging to
 neither the conversation above nor the input below; and because that strip sized itself to its
@@ -584,7 +646,9 @@ The vocabulary these encode, which new work should follow:
 - **Content leads.** One element per view carries emphasis, usually what is being typed into
   or read. Everything else is secondary or tertiary label colour.
 - **Three tiers of button, one primary per screen.** `ThemedButton.Emphasis` names the shapes
-  the control always had: **primary** is the accent fill (`isProminent`), **secondary** the
+  the control always had: **primary** is the material's prominent treatment (`isProminent`) —
+  normally an accent fill, but a classic material can keep the ordinary raised face and mark the
+  default action with an outer frame and inset dotted keyboard focus — **secondary** is the
   surface-and-hairline (`isBordered`), **tertiary** the mark with no surface until the pointer
   reaches it. There is deliberately no destructive colour — a destructive button says so in its
   *title*, and red on a theme whose accent is already red says nothing. **A destructive
@@ -698,8 +762,9 @@ in the positive status role, which is what a running process actually is.
 `SessionComposerViewController` is the reference implementation, and **the only way a session
 is created**. Reading down its column: **two** chips above the box answer *where* and *who* —
 a location breadcrumb (`AnotherTerminal ▸ master`) and an identity (`Claude Code · work`) — and
-the box's own footer carries what the session will run *with*: model and mode on the leading
-side, then the account's usage reading, the surface, and the send closing the row. **Import _n_
+the box's own footer carries what the session will run *with*: model, mode and catalog-backed
+effort on the leading side, then the account's usage reading, the surface, and the send closing
+the row. **Import _n_
 conversations** sits quietly under the box, the other way to arrive at the same place.
 
 **Two chips, not four.** The row was project / agent / account / checkout, which is four
@@ -1121,12 +1186,14 @@ showing the system accent), the project file tree, and the import-conversation l
 five instances, so the fix is a component — `ThemedTableRowView`, returned from
 `rowViewForRow:`/`rowViewForItem:` — rather than a colour at one call site.
 
-**The fill is `Design.Surface.selection`, not the accent.** That role is the theme's accent at
+**The fill is the theme's `selection` role, not the accent.** That role is the theme's accent at
 roughly a quarter alpha, which is what lets the row keep its own label, secondary and tertiary
-inks: at full strength every tier in the row would need a selected twin, which is the work
-`ExecutionAuditEventView` does by hand and the sidebar does through
-`BackdropThemedControl.hostGround`. Full accent stays the sidebar's, where the selected session is
-the window's subject; two selections at equal weight in one window is a hierarchy, not a pair.
+inks: at full strength every tier in the row would need a selected twin, which is the work the
+sidebar does through `BackdropThemedControl.hostGround`. Full accent stays the sidebar's, where the
+selected session is the window's subject; two selections at equal weight in one window is a
+hierarchy, not a pair. (*"Roughly a quarter alpha"* was a description of the themes that existed,
+and two of them never matched it — see the 2026-08-05 note below, which turns it into a
+construction.)
 
 **Under System it hands the highlight straight back**, the same rule `SidebarHoverRowView`
 follows — the stock accent, its emphasized and unemphasized strengths and its vibrancy are worth
@@ -1194,3 +1261,56 @@ a measurement), and the row's own case is held by the three layers that *were* w
 The general lesson is the one this whole exercise is about: a test that renders a state the
 framework refuses to draw is a test of nothing, and the only way to know which one you have
 written is to break the code and watch.
+
+## 2026-08-05 — a fill and the ink on it were two decisions, made in different files
+
+Reported as **"black text on dark blue background is hard to read"**, in the account dropdown under
+Windows 98. It is one bug with two symptoms pointing in opposite directions, which is why neither
+call site looks wrong on its own.
+
+`Design.Surface.selection` was a token anyone could take, and four surfaces did. Two of them wrote
+`Design.Text.label` on it — the ink for the **chrome's** ground, not for the fill they had just
+painted. Two wrote `Design.Text.selected`, which is `Text.on(Design.Surface.accent)`: measured
+against the *opaque* accent, not against a role that most themes state as that accent at a fifth
+of its strength. Measured over each theme's own surface:
+
+| | fill | `Text.label` on it | `Text.selected` on it |
+|---|---|---|---|
+| Windows 98 | `#000080` @ 0.9 | **1.47:1** | 14.29:1 |
+| Platinum | `#3151B5` @ 0.88 | **3.70:1** | 5.67:1 |
+| Christmas | `#C1121F` @ 0.2 | 11.93:1 | **1.76:1** |
+| OpenStep / IRIX / Amiga / BeOS | 0.82–0.88 | 5.97–13.62:1 | below 4.5 |
+
+**The fix is that the fill is no longer available on its own.** `SelectionSurface` vends it
+together with a `Design.Ink` measured against the fill *as composited over the ground it is painted
+on*, and `scripts/check_architecture_boundaries.sh` fails a build that reads `.selection` from the
+palette anywhere but there. A call site can no longer make half of this decision, which is all
+either of them was doing.
+
+**Two strengths, and the surface does not choose freely.** Which one it takes answers one question:
+*can it reach the ink of everything drawn inside it?*
+
+- `stated` paints the theme's own value and inverts its ink to suit — white on Windows 98's navy,
+  the ordinary near-black on Christmas's wash, neither call site knowing which it got. For a
+  surface that inks its own contents: a run of selected text (`ThemedTextSelection`), a row that
+  draws its own labels (`ExecutionAuditEventView`, `PromptCompletionView`).
+- `quiet` holds the fill back toward its ground until `Design.Text.label` reads on it, and leaves
+  the ink alone. For `ThemedTableRowView`, which draws the fill while the **cells** are feature code
+  in nine different view controllers. A theme that already passes is returned untouched and never
+  second-guessed, so only Windows 98 and Platinum move at all, and only as far as they must.
+
+Held back *toward the ground* rather than moved along its own lightness the way
+`NSColor.legible(on:)` moves an ink: a selection is not a colour anyone reads, it is a colour that
+says *this row, not that one*, and the honest way to say less is to say it more quietly. Moving its
+lightness keeps the strength and loses the hue, which turns navy into a pale blue nobody chose.
+
+`ThemedTextSelection` needed a third form. `selectedTextAttributes` is set once and read by TextKit
+for the life of the view, and a field editor arrives from AppKit already built — neither redraws
+through a call site that could resolve a colour again — so `SelectionSurface.dynamic` returns the
+pair as dynamic `NSColor`s over a **closure** for the ground, since what a text view sits on moves
+with the theme too.
+
+`SelectionSurfaceTests` states the promise over every stock theme × every appearance it ships,
+which is the part that was missing: `ThemedTableRowView`'s own documentation had claimed "the
+accent held far enough back that the row's own label tiers still read over it" since it was
+written, and no theme had ever been checked against it.

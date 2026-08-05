@@ -129,6 +129,31 @@ audits catch factories and framework-created view trees, while render and live-t
 tests prove that a boundary actually paints every state correctly. No one layer replaces the
 others.
 
+**A fourth case the first three cannot see: the code nobody wrote.** Where AppKit supplies a
+default, an omission is a decision, and there is no call site to lint, no wrong class in the tree,
+and nothing for a reviewer to read. A list's row is the worked example — a delegate that declines
+to supply one gets a plain `NSTableRowView`, which fills its selection with the *system* accent —
+and it shipped in four panes at once. Three rules follow from it, and they are the ones to reach
+for whenever a framework default would be visible:
+
+- **Answer it in the component, not at the call sites.** `ThemedTableView`/`ThemedOutlineView`
+  create the themed row themselves, through the same `makeView(withIdentifier:)` AppKit uses, so a
+  list gets the right answer by existing. A delegate that states its own row still wins.
+- **Give the audit something to see.** `ThemeBoundaryAudit` treats a row view that is not a
+  `ThemedComponent` as a violation, which turns the absence into a class it can name — and a list
+  must be *rendered with rows* for that to mean anything, which is what `ThemeLeakSweepTests`
+  does per screen.
+- **Sweep the pixels for what no rule anticipated.** Under a theme whose accent is nowhere near
+  the system's, a fill's worth of system accent anywhere in a screen is a framework default
+  drawing itself. That check needs no prior knowledge of the mechanism, which is the point: it is
+  the layer that catches the next one — within a bound that is stated on
+  `ThemeLeakSweepTests` and was measured, not assumed: AppKit draws a list's selection only in a
+  **key** window, which no test in this target can produce, so that particular fill is invisible to
+  any pixel sweep here and is held by the three layers above instead.
+
+Break the code on purpose and watch each layer fail before trusting it. Two of the four written
+here passed against the regressed build for reasons that had nothing to do with the defect.
+
 The source checker also rejects pointer-handling classes in `UI/Design/` unless they inherit a
 configured interactive base type. This is a contract lint, not merely a ban on stock AppKit:
 custom drawing does not excuse a mouse-only control. Direct `ThemedControl` subclasses are also

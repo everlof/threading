@@ -16,6 +16,27 @@ final class ThemedCheckbox: ThemedControl {
         static let inset: CGFloat = Design.Spacing.tight
         static let markPointSize: CGFloat = 10
         static let markInset: CGFloat = 3
+
+        /// Between the box and the ring around it — `ThemedToggle`'s gap, for the same reason a
+        /// ring needs one: a ring flush against a shape reads as that shape's own border grown
+        /// thicker rather than as something the keyboard did.
+        static let focusGap: CGFloat = Design.Spacing.hairline
+    }
+
+    /// The room the box is given before the title, and never less than its ring needs.
+    ///
+    /// A checked box is filled with the accent, so a ring drawn *inside* it was the accent on
+    /// the accent — nothing at all, in every theme, which is what a checked checkbox showed
+    /// about where the keyboard was. Ringing it from outside is the only treatment that reads
+    /// the same in all three states, and drawing is clipped to `bounds`, so the room has to be
+    /// reserved rather than assumed.
+    ///
+    /// Read at measure *and* draw time rather than stated as a constant, because
+    /// `focusRingWidth` grows under Increase Contrast; `ThemeRedraw` answers that notification
+    /// with `invalidateIntrinsicContentSize()`, so the reserved margin follows it. The ordinary
+    /// case is the scale's own step, unchanged.
+    private var boxInset: CGFloat {
+        max(Layout.inset, Layout.focusGap + Design.Accessibility.focusRingWidth)
     }
 
     let title: String
@@ -56,11 +77,11 @@ final class ThemedCheckbox: ThemedControl {
 
     override var intrinsicContentSize: NSSize {
         guard !title.isEmpty else {
-            return NSSize(width: Layout.inset * 2 + Layout.box, height: Design.Size.chipHeight)
+            return NSSize(width: boxInset * 2 + Layout.box, height: Design.Size.chipHeight)
         }
         let width = ceil(title.size(withAttributes: [.font: Design.Typography.controlRegular()]).width)
         return NSSize(
-            width: Layout.inset * 2 + Layout.box + Layout.gap + width,
+            width: boxInset * 2 + Layout.box + Layout.gap + width,
             height: Design.Size.chipHeight
         )
     }
@@ -118,17 +139,18 @@ final class ThemedCheckbox: ThemedControl {
         }
 
         let box = NSRect(
-            x: Layout.inset,
+            x: boxInset,
             y: (bounds.height - Layout.box) / 2,
             width: Layout.box,
             height: Layout.box
         )
         let filled = state != .off
-        let shape = ThemedSurface.draw(
+        let corner = Design.Radius.control(fitting: box.size)
+        ThemedSurface.draw(
             box,
             fill: filled ? Design.Surface.accent : Design.Surface.controlResting,
             border: filled ? nil : Design.Surface.border,
-            radius: Design.Radius.control(fitting: box.size)
+            radius: corner
         )
         let markName = state == .mixed ? "minus" : "checkmark"
         if filled,
@@ -143,7 +165,13 @@ final class ThemedCheckbox: ThemedControl {
                 tint: isEnabled ? Design.Text.selected : Design.Text.tertiary
             )
         }
-        drawKeyboardFocus(around: shape)
+        // Around the box rather than on it, and from the box itself rather than from what the
+        // fill returned: a bordered shape is drawn half a point in, and a ring that followed
+        // that would sit half a point closer to a clear box than to a checked one.
+        drawKeyboardFocus(
+            around: ThemedSurface.Shape(rect: box, radius: corner),
+            outsideBy: Layout.focusGap
+        )
 
         guard !title.isEmpty else { return }
         let font = Design.Typography.controlRegular()

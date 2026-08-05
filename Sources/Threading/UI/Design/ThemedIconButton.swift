@@ -26,6 +26,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// Nested inside another control — a tab's close, a row's actions.
         case inline
 
+        /// The chevron half of a split control, welded to the press it belongs to — see
+        /// `SplitIconButtonView`. A toolbar button's height on a narrower base, because the two
+        /// halves of a split control are not equals: the press is the point and the chevron is
+        /// the exception, and equal halves would offer them as the same choice twice.
+        case splitMenu
+
         var size: NSSize {
             switch self {
             case .toolbar:
@@ -38,13 +44,18 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
                     width: Design.Size.inlineButtonTarget,
                     height: Design.Size.inlineButtonTarget
                 )
+            case .splitMenu:
+                NSSize(
+                    width: Design.Size.splitMenuWidth,
+                    height: Design.Size.toolbarButtonHeight
+                )
             }
         }
 
         /// The glyph's slot. The remainder is the padding, equal on every side.
         var glyph: CGFloat {
             switch self {
-            case .toolbar: Design.Size.tabIconSlot
+            case .toolbar, .splitMenu: Design.Size.tabIconSlot
             case .inline: Design.Size.inlineButtonGlyph
             }
         }
@@ -60,7 +71,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// the fit.
         var glyphPointSize: CGFloat {
             switch self {
-            case .toolbar: Design.Symbol.toolbar
+            case .toolbar, .splitMenu: Design.Symbol.toolbar
             case .inline: Design.Symbol.control
             }
         }
@@ -75,12 +86,38 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         var hoverFill: KeyPath<Design.Ink, NSColor> {
             switch self {
             case .toolbar: \.surface
-            case .inline: \.surfaceHover
+            // Both sit on a surface something else already drew — another control's fill, or
+            // the plate a split control shares — so the resting lift is invisible there.
+            case .inline, .splitMenu: \.surfaceHover
             }
         }
     }
 
     var onPress: (() -> Void)?
+
+    /// Whether this button draws its own fill and border, or leaves them to whoever hosts it.
+    ///
+    /// False for the halves of a `SplitIconButtonView`, and *only* for a host that draws the
+    /// surface itself: two halves each raising their own rounded rect is the seam that component
+    /// exists to remove. Everything else about the button — the glyph, the focus ring, the press
+    /// gesture, the accessibility — is unchanged, because none of it is the surface.
+    var drawsSurface = true {
+        didSet {
+            guard drawsSurface != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Told to the host that draws this button's surface, whenever what it would draw changed.
+    ///
+    /// A host cannot observe a hover it does not track, and it must not track one of its own: two
+    /// tracking areas over the same points answer in whichever order AppKit delivers them, which
+    /// is how a raised half survives the pointer leaving it.
+    var surfaceStateDidChange: (() -> Void)?
+
+    /// Whether a host drawing for this button should raise its half — the pointer is on it, or
+    /// holding it down.
+    var isRaised: Bool { isHovered || isPressed }
 
     /// Set when the press opens a menu rather than performing an action.
     ///
@@ -100,10 +137,22 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// long as its menu is, the way a menu-bar title does.
     var presentsMenu = false
 
+    /// The menu a *secondary* click asks for, on a button whose press already does something.
+    ///
+    /// The alternative to `presentsMenu`, not a companion to it. A button that offers a choice on
+    /// every press makes the common case cost two gestures — the sidebar's `+` asked "chat or
+    /// terminal?" every time, and it is a chat nearly every time. So the press does the ordinary
+    /// thing and the rest hangs off right-click, the way a row's own actions already do.
+    ///
+    /// Returning `false` lets the click fall through to whatever would have handled it, which is
+    /// how a row keeps its own context menu when a button on it offers none.
+    var onContextMenu: ((ThemedMenuAnchor) -> Bool)?
+
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
             needsDisplay = true
+            surfaceStateDidChange?()
             setAccessibilityValue(isSelected)
         }
     }
@@ -112,7 +161,13 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     private var accessibilityName: String
     private let isEmphasized: Bool
     private let actionTarget: Target
-    private var isPressed = false { didSet { needsDisplay = true } }
+    private(set) var isPressed = false {
+        didSet {
+            guard isPressed != oldValue else { return }
+            needsDisplay = true
+            surfaceStateDidChange?()
+        }
+    }
 
     /// The action this press will run, taken at the moment the press began.
     ///
@@ -237,6 +292,21 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Half of a split control draws no surface of its own: the plate underneath is one
+        // shape, and a second one raised inside it is the seam `SplitIconButtonView` removes.
+        // The ring still needs a silhouette to follow, so it takes the one that was not drawn.
+        guard drawsSurface else {
+            drawKeyboardFocus(
+                around: ThemedSurface.Shape(
+                    rect: bounds,
+                    radius: Design.Radius.control(fitting: bounds.size)
+                ),
+                color: ink.label
+            )
+            applyGlyphTint()
+            return
+        }
+
         let active = isSelected || isEmphasized
         let fill: NSColor
         if isPressed {
@@ -266,9 +336,22 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
         drawKeyboardFocus(around: shape, color: ink.label)
 
+        applyGlyphTint()
+    }
+
+    /// The glyph reads against whatever is under it *now*: brighter while the button is selected
+    /// or under the pointer, dimmed when it cannot be pressed. Stated once because both drawing
+    /// paths — this button's own surface, and a host's — end here.
+    private func applyGlyphTint() {
         iconView.tint = isEnabled
             ? (isSelected || isHovered ? ink.label : ink.secondary)
             : ink.quaternary
+    }
+
+    /// A raised half is drawn by the plate, not by this button, so the plate has to be told.
+    override func hoverDidChange() {
+        super.hoverDidChange()
+        surfaceStateDidChange?()
     }
 
     /// **A press does not take the keyboard focus.** Tab still reaches this button — that is what
@@ -294,6 +377,18 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
         pressedAction = onPress
         beginWatchingForRelease()
+    }
+
+    /// The secondary click, anchored where it landed — the idiom `ThemedMenuAnchor.pointer`
+    /// states. A button offering no such menu passes the click on rather than eating it.
+    override func rightMouseDown(with event: NSEvent) {
+        guard isEnabled, let onContextMenu else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        if !onContextMenu(.pointer(event.locationInWindow)) {
+            super.rightMouseDown(with: event)
+        }
     }
 
     private func beginWatchingForRelease() {
@@ -377,6 +472,16 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     override func accessibilityTitle() -> String? { accessibilityName }
     override func accessibilityPerformPress() -> Bool {
         performPress()
+    }
+
+    /// The pointerless route to the secondary click's menu, anchored to the button itself —
+    /// and, for a button whose press *is* its menu, to that same menu.
+    override func accessibilityPerformShowMenu() -> Bool {
+        if let onContextMenu, isEnabled {
+            return onContextMenu(.control)
+        }
+        guard presentsMenu else { return super.accessibilityPerformShowMenu() }
+        return performPress()
     }
 
     override func performPrimaryAction() -> Bool {

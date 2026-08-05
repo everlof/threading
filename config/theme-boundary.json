@@ -327,8 +327,14 @@
     {
       "path": "Sources/Threading/UI/Design/Toast.swift",
       "kind": "frozenLayerColor",
+      "symbol": "strokeColor",
+      "reason": "The toast's contour rail reapplies its shape-layer stroke from draw(_:) on every theme refresh, the same discipline as the spinner's stroke."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/Toast.swift",
+      "kind": "frozenLayerColor",
       "symbol": "backgroundColor",
-      "reason": "The toast's dwell rail reapplies its layer fill from draw(_:) on every theme refresh, the same discipline as the spinner's stroke."
+      "reason": "The dwell rail's silhouette is an alpha-only mask; black supplies coverage and carries no theme colour to refresh."
     },
     {
       "path": "Sources/Threading/UI/Design/Toast.swift",

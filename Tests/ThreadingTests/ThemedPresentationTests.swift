@@ -128,11 +128,116 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(renders.count, anchors.count, "an arrow edge rendered as another edge")
     }
 
+    func testWindows98PopoverUsesAPaleSquareStemlessInfotip() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+        defer { AppThemePalette.set(.system) }
+
+        let contentSize = NSSize(width: 220, height: 140)
+        let material = AppThemeStyles.win98.material
+        let placement = ThemedPopoverLayout.place(
+            anchor: NSRect(x: 300, y: 390, width: 20, height: 20),
+            contentSize: contentSize,
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+            preferredEdge: .maxX,
+            style: material.popoverStyle,
+            hasMaterialShadow: material.glow != nil,
+            bevelWidth: material.bevel?.width
+        )
+
+        XCTAssertTrue(placement.classic)
+        XCTAssertFalse(placement.hasArrow)
+        XCTAssertEqual(placement.bodyFrame.origin, .zero)
+        XCTAssertEqual(placement.bodyFrame.size, placement.panelFrame.size)
+        XCTAssertEqual(placement.contentFrame.width, contentSize.width)
+        XCTAssertEqual(placement.contentFrame.height, contentSize.height)
+        XCTAssertEqual(placement.contentFrame.minX, ThemedPopoverLayout.compactBorderInset)
+
+        let chrome = ThemedPopoverChromeView(
+            frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+        )
+        chrome.placement = placement
+        let rep = try rendered(chrome, scale: 2)
+        try writeRender(of: rep, named: "popover-chrome-win98-infotip")
+        let centre = try pixel(
+            of: rep,
+            at: NSPoint(x: placement.bodyFrame.midX, y: placement.bodyFrame.midY),
+            in: chrome
+        )
+        XCTAssertEqual(centre.hexString, "#FFFFE1")
+        let edge = try pixel(
+            of: rep,
+            at: NSPoint(x: 0.5, y: placement.bodyFrame.midY),
+            in: chrome
+        )
+        XCTAssertGreaterThan(contrast(edge, centre), 0.1, "the infotip lost its thin dark rule")
+    }
+
+    func testPeriodPopoverCanConsumeTheMaterialsHardBevel() throws {
+        AppThemePalette.set(AppThemeStyles.platinum)
+        defer { AppThemePalette.set(.system) }
+
+        let material = AppThemeStyles.platinum.material
+        let placement = ThemedPopoverLayout.place(
+            anchor: NSRect(x: 300, y: 390, width: 20, height: 20),
+            contentSize: NSSize(width: 220, height: 140),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+            preferredEdge: .maxX,
+            style: material.popoverStyle,
+            hasMaterialShadow: false,
+            bevelWidth: material.bevel?.width
+        )
+        let chrome = ThemedPopoverChromeView(
+            frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+        )
+        chrome.placement = placement
+        let rep = try rendered(chrome, scale: 2)
+        try writeRender(of: rep, named: "popover-chrome-platinum-bevel")
+        let topLeft = try pixel(
+            of: rep,
+            at: NSPoint(x: 0.5, y: placement.bodyFrame.maxY - 0.5),
+            in: chrome
+        )
+        let bottomRight = try pixel(
+            of: rep,
+            at: NSPoint(x: placement.bodyFrame.maxX - 0.5, y: 0.5),
+            in: chrome
+        )
+        XCTAssertNotEqual(topLeft.hexString, bottomRight.hexString)
+    }
+
+    func testPopoverWindowUsesOnlyTheDepthConstructionChosenByItsTheme() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        for (theme, expectsSystemShadow) in [
+            (AppTheme.system, true),
+            (AppThemeStyles.win98, false),
+            (AppThemeStyles.neoBrutalism, false),
+            (AppThemeStyles.claymorphism, false)
+        ] {
+            AppThemePalette.set(theme)
+            let popover = ThemedPopover()
+            popover.animates = false
+            popover.contentViewController = popoverContent()
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+            let panel = try XCTUnwrap(popover.presentedWindow)
+            XCTAssertEqual(
+                panel.hasShadow,
+                expectsSystemShadow,
+                "\(theme.name) used the wrong native window shadow"
+            )
+            popover.close()
+        }
+    }
+
     // MARK: - Dismissal and focus
 
     func testPopoverEscapeClosesOnceAndReturnsFocus() throws {
         let window = testWindow()
-        defer { window.close() }
+        defer { settle(window) }
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
         XCTAssertTrue(window.makeFirstResponder(anchor))
 
@@ -161,8 +266,7 @@ final class ThemedPresentationTests: XCTestCase {
     }
 
     func testPopoverClosesWhenItsAnchorLeavesTheHierarchy() throws {
-        let window = testWindow()
-        defer { window.close() }
+        let window = offscreenWindow()
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
         let content = NSViewController()
         content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
@@ -183,8 +287,7 @@ final class ThemedPresentationTests: XCTestCase {
     }
 
     func testDroppingPopoverOwnerDetachesAndTearsDownItsPanel() throws {
-        let window = testWindow()
-        defer { window.close() }
+        let window = offscreenWindow()
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
         let content = NSViewController()
         content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
@@ -208,9 +311,80 @@ final class ThemedPresentationTests: XCTestCase {
         wait(for: [detached], timeout: 1)
     }
 
+    // MARK: - Popovers and dropdowns in one window
+
+    /// The reported bug: the hover card over a sidebar row stayed up when that row's `+` opened
+    /// its dropdown, and — being a child window over a menu drawn inside the window — covered
+    /// the rows the click was aiming for.
+    func testOpeningADropdownClosesThePopoverThatWouldCoverIt() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = popoverContent()
+        var closes = 0
+        popover.onClose = { closes += 1 }
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        XCTAssertTrue(popover.isShown)
+
+        let session = try XCTUnwrap(presentMenu(from: anchor))
+        defer { ThemedMenuPresenter.dismiss(session) }
+
+        XCTAssertFalse(popover.isShown, "the dropdown opened underneath an open popover")
+        XCTAssertNil(popover.presentedWindow)
+        XCTAssertEqual(closes, 1)
+    }
+
+    /// The same collision from the other side: hover tracking keeps firing while a dropdown is
+    /// open, so a row crossed on the way down the menu must not raise a card over it.
+    func testAPopoverDoesNotOpenWhileADropdownIsUpInTheSameWindow() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+
+        let session = try XCTUnwrap(presentMenu(from: anchor))
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = popoverContent()
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+        XCTAssertFalse(popover.isShown, "a popover opened over a dropdown that was already up")
+        XCTAssertNil(popover.presentedWindow)
+
+        ThemedMenuPresenter.dismiss(session)
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        defer { popover.close() }
+        XCTAssertTrue(popover.isShown, "the dropdown's exit left hover popovers shut out")
+    }
+
+    /// The exception the rule needs: a dropdown opened from a control *inside* a popover is
+    /// presented in that panel's own window, and closing the surface it belongs to would take
+    /// the menu down with it.
+    func testADropdownOpenedInsideAPopoverLeavesItOpen() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+
+        let content = popoverContent()
+        let inner = ThemedButton(title: "Inside", target: nil, action: nil)
+        inner.frame = NSRect(x: 10, y: 10, width: 80, height: Design.Size.chipHeight)
+        content.view.addSubview(inner)
+
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = content
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        defer { popover.close() }
+        XCTAssertNotNil(inner.window)
+
+        let session = try XCTUnwrap(presentMenu(from: inner))
+        defer { ThemedMenuPresenter.dismiss(session) }
+
+        XCTAssertTrue(popover.isShown, "a menu closed the very popover it was opened from")
+    }
+
     func testAlertEscapeEndsTheSheetAndReturnsFocus() throws {
         let window = testWindow()
-        defer { window.close() }
+        defer { settle(window) }
         let source = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
         XCTAssertTrue(window.makeFirstResponder(source))
 
@@ -264,7 +438,12 @@ final class ThemedPresentationTests: XCTestCase {
     /// dialog was the button that does not delete, and on a theme whose accent is its negative
     /// colour it was the reddest thing too. Filling the *action* instead was rejected — it makes
     /// the irreversible button the most clickable thing on a sheet meant to slow the user down —
-    /// so a destructive confirmation fills neither, and the two come out the same size.
+    /// so a destructive confirmation fills neither.
+    ///
+    /// The frames were always the same size, filled or not — what differed was the *drawing*, and
+    /// that is asserted where it happens, in
+    /// `testTheFocusedDefaultOfAnAlertKeepsTheEdgeOfItsFill`. Kept here as the cheap guard that
+    /// the row still lays out as one.
     func testADestructiveAlertFillsNeitherButtonAndSizesThemAlike() throws {
         let root = sized(destructiveAlert().makeContentView())
         let buttons = themedButtons(in: root)
@@ -295,6 +474,99 @@ final class ThemedPresentationTests: XCTestCase {
 
         XCTAssertEqual(buttons.first { $0.title == "Allow" }?.emphasis, .primary)
         XCTAssertEqual(buttons.first { $0.title == "Cancel" }?.emphasis, .secondary)
+    }
+
+    /// A quit dialog, reported as "Cancel and Quit are different sizes".
+    ///
+    /// They were, and the focus ring was doing it. A prominent button's ring is stroked inside
+    /// its silhouette in `Text.selected` — a near-ground tone, by definition — so on the edge of
+    /// an accent *fill* it did not read as a ring around the button: it replaced the outermost
+    /// 2pt of the fill on all four sides, and the pill came out 4pt shorter and 4pt narrower than
+    /// the bordered Cancel beside it. Nothing in the picture said "focus"; it said "two sizes".
+    ///
+    /// Not a property of a theme, which is how it was found twice: the destructive-alert fix
+    /// settled it for delete dialogs by filling neither button, and every ordinary confirmation
+    /// still filled its default. So the rule is stated where the ring is drawn, and asserted here
+    /// on the fill's own edge across a light theme, a dark one, and the system default.
+    func testTheFocusedDefaultOfAnAlertKeepsTheEdgeOfItsFill() throws {
+        let previous = AppThemeLibrary.current
+        defer {
+            AppThemePalette.set(previous)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previous.id))
+        }
+
+        for theme in [AppTheme.system, AppThemeStyles.botanical, AppThemeStyles.cyberpunk] {
+            AppThemePalette.set(theme)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+
+            let alert = ThemedAlert()
+            alert.messageText = "Quit with one turn in flight?"
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+
+            let root = sized(alert.makeContentView())
+            root.appearance = NSAppearance(
+                named: theme.mode == .dark ? .darkAqua : .aqua
+            )
+            let window = NSWindow(
+                contentRect: root.bounds,
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView?.addSubview(root)
+
+            let quit = try XCTUnwrap(themedButtons(in: root).first { $0.title == "Quit" })
+            XCTAssertEqual(quit.emphasis, .primary, "\(theme.name): the default is not filled")
+
+            // The same button before focus reaches it. Asserted against *itself* rather than
+            // against a fill sampled from its middle: a theme whose primary is outlined rather
+            // than filled draws a hairline at that edge by design, and comparing the edge to the
+            // interior would call that border a defect. What must be true under every treatment
+            // is that focus changes nothing at the silhouette's edge.
+            root.layoutSubtreeIfNeeded()
+            let resting = try rendered(root, scale: 2)
+
+            XCTAssertTrue(window.makeFirstResponder(quit))
+            root.layoutSubtreeIfNeeded()
+
+            let rep = try rendered(root, scale: 2)
+            try writeRender(of: rep, named: "alert-quit-\(theme.id.rawValue)")
+
+            let frame = quit.convert(quit.bounds, to: root)
+            let edges: [(String, NSPoint)] = [
+                ("top", NSPoint(x: frame.midX, y: frame.maxY - 1)),
+                ("bottom", NSPoint(x: frame.midX, y: frame.minY + 1)),
+                ("leading", NSPoint(x: frame.minX + 1, y: frame.midY)),
+                ("trailing", NSPoint(x: frame.maxX - 1, y: frame.midY))
+            ]
+            for (edge, point) in edges {
+                XCTAssertLessThan(
+                    contrast(
+                        try pixel(of: rep, at: point, in: root),
+                        try pixel(of: resting, at: point, in: root)
+                    ),
+                    0.06,
+                    "\(theme.name): the focus ring ate the \(edge) edge of the default's fill, "
+                        + "so it reads smaller than the Cancel beside it"
+                )
+            }
+
+            // And the ring is still there to be seen, inside that band.
+            let ringPoint = NSPoint(
+                x: frame.midX,
+                y: frame.maxY - Design.Accessibility.focusRingWidth * 1.5
+            )
+            XCTAssertGreaterThan(
+                contrast(
+                    try pixel(of: rep, at: ringPoint, in: root),
+                    try pixel(of: resting, at: ringPoint, in: root)
+                ),
+                0.1,
+                "\(theme.name): the focused default draws no ring at all"
+            )
+        }
     }
 
     /// The picture, under the theme that showed it. Swiss Minimalist sets `accent` and
@@ -364,6 +636,9 @@ final class ThemedPresentationTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// A **key** window, for the two tests that assert where focus lands — which is the one
+    /// thing an unshown window cannot answer, and so the only reason to prefer this over
+    /// `offscreenWindow()` below. Everything else in this file uses that one.
     private func testWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),
@@ -376,8 +651,70 @@ final class ThemedPresentationTests: XCTestCase {
         source.frame = NSRect(x: 40, y: 80, width: 100, height: Design.Size.chipHeight)
         root.addSubview(source)
         window.contentView = root
+        // Closing a window releases it — and AppKit's sheet machinery keeps its own
+        // `_NSWindowTransformAnimation` pointing at that window for as long as the animation is
+        // in flight. Released underneath one, the animation's `dealloc` lands on freed memory the
+        // next time *anything* flushes a Core Animation transaction, which is whichever later
+        // test happens to spin a run loop. It killed the host inside `ToastTests`, two suites
+        // along, with a `SIGSEGV` in `-[_NSWindowTransformAnimation dealloc]` and nothing in the
+        // log to connect it to the test that armed it. See `settle(_:)`.
+        window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         return window
+    }
+
+    /// Takes a shown fixture window off screen and lets AppKit finish what it was animating on
+    /// it, so nothing is left half-torn-down for the next test's run loop to trip over.
+    ///
+    /// Ordered out rather than closed: this window has to outlive its own animations, and
+    /// `close()` is what hands it to them as freed memory.
+    private func settle(_ window: NSWindow) {
+        window.orderOut(nil)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: Self.animationSettleInterval))
+    }
+
+    /// Long enough for a sheet's transform animation to run out. AppKit's is a quarter second;
+    /// this waits it out rather than guessing, because the cost of guessing short is a crash in
+    /// another test file.
+    private static let animationSettleInterval: TimeInterval = 0.35
+
+    /// A window that is never ordered on screen and never closed: none of the
+    /// popover-versus-dropdown behaviour needs to be visible, and neither ordering a window in
+    /// nor closing the last one goes near the host's termination trap (see CLAUDE.md). The
+    /// window is simply released with the test.
+    private func offscreenWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        let source = ThemedButton(title: "Source", target: nil, action: nil)
+        source.frame = NSRect(x: 40, y: 80, width: 100, height: Design.Size.chipHeight)
+        root.addSubview(source)
+        window.contentView = root
+        return window
+    }
+
+    private func popoverContent() -> NSViewController {
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
+        content.preferredContentSize = content.view.frame.size
+        return content
+    }
+
+    private func presentMenu(from source: NSView) -> AnyObject? {
+        ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "New Chat…"))],
+                minimumWidth: 0
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        )
     }
 
     private func sized(_ view: NSView) -> NSView {
@@ -470,10 +807,14 @@ final class ThemedPresentationTests: XCTestCase {
     }
 
     /// Saves the render where the other render tests put theirs, for appearance review.
+    ///
+    /// Falls back the way `ThemedCheckboxTests` does rather than returning empty-handed:
+    /// `scripts/test.sh` forwards no environment to the test host, so keying this on
+    /// `THREADING_RENDER_OUT` alone meant the pictures were written by nothing but an Xcode run
+    /// somebody had configured by hand.
     private func writeRender(of rep: NSBitmapImageRep, named name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
-            return
-        }
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            ?? NSTemporaryDirectory() + "ThreadingRenders"
         let url = URL(fileURLWithPath: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))

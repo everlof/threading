@@ -371,11 +371,14 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         //
         // Filling the *action* instead was the other candidate and is worse: it makes the
         // irreversible button the most clickable thing on a sheet whose whole purpose is to
-        // slow the user down. So neither is filled. Both buttons are secondary, which also
-        // makes them the same size — a prominent button's focus ring is stroked inside its own
-        // silhouette, so the filled Cancel read 4pt shorter than the bordered Delete beside it.
-        // What is left says it plainly: Delete is the only red thing, and the ring says Return
-        // is on Cancel.
+        // slow the user down. So neither is filled. What is left says it plainly: Delete is the
+        // only red thing, and the ring says Return is on Cancel.
+        //
+        // This once carried a second reason — that two secondaries also came out the same size,
+        // where a filled one read 4pt shorter than the bordered button beside it. That was the
+        // focus ring eating the edge of its own fill, it was never a property of destructive
+        // dialogs, and it is fixed in `ThemedButton` now. The rule above rests on what the
+        // colours mean, which is the only thing it ever should have rested on.
         let hasDestructiveAction = alert.buttons.contains(where: \.hasDestructiveAction)
 
         for index in alert.buttons.indices.reversed() {

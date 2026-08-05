@@ -20,6 +20,43 @@ import AppKit
 /// mark only has to be findable, not readable.
 enum IconBackplate {
 
+    // MARK: - The Ground
+
+    /// The tone of the surface a mark is actually drawn on.
+    ///
+    /// A type rather than a `CGFloat` because the number this rule needs is not one a caller can
+    /// be trusted to write. It carried two named constants for a while — the tones of the light
+    /// and dark *system* sidebars — and `ProjectIconStore` reached for them, since "which
+    /// appearance is this" is a question with an easy answer and "what colour is under this icon"
+    /// is not. They are the same answer only under the System theme. Windows 98's sidebar is
+    /// `#C0C0C0`, tone 0.75, where the constant said 0.97; the Claude mark measures 0.53, so the
+    /// separation the rule tests came out 0.44 against the constant and 0.23 against the surface
+    /// actually painted, on either side of the 0.24 threshold. Every project favicon between
+    /// roughly 0.51 and 0.73 lost its plate under half the themes in the app.
+    ///
+    /// So there is no way to state a ground except by handing over the colour, and the tone is
+    /// measured here. The constants are gone rather than deprecated: a number that was wrong for
+    /// nineteen of twenty-one themes should not be reachable.
+    struct Ground: Equatable {
+
+        /// 0 (black) to 1 (white), by the measure `IconBackplate` documents.
+        let tone: CGFloat
+
+        init(_ color: NSColor) {
+            tone = IconBackplate.tone(of: color)
+        }
+
+        /// A stable, short key for caching a rendition composed against this ground.
+        ///
+        /// Quantized, because the ground is a measurement: a fill that resolves a thousandth
+        /// differently between two reads is the same ground, and keying on the raw value would
+        /// grow an entry per read. The step is far finer than `minimumSeparation`, so two grounds
+        /// that share a key cannot disagree about the plate.
+        var cacheKey: String {
+            String(Int((tone * CGFloat(Defaults.groundKeySteps)).rounded()))
+        }
+    }
+
     // MARK: - Measuring
 
     /// The image's alpha-weighted mean tone over its visible pixels, 0 (black) to 1 (white).
@@ -78,9 +115,9 @@ enum IconBackplate {
     /// A mark with no measurable tone — an undecodable image — never plates: the plate is a
     /// rescue, and rescuing something we cannot see the shape of is how a plate ends up behind
     /// every icon in the list.
-    static func isNeeded(markTone: CGFloat?, groundTone: CGFloat) -> Bool {
+    static func isNeeded(markTone: CGFloat?, ground: Ground) -> Bool {
         guard let markTone else { return false }
-        return abs(markTone - groundTone) < Defaults.minimumSeparation
+        return abs(markTone - ground.tone) < Defaults.minimumSeparation
     }
 
     /// The neutral that opposes a ground.
@@ -89,8 +126,8 @@ enum IconBackplate {
     /// exists to *oppose* the ground, and every themed colour follows it. This is the design
     /// system's one standing exception to "semantic roles only", and it is the whole reason the
     /// plate works under a red selection as well as under a grey sidebar.
-    static func plateColor(againstTone groundTone: CGFloat) -> NSColor {
-        groundTone < Defaults.midTone ? Defaults.lightPlate : Defaults.darkPlate
+    static func plateColor(against ground: Ground) -> NSColor {
+        ground.tone < Defaults.midTone ? Defaults.lightPlate : Defaults.darkPlate
     }
 
     // MARK: - Composing
@@ -102,16 +139,16 @@ enum IconBackplate {
     /// put a light square behind a label-coloured glyph that was never in trouble.
     static func plated(
         _ image: NSImage,
-        againstTone groundTone: CGFloat,
+        against ground: Ground,
         size: CGFloat = Defaults.displaySize,
         cornerRadius: CGFloat = Defaults.cornerRadius
     ) -> NSImage {
         guard !image.isTemplate,
-              isNeeded(markTone: tone(of: image), groundTone: groundTone) else { return image }
+              isNeeded(markTone: tone(of: image), ground: ground) else { return image }
 
         return compose(
             image,
-            plate: plateColor(againstTone: groundTone),
+            plate: plateColor(against: ground),
             size: size,
             cornerRadius: cornerRadius
         )
@@ -184,10 +221,9 @@ enum IconBackplate {
         /// which neutral opposes it.
         static let midTone: CGFloat = 0.5
 
-        /// The sidebar's own two grounds, for callers whose ground *is* the appearance and who
-        /// would otherwise have to resolve a themed colour to state the obvious.
-        static let darkAppearanceGroundTone: CGFloat = 0.13
-        static let lightAppearanceGroundTone: CGFloat = 0.97
+        /// How finely `Ground.cacheKey` distinguishes two grounds — a hundredth of the tone
+        /// scale, an order of magnitude finer than `minimumSeparation`.
+        static let groundKeySteps = 100
 
         static let lightPlate = NSColor(white: 0.93, alpha: 0.96)
         static let darkPlate = NSColor(white: 0.16, alpha: 0.92)

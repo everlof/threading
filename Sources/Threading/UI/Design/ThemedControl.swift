@@ -335,7 +335,7 @@ enum ThemedSurface {
             }
         }
 
-        let width = Design.Radius.border
+        let width = Design.Radius.controlBorder
         // Half a point in, so a one-point border falls inside the control rather than straddling
         // its edge and drawing at half intensity.
         let rect = border == nil ? bounds : bounds.insetBy(dx: width / 2, dy: width / 2)
@@ -471,7 +471,7 @@ private extension NSView {
     /// the size the constraint system last *asked* for, and AppKit caches that until it is told the
     /// answer moved. Repainting alone left every rule in the window ruling for the theme that had
     /// just left, while anything built after the switch took the new weight: arriving at Editorial
-    /// (1) from Neo Brutalism (3), one window drew hairlines and 3-point rules at once. The seam
+    /// from a heavily ruled theme, one window drew hairlines and heavy rules at once. The seam
     /// itself was already right — `dividerThickness` is computed per read — which is exactly why
     /// the mismatch survived being fixed there.
     ///

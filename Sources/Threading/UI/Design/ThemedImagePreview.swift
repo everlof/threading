@@ -125,8 +125,12 @@ final class ThemedImagePreview: ThemedControl {
         // pointer arrives, and holding the wash through mouse-down keeps the click from feeling
         // like it landed on inert content. No transform: Reduce Motion should not turn a basic
         // affordance into a different interaction.
+        //
+        // `imageHoverWash` rather than `controlHover`, because this fill lands *on top of* the
+        // picture instead of under it — see the role's note. `controlHover` is opaque under
+        // System and under half the stock themes, so it hid the image outright.
         if isHovered || isPressArmed {
-            Design.Surface.controlHover.setFill()
+            Design.Surface.imageHoverWash.setFill()
             shape.path.fill()
             Design.Surface.accent.setStroke()
             let hoverPath = shape.inset(by: Design.Radius.border / 2).path
