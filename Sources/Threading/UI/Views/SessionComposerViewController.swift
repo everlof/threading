@@ -43,28 +43,71 @@ final class SessionComposerViewController: NSViewController {
         action: #selector(importTapped)
     )
 
-    /// The import offer's own row, which exists to place the button by its **ink**.
+    /// The one thing this screen is for, stated as a button rather than as a glyph in the box.
     ///
-    /// A plain button's frame carries the padding its hover surface needs, so aligned by frame
-    /// its first letter sits inside every other row in the column. The row subtracts what the
-    /// button itself states (`OpticalInsetProviding`) rather than a number of its own.
+    /// A brief is several lines — often a pasted paragraph — so Return belongs to the text and
+    /// the send has to live somewhere Return is not. Out here it can also carry `⌘↩` on its
+    /// face, which is the whole reason the chord is findable; a glyph has nowhere to write one
+    /// and had to promise it on a tooltip nobody reads before pressing Return.
     ///
-    /// The row is what hides when there is nothing to import, not only the button: a hidden view
-    /// keeps its constraints, so a button hidden inside a visible row leaves the row standing at
-    /// its full height and the column ends in a gap nothing draws in.
-    private lazy var importRow: NSView = {
+    /// See `PromptView.SubmitPlacement.outside`.
+    private lazy var startButton: ThemedButton = {
+        let button = ThemedButton(
+            title: L10n.string("Start session"),
+            target: self,
+            action: #selector(startTapped)
+        )
+        button.emphasis = .primary
+        button.shortcut = ComposerDefaults.startShortcut
+        button.setAccessibilityIdentifier("composer.session-start.submit")
+        return button
+    }()
+
+    /// The row under the box: the action at its trailing end, the other way in at its leading
+    /// one. Two offers of unequal weight, one at each edge, rather than a pair the eye has to
+    /// rank — pressing Start is what this screen is for, and adopting a conversation that
+    /// already exists is the other way to arrive at the same place.
+    ///
+    /// The row exists to place the import button by its **ink**: a plain button's frame carries
+    /// the padding its hover surface needs, so aligned by frame its first letter sits inside
+    /// every other row in the column. The row subtracts what the button itself states
+    /// (`OpticalInsetProviding`) rather than a number of its own. The primary opposite it needs
+    /// no such correction — a filled shape's ink *is* its frame.
+    ///
+    /// The row itself never hides now that it carries the send; the import button is what
+    /// appears once discovery finds something.
+    private lazy var actionRow: NSView = {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.setAccessibilityIdentifier("composer.session-start.import-row")
+        row.setAccessibilityIdentifier("composer.session-start.actions")
         importButton.translatesAutoresizingMaskIntoConstraints = false
+        startButton.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(importButton)
+        row.addSubview(startButton)
 
         let inset = importButton.opticalHorizontalInset
         NSLayoutConstraint.activate([
             importButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: -inset),
-            importButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: inset),
-            importButton.topAnchor.constraint(equalTo: row.topAnchor),
-            importButton.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+            importButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+
+            // Both buttons stand at the same height, which is a statement about the *row* rather
+            // than about either button. A plain button asks for the height its mark and its
+            // padding need — 4pt shorter than a bordered one — and at rest that is invisible,
+            // because it draws nothing. Under the pointer it raises a surface, and a hover pill
+            // visibly shorter than the primary it sits opposite reads as two rows pretending to
+            // be one. The height is the row's to state; the ink stays where it was.
+            importButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
+
+            // The offer yields first: it is one line of quiet text, and the action beside it is
+            // the thing that must stay readable when the pane is narrow.
+            importButton.trailingAnchor.constraint(
+                lessThanOrEqualTo: startButton.leadingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
+            startButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            startButton.topAnchor.constraint(equalTo: row.topAnchor),
+            startButton.bottomAnchor.constraint(equalTo: row.bottomAnchor)
         ])
         return row
     }()
@@ -225,10 +268,10 @@ final class SessionComposerViewController: NSViewController {
         wirePrompt()
         setupPromptCustomization()
 
-        // Three things, evenly spaced: where this runs, what to say, and the other way in. The
-        // column used to need two different steps because it held a usage block and an action
-        // row of its own; with both folded into the box there is one rhythm to keep.
-        stack.setViews([chips, promptContentContainer, importRow], in: .leading)
+        // Three things, evenly spaced: where this runs, what to say, and what to do about it.
+        // The column used to need two different steps because it held a usage block as well;
+        // with that folded into the box there is one rhythm to keep.
+        stack.setViews([chips, promptContentContainer, actionRow], in: .leading)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
@@ -253,7 +296,14 @@ final class SessionComposerViewController: NSViewController {
             constant: -Design.Spacing.pane * 2
         )
         measure.priority = ComposerDefaults.columnMeasurePriority
-        stack.setContentHuggingPriority(
+
+        // `setHuggingPriority`, not `setContentHuggingPriority`: a stack view hugs its content
+        // through its **own** property, and the content one it inherits from `NSView` leaves
+        // that untouched at its default 250. That is above the measurement, so the column went
+        // on hugging its widest row and the measurement never applied — the box sat at 415
+        // points in a 1454-point pane, with the chips inside it crushed against each other,
+        // while every constraint here read as though it were filling the pane.
+        stack.setHuggingPriority(
             ComposerDefaults.columnHuggingPriority,
             for: .horizontal
         )
@@ -277,6 +327,9 @@ final class SessionComposerViewController: NSViewController {
                 constant: -Design.Spacing.pane
             ),
             promptContentContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            // The action row spans the column, which is what puts the send on the same edge the
+            // box ends at rather than wherever its own two buttons happen to end.
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
 
             // The hero floats in whatever room the composer leaves above itself.
             heroRegion.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -301,7 +354,7 @@ final class SessionComposerViewController: NSViewController {
         observeUsage()
         // Nothing has been discovered yet, so the offer starts absent rather than as an
         // untitled button holding a row open until the first scan comes back.
-        refreshImportChip()
+        refreshImportOffer()
     }
 
     /// A pane too short to float the greeting shows the composer alone — half a hero peeking
@@ -339,10 +392,10 @@ final class SessionComposerViewController: NSViewController {
         promptView.showsImageAttachments = true
         promptView.placeholder = ComposerDefaults.promptPlaceholder
         promptView.minimumHeight = ComposerDefaults.promptHeight
-        // The same box the conversation replies in: the send closes a control row along the
-        // bottom, and Return sends unless `AppSettings.promptReturnKey` says otherwise. See
-        // `PromptView.SubmitPlacement`.
-        promptView.submitPlacement = .footer
+        // Return belongs to the text here; `startButton` sends. The box still carries the
+        // control row the conversation's reply box has — the row comes from `setFooterControls`
+        // below, not from where the send sits. See `PromptView.SubmitPlacement`.
+        promptView.submitPlacement = .outside
 
         usageLabel.applyFont(.subheading)
         usageLabel.textColor = Design.Text.tertiary
@@ -522,7 +575,7 @@ final class SessionComposerViewController: NSViewController {
             // Words typed here stay; a draft belonging to the project just left does not.
             promptView.stringValue = carriedPrompt ?? ""
             importable = []
-            refreshImportChip()
+            refreshImportOffer()
             refreshChips()
             return
         }
@@ -593,18 +646,19 @@ final class SessionComposerViewController: NSViewController {
     /// enough that the user can select another project before it finishes.
     private func discoverImportable(for project: Project) {
         importable = []
-        refreshImportChip()
+        refreshImportOffer()
 
         SessionImporter.discover(for: project) { [weak self] found in
             guard let self, self.projectID == project.id else { return }
 
             self.importable = found
-            self.refreshImportChip()
+            self.refreshImportOffer()
         }
     }
 
-    private func refreshImportChip() {
-        importRow.isHidden = importable.isEmpty
+    /// The offer appears once discovery has found something to offer. Only the button hides —
+    /// the row it is on carries the send, so it stands whatever discovery answers.
+    private func refreshImportOffer() {
         importButton.isHidden = importable.isEmpty
         importButton.title = ComposerDefaults.importTitle(count: importable.count)
     }
@@ -626,11 +680,13 @@ final class SessionComposerViewController: NSViewController {
 
         // A session cannot start nowhere. The prompt stays live — words first, place second —
         // but the send keeps the promise honest, and says why rather than sitting there dimmed
-        // with nothing to explain itself: a glyph has no room for a sentence, its tooltip does.
+        // with nothing to explain itself.
         promptView.isSubmissionEnabled = project != nil
         promptView.submissionDisabledReason = project == nil
             ? ComposerDefaults.chooseProjectFirstReason
             : nil
+        startButton.isEnabled = project != nil
+        startButton.toolTip = project == nil ? ComposerDefaults.chooseProjectFirstReason : nil
 
         let accounts = availableAccounts
         let account = selectedAgent.supportsAccounts
@@ -1164,7 +1220,7 @@ final class SessionComposerViewController: NSViewController {
             // Dropped from the list as well as adopted: the project now tracks it, and
             // offering it again would only be refused as a duplicate.
             self.importable.removeAll { $0.id == chosen.id }
-            self.refreshImportChip()
+            self.refreshImportOffer()
 
             self.delegate?.sessionComposer(self, importSession: chosen, into: projectID)
         }
@@ -1174,6 +1230,13 @@ final class SessionComposerViewController: NSViewController {
 
     @objc private func importTapped() {
         presentImportPicker()
+    }
+
+    /// Sent through the box rather than read off it, so the button, ⌘Return and the box's own
+    /// rules stay one path: the attachments go with the words, and a submission the box has
+    /// disabled stays disabled however it was asked.
+    @objc private func startTapped() {
+        promptView.submit()
     }
 
     private func createWorktree() {
@@ -1397,9 +1460,15 @@ enum ComposerDefaults {
 
     static let importSymbol = "tray.and.arrow.down"
 
-    /// Why the send will not fire, on the glyph's tooltip. A short sentence rather than a
-    /// dimmed control with nothing to say — the chip beside it is already the ask, and this is
-    /// what connects the two.
+    /// What the start button answers to and what it draws on its face — one value, so it cannot
+    /// name a chord it does not answer. `PromptView` handles the same chord in `keyDown`, which
+    /// is what makes it work in a box that has no button beside it at all.
+    static let startShortcut = KeyboardShortcut(key: "\r", modifiers: .command)
+
+    /// Why the send will not fire, on the start button's tooltip and on the box's. A short
+    /// sentence rather than a dimmed control with nothing to say — the chip above is already the
+    /// ask, and this is what connects the two. Both are told, because ⌘Return reaches the box
+    /// without going near the button.
     static var chooseProjectFirstReason: String { L10n.string("Choose a project first") }
 
     /// How old the usage reading is, on the label's tooltip. The panel this replaced said it

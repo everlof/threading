@@ -29,24 +29,27 @@ final class SessionComposerRenderTests: XCTestCase {
 
     // MARK: - Behavior
 
-    /// The send is the glyph in the box's own footer now, so "cannot start nowhere" is a
-    /// disabled submission with a stated reason rather than a dimmed button beside the box.
+    /// "A session cannot start nowhere" is a disabled send with a stated reason, on the button
+    /// and in the box alike — the chord reaches the box directly, so disabling only the button
+    /// would leave ⌘Return starting a session the button says it cannot start.
     func testNilProjectModeDisablesTheSendAndSaysWhy() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
 
         composer.show(projectID: nil)
         let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let start = try startButton(in: composer.view)
         XCTAssertFalse(prompt.isSubmissionEnabled, "A session cannot start nowhere")
+        XCTAssertFalse(start.isEnabled)
         XCTAssertEqual(
             prompt.submissionDisabledReason,
             "Choose a project first",
             "a dead control has to say what would make it live"
         )
         XCTAssertEqual(
-            try sendGlyph(in: prompt).toolTip,
+            start.toolTip,
             "Choose a project first",
-            "a glyph has no room for a sentence; its tooltip is where the reason goes"
+            "a dimmed button with nothing to explain itself is the state this replaced"
         )
 
         let store = ProjectStore.shared
@@ -59,22 +62,26 @@ final class SessionComposerRenderTests: XCTestCase {
         composer.show(projectID: project.id)
         XCTAssertTrue(prompt.isSubmissionEnabled)
         XCTAssertNil(prompt.submissionDisabledReason, "the reason outlived the reason")
+        XCTAssertTrue(start.isEnabled)
+        XCTAssertNil(start.toolTip, "with nothing left to explain, the button says its own title")
         XCTAssertEqual(
-            try sendGlyph(in: prompt).toolTip,
-            "Send · ⌘Return",
-            "with nothing left to explain, the glyph goes back to naming its chord"
+            start.shortcut,
+            ComposerDefaults.startShortcut,
+            "the chord is on the button's face, which is the only place it is findable"
         )
     }
 
     /// The composer's own reading of the footer contract: the choices lead, what is left to
-    /// spend and the surface trail, and the send closes the row.
+    /// spend and the surface trail. The send is not on this row — a brief sends from the button
+    /// under the box — and the row is the box's all the same, which is the point: it comes from
+    /// `setFooterControls`, not from where the send happens to sit.
     ///
     /// Configured by hand rather than by `show`, because which of these a real machine draws
     /// depends on how many logins the agent has and whether it renders natively — and the
     /// arrangement is the same question either way. A stack detaches a hidden arranged view from
     /// the hierarchy outright, so an environment-dependent chip is not merely invisible here, it
     /// is absent.
-    func testTheBoxsFooterCarriesTheChoicesThenTheReadingThenTheSend() throws {
+    func testTheBoxsFooterCarriesTheChoicesThenTheReading() throws {
         let composer = SessionComposerViewController()
         let host = host(composer, size: Render.tall)
 
@@ -101,20 +108,27 @@ final class SessionComposerRenderTests: XCTestCase {
             )
         }
 
-        let send = try sendGlyph(in: prompt)
+        XCTAssertTrue(
+            try sendGlyph(in: prompt).isHidden,
+            "the brief's send is the button under the box, not a glyph on this row"
+        )
         let inBox = { (view: NSView) in view.convert(view.bounds, to: prompt) }
 
         XCTAssertLessThan(inBox(model).maxX, inBox(mode).minX, "model leads the row, then mode")
         XCTAssertLessThan(inBox(mode).maxX, inBox(effort).minX, "mode leads effort")
         XCTAssertLessThan(inBox(effort).maxX, inBox(usage).minX)
         XCTAssertLessThan(inBox(usage).maxX, inBox(surface).minX, "the reading precedes the surface")
-        XCTAssertLessThan(inBox(surface).maxX, inBox(send).minX, "the send closes the row")
 
         // The trailing group reaches the box's own edge rather than trailing the leading one.
         XCTAssertGreaterThan(
             inBox(usage).minX - inBox(effort).maxX,
             inBox(mode).minX - inBox(model).maxX,
-            "nothing pushed the reading and the send to the trailing edge"
+            "nothing pushed the reading and the surface to the trailing edge"
+        )
+        XCTAssertLessThan(
+            prompt.bounds.maxX - inBox(surface).maxX,
+            Design.Spacing.large,
+            "the row has to finish on the box's own edge"
         )
     }
 
@@ -375,13 +389,13 @@ final class SessionComposerRenderTests: XCTestCase {
         choose(titled: "Extra High", on: effort)
         let prompt = try XCTUnwrap(promptView(in: composer.view))
         prompt.stringValue = "Think carefully"
-        try sendGlyph(in: prompt).performClick()
+        try startButton(in: composer.view).performClick()
         XCTAssertEqual(recorder.reasoningEfforts.last!, "xhigh")
 
         choose(titled: AgentKind.openCode.displayName, on: identity)
         XCTAssertTrue(effort.isHidden, "a provider without a catalog exposed an invented value")
         prompt.stringValue = "Use provider defaults"
-        try sendGlyph(in: prompt).performClick()
+        try startButton(in: composer.view).performClick()
         XCTAssertNil(recorder.reasoningEfforts.last!)
     }
 
@@ -469,7 +483,7 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
         let prompt = try XCTUnwrap(promptView(in: composer.view))
-        let send = try sendGlyph(in: prompt)
+        let send = try startButton(in: composer.view)
         prompt.stringValue = "Read this screenshot"
         prompt.attachFiles(at: [imageURL.path])
 
@@ -523,10 +537,14 @@ final class SessionComposerRenderTests: XCTestCase {
         composer.show(projectID: nil)
         host.layoutSubtreeIfNeeded()
 
-        // With nothing to import, the box is the last thing in the column. The handoff view is
-        // asked for it by name, since that is the view the pane animates on the way out.
-        let box = composer.promptHandoffView
-        let frame = composer.view.convert(box.bounds, from: box)
+        // The action row is the last thing in the column, with nothing to import or without:
+        // it carries the send, so it stands whatever discovery answers.
+        let row = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.actions"
+            }
+        )
+        let frame = composer.view.convert(row.bounds, from: row)
         // Flipped or not, the column's bottom edge lands one pane inset above the pane's.
         let gap = composer.view.isFlipped
             ? composer.view.bounds.height - frame.maxY
@@ -537,6 +555,12 @@ final class SessionComposerRenderTests: XCTestCase {
             accuracy: 1,
             "The composer hangs from the pane's bottom edge"
         )
+
+        // And the box the pane animates on the way out is above it rather than flush itself —
+        // asked for by name, since that is the view the handoff moves.
+        let box = composer.promptHandoffView
+        let boxFrame = composer.view.convert(box.bounds, from: box)
+        XCTAssertLessThan(frame.maxY, boxFrame.minY, "the row has to sit under the box")
     }
 
     /// The import offer is quiet, sits under the box, and is aligned by its **ink**: a plain
@@ -567,6 +591,41 @@ final class SessionComposerRenderTests: XCTestCase {
             boxFrame.minX,
             accuracy: 1,
             "the import title is off the column's leading edge by its own hover padding"
+        )
+    }
+
+    /// The two buttons in the action row stand at one height.
+    ///
+    /// A plain button's intrinsic height is what its mark and padding need — four points short of
+    /// a bordered one — and at rest that reads as nothing, because it draws no surface. Under the
+    /// pointer it raises one, and a hover pill shorter than the primary opposite it makes the row
+    /// look like two rows. The row states the height; the ink stays on its own margin, which the
+    /// test above asserts.
+    func testTheImportOfferStandsAtTheSameHeightAsTheAction() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+        composer.show(projectID: nil)
+
+        let importButton = try revealImport(in: composer.view)
+        let start = try startButton(in: composer.view)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThan(
+            importButton.intrinsicContentSize.height,
+            start.intrinsicContentSize.height,
+            "the tiers ask for different heights — this is the row overruling them, not a no-op"
+        )
+        XCTAssertEqual(
+            importButton.frame.height,
+            start.frame.height,
+            accuracy: 0.5,
+            "the offer's hover surface has to be as tall as the action beside it"
+        )
+        XCTAssertEqual(
+            importButton.frame.midY,
+            start.frame.midY,
+            accuracy: 0.5,
+            "and centred on the same line, so equal heights mean equal edges"
         )
     }
 
@@ -733,6 +792,16 @@ final class SessionComposerRenderTests: XCTestCase {
 
     // MARK: - Tree walking
 
+    /// The composer's send: the primary under the box, which is what a brief is sent from.
+    private func startButton(in view: NSView) throws -> ThemedButton {
+        try XCTUnwrap(
+            controls(in: view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.submit"
+            } as? ThemedButton,
+            "The composer has to hold its start button"
+        )
+    }
+
     /// The send that closes the box's control row. The only `ThemedButton` inside a `PromptView`
     /// — the footer's other occupants are chips and a label.
     private func sendGlyph(in prompt: PromptView) throws -> ThemedButton {
@@ -746,17 +815,17 @@ final class SessionComposerRenderTests: XCTestCase {
         descendants(of: view).first { $0 is PromptView } as? PromptView
     }
 
-    /// Puts the import offer into the state discovery gives it — counted title, row shown —
+    /// Puts the import offer into the state discovery gives it — counted title, button shown —
     /// without waiting on a real scan of a real project.
     ///
-    /// The row is reached through `arrangedSubviews`, since the column detaches it while there
-    /// is nothing to import, and the button through the row rather than the composer: a detached
-    /// row takes its contents out of the hierarchy with it.
+    /// The row is reached through `arrangedSubviews` and the button through the row rather than
+    /// through the composer, since a stack that detaches a hidden view takes its contents out of
+    /// the hierarchy with it.
     @discardableResult
     private func revealImport(in view: NSView) throws -> ThemedButton {
         let row = try XCTUnwrap(
             controls(in: view).first {
-                $0.accessibilityIdentifier() == "composer.session-start.import-row"
+                $0.accessibilityIdentifier() == "composer.session-start.actions"
             }
         )
         let button = try XCTUnwrap(
@@ -764,7 +833,6 @@ final class SessionComposerRenderTests: XCTestCase {
                 $0.accessibilityIdentifier() == "composer.session-start.import"
             } as? ThemedButton
         )
-        row.isHidden = false
         button.isHidden = false
         button.title = ComposerDefaults.importTitle(count: 90)
         return button
