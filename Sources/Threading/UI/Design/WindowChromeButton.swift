@@ -83,12 +83,22 @@ final class WindowChromeButton: ThemedControl {
     }
 
     override var intrinsicContentSize: NSSize {
-        if (fixtureStyle ?? WindowChromeAppearance.resolve())?.glyphStyle == .amiga {
+        switch (fixtureStyle ?? WindowChromeAppearance.resolve())?.glyphStyle {
+        case .squares:
+            // The default Win95/98 non-client metrics are not the generic takeover slot:
+            // a caption button is 16×14 inside an 18px title bar. The former 18×16 plates
+            // were visibly too broad beside the original even before comparing the marks.
+            return NSSize(width: 16, height: 14)
+        case .amiga:
             // Intuition gadgets consume almost the full 26px title strip. The generic 18×16
             // caption slot made the same figures float in the blue rather than partition it.
             return NSSize(width: 24, height: 22)
+        default:
+            return NSSize(
+                width: Design.Size.windowButtonWidth,
+                height: Design.Size.windowButtonHeight
+            )
         }
-        return NSSize(width: Design.Size.windowButtonWidth, height: Design.Size.windowButtonHeight)
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -192,7 +202,8 @@ final class WindowChromeButton: ThemedControl {
             ThemedSurface.draw(
                 bounds,
                 fill: fill,
-                border: Design.Surface.border
+                border: Design.Surface.border,
+                bevel: isPressed ? .sunken : .automatic
             )
             ink = Design.Text.label
         case .platinum:
@@ -282,18 +293,27 @@ final class WindowChromeButton: ThemedControl {
                 : (resolved?.inactiveInk ?? Design.Text.secondary)
         }
 
+        // Raised bitmap-era controls move their figure with the pressed face. This is one
+        // physical-button rule shared by the hard retro families; leaving the glyph behind
+        // made the bevel invert while its contents appeared painted on the window.
+        let glyphBounds = style != .plain && isPressed
+            ? bounds.offsetBy(dx: 1, dy: -1)
+            : bounds
+
         if style == .platinum {
-            drawPlatinumGlyph(in: bounds, ink: ink)
+            drawPlatinumGlyph(in: glyphBounds, ink: ink)
         } else if style == .beOS {
-            drawBeOSGlyph(in: bounds, ink: ink)
+            drawBeOSGlyph(in: glyphBounds, ink: ink)
         } else if style == .openStep {
-            drawOpenStepGlyph(in: bounds, ink: ink)
+            drawOpenStepGlyph(in: glyphBounds, ink: ink)
         } else if style == .irix {
-            drawIRIXGlyph(in: bounds, ink: ink)
+            drawIRIXGlyph(in: glyphBounds, ink: ink)
         } else if style == .amiga {
-            drawAmigaGlyph(in: bounds, ink: ink)
+            drawAmigaGlyph(in: glyphBounds, ink: ink)
+        } else if style == .squares {
+            drawWindows98Glyph(in: glyphBounds, ink: ink)
         } else {
-            drawGlyph(in: bounds, ink: ink, pixelArt: style == .squares)
+            drawGlyph(in: glyphBounds, ink: ink)
         }
         drawKeyboardFocus(around: ThemedSurface.Shape(
             rect: bounds,
@@ -309,17 +329,12 @@ final class WindowChromeButton: ThemedControl {
     /// The three glyphs, drawn as shapes rather than set as symbols: the close cross, the
     /// minimize sill, and the zoom frame are *shapes*, and a font's rendition of them varies
     /// with the face the theme chose — the one thing a window button must not do.
-    private func drawGlyph(in rect: NSRect, ink: NSColor, pixelArt: Bool) {
+    private func drawGlyph(in rect: NSRect, ink: NSColor) {
         let side = min(rect.width, rect.height)
         let glyph = rect.insetBy(
             dx: (rect.width - side) / 2 + side * Glyph.inset,
             dy: (rect.height - side) / 2 + side * Glyph.inset
         )
-        if pixelArt {
-            drawPixelGlyph(in: glyph, ink: ink)
-            return
-        }
-
         let path = NSBezierPath()
         path.lineWidth = Glyph.strokeWidth
         path.lineCapStyle = .butt
@@ -376,60 +391,116 @@ final class WindowChromeButton: ThemedControl {
         path.stroke()
     }
 
-    /// The same three figures built from whole-point rectangles on a snapped grid, which is
-    /// what the originals were: the cross is a stair-stepped diagonal, not a smoothed line.
-    /// Every coordinate is integral, so with antialiasing off each rectangle lands on exact
-    /// device pixels and the figure has no gray in it anywhere.
-    private func drawPixelGlyph(in rect: NSRect, ink: NSColor) {
-        let size = max(3, floor(min(rect.width, rect.height)))
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
+    /// Win95/98 caption marks reconstructed from the Marlett figures Windows used for its
+    /// non-client buttons. This is deliberately *not* the generic vector alphabet above:
+    /// Marlett's `r` close mark has two-pixel stair steps, `1` is a nine-pixel window with a
+    /// two-pixel title rail, and `0` is a six-by-two sill. The previous seven-point canvas and
+    /// single-pixel diagonals were crisp but visibly too small and too light.
+    private func drawWindows98Glyph(in rect: NSRect, ink: NSColor) {
+        let bitmap = Windows98GlyphArtwork.bitmap(for: role, restored: displaysRestore)
+        let width = CGFloat(bitmap.width)
+        let height = CGFloat(bitmap.rowsTopToBottom.count)
+        // An odd bitmap cannot have equal whole-pixel margins in an even-width button. The
+        // originals made the same one-pixel choice; bias top/leading and keep every cell whole.
+        let originX = floor(rect.midX - width / 2)
+        // Minimize is a short figure inside the same nine-pixel Marlett em as Maximize. Its
+        // two rows sit on that cell's floor; centering those two ink rows made it resemble a
+        // generic dash instead of the Windows caption sill.
+        let originY = floor(rect.midY - CGFloat(bitmap.canvasHeight) / 2)
         ink.setFill()
 
-        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
+        for (rowIndex, row) in bitmap.rowsTopToBottom.enumerated() {
+            let y = originY + height - 1 - CGFloat(rowIndex)
+            var runStart: Int?
+            for column in 0...bitmap.width {
+                let filled = column < bitmap.width
+                    && row[row.index(row.startIndex, offsetBy: column)] == "#"
+                if filled, runStart == nil {
+                    runStart = column
+                } else if !filled, let start = runStart {
+                    NSRect(
+                        x: originX + CGFloat(start),
+                        y: y,
+                        width: CGFloat(column - start),
+                        height: 1
+                    ).fill()
+                    runStart = nil
+                }
+            }
+        }
+    }
+
+    /// Readable one-bit source artwork, kept internal so component tests can pin the exact
+    /// figure rather than merely asserting that some black pixels appeared in the button.
+    enum Windows98GlyphArtwork {
+        struct Bitmap: Equatable {
+            let rowsTopToBottom: [String]
+            let canvasHeight: Int
+
+            init(rowsTopToBottom: [String], canvasHeight: Int? = nil) {
+                self.rowsTopToBottom = rowsTopToBottom
+                self.canvasHeight = canvasHeight ?? rowsTopToBottom.count
+            }
+
+            var width: Int { rowsTopToBottom.first?.count ?? 0 }
         }
 
-        switch role {
-        case .windowMenu:
-            dot(1, floor(size / 2), size - 2, 2)
-        case .close:
-            // Two stair-stepped diagonals, each step one point square — the aliased cross
-            // the original bitmap draws.
-            for step in stride(from: 0, to: size, by: 1) {
-                dot(step, step)
-                dot(size - 1 - step, step)
+        static func bitmap(for role: Role, restored: Bool) -> Bitmap {
+            switch role {
+            case .windowMenu:
+                return Bitmap(rowsTopToBottom: ["#######", "#######"])
+            case .minimize:
+                return Bitmap(
+                    rowsTopToBottom: ["######", "######"],
+                    canvasHeight: 9
+                )
+            case .close:
+                return Bitmap(rowsTopToBottom: [
+                    "##.....##",
+                    ".##...##.",
+                    "..##.##..",
+                    "...###...",
+                    "...###...",
+                    "..##.##..",
+                    ".##...##.",
+                    "##.....##"
+                ])
+            case .zoom where restored:
+                return Bitmap(rowsTopToBottom: [
+                    "..########",
+                    "..########",
+                    "..#......#",
+                    "########.#",
+                    "########.#",
+                    "#......#.#",
+                    "#......#.#",
+                    "#......#..",
+                    "########.."
+                ])
+            case .zoom:
+                return Bitmap(rowsTopToBottom: [
+                    "#########",
+                    "#########",
+                    "#.......#",
+                    "#.......#",
+                    "#.......#",
+                    "#.......#",
+                    "#.......#",
+                    "#.......#",
+                    "#########"
+                ])
+            case .depth:
+                return Bitmap(rowsTopToBottom: [
+                    "..########",
+                    "..#......#",
+                    "..#......#",
+                    "########.#",
+                    "#......#.#",
+                    "#......#.#",
+                    "#......#..",
+                    "########.."
+                ])
             }
-        case .minimize:
-            // The sill sits on the figure's floor, two points deep, and stops short of the
-            // full width the way the original does.
-            dot(1, 0, size - 2, 2)
-        case .zoom:
-            func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
-                dot(x, y, side, 1)
-                dot(x, y + side - 1, side, 1)
-                dot(x, y, 1, side)
-                dot(x + side - 1, y, 1, side)
-                dot(x, y + side - 3, side, 2)
-            }
-            if displaysRestore {
-                let windowSide = max(3, size - 2)
-                frame(2, 2, side: windowSide)
-                frame(0, 0, side: windowSide)
-            } else {
-                // A window in miniature: a one-point frame under a two-point title bar.
-                frame(0, 0, side: size)
-            }
-        case .depth:
-            let windowSide = max(3, size - 2)
-            func depthFrame(_ x: CGFloat, _ y: CGFloat) {
-                dot(x, y, windowSide, 1)
-                dot(x, y + windowSide - 1, windowSide, 1)
-                dot(x, y, 1, windowSide)
-                dot(x + windowSide - 1, y, 1, windowSide)
-            }
-            depthFrame(2, 2)
-            depthFrame(0, 0)
         }
     }
 

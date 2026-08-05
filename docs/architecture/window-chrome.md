@@ -404,6 +404,15 @@ draws/names itself Restore while zoomed. `WindowChromeFrameView` draws the borde
 draws nothing at all in native dress, where the terminal-palette backdrop showing through the
 titlebar strip is load-bearing.
 
+**A pixel-art glyph is not a vector glyph with antialiasing disabled.** Windows 95/98 drew its
+caption figures from Marlett (`0` Minimize, `1` Maximize, `2` Restore, `r` Close) inside a 16×14
+button on the default 18px caption band. The Windows family therefore carries explicit one-bit
+artwork: a 6×2 sill, a 9px framed window with a 2px title rail, and the Close mark's 2px stepped
+diagonals. The first implementation derived a roughly 7×7 canvas from the generic 18×16 slot;
+it was technically pixel-snapped but visibly too small and too light. Other retro families keep
+their own one-bit alphabets rather than borrowing Marlett, and every raised hard-retro button
+moves its figure one pixel with the face when pressed.
+
 Workbench's Depth role remains opt-in. It sends the current window behind its peers and is not
 folded into Minimize, so a custom theme can state the original stacking operation without
 changing the standard three-button default inherited by older documents.

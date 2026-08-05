@@ -109,7 +109,10 @@ extension AppThemeStyles {
                     ink: hex("#FFFFFF"),
                     inactiveInk: hex("#FFFFFF"),
                     titleAlignment: .leading,
-                    height: 20,
+                    // Default classic non-client metrics: an 18px caption band holding
+                    // 16×14 caption buttons. Keeping the actual relationship matters as much
+                    // as the colours — the former 20/18×16 pair looked inflated beside Win98.
+                    height: 18,
                     buttonGlyphStyle: .squares
                 ),
                 frame: WindowChromeStyle.Frame(width: 3)

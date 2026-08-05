@@ -103,6 +103,81 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(button.accessibilityLabel(), L10n.string("Zoom"))
     }
 
+    func testWindows98UsesTheClassicCaptionMetrics() throws {
+        let style = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.win98.variant(.light)?.chrome)
+        )
+        let button = WindowChromeButton(role: .close)
+        button.fixtureStyle = style
+
+        XCTAssertEqual(style.bandHeight, 18)
+        XCTAssertEqual(button.intrinsicContentSize, NSSize(width: 16, height: 14))
+    }
+
+    func testWindows98CaptionArtworkKeepsTheMarlettWeightAndScale() {
+        typealias Artwork = WindowChromeButton.Windows98GlyphArtwork
+
+        let minimize = Artwork.bitmap(for: .minimize, restored: false)
+        XCTAssertEqual(
+            minimize.rowsTopToBottom,
+            ["######", "######"],
+            "the Minimize sill is no longer 6×2"
+        )
+        XCTAssertEqual(
+            minimize.canvasHeight,
+            9,
+            "Minimize must stay on the floor of the shared Marlett caption cell"
+        )
+        XCTAssertEqual(
+            Artwork.bitmap(for: .zoom, restored: false).rowsTopToBottom,
+            [
+                "#########",
+                "#########",
+                "#.......#",
+                "#.......#",
+                "#.......#",
+                "#.......#",
+                "#.......#",
+                "#.......#",
+                "#########"
+            ],
+            "Maximize lost its nine-pixel window or two-pixel title rail"
+        )
+        XCTAssertEqual(
+            Artwork.bitmap(for: .close, restored: false).rowsTopToBottom,
+            [
+                "##.....##",
+                ".##...##.",
+                "..##.##..",
+                "...###...",
+                "...###...",
+                "..##.##..",
+                ".##...##.",
+                "##.....##"
+            ],
+            "Close returned to the thin one-pixel diagonal the reference disproves"
+        )
+
+        for role in [
+            WindowChromeButton.Role.windowMenu, .close, .minimize, .zoom, .depth
+        ] {
+            for restored in [false, true] {
+                let bitmap = Artwork.bitmap(for: role, restored: restored)
+                XCTAssertGreaterThan(bitmap.width, 0)
+                XCTAssertTrue(
+                    bitmap.rowsTopToBottom.allSatisfy { $0.count == bitmap.width },
+                    "\(role) has a ragged source bitmap"
+                )
+                XCTAssertTrue(
+                    bitmap.rowsTopToBottom.allSatisfy { row in
+                        row.allSatisfy { $0 == "#" || $0 == "." }
+                    },
+                    "\(role) contains a non-binary source pixel"
+                )
+            }
+        }
+    }
+
     func testTheMinimizeButtonAsksItsWindowToMiniaturize() {
         let window = makeWindow()
         let button = WindowChromeButton(role: .minimize)
@@ -418,6 +493,40 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(written, themes.count * 2)
     }
 
+    /// Caption glyph review at their real sizes, not buried inside a 1,100pt window render.
+    /// Every takeover family is present, with its authored operations plus Restore and the
+    /// pressed state. This is the wider iconography sweep: a new retro family cannot land with
+    /// only its happy-path close button visible in the gallery.
+    func testRendersEveryRetroCaptionGlyphFamily() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+
+        let themes = [
+            AppThemeStyles.win98,
+            AppThemeStyles.platinum,
+            AppThemeStyles.beOS,
+            AppThemeStyles.openStep,
+            AppThemeStyles.irix,
+            AppThemeStyles.amiga
+        ]
+        var written = 0
+        for theme in themes {
+            AppThemePalette.set(theme)
+            let chrome = try XCTUnwrap(theme.variant(.light)?.chrome)
+            let style = WindowChromeAppearance.resolved(from: chrome)
+            let png = try XCTUnwrap(captionGlyphStrip(style: style))
+            let url = directory.appendingPathComponent(
+                "caption-glyphs-\(theme.id.rawValue).png"
+            )
+            try png.write(to: url)
+            print("Rendered \(theme.name) caption glyphs to \(url.path)")
+            written += 1
+        }
+
+        XCTAssertEqual(written, themes.count)
+    }
+
     /// The whole takeover window as one picture: the real `MainWindowController` dressed by
     /// the stock takeover themes, drawn unshown. In takeover the app draws every pixel of
     /// the frame, so the content render *is* the window — the one picture that shows band,
@@ -544,6 +653,67 @@ final class WindowChromeComponentTests: XCTestCase {
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.wantsLayer = true
         host.layer?.backgroundColor = theme.resolved(.ground, appearance: appearance).cgColor
+        host.cacheDisplay(in: host.bounds, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private func captionGlyphStrip(style: WindowChromeAppearance.Resolved) -> Data? {
+        func button(_ role: WindowChromeButton.Role, restored: Bool = false) -> WindowChromeButton {
+            let button = WindowChromeButton(role: role)
+            button.fixtureStyle = style
+            button.fixtureIsKey = true
+            if role == .zoom { button.fixtureIsZoomed = restored }
+            return button
+        }
+
+        func role(_ stated: WindowChromeStyle.TitleBar.ButtonRole) -> WindowChromeButton.Role {
+            switch stated {
+            case .windowMenu: return .windowMenu
+            case .close: return .close
+            case .minimize: return .minimize
+            case .zoom: return .zoom
+            case .depth: return .depth
+            }
+        }
+
+        let normal = style.visibleButtons.map { button(role($0)) }
+        let restored = style.visibleButtons.contains(.zoom) ? [button(.zoom, restored: true)] : []
+        let pressed = style.visibleButtons.map { stated -> WindowChromeButton in
+            let result = button(role(stated))
+            result.mouseDown(with: NSEvent())
+            return result
+        }
+
+        func row(_ buttons: [WindowChromeButton]) -> NSStackView {
+            let row = NSStackView(views: buttons)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = Design.Spacing.hairline
+            row.translatesAutoresizingMaskIntoConstraints = false
+            return row
+        }
+
+        let normalRow = row(normal + restored)
+        let pressedRow = row(pressed)
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: 180,
+            height: max(44, style.bandHeight * 2 + 6)
+        ))
+        host.wantsLayer = true
+        host.layer?.backgroundColor = style.activeGradient.colors.first?.cgColor
+        host.addSubview(normalRow)
+        host.addSubview(pressedRow)
+        NSLayoutConstraint.activate([
+            normalRow.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 4),
+            normalRow.topAnchor.constraint(equalTo: host.topAnchor, constant: 3),
+            pressedRow.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 4),
+            pressedRow.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -3)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
