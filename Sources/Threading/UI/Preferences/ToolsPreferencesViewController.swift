@@ -23,15 +23,21 @@ final class ToolsPreferencesViewController: NSViewController {
     private var pageView: NSView?
     private let groupOverride: [MCPToolGroup]?
     private let browserAccessStore: BrowserAccessStore
+    private let chromeAutomationProfile: ChromeAutomationProfile
     private var persistentOriginKeys: [String] = []
 
     convenience init(groups: [MCPToolGroup]? = nil) {
         self.init(groups: groups, browserAccessStore: BrowserAccessStore())
     }
 
-    init(groups: [MCPToolGroup]?, browserAccessStore: BrowserAccessStore) {
+    init(
+        groups: [MCPToolGroup]?,
+        browserAccessStore: BrowserAccessStore,
+        chromeAutomationProfile: ChromeAutomationProfile = .shared
+    ) {
         groupOverride = groups
         self.browserAccessStore = browserAccessStore
+        self.chromeAutomationProfile = chromeAutomationProfile
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -71,6 +77,7 @@ final class ToolsPreferencesViewController: NSViewController {
         for (index, group) in displayedGroups.enumerated() {
             sections.append(groupSection(group, index: index))
         }
+        sections.append(chromeAutomationSection())
         sections.append(websiteAccessSection())
 
         let enabled = displayedGroups.filter { MCPToolCatalog.isEnabled($0) }.count
@@ -195,6 +202,59 @@ final class ToolsPreferencesViewController: NSViewController {
         return row
     }
 
+    /// The one place the signed-in Chrome profile can be created, because creating it is the one
+    /// part of that feature an agent must not be able to do.
+    ///
+    /// It sits on Tools rather than on Privacy: what it grants is not a permission Threading
+    /// holds, it is a browser an agent can be pointed at — the same question the switches above
+    /// and Website Access below answer.
+    private func chromeAutomationSection() -> NSView {
+        let profile = chromeAutomationProfile
+        let row: NSView
+        switch profile.state {
+        case .chromeMissing:
+            row = SettingsUI.row(
+                title: "Google Chrome is not installed",
+                subtitle: """
+                    Agents can still use Threading's own browser and the isolated test browser. \
+                    A signed-in automation profile needs real Chrome.
+                    """
+            )
+        case .notSetUp:
+            row = SettingsUI.row(
+                title: "Not set up",
+                subtitle: """
+                    Opens a separate Chrome on a profile of Threading's own. Sign in to the sites \
+                    you want agents to reach and install your password manager's extension there. \
+                    Threading never reads a password, a cookie, or a Keychain item.
+                    """,
+                control: SettingsUI.button(
+                    "Set Up Automation Profile",
+                    target: self,
+                    action: #selector(setUpChromeAutomationProfile)
+                )
+            )
+        case .ready:
+            row = SettingsUI.row(
+                title: "Ready",
+                subtitle: """
+                    Agents may use this profile only for websites you allow, one run at a time, \
+                    and it opens visibly so you can see what it does. Sign in to another site by \
+                    opening it again.
+                    """,
+                control: SettingsUI.button(
+                    "Open Automation Profile",
+                    target: self,
+                    action: #selector(setUpChromeAutomationProfile)
+                )
+            )
+        }
+        return SettingsUI.section(
+            "Signed-in Chrome",
+            SettingsCard(rows: [row])
+        )
+    }
+
     private func websiteAccessSection() -> NSView {
         persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
         guard !persistentOriginKeys.isEmpty else {
@@ -244,6 +304,13 @@ final class ToolsPreferencesViewController: NSViewController {
         AppSettings.shared.setToolGroup(group.id, enabled: sender.state == .on)
         // Rebuilt rather than dimmed in place: the header's count line and the page summary
         // both state enablement, and a wholesale rebuild is the page's one update path.
+        render()
+    }
+
+    @objc private func setUpChromeAutomationProfile() {
+        chromeAutomationProfile.openForSetup()
+        // Chrome writes its profile the moment it opens, so the page's own state line is stale
+        // as soon as the window appears. Rebuilding is this page's one update path.
         render()
     }
 

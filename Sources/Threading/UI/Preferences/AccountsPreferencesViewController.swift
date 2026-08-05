@@ -281,6 +281,8 @@ extension AgentKind {
         switch self {
         case .claude: return "✳️"
         case .codex: return "🌀"
+        case .grok: return "𝕏"
+        case .openCode: return "{}"
         }
     }
 }

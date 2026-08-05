@@ -11,6 +11,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     private let remoteAccessToggle = ThemedToggle()
     private let connectionModeControl = ThemedSegmentedControl()
+    private let ownerRelayFallbackToggle = ThemedToggle()
+    private let keepRelayReadyToggle = ThemedToggle()
+    private let inputControlDefault = ThemedSegmentedControl()
     private let openLocallyButton = ThemedButton()
     private let pairingActionButton = ThemedButton()
     private let pairedDevicesStack = NSStackView()
@@ -24,6 +27,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let pairingDetail = NSTextField(wrappingLabelWithString: "")
     private let pairingCode = NSImageView()
     private let pairingInstruction = NSTextField(wrappingLabelWithString: "")
+    private var tailscaleStepGlyphs: [NSTextField] = []
+    private var tailscaleStepDetails: [NSTextField] = []
+    private var tailscaleReadinessSection: NSView?
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
@@ -69,7 +75,37 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         connectionModeControl.setAccessibilityIdentifier("settings.remote-access.connection-mode")
         connectionModeControl.translatesAutoresizingMaskIntoConstraints = false
         connectionModeControl.widthAnchor.constraint(
-            equalToConstant: SettingsUIDefaults.controlWidth
+            equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
+        ).isActive = true
+
+        ownerRelayFallbackToggle.target = self
+        ownerRelayFallbackToggle.action = #selector(ownerRelayFallbackChanged)
+        ownerRelayFallbackToggle.setAccessibilityIdentifier(
+            "settings.remote-access.owner-relay-fallback"
+        )
+        keepRelayReadyToggle.target = self
+        keepRelayReadyToggle.action = #selector(keepRelayReadyChanged)
+        keepRelayReadyToggle.setAccessibilityIdentifier(
+            "settings.remote-access.keep-relay-ready"
+        )
+
+        inputControlDefault.configure(
+            titles: RemoteInputControlDefault.allCases.map(\.title),
+            selectedIndex: RemoteInputControlDefault.allCases.firstIndex(
+                of: AppSettings.shared.remoteInputControlDefault
+            ) ?? 0
+        )
+        inputControlDefault.onSelect = { index in
+            guard RemoteInputControlDefault.allCases.indices.contains(index) else { return }
+            AppSettings.shared.remoteInputControlDefault =
+                RemoteInputControlDefault.allCases[index]
+        }
+        inputControlDefault.setAccessibilityIdentifier(
+            "settings.remote-access.input-control-default"
+        )
+        inputControlDefault.translatesAutoresizingMaskIntoConstraints = false
+        inputControlDefault.widthAnchor.constraint(
+            equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
         ).isActive = true
 
         openLocallyButton.title = L10n.string("Open in Browser")
@@ -126,13 +162,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     private func buildPage() {
-        let page = SettingsUI.page([
-            SettingsUI.heading("Remote Access"),
+        let readiness = SettingsUI.section(
+            "Tailscale Readiness",
+            tailscaleReadinessCard()
+        )
+        tailscaleReadinessSection = readiness
+        let page = SettingsUI.page(title: "Remote Access", sections: [
             SettingsUI.note(
                 "Continue chats from Threading on iPhone or a private browser. "
                     + "Nothing is exposed until you turn it on."
             ),
             SettingsUI.section("Connection", connectionCard()),
+            readiness,
             SettingsUI.section("Set Up Your iPhone", pairingCard()),
             SettingsUI.section("Sharing & Security", securityCard()),
             SettingsUI.note(
@@ -162,11 +203,64 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             SettingsUI.row(
                 title: "Connection",
                 subtitle: "Relay supports ordinary share links. Tailscale keeps access inside "
-                    + "your private tailnet. Both uses Tailscale for pairing and the relay for sharing.",
+                    + "your private tailnet. Private + Sharing uses Tailscale for pairing and "
+                    + "starts the public relay only when it is needed.",
                 control: connectionModeControl
+            ),
+            SettingsUI.row(
+                title: "Owner Relay Fallback",
+                subtitle: "In Private + Sharing, let your paired devices use Relay when "
+                    + "Tailscale cannot be reached. Off fails closed on the private path.",
+                control: ownerRelayFallbackToggle
+            ),
+            SettingsUI.row(
+                title: "Keep Sharing Relay Ready",
+                subtitle: "Start the public relay immediately instead of waiting until you "
+                    + "create a public share link.",
+                control: keepRelayReadyToggle
             ),
             SettingsUI.fullRow(connectionStatusRow())
         ])
+    }
+
+    private func tailscaleReadinessCard() -> SettingsCard {
+        let titles = [
+            L10n.string("Tailscale installed"),
+            L10n.string("Signed in and running"),
+            L10n.string("Private HTTPS endpoint"),
+        ]
+        var rows: [NSView] = []
+        for title in titles {
+            let glyph = NSTextField(labelWithString: "–")
+            glyph.applyFont(.body)
+            glyph.setContentHuggingPriority(.required, for: .horizontal)
+
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.applyFont(.body)
+            titleLabel.textColor = Design.Text.label
+            let detail = NSTextField(wrappingLabelWithString: "")
+            detail.applyFont(.subheading)
+            detail.textColor = Design.Text.secondary
+
+            let labels = NSStackView(views: [titleLabel, detail])
+            labels.orientation = .vertical
+            labels.alignment = .leading
+            labels.spacing = Design.Spacing.hairline
+            let row = NSStackView(views: [glyph, labels])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = Design.Spacing.medium
+            row.edgeInsets = NSEdgeInsets(
+                top: Design.Spacing.medium,
+                left: Design.Spacing.inset,
+                bottom: Design.Spacing.medium,
+                right: Design.Spacing.inset
+            )
+            rows.append(row)
+            tailscaleStepGlyphs.append(glyph)
+            tailscaleStepDetails.append(detail)
+        }
+        return SettingsCard(rows: rows)
     }
 
     private func connectionStatusRow() -> NSView {
@@ -222,6 +316,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     private func securityCard() -> SettingsCard {
         SettingsCard(rows: [
+            SettingsUI.row(
+                title: "New shared chats",
+                subtitle: "Collaborative lets everyone with reply access send. Focused starts "
+                    + "with the Mac owner in control. You can switch a live chat at any time.",
+                control: inputControlDefault
+            ),
             SettingsUI.detailRow(
                 symbol: "lock.shield",
                 title: "Your own devices",
@@ -257,6 +357,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         connectionModeControl.selectedIndex = RemoteAccessConnectionMode.allCases.firstIndex(
             of: AppSettings.shared.remoteAccessConnectionMode
         ) ?? 0
+        let usesHybrid = AppSettings.shared.remoteAccessConnectionMode == .tailscaleAndRelay
+        ownerRelayFallbackToggle.state = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
+            ? .on : .off
+        ownerRelayFallbackToggle.isEnabled = usesHybrid
+        keepRelayReadyToggle.state = AppSettings.shared.remoteAccessKeepsRelayReady ? .on : .off
+        keepRelayReadyToggle.isEnabled = usesHybrid
+        inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
+            of: AppSettings.shared.remoteInputControlDefault
+        ) ?? 0
+        tailscaleReadinessSection?.isHidden =
+            AppSettings.shared.remoteAccessConnectionMode == .relay
+        updateTailscaleReadiness(coordinator.tailscaleReadiness)
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
@@ -339,6 +451,21 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             return
         }
 
+        if mode == .tailscaleAndRelay,
+           AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
+           case .connected = relay,
+           case .unavailable(let reason) = tailscale {
+            updateConnection(
+                title: L10n.string("Relay fallback ready"),
+                detail: L10n.format(
+                    "Paired devices can connect through Relay. Tailscale pairing: %@",
+                    reason
+                ),
+                color: Design.Status.warning
+            )
+            return
+        }
+
         let pairingState = mode == .relay ? relay : tailscale
         switch pairingState {
         case .connected(let origin):
@@ -349,8 +476,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     detail = L10n.string("Tailscale pairing and share links are ready.")
                 case .unavailable(let reason):
                     detail = L10n.format("Private pairing is ready. Sharing relay: %@", reason)
-                case .stopped, .starting:
+                case .starting:
                     detail = L10n.string("Private pairing is ready; the sharing relay is connecting…")
+                case .stopped:
+                    detail = L10n.string(
+                        "Private pairing is ready. The public relay starts when you share."
+                    )
                 }
             } else if mode == .tailscale {
                 detail = L10n.format(
@@ -448,6 +579,89 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         statusTitle.stringValue = title
         statusDetail.stringValue = detail
         statusGlyph.textColor = color
+    }
+
+    private func updateTailscaleReadiness(_ readiness: TailscaleReadiness) {
+        guard tailscaleStepGlyphs.count == 3, tailscaleStepDetails.count == 3 else { return }
+
+        func setStep(_ index: Int, glyph: String, color: NSColor, detail: String) {
+            tailscaleStepGlyphs[index].stringValue = glyph
+            tailscaleStepGlyphs[index].textColor = color
+            tailscaleStepDetails[index].stringValue = detail
+        }
+        func pending(_ index: Int, _ detail: String) {
+            setStep(index, glyph: "–", color: Design.Text.tertiary, detail: detail)
+        }
+        func ready(_ index: Int, _ detail: String) {
+            setStep(index, glyph: "✓", color: Design.Status.positive, detail: detail)
+        }
+        func attention(_ index: Int, _ detail: String) {
+            setStep(index, glyph: "!", color: Design.Status.warning, detail: detail)
+        }
+
+        switch readiness {
+        case .notChecked:
+            pending(0, L10n.string("Checked when Remote Access turns on."))
+            pending(1, L10n.string("Waiting for the installation check."))
+            pending(2, L10n.string("Waiting for Tailscale."))
+        case .checking:
+            pending(0, L10n.string("Looking for Tailscale…"))
+            pending(1, L10n.string("Checking your tailnet status…"))
+            pending(2, L10n.string("Waiting for Tailscale."))
+        case .publishing:
+            ready(0, L10n.string("Tailscale is installed."))
+            ready(1, L10n.string("This Mac is connected to your tailnet."))
+            pending(2, L10n.string("Publishing Threading privately…"))
+        case .ready(let origin):
+            ready(0, L10n.string("Tailscale is installed."))
+            ready(1, L10n.string("This Mac is connected to your tailnet."))
+            setStep(
+                2,
+                glyph: "✓",
+                color: Design.Status.positive,
+                detail: L10n.format("Ready at %@.", origin.host ?? origin.absoluteString)
+            )
+        case .actionRequired(let issue):
+            switch issue {
+            case .notInstalled:
+                attention(0, L10n.string("Install Tailscale on this Mac, then retry."))
+                pending(1, L10n.string("Waiting for Tailscale."))
+                pending(2, L10n.string("Waiting for Tailscale."))
+            case .signedOut:
+                ready(0, L10n.string("Tailscale is installed."))
+                attention(1, L10n.string("Sign in to Tailscale on this Mac, then retry."))
+                pending(2, L10n.string("Waiting for Tailscale."))
+            case .stopped:
+                ready(0, L10n.string("Tailscale is installed."))
+                attention(1, L10n.string("Turn on Tailscale on this Mac, then retry."))
+                pending(2, L10n.string("Waiting for Tailscale."))
+            case .statusUnavailable:
+                ready(0, L10n.string("Tailscale is installed."))
+                attention(1, L10n.string("Threading could not read Tailscale’s status."))
+                pending(2, L10n.string("Waiting for Tailscale."))
+            case .httpsRequired:
+                ready(0, L10n.string("Tailscale is installed."))
+                ready(1, L10n.string("This Mac is connected to your tailnet."))
+                attention(2, L10n.string("Enable Tailscale HTTPS for this tailnet, then retry."))
+            case .permissionDenied:
+                ready(0, L10n.string("Tailscale is installed."))
+                ready(1, L10n.string("This Mac is connected to your tailnet."))
+                attention(2, L10n.string("Allow Threading to publish this private service, then retry."))
+            case .portInUse:
+                ready(0, L10n.string("Tailscale is installed."))
+                ready(1, L10n.string("This Mac is connected to your tailnet."))
+                attention(
+                    2,
+                    L10n.string(
+                        "HTTPS port 8443 already has a Tailscale Serve handler. Remove it, then retry."
+                    )
+                )
+            case .serveFailed:
+                ready(0, L10n.string("Tailscale is installed."))
+                ready(1, L10n.string("This Mac is connected to your tailnet."))
+                attention(2, L10n.string("Tailscale Serve could not publish Threading. Retry the connection."))
+            }
+        }
     }
 
     private func rebuildPairedDevices(
@@ -554,6 +768,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     @objc private func remoteAccessChanged() {
         RemoteAccessCoordinator.shared.setEnabled(remoteAccessToggle.state == .on)
+        refresh()
+    }
+
+    @objc private func ownerRelayFallbackChanged() {
+        RemoteAccessCoordinator.shared.setAllowsOwnerRelayFallback(
+            ownerRelayFallbackToggle.state == .on
+        )
+        refresh()
+    }
+
+    @objc private func keepRelayReadyChanged() {
+        RemoteAccessCoordinator.shared.setKeepsRelayReady(keepRelayReadyToggle.state == .on)
         refresh()
     }
 

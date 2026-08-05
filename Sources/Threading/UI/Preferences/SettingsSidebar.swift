@@ -33,6 +33,22 @@ final class SettingsSidebar: NSView {
     /// the initial page without re-entrancy.
     var onSelect: ((String) -> Void)?
 
+    /// Called with the trimmed query when the user asks the AI search to interpret it.
+    var onAskAI: ((String) -> Void)?
+
+    /// Whether the Ask AI affordance is offered at all — false when no eligible agent login
+    /// exists. Set once by the owner; the affordance itself still appears only with a query,
+    /// because with nothing typed there is nothing to interpret.
+    var isAskAIAvailable = false {
+        didSet {
+            guard isAskAIAvailable != oldValue else { return }
+            rebuildResults()
+        }
+    }
+
+    /// The Ask AI button currently on screen, nil while hidden. For the owner and the tests.
+    private(set) var askAIButton: ThemedButton?
+
     private var items: [Item] = []
     private var displayedItems: [Item] = []
     private var rows: [ThemedTabItemView] = []
@@ -138,6 +154,15 @@ final class SettingsSidebar: NSView {
         noResults.isHidden = !rows.isEmpty
 
         if rows.isEmpty { resultViews = [noResults] }
+
+        // Offered whenever there is a query to interpret, not only when the filter came up
+        // empty: the filter matches words, and the page the user *means* is often not among
+        // the pages their words matched.
+        askAIButton = nil
+        if !query.isEmpty, isAskAIAvailable {
+            resultViews.append(askAIRow())
+        }
+
         let stack = NSStackView(views: resultViews)
         stack.orientation = .vertical
         stack.alignment = rows.isEmpty ? .centerX : .leading
@@ -197,6 +222,43 @@ final class SettingsSidebar: NSView {
             label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor)
         ])
         return container
+    }
+
+    /// The Ask AI affordance: one quiet button under the filtered rows, indented to the rows'
+    /// title line like a group caption, separated by the caption's own spacing.
+    private func askAIRow() -> NSView {
+        let button = ThemedButton(
+            title: L10n.string("Ask AI"),
+            target: self,
+            action: #selector(askAIClicked)
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setAccessibilityLabel(L10n.string("Ask AI about settings"))
+        button.setAccessibilityIdentifier("settings.search.ask-ai")
+        askAIButton = button
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.topAnchor.constraint(
+                equalTo: container.topAnchor,
+                constant: Design.Spacing.medium
+            ),
+            button.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            button.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            button.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor)
+        ])
+        return container
+    }
+
+    @objc private func askAIClicked() {
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        onAskAI?(query)
     }
 
     private func makeRow(title: String, symbol: String, opens pageID: String) -> ThemedTabItemView {

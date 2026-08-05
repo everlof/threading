@@ -357,6 +357,108 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertEqual(rowTitles(in: sidebar), ["General", "Themes"])
     }
 
+    // MARK: - Ask AI
+
+    /// The affordance appears exactly when there is a query to interpret and a provider to
+    /// ask — with results and without, because the filter matches words and the page the user
+    /// *means* is often not among the pages their words matched.
+    func testAskAIIsOfferedWheneverThereIsAQueryAndAProvider() {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "general", title: "General", symbol: "gearshape", searchText: "General mute")
+        ])
+        sidebar.isAskAIAvailable = true
+
+        XCTAssertNil(sidebar.askAIButton, "nothing typed means nothing to interpret")
+
+        sidebar.updateSearchQuery("mute")
+        XCTAssertNotNil(sidebar.askAIButton, "hidden beside results, where a miss is likeliest")
+
+        sidebar.updateSearchQuery("zzzz")
+        XCTAssertEqual(sidebar.visibleItemIDs, [])
+        XCTAssertNotNil(sidebar.askAIButton)
+
+        sidebar.updateSearchQuery("")
+        XCTAssertNil(sidebar.askAIButton)
+    }
+
+    /// Without an eligible login there is nothing to ask, and a button that apologises when
+    /// clicked is worse than no button.
+    func testAskAIStaysHiddenWithoutAProvider() {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "general", title: "General", symbol: "gearshape", searchText: "General")
+        ])
+        sidebar.isAskAIAvailable = false
+        sidebar.updateSearchQuery("anything")
+        XCTAssertNil(sidebar.askAIButton)
+    }
+
+    /// The click hands over the trimmed query — the same text the filter read, so the AI and
+    /// the filter are always answering the same question.
+    func testAskAIReportsTheTrimmedQuery() throws {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "general", title: "General", symbol: "gearshape", searchText: "General")
+        ])
+        sidebar.isAskAIAvailable = true
+        var asked: String?
+        sidebar.onAskAI = { asked = $0 }
+        sidebar.updateSearchQuery("  stop the flashing  ")
+
+        let button = try XCTUnwrap(sidebar.askAIButton)
+        _ = NSApp.sendAction(try XCTUnwrap(button.action), to: button.target, from: button)
+        XCTAssertEqual(asked, "stop the flashing")
+    }
+
+    // MARK: - The AI results page
+
+    /// The pane's answer to an Ask AI run: each suggested page with the run's own sentence
+    /// on why, and a way in — the tag indexing this page's rows, never the catalogue.
+    func testTheAIResultsPageListsSuggestionsAndOpensThePageBehindARow() throws {
+        let results = SettingsAISearchViewController()
+        var opened: String?
+        results.onOpen = { opened = $0 }
+        results.loadView()
+        results.apply(.answered(query: "flashing", matches: [
+            .init(pageID: "general", title: "General", symbol: "gearshape",
+                  reason: "Notifications and their sounds live here."),
+            .init(pageID: "motion", title: "Motion", symbol: "sparkles",
+                  reason: "The working indicator's animation.")
+        ]))
+
+        let titles = labels(in: results.view)
+        XCTAssertTrue(titles.contains("General"))
+        XCTAssertTrue(titles.contains("Notifications and their sounds live here."))
+        XCTAssertTrue(
+            titles.contains { $0.localizedCaseInsensitiveContains("flashing") },
+            "the page never repeated the query it is answering"
+        )
+
+        let buttons = descendants(of: results.view)
+            .compactMap { $0 as? ThemedButton }
+            .filter { $0.title == L10n.string("Open") }
+        XCTAssertEqual(buttons.count, 2)
+        let second = try XCTUnwrap(buttons.last)
+        _ = NSApp.sendAction(try XCTUnwrap(second.action), to: second.target, from: second)
+        XCTAssertEqual(opened, "motion")
+    }
+
+    /// A run in flight says who is being asked; a run that answered nothing says so in the
+    /// same words the term filter uses, because to the reader it is the same outcome.
+    func testTheAIResultsPageReportsProgressAndAnEmptyAnswer() {
+        let results = SettingsAISearchViewController()
+        results.loadView()
+
+        results.apply(.running(query: "q", providerName: "Claude Code"))
+        XCTAssertTrue(
+            labels(in: results.view).contains { $0.contains("Claude Code") }
+        )
+
+        results.apply(.answered(query: "q", matches: []))
+        XCTAssertTrue(labels(in: results.view).contains(L10n.string("No settings found.")))
+
+        results.apply(.failed(query: "q", message: "The search timed out."))
+        XCTAssertTrue(labels(in: results.view).contains("The search timed out."))
+    }
+
     // MARK: - The results page
 
     /// The pane's half of the answer. A search that only narrowed the sidebar left the one

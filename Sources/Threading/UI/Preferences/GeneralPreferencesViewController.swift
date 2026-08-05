@@ -13,6 +13,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let accountAvatarToggle = ThemedToggle()
     private let claudeAttachmentToggle = ThemedToggle()
     private let codexAttachmentToggle = ThemedToggle()
+    private let outsideProjectAttachmentToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
     private let relaunchSessionsToggle = ThemedToggle()
     private let attentionNotificationToggle = ThemedToggle()
@@ -96,6 +97,11 @@ final class GeneralPreferencesViewController: NSViewController {
             codexAttachmentToggle,
             isOn: AppSettings.shared.detectsAttachmentReferences(for: .codex),
             action: #selector(codexAttachmentDetectionChanged)
+        )
+        configure(
+            outsideProjectAttachmentToggle,
+            isOn: AppSettings.shared.includesAttachmentsOutsideProject,
+            action: #selector(outsideProjectAttachmentsChanged)
         )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(relaunchSessionsToggle,
@@ -291,6 +297,14 @@ final class GeneralPreferencesViewController: NSViewController {
                 subtitle: "Scans Codex's terminal output and Native replies for image and PDF paths. "
                     + "Turn this off if a Codex update changes how paths are rendered.",
                 control: codexAttachmentToggle
+            ),
+            SettingsUI.row(
+                title: "Include files outside the project",
+                subtitle: "Detected paths are normally kept to the session's own project, because "
+                    + "a paired phone can fetch anything in the list and printed text is not a "
+                    + "handoff. Turn this on to list them wherever they are; Threading copies "
+                    + "each one in. Images you attach or the agent shows are never affected.",
+                control: outsideProjectAttachmentToggle
             )
         ])
     }
@@ -603,6 +617,14 @@ final class GeneralPreferencesViewController: NSViewController {
             for: .codex,
             enabled: codexAttachmentToggle.state == .on
         )
+    }
+
+    /// Widening this hides nothing that was already listed and reveals what each open pane
+    /// refused, which those panes do for themselves: every one of them refreshes on
+    /// `AppSettingsDidChange`, and the store's read gate answers the rest.
+    @objc private func outsideProjectAttachmentsChanged() {
+        AppSettings.shared.includesAttachmentsOutsideProject =
+            outsideProjectAttachmentToggle.state == .on
     }
 
     @objc private func branchGroupingChanged() {
