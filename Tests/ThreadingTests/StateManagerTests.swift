@@ -186,7 +186,11 @@ final class StateManagerTests: XCTestCase {
         let other = SessionID().uuidString
         let impossible = [
             """
-            {"id":"\(id)","kind":"claude","title":"Wrong option",\
+            {"id":"\(id)","kind":"grok","title":"Wrong option",\
+            "reasoningEffort":"high"}
+            """,
+            """
+            {"id":"\(id)","kind":"opencode","title":"Wrong option",\
             "reasoningEffort":"high"}
             """,
             """
@@ -220,15 +224,29 @@ final class StateManagerTests: XCTestCase {
 
     func testExplicitModelEncodingPreservesNonDefaultFields() throws {
         let parentID = SessionID()
-        var session = AgentSession(
-            configuration: .codex(
-                reasoningEffort: "ultra",
-                continuedFromClaude: parentID
+        let sessionID = SessionID()
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: parentID,
+                kind: .claude,
+                model: "claude-sonnet-4-5",
+                title: "Original"
             ),
+            ConversationHandoffEndpoint(
+                sessionID: sessionID,
+                kind: .codex,
+                model: "gpt-test",
+                title: "Original"
+            )
+        ]))
+        var session = AgentSession(
+            configuration: .codex(reasoningEffort: "ultra"),
             title: "Original",
             accountHandle: .named("codex-work"),
             model: "gpt-test",
-            usesNativeUI: true
+            usesNativeUI: true,
+            handoff: handoff,
+            id: sessionID
         )
         session.customTitle = "Renamed"
         session.agentTitle = "Terminal title"

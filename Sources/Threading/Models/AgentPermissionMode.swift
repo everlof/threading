@@ -1,11 +1,22 @@
 import Foundation
 
+// MARK: - Agent Launch Flag
+
+/// One `--flag value` pair on a launch line, before it is quoted into a `ShellCommand`.
+///
+/// A plain value so a mode's translation into a runtime's own vocabulary can be asserted
+/// directly, without building a command or reading one back out of a quoted string.
+struct AgentLaunchFlag: Equatable {
+    let name: String
+    let value: String
+}
+
 // MARK: - Agent Permission Mode
 
 /// How much a session may do before it has to ask.
 ///
-/// One vocabulary for both CLIs — **Claude's**, because it is the richer one and the only one
-/// that names a single mode rather than a pair of axes. Raw values are Claude's own external
+/// One vocabulary for the supported CLIs — **Claude's**, because it is the richer one and,
+/// together with Grok, names a single mode rather than a pair of axes. Raw values are Claude's own external
 /// flag values, so `rawValue` is what `--permission-mode` takes and a case rename would be a
 /// silent reset wherever this is persisted.
 ///
@@ -86,10 +97,73 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
         }
     }
 
+    // MARK: - Launch Flags
+
+    /// What this mode becomes on one runtime's launch line, in the order the line states it.
+    ///
+    /// The dispatch lives here rather than in the launcher because everything it chooses
+    /// between lives here. It used to be a `switch session.kind` in `AgentLauncher` selecting
+    /// among the value properties below, which meant the two had to agree and nothing said so:
+    /// a fifth runtime could be given its value property and no launcher branch, or a branch
+    /// naming the wrong axis, and both compile. Now the compiler requires the case, and the
+    /// case is next to the values it returns.
+    ///
+    /// Empty for a runtime whose policy Threading does not translate. `AgentLauncher` asks
+    /// `AgentKind.supportsPermissionModes` before calling this, so empty is the belt-and-braces
+    /// answer rather than the working path.
+    func launchFlags(for kind: AgentKind) -> [AgentLaunchFlag] {
+        switch kind {
+        case .claude:
+            return [
+                AgentLaunchFlag(
+                    name: AgentDefaults.claudePermissionModeFlag,
+                    value: claudeFlagValue
+                )
+            ]
+
+        case .grok:
+            return [
+                AgentLaunchFlag(
+                    name: AgentDefaults.grokPermissionModeFlag,
+                    value: grokFlagValue
+                )
+            ]
+
+        case .codex:
+            // Both axes, always together: Codex defaults them independently, so stating one
+            // and leaving the other produces a posture that is neither the mode asked for nor
+            // the CLI's own.
+            return [
+                AgentLaunchFlag(
+                    name: AgentDefaults.codexApprovalFlag,
+                    value: codexApprovalPolicy
+                ),
+                AgentLaunchFlag(
+                    name: AgentDefaults.codexSandboxFlag,
+                    value: codexSandboxMode
+                )
+            ]
+
+        case .openCode:
+            // OpenCode owns a richer per-tool policy in `opencode.json`, and its `--auto` is
+            // not equivalent to any one of these six. Presenting a false mapping would be
+            // worse than leaving that policy where the user set it.
+            return []
+        }
+    }
+
     // MARK: - Claude
 
     /// The value for `--permission-mode`, which is the raw value by construction.
     var claudeFlagValue: String { rawValue }
+
+    // MARK: - Grok
+
+    /// Grok exposes the same six permission modes. Its manual/default mode is the one spelling
+    /// that differs; every other external value is identical to Claude's.
+    var grokFlagValue: String {
+        self == .manual ? "default" : rawValue
+    }
 
     // MARK: - Codex
 

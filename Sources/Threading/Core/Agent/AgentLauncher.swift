@@ -9,8 +9,9 @@ struct AgentLaunchPlan {
 
     /// The conversation state this launch establishes.
     ///
-    /// Claude launches and all resumes carry an identifier. A fresh Codex launch awaits the
-    /// identifier reported by the CLI, while research runs and shells have none by design.
+    /// Claude launches and all resumes carry an identifier. Fresh Codex/OpenCode launches
+    /// await the identifier assigned by the CLI; fresh Grok launches await confirmation that
+    /// its caller-supplied UUID was persisted. Research runs and shells have none.
     let resumeState: ResumeState
 }
 
@@ -38,7 +39,7 @@ struct ShellCommand: Equatable {
 
     /// The command's trailing operand — for an agent launch, the opening prompt.
     ///
-    /// Kept apart from the flags because both CLIs reject a positional argument that begins
+    /// Kept apart from the flags because the operand-taking CLIs reject a positional argument that begins
     /// with `-`, and both reject it *before* the session exists: Claude's parser answers
     /// `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
     /// `unexpected argument '- ' found`. A bulleted opening — a list of things to do, one per
@@ -144,6 +145,10 @@ enum AgentLauncher {
             )
         case .codex:
             (command, resumeState) = codexCommand(for: session, prompt: initialPrompt)
+        case .grok:
+            (command, resumeState) = grokCommand(for: session, prompt: initialPrompt)
+        case .openCode:
+            (command, resumeState) = openCodeCommand(for: session, prompt: initialPrompt)
         }
 
         return launchPlan(
@@ -167,6 +172,10 @@ enum AgentLauncher {
             return claudeStreamPlan(for: session, in: project)
         case .codex:
             return codexStreamPlan(for: session, in: project)
+        case .grok:
+            return grokStreamPlan(for: session, in: project)
+        case .openCode:
+            preconditionFailure("OpenCode does not yet expose a Threading native conversation transport")
         }
     }
 
@@ -179,7 +188,7 @@ enum AgentLauncher {
     ///
     /// Claude-only. Codex has no comparable bridge, and its launches never carry the key.
     static func remoteControlAtStartup(for session: AgentSession) -> Bool? {
-        guard session.kind == .claude else { return nil }
+        guard session.kind.supports(.remoteControl) else { return nil }
         return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
     }
 
@@ -195,7 +204,7 @@ enum AgentLauncher {
     /// Terminal launches only. A native conversation runs `--print`, where the CLI never
     /// draws a status line, so its settings file has nothing to say about one.
     static func statusLineOverride(for session: AgentSession, in project: Project) -> String? {
-        guard session.kind == .claude, AppSettings.shared.suppressesClaudeStatusLine,
+        guard session.kind.supports(.statusLine), AppSettings.shared.suppressesClaudeStatusLine,
               let account = AgentAccountDiscovery.account(
                   for: session.kind,
                   handle: session.accountHandle
@@ -216,7 +225,8 @@ enum AgentLauncher {
     /// survive to the command line rather than collapsing into a "safe" mode: naming any mode
     /// would override a `permissions.defaultMode` or `config.toml` the user set themselves.
     static func permissionMode(for session: AgentSession) -> AgentPermissionMode? {
-        session.permissionMode ?? AppSettings.shared.defaultPermissionMode
+        guard session.kind.supportsPermissionModes else { return nil }
+        return session.permissionMode ?? AppSettings.shared.defaultPermissionMode
     }
 
     /// Adds the flags that state the mode, in each CLI's own vocabulary.
@@ -230,15 +240,8 @@ enum AgentLauncher {
     ) {
         guard let mode = permissionMode(for: session) else { return }
 
-        switch session.kind {
-        case .claude:
-            command.append(
-                flag: AgentDefaults.claudePermissionModeFlag,
-                value: mode.claudeFlagValue
-            )
-        case .codex:
-            command.append(flag: AgentDefaults.codexApprovalFlag, value: mode.codexApprovalPolicy)
-            command.append(flag: AgentDefaults.codexSandboxFlag, value: mode.codexSandboxMode)
+        for launchFlag in mode.launchFlags(for: session.kind) {
+            command.append(flag: launchFlag.name, value: launchFlag.value)
         }
     }
 
@@ -249,6 +252,7 @@ enum AgentLauncher {
     ) -> AgentLaunchPlan {
         var command = ShellCommand(word: AgentDefaults.claudeExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+        appendReasoningEffort(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)
         command.append(flag: "--print")
         command.append(flag: "--input-format", value: "stream-json")
@@ -332,6 +336,30 @@ enum AgentLauncher {
         )
     }
 
+    /// Grok exposes the Agent Client Protocol over newline-delimited JSON-RPC. The stream
+    /// wrapper owns the ACP initialize/session handshake; the launch only selects the supported
+    /// stdio transport and any model the conversation already pinned.
+    private static func grokStreamPlan(
+        for session: AgentSession,
+        in project: Project
+    ) -> AgentLaunchPlan {
+        var command = ShellCommand(word: AgentDefaults.grokExecutable)
+        command.append(word: "agent")
+        appendModelFlag(for: session, flag: AgentDefaults.grokModelFlag, to: &command)
+        // The same flag the terminal launch states, for the same reason. Without it, choosing
+        // Plan or Bypass Permissions on a natively rendered Grok session recorded the choice
+        // and redrew the chip while the process ran under whatever `grok` defaults to. The ACP
+        // handshake carries no mode either, so the launch line is the only place to say it.
+        appendPermissionMode(for: session, to: &command)
+        command.append(word: "stdio")
+
+        return launchPlan(
+            command: routed(command, for: session),
+            in: project.folderPath,
+            resumeState: session.resumeState
+        )
+    }
+
     /// Builds a one-shot, headless `codex exec` run used for background research — icon
     /// discovery today.
     ///
@@ -362,6 +390,108 @@ enum AgentLauncher {
         command.append(operand: prompt)
 
         return launchPlan(command: command, in: folder, resumeState: .unavailable)
+    }
+
+    /// Builds the one-shot, headless run behind the AI settings search, on whichever runtime
+    /// claims `.headlessResearch`.
+    ///
+    /// `codexResearchPlan`'s posture — default account through `env -u`, no session of ours,
+    /// read-only where the runtime has a sandbox to say so — but with Threading's MCP endpoint
+    /// attached and *scoped*: the endpoint belongs to an ad-hoc registration
+    /// (`MCPSessionRegistry.beginAdHoc`), so the run is advertised and admitted exactly the
+    /// tools it was launched for, rather than a catalogue a cheap model would spend its run
+    /// reading. Claude additionally runs `--strict-mcp-config` and `--tools ''` — the opposite
+    /// of a session launch, deliberately: a session must keep the user's own MCP servers and
+    /// built-in tools, while a helper that reached either would be spending the user's tokens
+    /// on capability the answer does not need.
+    static func settingsResearchPlan(
+        kind: AgentKind,
+        sessionID: SessionID,
+        prompt: String,
+        in folder: String
+    ) -> AgentLaunchPlan? {
+        guard let command = settingsResearchCommand(
+            kind: kind,
+            prompt: prompt,
+            mcpConfigPath: MCPSessionRegistry.writeConfiguration(for: sessionID),
+            endpointURL: MCPSessionRegistry.endpointURL(for: sessionID)
+        ) else { return nil }
+
+        return launchPlan(command: command, in: folder, resumeState: .unavailable)
+    }
+
+    /// Internal for the tests: the command line is the contract with two CLIs, and the
+    /// capability pairing test proves a plan exists exactly where `.headlessResearch` is
+    /// claimed. The MCP config path (Claude) and endpoint URL (Codex) arrive as parameters so
+    /// the pairing holds without a live listener.
+    static func settingsResearchCommand(
+        kind: AgentKind,
+        prompt: String,
+        mcpConfigPath: String?,
+        endpointURL: String?
+    ) -> ShellCommand? {
+        guard kind.supports(.headlessResearch) else { return nil }
+
+        var command = ShellCommand()
+        command.append(word: "env")
+        command.append(flag: "-u", value: kind.accountEnvironmentKey)
+
+        switch kind {
+        case .claude:
+            guard let mcpConfigPath else { return nil }
+            command.append(word: AgentDefaults.claudeExecutable)
+            command.append(
+                flag: AgentDefaults.claudeModelFlag,
+                value: AgentDefaults.claudeResearchModel
+            )
+            command.append(flag: "--print")
+            command.append(flag: "--output-format", value: "json")
+            // No built-in tools: the answer is a look-up in the catalogue the MCP tool
+            // returns, not filesystem work.
+            command.append(flag: "--tools", value: "")
+            command.append(flag: "--mcp-config", value: mcpConfigPath)
+            command.append(flag: "--strict-mcp-config")
+            command.append(
+                flag: "--allowedTools",
+                value: MCPDefaults.allowedToolName(MCPBuiltInTool.listSettings.rawValue)
+            )
+
+        case .codex:
+            guard let endpointURL else { return nil }
+            command.append(word: AgentDefaults.codexExecutable)
+            appendCodexConfigOverride(
+                AgentDefaults.codexReasoningEffortKey,
+                string: AgentDefaults.codexResearchReasoningEffort,
+                to: &command
+            )
+            command.append(
+                flag: AgentDefaults.codexSandboxFlag,
+                value: AgentDefaults.codexSandboxReadOnly
+            )
+            let server = "mcp_servers.\(MCPDefaults.serverName)"
+            let tool = MCPBuiltInTool.listSettings.rawValue
+            appendCodexConfigOverride("\(server).url", string: endpointURL, to: &command)
+            appendCodexConfigOverride(
+                "\(server).enabled_tools",
+                tomlValue: "[\(tomlString(tool))]",
+                to: &command
+            )
+            appendCodexConfigOverride(
+                "\(server).tools.\(tool).approval_mode",
+                string: "approve",
+                to: &command
+            )
+            command.append(word: "exec")
+            command.append(flag: "--json")
+            command.append(flag: AgentDefaults.codexSkipGitRepoCheckFlag)
+
+        case .grok, .openCode:
+            // `.headlessResearch` is not granted here; the guard above already refused.
+            return nil
+        }
+
+        command.append(operand: prompt)
+        return command
     }
 
     /// Appends flags registering Threading's own MCP server when one is available.
@@ -418,6 +548,12 @@ enum AgentLauncher {
                 )
             }
 
+        case .grok, .openCode:
+            // Do not rewrite either runtime's persistent configuration. OpenCode's TUI server
+            // has a dynamic MCP endpoint, but Threading does not own that server lifecycle yet;
+            // Grok's equivalent per-TUI contract remains unmeasured.
+            break
+
         }
     }
 
@@ -460,6 +596,22 @@ enum AgentLauncher {
         brokersPermissions: Bool = false
     ) -> ShellCommand {
         var routed = ShellCommand()
+
+        if !session.kind.supportsAccounts && !session.kind.supportsThreadingBridge {
+            return command
+        }
+
+        if !session.kind.supportsAccounts {
+            routed.append(word: "env")
+            appendHookEnvironment(
+                for: session,
+                brokersPermissions: brokersPermissions,
+                to: &routed
+            )
+            routed.append(contentsOf: command)
+            appendMCPFlags(for: session, to: &routed)
+            return routed
+        }
 
         let environmentKey = session.kind.accountEnvironmentKey
         guard let account = AgentAccountDiscovery.account(
@@ -505,6 +657,7 @@ enum AgentLauncher {
         brokersPermissions: Bool,
         to command: inout ShellCommand
     ) {
+        guard session.kind.supportsThreadingBridge else { return }
         guard let port = MCPServer.shared.port else { return }
 
         command.append(word: "\(MCPDefaults.portEnvironmentKey)=\(port)")
@@ -537,6 +690,7 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand(word: AgentDefaults.claudeExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+        appendReasoningEffort(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)
 
         // Optional lifecycle hooks only. A terminal session raises the CLI's own permission
@@ -655,7 +809,52 @@ enum AgentLauncher {
         command.append(flag: flag, value: model)
     }
 
-    /// Both CLIs take an opening prompt as a trailing positional argument — which is why it
+    /// Emits only values the selected model's provider-owned catalog publishes.
+    ///
+    /// Claude exposes a session-level CLI flag. Codex exposes the equivalent as a config
+    /// override. Providers without a catalog and launch contract can still persist no value,
+    /// so they deliberately reach neither branch.
+    private static func appendReasoningEffort(
+        for session: AgentSession,
+        to command: inout ShellCommand
+    ) {
+        guard let effort = session.reasoningEffort, !effort.isEmpty else { return }
+
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+        let model = session.model ?? AgentModels.defaultModel(
+            for: session.kind,
+            account: account
+        )
+        switch session.kind {
+        case .claude:
+            guard AgentDefaults.claudeReasoningEfforts.contains(effort) else { return }
+            command.append(flag: AgentDefaults.claudeEffortFlag, value: effort)
+        case .codex:
+            let option = AgentModels.option(
+                identifier: model,
+                for: session.kind,
+                account: account
+            )
+            // Existing records outlive the cache that originally validated them. Preserve a
+            // saved choice when metadata is unavailable; when the current catalog knows the
+            // levels, it is authoritative and stale values are dropped.
+            guard option?.reasoningLevels.isEmpty != false
+                    || option?.supports(reasoningEffort: effort) == true
+            else { return }
+            appendCodexConfigOverride(
+                AgentDefaults.codexReasoningEffortKey,
+                string: effort,
+                to: &command
+            )
+        case .grok, .openCode:
+            break
+        }
+    }
+
+    /// Claude, Codex, and Grok take an opening prompt as a trailing positional argument — which is why it
     /// goes in as `ShellCommand`'s operand rather than as another word: see the note there for
     /// what a prompt beginning with `-` did to the launch.
     private static func appendPrompt(_ prompt: String?, to command: inout ShellCommand) {
@@ -687,6 +886,59 @@ enum AgentLauncher {
         return (command, .awaitingIdentifier)
     }
 
+    /// OpenCode's interactive TUI resumes with `--session <ses_…>`. A fresh invocation creates
+    /// its own identifier, which `OpenCodeSessionDiscovery` reads back from the CLI's supported
+    /// JSON session listing. Unlike Claude and Codex, the opening is a named `--prompt` value,
+    /// not a positional operand.
+    private static func openCodeCommand(
+        for session: AgentSession,
+        prompt: String?
+    ) -> (ShellCommand, ResumeState) {
+        var command = ShellCommand(word: AgentDefaults.openCodeExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.openCodeModelFlag, to: &command)
+
+        if let existingID = session.resumeState.transcriptID {
+            command.append(flag: "--session", value: existingID.rawValue)
+            return (command, .resumable(existingID))
+        }
+
+        if session.isCrossProviderContinuation,
+           session.kind.supports(.openingFileAttachments) {
+            command.append(
+                flag: "--file",
+                value: ConversationHandoffStore.url(for: session.id).path
+            )
+        }
+
+        if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            command.append(flag: "--prompt", value: prompt)
+        }
+        return (command, .awaitingIdentifier)
+    }
+
+    /// Grok accepts a caller-supplied UUID for a new interactive conversation and a positional
+    /// opening prompt. A resume names that same UUID with `--resume`; the opening is never
+    /// replayed. These flags were measured against Grok 0.2.118 rather than inferred from its
+    /// headless `--single` mode.
+    private static func grokCommand(
+        for session: AgentSession,
+        prompt: String?
+    ) -> (ShellCommand, ResumeState) {
+        var command = ShellCommand(word: AgentDefaults.grokExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.grokModelFlag, to: &command)
+        appendPermissionMode(for: session, to: &command)
+
+        if let existingID = session.resumeState.transcriptID {
+            command.append(flag: "--resume", value: existingID.rawValue)
+            return (command, .resumable(existingID))
+        }
+
+        let mintedID = TranscriptID(session.id.uuidString.lowercased())
+        command.append(flag: "--session-id", value: mintedID.rawValue)
+        appendPrompt(prompt, to: &command)
+        return (command, .awaitingIdentifier)
+    }
+
     /// Maps Threading's per-conversation reasoning and Fast choices onto Codex's launch
     /// configuration.
     ///
@@ -698,33 +950,7 @@ enum AgentLauncher {
         for session: AgentSession,
         to command: inout ShellCommand
     ) {
-        if let effort = session.reasoningEffort, !effort.isEmpty {
-            let account = AgentAccountDiscovery.account(
-                for: session.kind,
-                handle: session.accountHandle
-            )
-            let model = session.model ?? AgentModels.defaultModel(
-                for: session.kind,
-                account: account
-            )
-            let option = AgentModels.option(
-                identifier: model,
-                for: session.kind,
-                account: account
-            )
-
-            // Preserve an override when the cache is unavailable or predates reasoning
-            // metadata. When the current catalog does know the model, it is authoritative:
-            // never launch Luna with a stale Ultra choice saved while the session used Sol.
-            if option?.reasoningLevels.isEmpty != false
-                || option?.supports(reasoningEffort: effort) == true {
-                appendCodexConfigOverride(
-                    AgentDefaults.codexReasoningEffortKey,
-                    string: effort,
-                    to: &command
-                )
-            }
-        }
+        appendReasoningEffort(for: session, to: &command)
 
         guard let fastMode = session.fastMode else { return }
 

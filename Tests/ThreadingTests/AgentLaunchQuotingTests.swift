@@ -134,6 +134,30 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(plan.arguments.count, 3, "the shell was handed more than one command")
     }
 
+    func testClaudeEffortIsPinnedOnTerminalAndNativeLaunches() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let session = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                reasoningEffort: "xhigh",
+                origin: .original
+            ),
+            title: "t",
+            model: "opus"
+        )
+
+        let plans = [
+            AgentLauncher.plan(for: session, in: project),
+            AgentLauncher.streamPlan(for: session, in: project)
+        ]
+
+        for plan in plans {
+            let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
+            let effortFlag = try XCTUnwrap(words.firstIndex(of: AgentDefaults.claudeEffortFlag))
+            XCTAssertEqual(words[effortFlag + 1], "xhigh")
+        }
+    }
+
     // MARK: - Against the CLI's own parser
 
     /// A prompt that begins with `-` is a prompt, not a flag.
@@ -171,12 +195,218 @@ final class AgentLaunchQuotingTests: XCTestCase {
         }
     }
 
+    /// OpenCode names its opening instead of accepting a positional operand. The model id is
+    /// provider-qualified data: choosing Grok through OpenRouter must not turn Grok into a new
+    /// app-level agent kind.
+    func testOpenCodeLaunchCarriesProviderModelAndNamedPrompt() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        var session = AgentSession(kind: .openCode, title: "t")
+        session.model = "openrouter/x-ai/grok-4"
+        let opening = "- inspect this safely"
+
+        let plan = AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
+        let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
+
+        XCTAssertEqual(plan.resumeState, .awaitingIdentifier)
+        XCTAssertEqual(words.suffix(5), [
+            AgentDefaults.openCodeExecutable,
+            "--model",
+            "openrouter/x-ai/grok-4",
+            "--prompt",
+            opening
+        ])
+    }
+
+    func testOpenCodeResumeUsesProviderAssignedSessionID() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        var session = AgentSession(kind: .openCode, title: "t")
+        let transcriptID = TranscriptID("ses_test")
+        session.resumeState = .resumable(transcriptID)
+
+        let plan = AgentLauncher.plan(
+            for: session,
+            in: project,
+            initialPrompt: "must not be replayed"
+        )
+        let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
+
+        XCTAssertEqual(plan.resumeState, .resumable(transcriptID))
+        XCTAssertEqual(words.suffix(3), [AgentDefaults.openCodeExecutable, "--session", "ses_test"])
+        XCTAssertFalse(words.contains("--prompt"))
+    }
+
+    /// The standalone Grok runtime is distinct from choosing a Grok model inside OpenCode. Its
+    /// TUI accepts a caller-minted UUID and a positional opening; `--` keeps a leading dash in
+    /// that opening out of Grok's option parser.
+    func testGrokLaunchMintsSessionIDAndCarriesModelPermissionAndPrompt() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let id = SessionID()
+        var session = AgentSession(kind: .grok, title: "t", model: "grok-4.5", id: id)
+        session.permissionMode = .acceptEdits
+        let opening = "- inspect this safely"
+
+        let plan = AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
+        let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
+        let transcriptID = TranscriptID(id.uuidString.lowercased())
+
+        // Grok accepts this UUID immediately, but does not persist a conversation while its
+        // first-login screen is open. The controller promotes it only after `sessions list`
+        // confirms the record exists.
+        XCTAssertEqual(plan.resumeState, .awaitingIdentifier)
+        XCTAssertEqual(words.suffix(9), [
+            AgentDefaults.grokExecutable,
+            "--model",
+            "grok-4.5",
+            "--permission-mode",
+            "acceptEdits",
+            "--session-id",
+            transcriptID.rawValue,
+            "--",
+            opening
+        ])
+    }
+
+    func testGrokResumeUsesExistingSessionAndDoesNotReplayOpening() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        var session = AgentSession(kind: .grok, title: "t")
+        let transcriptID = TranscriptID("01935b8d-8f29-7abc-9def-0123456789ab")
+        session.resumeState = .resumable(transcriptID)
+
+        let plan = AgentLauncher.plan(
+            for: session,
+            in: project,
+            initialPrompt: "must not be replayed"
+        )
+        let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
+
+        XCTAssertEqual(plan.resumeState, .resumable(transcriptID))
+        XCTAssertNotNil(words.firstIndex(of: AgentDefaults.grokExecutable))
+        XCTAssertEqual(words.suffix(2), ["--resume", transcriptID.rawValue])
+        XCTAssertFalse(words.contains("must not be replayed"))
+    }
+
+    func testGrokNativeSessionRoundTrips() throws {
+        var session = AgentSession(kind: .grok, title: "Grok", usesNativeUI: true)
+        session.permissionMode = .auto
+        let transcriptID = TranscriptID(session.id.uuidString.lowercased())
+        session.resumeState = .resumable(transcriptID)
+
+        let restored = try JSONDecoder().decode(
+            AgentSession.self,
+            from: JSONEncoder().encode(session)
+        )
+
+        XCTAssertEqual(restored.kind, .grok)
+        XCTAssertEqual(restored.resumeState, .resumable(transcriptID))
+        XCTAssertEqual(restored.permissionMode, .auto)
+        XCTAssertTrue(restored.usesNativeUI)
+        XCTAssertFalse(restored.kind.supportsAccounts)
+        XCTAssertTrue(restored.kind.supportsPresetSessionID)
+        XCTAssertTrue(restored.kind.supportsPermissionModes)
+        XCTAssertTrue(restored.kind.supportsThreadingBridge)
+    }
+
     /// And it is the *last* word, after every flag the launch grows on its way out.
     ///
     /// `routed` wraps the command and appends the MCP flags around it, so the prompt used to
     /// sit in the middle of the line. Terminating the options where it stood would have handed
     /// `--mcp-config` to the CLI as more prompt text — the operand has to move to the end, not
     /// just gain a `--`.
+    // MARK: - Settings research one-shots
+
+    /// `.headlessResearch` and the settings-research command builder are the claim and the
+    /// delivery — the same pairing rule the permission vocabulary follows. A runtime claiming
+    /// the capability must produce a one-shot line, and one that does not must refuse even
+    /// with the MCP wiring handed to it.
+    func testHeadlessResearchCapabilityAgreesWithTheCommandItProduces() {
+        for kind in AgentKind.allCases {
+            let command = AgentLauncher.settingsResearchCommand(
+                kind: kind,
+                prompt: "p",
+                mcpConfigPath: "/tmp/mcp.json",
+                endpointURL: "http://127.0.0.1:9/mcp/t"
+            )
+            XCTAssertEqual(
+                command != nil,
+                kind.supports(.headlessResearch),
+                "\(kind) disagrees with its own research surface"
+            )
+        }
+    }
+
+    /// The Claude one-shot, word for word: default-account routing, print mode with the JSON
+    /// envelope, no built-in tools, only Threading's MCP server, and only the one tool
+    /// pre-approved — with the query kept last, behind `--`.
+    func testClaudeSettingsResearchRunsScopedPrintModeOnTheDefaultAccount() throws {
+        let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
+            kind: .claude,
+            prompt: "make it stop flashing",
+            mcpConfigPath: "/tmp/scope.json",
+            endpointURL: nil
+        ))
+        let words = try Self.tokenizing(
+            ShellCommand.executing(command, in: "/tmp/scratch").source
+        )
+
+        XCTAssertEqual(words, [
+            "env", "-u", "CLAUDE_CONFIG_DIR",
+            AgentDefaults.claudeExecutable,
+            "--model", AgentDefaults.claudeResearchModel,
+            "--print",
+            "--output-format", "json",
+            "--tools", "",
+            "--mcp-config", "/tmp/scope.json",
+            "--strict-mcp-config",
+            "--allowedTools", "mcp__threading__list_settings",
+            "--", "make it stop flashing"
+        ])
+    }
+
+    /// The Codex one-shot: `codexResearchPlan`'s posture plus the scoped MCP overrides, and
+    /// `--skip-git-repo-check` because the run works in a scratch directory, not a checkout.
+    func testCodexSettingsResearchRunsScopedReadOnlyExecOnTheDefaultAccount() throws {
+        let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
+            kind: .codex,
+            prompt: "make it stop flashing",
+            mcpConfigPath: nil,
+            endpointURL: "http://127.0.0.1:9/mcp/t"
+        ))
+        let words = try Self.tokenizing(
+            ShellCommand.executing(command, in: "/tmp/scratch").source
+        )
+
+        XCTAssertEqual(words, [
+            "env", "-u", "CODEX_HOME",
+            AgentDefaults.codexExecutable,
+            "--config", "model_reasoning_effort=\"low\"",
+            "--sandbox", "read-only",
+            "--config", "mcp_servers.threading.url=\"http://127.0.0.1:9/mcp/t\"",
+            "--config", "mcp_servers.threading.enabled_tools=[\"list_settings\"]",
+            "--config", "mcp_servers.threading.tools.list_settings.approval_mode=\"approve\"",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--", "make it stop flashing"
+        ])
+    }
+
+    /// A research run without its MCP wiring has no catalogue to read, so it refuses to
+    /// launch rather than spending a run to be told nothing.
+    func testASettingsResearchRunWithoutItsEndpointRefusesToLaunch() {
+        XCTAssertNil(AgentLauncher.settingsResearchCommand(
+            kind: .claude,
+            prompt: "p",
+            mcpConfigPath: nil,
+            endpointURL: "http://127.0.0.1:9/mcp/t"
+        ))
+        XCTAssertNil(AgentLauncher.settingsResearchCommand(
+            kind: .codex,
+            prompt: "p",
+            mcpConfigPath: "/tmp/scope.json",
+            endpointURL: nil
+        ))
+    }
+
     func testTheOpeningPromptIsTheLastWordOnTheLine() throws {
         let opening = "an ordinary opening"
         let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))

@@ -60,6 +60,13 @@ Two invariants matter:
 - **The default account launches with `env -u`**, not a bare command. A login shell may export
   an override, which would otherwise silently route to the wrong account.
 
+These are Claude/Codex capabilities, not assumptions about every runtime. Grok supports a
+redirectable `GROK_HOME`, but multiple-login discovery and session movement have not been
+measured, so its login remains inside the TUI. OpenCode provider
+credentials and session data are shared while `OPENCODE_CONFIG_DIR` redirects configuration
+only, so it is not presented as a Threading multi-account agent. OpenRouter authentication and
+provider selection stay inside OpenCode (`/connect` and `/models`).
+
 In the sidebar an alternate account is identified entirely by the session's icon slot — its
 chosen emoji, else a letter badge (`c.circle.fill`) from its name — with the full name in the
 tooltip. Rows carry no account text line, which keeps every session a single-line row.
@@ -237,6 +244,82 @@ The model the pill uses is the **effective** one — the session's own choice, e
 account is configured to run — since that is what the next turn will spend. It is passed in
 rather than looked up, because the pill follows a session and the session is what knows.
 
+### Which model an unpinned session runs
+
+Four sources answer "what will this run on", and `AgentModels.resolvedDefault` ranks them.
+`ResolvedDefaultModel.Source` comes back with the answer because each is qualified differently on
+screen — one is a setting to go and change, one is a fact about this session, one is a memory:
+
+| Rank | Source | Row reads |
+|---|---|---|
+| 1 | the id this session's runtime announced when it started | `Opus · 1M  (in use)` |
+| 2 | `model` in the account's `settings.json` / `config.toml` | `Opus · 1M  (account default)` |
+| 3 | `orgModelDefaultCache` in the account's `.claude.json` | `Opus · 1M  (account default)` |
+| 4 | what this login last resolved an unpinned session to | `Opus · 1M  (last used)` |
+| 5 | the model the login's newest transcript recorded | `Opus 5  (last used)` |
+| — | nothing | `Agent's choice` |
+
+**The runtime outranks the config file, but only while the session pinned nothing.** The file is
+our reading of what the CLI *would* pick; the announced id is what it did pick. After an explicit
+switch, though, that id names the user's own choice — printing it on the row that means "leave it
+to the CLI" would be actively wrong, where the generic string was merely unhelpful. OpenCode draws
+the same line: *"switching models changes that session and does not rewrite your config."*
+
+This started as a chip and a menu row disagreeing one click apart. The chip fell through
+`session.model → reported → configured` while the row consulted only the config file, so a login
+whose `settings.json` names no model — the common case, since leaving the choice to the CLI is the
+default — showed `Opus · 1M` above a row still reading "Default model".
+
+**Ranks 4 and 5 are evidence, not configuration**, which is why they lose to a config file that
+has since changed and why they share one label. Rank 4 is what Threading watched a session
+resolve to (`AccountPreference.lastReportedModel`, recorded only from sessions that pinned
+nothing). Rank 5 is `ClaudeAccountLastRunModel`, which reads the same fact out of the transcripts
+the login has already written — including every session it ran in a plain terminal, before
+Threading existed on that machine.
+
+Rank 5 is why the last resort is nearly unreachable. Measured on a real login: no `model` key
+anywhere, no organisation, never once run inside Threading — and 167 transcripts whose newest
+records `claude-opus-5`. The answer was on disk the whole time. It is deliberately labelled
+*last used* rather than *account default*, because nothing in a transcript says whether that
+model was inherited or passed as `--model`; "last used" is true either way.
+
+**No rank invents a name.** Nothing here guesses the CLI's own fallback: that is negotiated per
+subscription and is not recorded on disk. Three ways of asking for it were tried and none works
+offline — there is no `claude models list`, `claude doctor` does not report it, and the
+stream-json `init` event carrying the model is only emitted once a turn begins, so it cannot be
+probed without spending an API call.
+
+The comparable apps all guess instead — OpenCode falls back to "the newest available supported
+model", Zed's hosted service pins one, VS Code carries the last used model globally and now cannot
+migrate users off deprecated ones.
+
+**The last resort says who decides, not what.** It reads `Agent's choice`, not "Default model".
+The old words were the actual complaint that started this: a row reading "Default model" looks
+like a setting whose value is being withheld, when the truth is that nothing has chosen yet. Only
+a login that has never run this agent *anywhere* reaches it.
+
+### Reading the CLI's own state file
+
+`settings.json` is what the *user* wrote. `.claude.json`, beside it in the same config directory,
+is what the CLI cached from the service, and it answers two things the settings file cannot:
+
+- `additionalModelOptionsCache` — models beyond the documented aliases this login may select,
+  each `{value, label, description}`. It carried `claude-fable-5[1m]` on both active logins
+  measured, which no alias names, so before this was read that model could not be picked from the
+  menu at all. Appended after the aliases, deduplicated by identifier.
+- `orgModelDefaultCache` — a managed organisation's default model, at rank 3 above.
+
+Both keys are **undocumented and frequently absent** — null on two of four real logins when this
+was measured — and `orgModelDefaultCache` was null on all four, so its *shape* is unverified: a
+bare string and two object forms are accepted and anything else reads as absent. Every read is
+strictly additive; a miss leaves the previous behaviour exactly as it was. This is the same move
+already made for Codex, which parses `models_cache.json` for slug, display name and service tiers.
+
+**The aliases are not a hardcoded stand-in for a catalog.** `claude --help` documents `opus`,
+`sonnet` and `fable` as *"an alias for the latest model"*, so they already track the newest of each
+family and stay right as versions ship. There is no `claude models list` to query and no
+cross-family notion of "newest" to compute — those three are tiers, not a timeline.
+
 The account menu is read against the model that *would* run if that login were picked, resolved
 per account (the configured default is an account's own setting). Its line is
 `Max · 5h 7% · 7d 56% · 7d Fable 89% · 7d Fable resets in 15h` — plan, every window, and when the
@@ -288,8 +371,9 @@ The same reading is put where an account is **chosen**, because that is the mome
 changes a decision; the pill speaks only after the session exists. Twice over, at two
 resolutions:
 
-- `AccountUsageMenu` writes each login's reading onto its item in the account chip's
-  menu, so the accounts are compared *before* one is picked. It shows the *cached* value and
+- `AccountUsageMenu` writes each login's reading onto its item in the composer's **identity**
+  chip menu — the logins section above the runtimes — so the accounts are compared *before* one
+  is picked. It shows the *cached* value and
   starts a refresh — a menu is built synchronously and a fetch is a network round trip, so
   the alternative to what is known is nothing at all. `prefetch()` is therefore called where
   the surface *appears* (launch, and each time the composer is shown) rather than where the
@@ -304,16 +388,37 @@ resolutions:
   the opposite. Drawn rather than composed from views, because `NSMenuItem` takes an image and
   no view at all — the same constraint that produced `ThemeSwatchImage`. The numbers stay: the
   ring is the glance, the text is the precise answer.
-- `AccountUsagePanelView` draws the chosen account in full under the chips: a `UsageWindowRow`
-  per window, each with the **time mark** that makes the number legible — fill short of the
-  mark is under pace, past it is spending faster than the window refills.
+- The composer's own reading is **one line inside the prompt box**, on the row that carries
+  what the session will run with. It is `AccountUsage.compactSummary` metered by the model the
+  session would launch on, which is the same string the toolbar pill draws once the session
+  exists, so the number a login is chosen on is the number that goes on being watched. Its
+  tooltip carries what the reading cannot: whose account it is, where each window stands and
+  when it comes back, and how old the reading is.
 
-`UsageWindowRow` and `UsageBarView` are shared with the toolbar's popover rather than
-reimplemented: the composer and the popover ask the same question, so they draw the same
-answer. The panel takes a *reading*, not an account — the composer owns the fetch and the
-notification, the view owns the drawing, which is also what lets it be rendered from
-synthetic data in a harness.
+  It replaced `AccountUsagePanelView`, which drew every window in full under the chips, one
+  `UsageWindowRow` per window with its bar and time mark. That panel had to be **told how much
+  room it could have**, because one bar per window plus one per metered model is a list the
+  provider lengthens and a panel taller than the pane makes the *window* taller — see
+  [`window-chrome.md`](window-chrome.md#a-pane-cannot-be-taller-than-its-window). A line cannot
+  do that, whatever the provider reports, which is the stronger version of the same rule and
+  why the fitting pass went with the panel. The full drawing is still a click away in the pill's
+  popover, where the pane's height is not at stake.
 
-`AccountUsage.compactSummary` is plain text for menus and tooltips; the pill keeps its own
-attributed build, which the model cannot produce because each value carries its own window's
-severity colour.
+`UsageWindowRow` and `UsageBarView` belong to the toolbar's popover and the usage settings page
+now. `AccountUsage.compactSummary` is the plain text every other surface shares — the account
+and model menus, this line, the tooltips; the pill keeps its own attributed build, which the
+model cannot produce because each value there carries its own window's severity colour.
+
+**A bar travels to a new reading rather than appearing at it** (`UsageBarView.apply`): the fill
+eases over `Design.Motion.standard` and the severity tint crossfades, while the words state the
+new reading outright, because a number counting up is unreadable mid-count. The travel eases out
+with **no overshoot**, unlike `ThemedToggle`, whose settle past the end is what gives its knob
+weight: a gauge may not draw a value it does not have, and a bar sailing past 90% and easing
+back would report a level the account never reached, on the one surface whose whole job is to
+say how much is left.
+
+`Design.Motion.standard` is zero under Reduce Motion, so the same guard that skips a pointless
+travel is also the accessibility branch — and it lands the value synchronously rather than
+costing a frame to arrive at what the caller is entitled to have now. A bar outside a window,
+or one leaving it mid-travel, lands for the same reason: the display link retains the view.
+

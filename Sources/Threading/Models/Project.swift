@@ -9,10 +9,142 @@ enum ProjectsStateVersion {
   static let current = 2
 }
 
-// MARK: - Agent Kind
+// MARK: - Agent Runtime
 
-/// The kind of program a session hosts.
-/// A session is a *conversation*, so this names an agent and nothing else.
+/// Features the host can rely on for one agent runtime.
+///
+/// Model providers are intentionally absent: OpenRouter, Anthropic, OpenAI, and xAI are model
+/// backends selected by a runtime. Keeping this matrix about CLI behavior means a Grok model
+/// selected through OpenCode is still an OpenCode session, while the standalone `grok` program
+/// is its own runtime with its own sessions and launch contract.
+/// Each member documents which runtimes have it and why, because this declaration is where
+/// someone adding a fifth runtime reads the contract. The first seven also have a named
+/// `supportsX` property on `AgentKind`, which predates `supports(_:)`; new capabilities are
+/// read through `supports(_:)` rather than growing that surface further.
+///
+/// A capability earns a member here only when the difference is a *static fact about the
+/// runtime*. Two other mechanisms carry the rest and are not to be duplicated here:
+/// catalog data (`AgentModelOption.reasoningLevels` decides whether an effort control
+/// appears at all) and live-transport conformance (`FastModeConversation` and its kin decide
+/// what a running conversation can be asked to change).
+struct AgentCapabilities: OptionSet {
+  let rawValue: Int
+
+  static let resume = Self(rawValue: 1 << 0)
+  static let presetSessionID = Self(rawValue: 1 << 1)
+  static let accounts = Self(rawValue: 1 << 2)
+  static let nativeUI = Self(rawValue: 1 << 3)
+  static let permissionModes = Self(rawValue: 1 << 4)
+  static let forking = Self(rawValue: 1 << 5)
+  static let threadingBridge = Self(rawValue: 1 << 6)
+
+  /// The runtime has its own remote-control bridge — the one that lets the vendor's web and
+  /// mobile clients drive a local conversation — which Threading can set at launch and offer
+  /// per session. Claude only; Codex, Grok and OpenCode expose no equivalent, and their
+  /// launches never carry the key.
+  static let remoteControl = Self(rawValue: 1 << 7)
+
+  /// The runtime draws a status line inside its own TUI. That line is both something
+  /// Threading can silence on the user's behalf and something whose coverage it must consult
+  /// before drawing facts of its own, so a terminal does not state the model twice. Claude
+  /// only. Native conversations run `--print`, where no status line is drawn at all, so this
+  /// governs terminal surfaces regardless of the runtime.
+  static let statusLine = Self(rawValue: 1 << 8)
+
+  /// The runtime's transcript records a conversation title Threading can read back. This is
+  /// what names a native session, which has no terminal to report a title over, and what
+  /// carries a name across a surface switch. Claude only: Codex's rollout has no title
+  /// record, so its sessions keep their prompt-derived name.
+  static let transcriptTitles = Self(rawValue: 1 << 9)
+
+  /// The runtime's transcript records which model actually answered. Threading reads it as
+  /// the third source for the terminal's model reading, after the session's own choice and
+  /// the account config — which is how a session visibly running Opus reported only its
+  /// effort. Claude only; Codex records its model in a rollout of a different shape.
+  static let transcriptModelRecord = Self(rawValue: 1 << 10)
+
+  /// Fast is a *service tier* on the account's model catalog, inheritable from config and
+  /// observable before launch. Codex only. This is what makes a fast reading reportable on a
+  /// terminal surface, where no control channel exists to ask.
+  static let serviceTierFastMode = Self(rawValue: 1 << 11)
+
+  /// Fast is a *live control-channel flag* that a running conversation starts with off until
+  /// Threading sends it. Claude only, and deliberately distinct from `serviceTierFastMode`:
+  /// the two differ in where the answer lives, in whether it survives a relaunch, and in
+  /// whether "no explicit choice" means off or means the account's default.
+  ///
+  /// Whether a *given* transport can be asked mid-conversation stays with
+  /// `FastModeConversation`; this states only what an unset choice means.
+  static let liveFastModeControl = Self(rawValue: 1 << 12)
+
+  /// A leading `/` in submitted text is a command the runtime itself interprets. Threading
+  /// therefore sends such a message bare, rather than wrapping it in the shared-chat
+  /// participant envelope that would turn the command into prose.
+  ///
+  /// Claude only, and the reason is narrower than it first appears. Codex's app-server takes
+  /// submitted text as text. **ACP does not**: `GrokACPComposerCatalog` enumerates Grok's slash
+  /// commands and `GrokACPStreamSession.send(_ invocation:)` forwards a literal `/compact …`
+  /// over `session/prompt`, so Grok plainly interprets the prefix. What has not been measured
+  /// is the *uncatalogued* case — a participant's leading-slash message that matches no
+  /// advertised command — which is the only text this capability governs. Granting it to Grok
+  /// on the strength of the catalogue alone would be reasoning past the evidence, so the
+  /// consequence is recorded instead: for Grok such a message keeps the participant envelope,
+  /// and for Claude it does not.
+  static let slashCommandPrefix = Self(rawValue: 1 << 13)
+
+  /// A lifecycle hook and the native transport name a child agent the *same* way, so a hook
+  /// may enrich a natively rendered subagent row instead of creating a twin of it. Codex
+  /// only: its app-server and its hooks both use the child thread id, while Claude native
+  /// keys on the Agent tool-use id and Claude's hook reports a different agent id — so for
+  /// Claude the hook stays the terminal adapter alone.
+  static let sharedSubagentIdentity = Self(rawValue: 1 << 14)
+
+  /// The runtime writes no conversation record until the first prompt lands, so one poll at
+  /// launch cannot settle the session's identifier. Discovery instead retries at a bounded
+  /// cadence while the TUI produces output, and once more when it exits. Grok and OpenCode:
+  /// both open a blank TUI that creates nothing until it is asked something.
+  ///
+  /// This is about the *record*, not about who chose the id, so it is orthogonal to
+  /// `presetSessionID` and Grok has both: Threading mints Grok's id up front and still has to
+  /// confirm the record exists before calling the conversation resumable. It is equally
+  /// orthogonal to lacking `presetSessionID`, which Codex also lacks — Codex writes its
+  /// rollout at launch, so one poll finds it.
+  static let deferredSessionIdentifier = Self(rawValue: 1 << 15)
+
+  /// Threading can walk this runtime's transcripts to price what a project or an account has
+  /// spent, which is what the Usage report is built from.
+  ///
+  /// Claude only, and the restriction belongs to the *reader* rather than to the runtime:
+  /// `TranscriptUsageIndex.transcripts(inAccountAt:)` enumerates
+  /// `AgentDefaults.claudeProjectsSubdirectory` and knows no other layout. Codex records its
+  /// usage in a rollout of a different shape, and neither Grok nor OpenCode has a transcript
+  /// this app parses at all. Stated here rather than as a filter over `AgentKind.allCases` at
+  /// the call site, which put the restriction a file away from the thing that causes it and
+  /// read like a policy rather than a limitation.
+  static let transcriptUsageIndex = Self(rawValue: 1 << 16)
+
+  /// A terminal launch can receive Threading's private, session-scoped MCP endpoint without
+  /// changing persistent runtime configuration. Claude and Codex only. Grok has the bridge on
+  /// its native ACP surface, but its TUI exposes persistent MCP configuration only; OpenCode's
+  /// dynamic server is not owned by Threading yet.
+  static let terminalThreadingBridge = Self(rawValue: 1 << 17)
+
+  /// A first terminal turn can attach a file by launch flag. OpenCode's documented `--file`
+  /// route is used for a durable handoff snapshot instead of squeezing a large export into one
+  /// command-line prompt.
+  static let openingFileAttachments = Self(rawValue: 1 << 18)
+
+  /// The runtime has a one-shot, non-interactive surface Threading can drive for app-level
+  /// research — prompt in, captured output out, no terminal and no session record of ours.
+  /// Claude (`--print`) and Codex (`exec --json`) only: Grok and OpenCode expose no measured
+  /// equivalent. This is what the AI settings search runs on; the older Codex-only research
+  /// features (icon lookups, drafted messages) predate the flag and still gate on a Codex
+  /// login directly.
+  static let headlessResearch = Self(rawValue: 1 << 19)
+}
+
+/// The kind of program a session hosts: an installed agent client/runtime, not the model
+/// provider it talks to. A session is a *conversation*, so this names an agent and nothing else.
 ///
 /// A shell used to be one of these — a sidebar row with a title, a launch record and an
 /// account slot it could never use, for something with no conversation to resume, no
@@ -23,12 +155,16 @@ enum ProjectsStateVersion {
 enum AgentKind: String, Codable, CaseIterable {
   case claude
   case codex
+  case grok
+  case openCode = "opencode"
 
   /// Human-readable name shown in menus and the sidebar.
   var displayName: String {
     switch self {
     case .claude: return "Claude Code"
     case .codex: return "Codex"
+    case .grok: return "Grok"
+    case .openCode: return "OpenCode"
     }
   }
 
@@ -40,7 +176,48 @@ enum AgentKind: String, Codable, CaseIterable {
     switch self {
     case .claude: return AgentDefaults.claudeExecutable
     case .codex: return AgentDefaults.codexExecutable
+    case .grok: return AgentDefaults.grokExecutable
+    case .openCode: return AgentDefaults.openCodeExecutable
     }
+  }
+
+  /// The single capability declaration consumed by the composer, the launcher, the session
+  /// actions and the conversation surface.
+  ///
+  /// This switch is the only place a runtime is named to decide what the host may do with it.
+  /// Everywhere else asks `supports(_:)`, which is enforced by
+  /// `scripts/check_architecture_boundaries.sh`: a feature that branches on the runtime's own
+  /// identity is a feature nobody can extend to a fifth runtime without re-reading the whole
+  /// app.
+  var capabilities: AgentCapabilities {
+    switch self {
+    case .claude:
+      return [
+        .resume, .presetSessionID, .accounts, .nativeUI, .permissionModes, .forking,
+        .threadingBridge, .remoteControl, .statusLine, .transcriptTitles,
+        .transcriptModelRecord, .transcriptUsageIndex, .liveFastModeControl,
+        .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch
+      ]
+    case .codex:
+      return [
+        .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
+        .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
+        .headlessResearch
+      ]
+    case .grok:
+      return [
+        .resume, .presetSessionID, .nativeUI, .permissionModes, .threadingBridge,
+        .deferredSessionIdentifier
+      ]
+    case .openCode:
+      return [.resume, .deferredSessionIdentifier, .openingFileAttachments]
+    }
+  }
+
+  /// Whether this runtime has one capability. The accessor for everything the seven named
+  /// `supportsX` properties below do not already cover.
+  func supports(_ capability: AgentCapabilities) -> Bool {
+    capabilities.contains(capability)
   }
 
   /// Whether sessions of this kind can be resumed by identifier after exiting.
@@ -48,26 +225,28 @@ enum AgentKind: String, Codable, CaseIterable {
   /// Every kind can, now that shells are not a kind. Kept as a property rather than deleted
   /// with its call sites, because a future agent without a resume story would need it back
   /// and the branches reading it are the honest place to notice.
-  var supportsResume: Bool { true }
+  var supportsResume: Bool { capabilities.contains(.resume) }
 
   /// Whether the session identifier can be chosen by us before launch.
   ///
-  /// Claude accepts `--session-id <uuid>`, so we mint it. Codex assigns its own,
-  /// which must be discovered afterwards via `CodexSessionDiscovery`.
-  var supportsPresetSessionID: Bool {
-    self == .claude
-  }
+  /// Claude and Grok accept `--session-id <uuid>`, so we mint it. Codex and OpenCode
+  /// assign their own, which must be discovered afterwards.
+  var supportsPresetSessionID: Bool { capabilities.contains(.presetSessionID) }
 
-  /// Whether this agent supports multiple logins.
-  var supportsAccounts: Bool { true }
+  /// Whether this agent supports Threading's config-directory account routing.
+  ///
+  /// OpenCode stores provider credentials in one shared data directory and selects providers
+  /// inside the TUI. Grok supports `GROK_HOME`, but Threading has not yet defined or measured
+  /// multiple-login discovery for it. Neither runtime is presented as account-routable yet.
+  var supportsAccounts: Bool { capabilities.contains(.accounts) }
 
   /// Whether Threading may render this agent's conversation itself, instead of a terminal.
   ///
-  /// Both agents qualify: each exposes a supported headless transport — Codex app-server
-  /// and `claude -p --output-format stream-json` — that Threading drives by spawning the
-  /// user's own installed CLI, authenticated by whatever `claude auth login` / `codex login`
-  /// already put on disk. No token is read, and no request is routed on the user's behalf,
-  /// which is the line Anthropic's policy actually draws.
+  /// Claude, Codex, and Grok qualify: each exposes a supported headless transport — Codex
+  /// app-server, `claude -p --output-format stream-json`, and `grok agent stdio` over ACP —
+  /// that Threading drives by spawning the user's own installed CLI, authenticated by that
+  /// CLI's existing login state. No token is read, and no request is routed on the user's
+  /// behalf, which is the line Anthropic's policy actually draws.
   ///
   /// Claude was excluded here for most of this project's life on the belief that `claude -p`
   /// on a subscription was off-limits to third-party apps. That was true of the February 2026
@@ -77,7 +256,19 @@ enum AgentKind: String, Codable, CaseIterable {
   /// credits was withdrawn on the day it was to take effect. That withdrawal was explicitly
   /// a pause, so this may become an economic choice — headless turns billed at API rates
   /// rather than against the plan — but it is a *permitted* one either way.
-  var supportsNativeUI: Bool { true }
+  var supportsNativeUI: Bool { capabilities.contains(.nativeUI) }
+
+  /// Whether Threading can translate its shared permission-mode vocabulary into launch flags.
+  ///
+  /// OpenCode owns a richer per-tool policy in `opencode.json`. Its `--auto` switch is not
+  /// equivalent to any one of Threading's six Claude-derived modes, so terminal sessions leave
+  /// that policy to OpenCode instead of presenting a false mapping. Grok's documented
+  /// `--permission-mode` values match all six modes exactly.
+  var supportsPermissionModes: Bool { capabilities.contains(.permissionModes) }
+
+  /// Whether Threading can inject its per-session lifecycle/MCP bridge without replacing the
+  /// runtime's own configuration.
+  var supportsThreadingBridge: Bool { capabilities.contains(.threadingBridge) }
 
   /// Whether a conversation of this agent can be forked into a side chat.
   ///
@@ -85,16 +276,18 @@ enum AgentKind: String, Codable, CaseIterable {
   /// conversation into a *new* transcript, leaving the original untouched, and honours a
   /// `--session-id` given alongside it — so the child's identifier is minted up front like
   /// any other Claude session. Codex has no equivalent (`codex exec resume` takes an id and
-  /// a prompt, nothing more), and forging one by copying its rollout is unproven.
-  var supportsForking: Bool {
-    self == .claude
-  }
+  /// a prompt, nothing more), and forging one by copying its rollout is unproven. Grok and
+  /// OpenCode both expose fork flags, but Threading has not yet measured their complete
+  /// side-chat lifecycle, so neither is advertised here yet.
+  var supportsForking: Bool { capabilities.contains(.forking) }
 
   /// Environment variable redirecting this CLI to an alternate config directory.
   var accountEnvironmentKey: String {
     switch self {
     case .claude: return "CLAUDE_CONFIG_DIR"
     case .codex: return "CODEX_HOME"
+    case .grok: return "GROK_HOME"
+    case .openCode: return "OPENCODE_CONFIG_DIR"
     }
   }
 }
@@ -106,7 +299,7 @@ enum ResumeState: Equatable {
   /// This kind of session has no resumable conversation, as with a shell.
   case unavailable
 
-  /// An agent conversation has not received its provider identifier yet.
+  /// An agent conversation does not yet have a confirmed, resumable provider identifier.
   case awaitingIdentifier
 
   /// The provider identifier for an existing conversation.
@@ -137,12 +330,11 @@ enum ResumeState: Equatable {
 /// How a Claude session was created.
 ///
 /// Forking is deliberately absent from the Codex configuration below: Codex has no provider
-/// operation with those semantics. Cross-provider continuation also names its source provider
-/// in the case itself, so a destination cannot claim it continued from its own provider.
+/// operation with those semantics. Cross-provider continuation is provider-neutral lineage,
+/// stored on `AgentSession` rather than smuggled into one runtime's launch configuration.
 enum ClaudeSessionOrigin: Equatable {
   case original
   case forked(from: SessionID)
-  case continuedFromCodex(SessionID)
 }
 
 /// Provider-specific session state.
@@ -151,25 +343,254 @@ enum ClaudeSessionOrigin: Equatable {
 /// parent, and continuation kind) whose Cartesian product admitted states neither provider
 /// could execute. Pattern matching now has to account only for states the product supports.
 enum AgentSessionConfiguration: Equatable {
-  case claude(remoteControl: Bool?, origin: ClaudeSessionOrigin)
-  case codex(reasoningEffort: String?, continuedFromClaude: SessionID?)
+  case claude(
+    remoteControl: Bool?,
+    reasoningEffort: String?,
+    origin: ClaudeSessionOrigin
+  )
+  case codex(reasoningEffort: String?)
+  case grok
+  case openCode
 
   var kind: AgentKind {
     switch self {
     case .claude: return .claude
     case .codex: return .codex
+    case .grok: return .grok
+    case .openCode: return .openCode
+    }
+  }
+
+  /// The configuration a plain new session of this runtime starts from: no lineage, no
+  /// reasoning override, nothing yet chosen. Total, because every runtime can host an ordinary
+  /// new conversation — and the one switch the two initializers below share, so a fifth
+  /// runtime is added here once rather than in each of them.
+  static func original(for kind: AgentKind) -> AgentSessionConfiguration {
+    switch kind {
+    case .claude:
+      return .claude(remoteControl: nil, reasoningEffort: nil, origin: .original)
+    case .codex: return .codex(reasoningEffort: nil)
+    case .grok: return .grok
+    case .openCode: return .openCode
+    }
+  }
+
+  /// The configuration for a newly requested session, or nil when the request describes a
+  /// session the runtime cannot run.
+  ///
+  /// This lived in `ProjectStore.addSession` as a switch over the runtime, which put the rules
+  /// about what a configuration may hold a file away from the cases that hold it. Two things
+  /// follow from moving it here.
+  ///
+  /// A rejection now means one of exactly two things: the enum has no case that can represent
+  /// the request, or the runtime lacks the capability the request needs. Nothing here is a
+  /// rule about a runtime by name.
+  ///
+  /// And a setting the runtime merely *ignores* is clamped rather than refused — `AgentSession`
+  /// already drops `usesNativeUI` for a runtime without that capability. Refusing the whole
+  /// session for a setting the model would have corrected is how choosing Grok's conversation
+  /// surface came to create nothing at all: the composer offered it, the capability allowed it,
+  /// `ConversationViewController` had a transport for it, and the store returned nil.
+  init?(
+    kind: AgentKind,
+    reasoningEffort: String?,
+    accountHandle: AccountHandle,
+    permissionMode: AgentPermissionMode?
+  ) {
+    guard accountHandle == .standard || kind.supportsAccounts,
+          permissionMode == nil || kind.supportsPermissionModes
+    else { return nil }
+
+    switch kind {
+    case .claude:
+      self = .claude(
+        remoteControl: nil,
+        reasoningEffort: reasoningEffort,
+        origin: .original
+      )
+
+    case .codex:
+      self = .codex(reasoningEffort: reasoningEffort)
+
+    case .grok, .openCode:
+      guard reasoningEffort == nil else { return nil }
+      self = .original(for: kind)
     }
   }
 
   fileprivate var derivedSessionID: SessionID? {
     switch self {
-    case .claude(_, .forked(let source)),
-      .claude(_, .continuedFromCodex(let source)),
-      .codex(_, .some(let source)):
+    case .claude(_, _, .forked(let source)):
       return source
-    case .claude, .codex:
+    case .claude, .codex, .grok, .openCode:
       return nil
     }
+  }
+}
+
+// MARK: - Conversation Handoff Provenance
+
+/// One durable stop in a cross-runtime continuation path.
+///
+/// The model is captured at the moment of the handoff rather than resolved while drawing. A
+/// session's explicit model, account default, and runtime-reported model can all change later;
+/// provenance must continue to say what the handoff actually meant when it was made.
+struct ConversationHandoffEndpoint: Codable, Equatable {
+  let sessionID: SessionID
+  let kind: AgentKind
+  var model: String?
+  var title: String?
+  private var modelIsProvisional: Bool?
+
+  init(
+    sessionID: SessionID,
+    kind: AgentKind,
+    model: String?,
+    title: String?,
+    modelIsProvisional: Bool = false
+  ) {
+    self.sessionID = sessionID
+    self.kind = kind
+    self.model = model
+    self.title = title
+    self.modelIsProvisional = modelIsProvisional
+  }
+
+  var displayName: String {
+    guard let model, !model.isEmpty else { return kind.displayName }
+    return ModelName.display(for: model)
+  }
+
+  mutating func recordReportedModel(_ reportedModel: String) {
+    guard !reportedModel.isEmpty,
+          model == nil || modelIsProvisional == true else { return }
+    model = reportedModel
+    modelIsProvisional = false
+  }
+}
+
+/// The full provider/model path that led to one destination conversation.
+///
+/// Every destination owns its copy. Deleting or renaming an ancestor therefore cannot rewrite
+/// history, while the session ids still make surviving ancestors navigable. The path is bounded
+/// because it rides every session row; the origin and newest hops are retained and the omitted
+/// count says when the middle was compacted.
+struct ConversationHandoff: Codable, Equatable {
+  static let maximumEndpoints = 16
+
+  private(set) var endpoints: [ConversationHandoffEndpoint]
+  private(set) var omittedEndpointCount: Int
+  let createdAt: Date
+
+  var source: ConversationHandoffEndpoint? {
+    endpoints.dropLast().last
+  }
+
+  var target: ConversationHandoffEndpoint? { endpoints.last }
+
+  init?(
+    endpoints: [ConversationHandoffEndpoint],
+    omittedEndpointCount: Int = 0,
+    createdAt: Date = Date()
+  ) {
+    guard endpoints.count >= 2,
+          omittedEndpointCount >= 0,
+          Self.hasValidRetainedPath(
+            endpoints,
+            omittedEndpointCount: omittedEndpointCount
+          )
+    else { return nil }
+
+    self.endpoints = endpoints
+    self.omittedEndpointCount = omittedEndpointCount
+    self.createdAt = createdAt
+    compactIfNeeded()
+  }
+
+  /// Carries an existing path into a new destination, refreshing the source's own endpoint with
+  /// its current title/model snapshot first. This is what turns direct lineage into a real path
+  /// across repeated handoffs.
+  @MainActor
+  static func continuing(
+    source: AgentSession,
+    targetID: SessionID,
+    targetKind: AgentKind,
+    targetModel: String?,
+    targetTitle: String
+  ) -> ConversationHandoff? {
+    guard source.kind != targetKind, source.id != targetID else { return nil }
+
+    var endpoints = source.handoff?.endpoints ?? []
+    let sourceEndpoint = ConversationHandoffEndpoint(
+      sessionID: source.id,
+      kind: source.kind,
+      model: source.handoffModelSnapshot,
+      title: source.displayTitle
+    )
+    if endpoints.isEmpty {
+      endpoints.append(sourceEndpoint)
+    } else {
+      endpoints[endpoints.count - 1] = sourceEndpoint
+    }
+    endpoints.append(ConversationHandoffEndpoint(
+      sessionID: targetID,
+      kind: targetKind,
+      model: targetModel,
+      title: targetTitle,
+      modelIsProvisional: true
+    ))
+
+    return ConversationHandoff(
+      endpoints: endpoints,
+      omittedEndpointCount: source.handoff?.omittedEndpointCount ?? 0
+    )
+  }
+
+  mutating func recordTargetModel(_ model: String) {
+    guard !model.isEmpty, !endpoints.isEmpty else { return }
+    endpoints[endpoints.count - 1].recordReportedModel(model)
+  }
+
+  func isValid(destinationID: SessionID, destinationKind: AgentKind) -> Bool {
+    guard endpoints.count >= 2,
+          endpoints.count <= Self.maximumEndpoints,
+          omittedEndpointCount >= 0,
+          Self.hasValidRetainedPath(
+            endpoints,
+            omittedEndpointCount: omittedEndpointCount
+          ),
+          let source,
+          let target,
+          source.sessionID != target.sessionID,
+          source.kind != target.kind,
+          target.sessionID == destinationID,
+          target.kind == destinationKind
+    else { return false }
+    return true
+  }
+
+  private static func hasValidRetainedPath(
+    _ endpoints: [ConversationHandoffEndpoint],
+    omittedEndpointCount: Int
+  ) -> Bool {
+    guard Set(endpoints.map(\.sessionID)).count == endpoints.count else { return false }
+    for (index, pair) in zip(endpoints, endpoints.dropFirst()).enumerated() {
+      // Once a middle has been compacted, the origin and first retained suffix endpoint were
+      // not necessarily adjacent in the real path. Every other pair still was.
+      if omittedEndpointCount > 0, index == 0 { continue }
+      guard pair.0.kind != pair.1.kind else { return false }
+    }
+    return true
+  }
+
+  private mutating func compactIfNeeded() {
+    guard endpoints.count > Self.maximumEndpoints else { return }
+    let removalCount = endpoints.count - Self.maximumEndpoints
+    // Preserve the originating endpoint and the newest suffix. The path remains a path, while
+    // `omittedEndpointCount` states the collapsed middle instead of silently pretending it never
+    // existed.
+    endpoints.removeSubrange(1 ... removalCount)
+    omittedEndpointCount += removalCount
   }
 }
 
@@ -196,6 +617,11 @@ enum AgentTitleSource: String, Codable {
 struct AgentSession: Codable, Identifiable {
   let id: SessionID
   private var configuration: AgentSessionConfiguration
+
+  /// Durable, provider-neutral lineage for a cross-runtime continuation. Kept apart from the
+  /// runtime configuration because all runtimes can receive a handoff even though their launch
+  /// settings have different shapes.
+  private(set) var handoff: ConversationHandoff?
 
   var kind: AgentKind { configuration.kind }
 
@@ -251,14 +677,16 @@ struct AgentSession: Codable, Identifiable {
   /// Nil uses whatever the CLI defaults to.
   var model: String?
 
-  /// A per-conversation Codex reasoning-effort override.
+  /// A per-conversation reasoning-effort override.
   ///
   /// Nil inherits the routed account when that value is supported by the selected model,
   /// otherwise the model catalog's own default. The value stays a string because the catalog
   /// is authoritative and may add levels without a Threading release.
   var reasoningEffort: String? {
-    guard case .codex(let value, _) = configuration else { return nil }
-    return value
+    switch configuration {
+    case .claude(_, let value, _), .codex(let value): return value
+    case .grok, .openCode: return nil
+    }
   }
 
   /// A per-conversation Fast-mode override.
@@ -285,7 +713,7 @@ struct AgentSession: Codable, Identifiable {
   /// merged settings ahead of its global config, so a value here wins. Claude only — Codex has
   /// no equivalent bridge.
   var remoteControl: Bool? {
-    guard case .claude(let value, _) = configuration else { return nil }
+    guard case .claude(let value, _, _) = configuration else { return nil }
     return value
   }
 
@@ -326,12 +754,33 @@ struct AgentSession: Codable, Identifiable {
   /// the child first runs, and afterwards this is lineage rather than behaviour. See
   /// `AgentLauncher.claudeForkCommand`.
   var forkedFrom: SessionID? {
-    guard case .claude(_, .forked(let parent)) = configuration else { return nil }
+    guard case .claude(_, _, .forked(let parent)) = configuration else { return nil }
     return parent
   }
 
   /// Whether this session began as a fork of another.
   var isSideChat: Bool { forkedFrom != nil }
+
+  /// The configuration a side chat of *this* conversation runs under, or nil where this
+  /// runtime has no fork operation.
+  ///
+  /// The store used to build a `.claude` configuration itself after testing the parent's
+  /// runtime, which meant granting `.forking` to a second runtime would have quietly minted
+  /// Claude sessions from its parents. Deriving the child from the parent's own case makes
+  /// that impossible to express: a runtime is forkable here only once someone writes down
+  /// what its fork *is*. `AgentCapabilitiesTests` holds the two answers to each other.
+  var forkedConfiguration: AgentSessionConfiguration? {
+    switch configuration {
+    case .claude(_, let reasoningEffort, _):
+      return .claude(
+        remoteControl: nil,
+        reasoningEffort: reasoningEffort,
+        origin: .forked(from: id)
+      )
+    case .codex, .grok, .openCode:
+      return nil
+    }
+  }
 
   /// The session whose visible conversation seeded this one on another provider.
   ///
@@ -340,14 +789,7 @@ struct AgentSession: Codable, Identifiable {
   /// only that snapshot to this session through the scoped `conversation_history` MCP tool.
   /// The destination then starts a genuinely new provider-native conversation.
   var continuedFrom: SessionID? {
-    switch configuration {
-    case .claude(_, .continuedFromCodex(let source)):
-      return source
-    case .codex(_, .some(let source)):
-      return source
-    case .claude, .codex:
-      return nil
-    }
+    handoff?.source?.sessionID
   }
 
   /// The format of the frozen handoff transcript.
@@ -355,19 +797,24 @@ struct AgentSession: Codable, Identifiable {
   /// Kept beside the lineage rather than recovered from the source record so the handoff
   /// remains readable if that original row is later deleted from Threading.
   var continuationSourceKind: AgentKind? {
-    switch configuration {
-    case .claude(_, .continuedFromCodex):
-      return .codex
-    case .codex(_, .some):
-      return .claude
-    case .claude, .codex:
-      return nil
-    }
+    handoff?.source?.kind
   }
 
   /// Whether this session began as a cross-provider continuation.
   var isCrossProviderContinuation: Bool {
-    continuedFrom != nil && continuationSourceKind != nil
+    handoff != nil
+  }
+
+  /// Best durable model label available before a handoff is made. A model the session pinned
+  /// wins, then the account's configured default, then the runtime's last report for that
+  /// account. Nil is preserved as an honest provider-name fallback for Grok/OpenCode and an
+  /// account whose CLI states no default.
+  @MainActor
+  var handoffModelSnapshot: String? {
+    if let model, !model.isEmpty { return model }
+    let account = AgentAccountDiscovery.account(for: kind, handle: accountHandle)
+    return AgentModels.defaultModel(for: kind, account: account)
+      ?? account.flatMap { AccountPreferencesStore.shared.lastReportedModel(for: $0.id) }
   }
 
   /// Whether Threading renders this conversation itself instead of showing the agent's
@@ -418,15 +865,8 @@ struct AgentSession: Codable, Identifiable {
     usesNativeUI: Bool = false,
     id: SessionID = SessionID()
   ) {
-    let configuration: AgentSessionConfiguration =
-      switch kind {
-      case .claude:
-        .claude(remoteControl: nil, origin: .original)
-      case .codex:
-        .codex(reasoningEffort: nil, continuedFromClaude: nil)
-      }
     self.init(
-      configuration: configuration,
+      configuration: .original(for: kind),
       title: title,
       accountHandle: accountHandle,
       model: model,
@@ -441,6 +881,7 @@ struct AgentSession: Codable, Identifiable {
     accountHandle: AccountHandle = .standard,
     model: String? = nil,
     usesNativeUI: Bool = false,
+    handoff: ConversationHandoff? = nil,
     id: SessionID = SessionID()
   ) {
     precondition(
@@ -449,6 +890,15 @@ struct AgentSession: Codable, Identifiable {
     )
     self.id = id
     self.configuration = configuration
+    precondition(
+      handoff == nil || handoff?.target?.sessionID == id,
+      "A handoff must end at its destination session"
+    )
+    precondition(
+      handoff == nil || handoff?.target?.kind == configuration.kind,
+      "A handoff must end at its destination runtime"
+    )
+    self.handoff = handoff
     self.title = title
     self.customTitle = nil
     self.agentTitle = nil
@@ -465,7 +915,7 @@ struct AgentSession: Codable, Identifiable {
     self.branch = nil
     self.isArchived = false
     self.isPinned = false
-    self.usesNativeUI = usesNativeUI
+    self.usesNativeUI = usesNativeUI && configuration.kind.supportsNativeUI
     self.themeID = nil
     self.notificationsMuted = nil
   }
@@ -477,6 +927,7 @@ struct AgentSession: Codable, Identifiable {
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case fastMode, remoteControl, permissionMode, archived, pinned, nativeUI, forkParent
     case continuationSource, continuationSourceKind
+    case handoff
     case themeID, themeName, notificationsMuted
   }
 
@@ -539,11 +990,17 @@ struct AgentSession: Codable, Identifiable {
       AgentKind.self,
       forKey: .continuationSourceKind
     )
-    if decodedReasoningEffort != nil, decodedKind != .codex {
+    let decodedHandoff = try container.decodeIfPresent(
+      ConversationHandoff.self,
+      forKey: .handoff
+    )
+    if decodedReasoningEffort != nil,
+       decodedKind != .claude,
+       decodedKind != .codex {
       throw DecodingError.dataCorruptedError(
         forKey: .reasoningEffort,
         in: container,
-        debugDescription: "Reasoning effort is only valid for Codex sessions"
+        debugDescription: "Reasoning effort is not valid for this runtime"
       )
     }
     if decodedRemoteControl != nil, decodedKind != .claude {
@@ -576,25 +1033,68 @@ struct AgentSession: Codable, Identifiable {
         debugDescription: "A session cannot derive from itself"
       )
     }
+
+    let legacyHandoff: ConversationHandoff?
+    if let decodedContinuationSource, let decodedContinuationKind {
+      legacyHandoff = ConversationHandoff(
+        endpoints: [
+          ConversationHandoffEndpoint(
+            sessionID: decodedContinuationSource,
+            kind: decodedContinuationKind,
+            model: nil,
+            title: nil
+          ),
+          ConversationHandoffEndpoint(
+            sessionID: id,
+            kind: decodedKind,
+            model: model,
+            title: title
+          )
+        ],
+        createdAt: decodedCreatedAt ?? Date()
+      )
+      guard legacyHandoff != nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .continuationSourceKind,
+          in: container,
+          debugDescription: "A continuation must cross runtimes"
+        )
+      }
+    } else {
+      legacyHandoff = nil
+    }
+
+    if let decodedHandoff, let legacyHandoff,
+       (decodedHandoff.source?.sessionID != legacyHandoff.source?.sessionID
+        || decodedHandoff.source?.kind != legacyHandoff.source?.kind) {
+      throw DecodingError.dataCorruptedError(
+        forKey: .handoff,
+        in: container,
+        debugDescription: "Handoff path disagrees with its legacy direct source"
+      )
+    }
+    handoff = decodedHandoff ?? legacyHandoff
+    if let handoff {
+      guard decodedForkParent == nil,
+            handoff.isValid(destinationID: id, destinationKind: decodedKind) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .handoff,
+          in: container,
+          debugDescription: "Invalid handoff path for this destination session"
+        )
+      }
+    }
     switch decodedKind {
     case .claude:
       let origin: ClaudeSessionOrigin
       if let decodedForkParent {
         origin = .forked(from: decodedForkParent)
-      } else if let decodedContinuationSource {
-        guard decodedContinuationKind == .codex else {
-          throw DecodingError.dataCorruptedError(
-            forKey: .continuationSourceKind,
-            in: container,
-            debugDescription: "Claude can only continue a Codex conversation"
-          )
-        }
-        origin = .continuedFromCodex(decodedContinuationSource)
       } else {
         origin = .original
       }
       configuration = .claude(
         remoteControl: decodedRemoteControl,
+        reasoningEffort: decodedReasoningEffort,
         origin: origin
       )
     case .codex:
@@ -605,19 +1105,81 @@ struct AgentSession: Codable, Identifiable {
           debugDescription: "Codex sessions cannot be provider forks"
         )
       }
-      if decodedContinuationSource != nil,
-        decodedContinuationKind != .claude
-      {
+      configuration = .codex(reasoningEffort: decodedReasoningEffort)
+    case .grok:
+      guard decodedForkParent == nil else {
         throw DecodingError.dataCorruptedError(
-          forKey: .continuationSourceKind,
+          forKey: .forkParent,
           in: container,
-          debugDescription: "Codex can only continue a Claude conversation"
+          debugDescription: "Grok sessions cannot yet be provider forks"
         )
       }
-      configuration = .codex(
-        reasoningEffort: decodedReasoningEffort,
-        continuedFromClaude: decodedContinuationSource
-      )
+      guard accountHandle == .standard else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .accountHandle,
+          in: container,
+          debugDescription: "Grok sessions do not yet use Threading account routing"
+        )
+      }
+      guard decodedReasoningEffort == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .reasoningEffort,
+          in: container,
+          debugDescription: "Grok sessions have no reasoning-effort contract to launch with"
+        )
+      }
+      guard fastMode == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .fastMode,
+          in: container,
+          debugDescription: "Grok sessions do not use Threading's Fast-mode control"
+        )
+      }
+      configuration = .grok
+    case .openCode:
+      guard decodedForkParent == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .forkParent,
+          in: container,
+          debugDescription: "OpenCode sessions cannot yet be provider forks"
+        )
+      }
+      guard !usesNativeUI else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .nativeUI,
+          in: container,
+          debugDescription: "OpenCode sessions currently support the terminal interface only"
+        )
+      }
+      guard accountHandle == .standard else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .accountHandle,
+          in: container,
+          debugDescription: "OpenCode sessions do not use Threading account routing"
+        )
+      }
+      guard decodedReasoningEffort == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .reasoningEffort,
+          in: container,
+          debugDescription: "OpenCode sessions select reasoning levels inside OpenCode"
+        )
+      }
+      guard fastMode == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .fastMode,
+          in: container,
+          debugDescription: "OpenCode sessions select model variants inside OpenCode"
+        )
+      }
+      guard permissionMode == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .permissionMode,
+          in: container,
+          debugDescription: "OpenCode sessions use OpenCode's own permission configuration"
+        )
+      }
+      configuration = .openCode
     }
     themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
     if themeID == nil,
@@ -660,27 +1222,47 @@ struct AgentSession: Codable, Identifiable {
       continuationSourceKind,
       forKey: .continuationSourceKind
     )
+    try container.encodeIfPresent(handoff, forKey: .handoff)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
   }
 
-  /// Changes a Codex-only option without admitting it into Claude's state space.
+  /// Changes a reasoning option only where the provider configuration can carry one.
   @discardableResult
-  mutating func setCodexReasoningEffort(_ effort: String?) -> Bool {
-    guard case .codex(_, let source) = configuration else { return false }
-    configuration = .codex(
-      reasoningEffort: effort,
-      continuedFromClaude: source
-    )
-    return true
+  mutating func setReasoningEffort(_ effort: String?) -> Bool {
+    switch configuration {
+    case .claude(let remoteControl, _, let origin):
+      configuration = .claude(
+        remoteControl: remoteControl,
+        reasoningEffort: effort,
+        origin: origin
+      )
+      return true
+    case .codex:
+      configuration = .codex(reasoningEffort: effort)
+      return true
+    case .grok, .openCode:
+      return false
+    }
   }
 
   /// Changes a Claude-only option without admitting it into Codex's state space.
   @discardableResult
   mutating func setClaudeRemoteControl(_ remoteControl: Bool?) -> Bool {
-    guard case .claude(_, let origin) = configuration else { return false }
-    configuration = .claude(remoteControl: remoteControl, origin: origin)
+    guard case .claude(_, let reasoningEffort, let origin) = configuration else { return false }
+    configuration = .claude(
+      remoteControl: remoteControl,
+      reasoningEffort: reasoningEffort,
+      origin: origin
+    )
     return true
+  }
+
+  /// Replaces the destination endpoint's provisional/default model with the runtime's own
+  /// report. The report is stamped into provenance once it is known, so later account-default
+  /// changes do not rewrite the path.
+  mutating func recordHandoffTargetModel(_ model: String) {
+    handoff?.recordTargetModel(model)
   }
 
   /// Whether a previous conversation exists that can be resumed.
@@ -722,8 +1304,18 @@ struct AgentSession: Codable, Identifiable {
   /// log needs. It is a `TranscriptID` the caller must not assume resumable — `resumeState`
   /// remains the authority on that.
   var externalIdentifier: String {
-    resumeState.transcriptID?.rawValue ?? id.uuidString.lowercased()
+    resumeState.transcriptID?.rawValue ?? threadingIdentifier
   }
+
+  /// Threading's own identifier for this chat, in the lowercased spelling every app-side
+  /// surface uses: the settings file, the MCP route, the history file, the extension command
+  /// context and the diagnostics journal are all keyed by it.
+  ///
+  /// Exposed beside the agent's identifier rather than instead of it — the two name the same
+  /// conversation to two different systems. For Claude and Grok they are the same string
+  /// because Threading mints the UUID and hands it over; Codex and OpenCode name themselves,
+  /// so there this is the only identifier that survives a `Continue with…` move intact.
+  var threadingIdentifier: String { id.uuidString.lowercased() }
 
   /// The name handed to the agent at launch, or nil when the user has not chosen one.
   ///
@@ -1031,6 +1623,7 @@ extension PersistedPanel {
 struct PersistedTab: Codable {
   enum Kind: String, Codable {
     case browser
+    case audit
     case html
     case image
     case semanticScene
@@ -1076,6 +1669,12 @@ struct PersistedSessionAttachment: Codable {
   let sourcePath: String?
   let kind: SessionAttachment.Kind
   let origin: SessionAttachment.Origin?
+
+  /// Written only when true, and read as false when absent: every payload predating the
+  /// configurable scope holds files that passed the narrow rule, so the absent case is a fact
+  /// about those files rather than a gap. Keeping the key out of the common row also keeps a
+  /// checkout's own document identical to what earlier builds wrote.
+  let isOutsideProject: Bool?
   let referencedAt: Date
 
   private enum CodingKeys: String, CodingKey {
@@ -1084,6 +1683,7 @@ struct PersistedSessionAttachment: Codable {
     case sourcePath
     case kind
     case origin
+    case isOutsideProject
     case referencedAt
   }
 }

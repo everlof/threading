@@ -82,6 +82,7 @@ enum AgentAccountDiscovery {
             switch provider {
             case .claude: return claudeAccounts()
             case .codex: return codexAccounts()
+            case .grok, .openCode: return []
             }
         }
 
@@ -93,7 +94,15 @@ enum AgentAccountDiscovery {
     /// Searches everything discovered: a session records the account it was started on, and a
     /// resume has to route back to it or the conversation id will not be found there. Switching
     /// a login off withdraws it from new work, not from the sessions already living on it.
+    ///
+    /// A runtime without account routing answers nil *quietly*. Nil was already the answer —
+    /// nothing is discovered for one — but it arrived through the not-found warning below, and
+    /// the sidebar looks an account up every time it reconfigures a row, which is on every tick
+    /// of a working agent. So a Grok or OpenCode session filled the log with the absence of a
+    /// feature, in the words Threading uses for a session whose real login has gone missing.
     static func account(for provider: AgentKind, handle: AccountHandle) -> AgentAccount? {
+        guard provider.supportsAccounts else { return nil }
+
         let discovered = allAccounts(for: provider)
 
         if let match = discovered.first(where: { $0.handle == handle }) {

@@ -4,6 +4,81 @@ Side chats, standalone terminals, the shell drawer, naming, launching, resuming 
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## The Runtime Capability Matrix
+
+`AgentKind.capabilities` in `Models/Project.swift` is the **only** place a runtime is named to
+decide what the host may do with it. Everything else asks `kind.supports(_:)`, and
+`scripts/check_architecture_boundaries.sh` fails the build on a `kind == .claude`-shaped
+comparison anywhere under `Sources/Threading` outside that file.
+
+The rule exists because the alternative was measured rather than imagined. Fifteen such
+comparisons had accumulated — the status line, the transcript title reader, the model reading,
+Remote Control, the two Fast mechanisms, the leading-slash envelope, subagent identity — and
+each one answered only for the runtimes that existed the day it was written. Grok and OpenCode
+fell into the `else` of every one of them silently. There is no way to review that: the
+question "what does OpenCode do here" has no single place to ask it.
+
+Three mechanisms carry provider difference, and mixing them up is how the matrix rots:
+
+| Mechanism | Owns | Example |
+|---|---|---|
+| `AgentCapabilities` | Static facts about the **runtime** | Claude draws a status line; Codex hooks and its app-server agree on a child's identity |
+| Catalog data | Facts about the **account and model**, read at runtime | `AgentModelOption.reasoningLevels` decides whether the effort chip appears at all — no runtime is named |
+| Optional protocols | Facts about a **live transport** | `FastModeConversation`, `ModelSwitchableConversation`, `SubagentReportingConversation` |
+
+Prefer the lower two. The opening effort chip is entirely catalog-driven. A reply-time effort
+chip additionally asks `ReasoningEffortConfigurableConversation`, because a model publishing
+levels does not prove that an already-running transport has a live wire for changing them.
+
+An exhaustive `switch` over `AgentKind` stays allowed and is often right — a transcript parser
+or a launch line genuinely differs per runtime, and there the compiler makes a fifth case a
+build error, which is the reminder the lint exists to reproduce for comparisons it cannot see.
+What the lint cannot catch is the *same* allowed switch written twice, so keep one copy:
+`SessionTranscript` is where "where is this session's file" is answered, after the replayer and
+the migration check each carried their own identical dispatch over the two transcript readers.
+Both would have needed editing to add a third, and neither would have failed to compile.
+
+**A capability and the code it governs must not be able to drift.** `AgentCapabilitiesTests`
+holds each pair to the other, because the failure mode is silent in both directions:
+
+- `.forking` is granted, but `AgentSession.forkedConfiguration` has no case for the runtime —
+  Fork appears in the menu and creates nothing.
+- `.nativeUI` is granted, the composer offers the surface, `ConversationViewController` has a
+  transport for it, and `ProjectStore.addSession` refuses the record. **This one shipped.**
+  Choosing Grok with the conversation surface created no session and reported no error.
+- `.headlessResearch` is granted, but `AgentLauncher.settingsResearchCommand` has no line for
+  the runtime — the settings search's Ask AI button offers a provider it cannot run. The
+  pairing test in `AgentLaunchQuotingTests` holds the claim to the delivery; the launch line
+  itself and the scoped MCP endpoint it talks to are
+  [`mcp-and-display.md`](mcp-and-display.md)'s.
+
+That second bug is why session construction now lives in
+`AgentSessionConfiguration.init?(kind:reasoningEffort:accountHandle:permissionMode:)`
+rather than as a switch in the store. A rejection there means one of exactly two things: the
+enum has no case that can represent the request, or the runtime lacks the capability the
+request needs. Nothing in it is a rule about a runtime by name.
+
+Reasoning effort has a second, narrower admission check in `ProjectStore.addSession`: an
+explicit value must be one of the resolved model's `reasoningLevels`. Claude attaches the
+installed CLI's documented session set (`low`, `medium`, `high`, `xhigh`, `max`) to every model
+option and launches it with `--effort`; Codex uses each account's own model cache and launches a
+`model_reasoning_effort` override. Grok and OpenCode publish neither a host-side catalog nor a
+launch contract, so the composer invents no rows and the store accepts no explicit value.
+
+Continuation lineage deliberately does **not** live in this provider-specific enum. Every
+runtime can receive a provider-neutral `ConversationHandoff`; putting the source into the Claude
+or Codex case made Grok/OpenCode continuations impossible to represent even after their delivery
+mechanisms existed.
+
+And it draws the line the store had blurred. A setting the runtime merely **ignores** is
+clamped — `AgentSession.init` already drops `usesNativeUI` for a runtime without it. A setting
+the runtime **cannot honour** is refused, because silently dropping an account handle would run
+the conversation against a login the user did not pick. Grok's native surface was refused when
+it should have been allowed, and OpenCode's was refused where clamping was the established
+answer everywhere else; both now go through one rule.
+
+## Side Chats
+
 A **side chat** is a session forked from another: it opens carrying the parent's context and
 keeps its own record, so a question can be asked without joining the conversation it asks
 about. `⋯` on a session row offers **New Side Chat** and **Ask on the Side…**, the second
@@ -61,17 +136,21 @@ discovery, the usage service, the brand icons, the migration.
 That conclusion still applies to the shell that belongs to a conversation. It is a **drawer
 under the conversation** (`ShellDrawerViewController`, ⌃`), which is what it always was in
 practice: a place to run a command *about* the conversation you are reading.
-`AgentKind` is down to `.claude` and `.codex`, and `supportsResume`, `supportsAccounts` and
-`supportsNativeUI` collapsed to `true` — that is the measure of how much of the model existed to
-describe the absence.
+`AgentKind` contains installed agent runtimes (`.claude`, `.codex`, `.grok`, `.openCode`), not
+model providers. `AgentCapabilities` is the single feature matrix consumed by presentation code.
+The standalone `grok` executable is a runtime with caller-minted UUIDs, a native ACP surface and
+a faithful permission mapping; choosing an xAI/Grok model through OpenRouter is still an OpenCode
+session. Grok and OpenCode currently have no Threading account routing or side chats; OpenCode is
+terminal-only and leaves permissions to its richer policy.
 
 A **standalone project terminal** is a different promise: a first-class sidebar destination
 for work that is not subordinate to a conversation. `ProjectTerminal` is deliberately its own
 small record rather than a third `AgentKind`: identity, displayed and custom titles, current
 directory, branch, theme assignment and creation time, with none of the transcript, provider,
-account, model, resume or import fields an `AgentSession` requires. A project's hover `+` asks
-for **New Chat…** or **New Terminal**; clicking the project row itself keeps opening the chat
-composer. The PTY begins when the terminal is first shown, is retained by
+account, model, resume or import fields an `AgentSession` requires. A project's hover `+` opens
+the chat composer on its press and offers **New Chat…** or **New Terminal** on a secondary
+click — the common case is a chat, and it should not cost a menu; clicking the project row
+itself keeps opening the chat composer. The PTY begins when the terminal is first shown, is retained by
 `ProjectTerminalRuntime` across sidebar switches, and ends when the row, project or app closes.
 After a normal exit the row remains dormant and **Start Again** creates a fresh shell in its
 last recorded directory. The record survives relaunch; process state and scrollback do not.
@@ -172,6 +251,23 @@ bottom, always installed and zero-high when closed, so every session surface pin
 the drawer's top and opening one is a change of constant. A split view would have brought its own
 collapse behaviour, delegate and priorities, all of which would need arguing out of the way.
 
+That change of constant moves the way every pane in the window moves. The gestures — the
+toggle, the drag spring, a moved-in tab's reveal — run it through `PaneTransition`
+([`window-chrome.md`](window-chrome.md), *how a pane moves*), while a session switch applies it
+instantly: the switch swaps the whole workspace at once, and the drawer sliding beside an
+instant page change would animate a change of subject as if it were a change of state. An
+animated close swaps the host off the session only in its completion — the tabs stay up while
+the band slides away — guarded by a generation counter so a reopen mid-slide is not hidden by
+the close it interrupted. The drawer's divider also shuts it like every other pane's: the
+height constraint clamps at the floor while the pointer keeps going, so
+`TerminalContainerViewController` keeps the unclamped running total during a drag, and the
+release asks `PaneTransition.dragShutsPane` — the strip reports only deltas, which is also why
+the drag-shut tests drive the container's two seams rather than synthesized events (a test
+`NSEvent` cannot carry `deltaY`). A drawer shut this way reopens at the floor the drag reached,
+never the overshoot, and the window is told through
+`terminalContainerDidChangeShellDrawer` so the toolbar's toggle follows a change it did not
+make.
+
 **Existing shell sessions were dropped, not converted** — there was nothing to convert. The
 version-1 → 2 state migration strips them before decoding, which it must: a kind the model no
 longer has does not decode, and one undecodable session would otherwise fail the whole document.
@@ -244,21 +340,65 @@ randomness injected, so tests pass a fixed date and a seeded generator; producti
 clock only at the call site. The hero hides below a height threshold
 (`viewDidLayout`) — half a greeting peeking from behind the prompt reads as a defect.
 
-The first chip is the **project**: every project (subtitle = its `~`-abbreviated folder, the
-old subheading), then *Add Existing Folder…* / *Create New Folder…*. Selection routes through
+**The prompt box is the same box the conversation replies in** — `SubmitPlacement.footer`, with
+model, mode and catalog-backed effort on the leading side of its bottom row and the account's
+usage reading, the surface and the send on the trailing side. Return sends, following `AppSettings.promptReturnKey`
+exactly as a reply does; ⌘Return sends under every setting. There is no Start button: the glyph
+that closes the row is the send, disabled with a stated reason while no project is chosen.
+
+**So it becomes that box rather than being replaced by it.** Starting a session swaps two whole
+surfaces, and the box is the one thing on both of them, which makes an instant swap read as a
+second screen arriving over the first. `ComposerHandoffAnimator` moves it instead: the composer's
+picture fades where it stood, the box's picture travels from where it was to where the reply box
+now is and crossfades into the real one, and the thread comes up under both — one animation group
+at `Design.Motion.handoff`, one completion, and an end state identical to the swap it replaced.
+
+It fires for exactly one route: a start made **in the composer** whose session is rendered
+natively. `SessionCoordinator` marks the pane at the point that start succeeds
+(`prepareComposerHandoff(for:)`) and the attach spends the mark, which requires the id to match
+*and* the composer to still be the surface on screen. Every other attach clears it, so a terminal
+start, a resume, a sidebar click, a remote start and a settings page are all the plain swap they
+always were, and a mark can never be inherited by whatever is selected next. Anything taking the
+pane mid-flight cancels the move onto its own end state and takes the ghosts with it. Under Reduce
+Motion the token is zero and the same path lands instantly, building no ghost at all.
+
+That also settled a height problem. A pane's content is a required minimum on the window, so
+anything here that grows without bound grows the *window* — which the old usage panel did, one
+bar per rate-limit window and one per metered model, off the bottom of the screen. The column is
+bounded by construction now: a chip row, a box capped at `Design.Size.inputMaxHeight`, and a
+one-line import offer under it. See
+[`window-chrome.md`](window-chrome.md#a-pane-cannot-be-taller-than-its-window).
+
+The first chip is the **location**: `<project> ▸ <checkout>` in a repository, the project alone
+outside one. Its menu opens with the checkouts a session can run in — this one, each added
+sibling (`ProjectStore.siblingCheckouts`), then *New Worktree…* — and the projects sit one
+layer in under *Switch Project*, with the same subtitles (`~`-abbreviated folders) the project
+chip used, followed by *Add Existing Folder…* / *Create New Folder…*. The nesting is not
+decoration: picking a checkout routes *this* session and leaves the composer untouched, picking
+a project navigates and resets every choice in it, and one flat list of places made the second
+reachable by a mis-click aimed at the first (see
+[`design-system.md`](design-system.md)). Selection routes through
 the delegate to `sidebar.select(projectID:)` — the one path project selection already takes —
 and the folder items reuse the coordinator's `addProject()`/`newProject()`. This is also what
 replaced the idea of a "first project" onboarding page: with **no projects at all the empty
 pane shows the composer itself in a nil-project mode** (`showEmptyState` →
-`showComposer(projectID: nil)`) — prompt live, **Start disabled**, chip reading "Choose a
-project…". Words typed before a project exists follow the composer into the project chosen
+`showComposer(projectID: nil)`) — prompt live, the send disabled and saying why, chip reading
+"Choose a project…" and its menu flattened to the projects themselves, since choosing one *is*
+the ask. Words typed before a project exists follow the composer into the project chosen
 next (unless that project already holds a draft); a draft belonging to a project just left
 does not leak back the other way. With projects present but nothing selected, the
 "No Session Selected" placeholder stays — the composer is the way *in*, not the idle state.
 
+The second chip is the **identity**: the agent's brand mark, and `<agent> · <login>` wherever
+that agent has more than one login to choose between. Its menu is the selected agent's accounts
+(with their usage readings, see [`accounts.md`](accounts.md)), a separator, then the *other*
+runtimes — the selected one is what the chip is showing, so a row for it would be the one row
+in the section that changed nothing. Switching login keeps the agent and clears the model;
+switching agent additionally moves to that agent's preferred account.
+
 ## Session Names
 
-**A session is never named after its agent or account** — the row's icon slot and account chip
+**A session is never named after its agent or account** — the row's icon slot and account mark
 already carry both facts, so "Claude Code 2" as a name repeated them while saying nothing about
 the conversation. `SessionNaming` holds the rules; three names remain, resolved by
 `displayTitle`:
@@ -427,6 +567,17 @@ after a bare `--`. Last matters as much as the `--`: `routed` appends the MCP fl
 the command, so terminating options where the prompt used to sit would have fed
 `--mcp-config` to the CLI as more prompt text.
 
+OpenCode's parser differs honestly: its opening is the value of `--prompt`, and a resume is
+`--session <ses_…>`. Its optional model remains the provider-qualified OpenCode id passed to
+`--model` (for example an OpenRouter model), not a new `AgentKind`.
+
+Grok's terminal contract was measured against 0.2.118. A fresh TUI launch is
+`grok --session-id <uuid> -- <opening>` and a later launch is `grok --resume <uuid>` with no
+opening replay. Quitting its browser-login screen leaves the session fresh because the UUID is
+not promoted until the public session list confirms it. `--model` is passed only when a session
+has an explicit model; otherwise the live/custom catalog and `/model` inside Grok remain
+authoritative.
+
 **A reusable opening message is part of the first turn, not a turn on every launch.**
 `AppSettings.newChatOpeningMessage` is optional app-wide context entered under Settings ▸
 General. `SessionCoordinator` trims it and appends it after the task with one blank line, then
@@ -496,6 +647,24 @@ drift from the selected path.
 How much a session may do before it stops to ask, chosen in the composer, overridable from a
 session's `⋯` menu, defaulted in Settings ▸ General. `AgentPermissionMode` owns the whole
 translation; `AgentLauncher.permissionMode(for:)` resolves session → app default → nil.
+
+**The whole translation, including which flags each runtime takes.** `launchFlags(for:)` returns
+the `AgentLaunchFlag` pairs for one mode on one runtime; the launcher appends whatever it gets
+back and knows nothing else about the mapping. That dispatch used to be a `switch session.kind`
+in the launcher choosing among the per-runtime value properties here, which meant two files had
+to agree and nothing said so — a runtime could be given its value property and no launcher
+branch, or a branch naming the wrong axis, and both compiled. `AgentCapabilitiesTests` now holds
+three invariants the split arrangement could not express: a runtime produces flags exactly when
+it claims `.permissionModes`, every flag is well-formed, and a runtime that splits the idea
+across independently-defaulted axes states *all* of them for *every* mode. Values are still
+asserted where they always were — against the tokenized launch line in
+`AgentPermissionModeTests`, which is the only place that proves the CLI receives them.
+
+This surface is capability-gated to Claude, Codex, and Grok. Grok accepts the same six values
+through `--permission-mode`, except that Threading's Manual is spelled `default` on its wire.
+OpenCode's `opencode.json` has a richer
+per-tool permission policy, and its `--auto` flag is not equivalent to any of the six modes;
+Threading therefore shows no mode control and leaves OpenCode's configuration untouched.
 
 **One vocabulary, Claude's**, because it is the only CLI that names a mode rather than a pair of
 axes. The six and what they mean are read out of the CLI (2.1.220) rather than assumed — its
@@ -691,12 +860,33 @@ stays in Core and knows nothing about sidebars: it announces `SessionArchiveRequ
 and the coordinator that already owns every other lifecycle decision observes it directly rather
 than having the window controller relay it back down.
 
-**Continuation lineage is not provider lineage.** A side chat's `forkedFrom` points at a
-provider-native child that can resume the same transcript semantics. A cross-provider session's
-`continuedFrom` instead records which Threading row supplied a frozen handoff, with
-`continuationSourceKind` retaining the decoder even if the source row is later deleted. The
-snapshot belongs to the destination row and is removed with it (or its project), so a future
-launch can regenerate the same bootstrap without depending on a mutable source transcript.
+**Continuation lineage is a durable path, not a launch-mode bit.** A side chat's `forkedFrom`
+points at a provider-native child that can resume the same transcript semantics. A cross-provider
+session instead owns a `ConversationHandoff`: ordered provider/model endpoints ending at itself,
+including stable Threading session ids and title snapshots. `continuedFrom` and
+`continuationSourceKind` remain computed compatibility views of the direct source, and the encoder
+continues to write their old keys so older builds can still read a new two-hop record.
+
+Repeated handoffs extend the path rather than replacing it. It is capped at sixteen endpoints;
+compaction retains the origin and newest suffix and records the exact omitted count. The native
+conversation renders a compact **Context handoff** divider, the sidebar hover card wraps the
+retained full path, and the divider's direct source endpoint navigates when that row still exists.
+Deleting or renaming an ancestor cannot rewrite provenance: each destination owns its frozen copy.
+
+The context snapshot is provider-neutral too. Claude/Codex transcripts are reduced through
+`TranscriptReplay`; Grok uses its documented `grok export`; OpenCode uses its documented
+`opencode export` JSON. Visible dialogue and bounded tool context are retained, private reasoning
+is omitted, and a continuation handed off again prepends the prior normalised snapshot while
+dropping the bootstrap/history-tool exchange that transported it. The result is capped at one
+million characters and stored under the destination id. The snapshot belongs to that destination
+row and is removed with it (or its project), so a future launch can regenerate the same bootstrap
+without depending on a mutable source transcript.
+
+Delivery follows runtime capability. Claude/Codex Terminal and all native Chat surfaces read
+pages from the session-scoped `conversation_history` tool. OpenCode receives the JSON snapshot as
+its documented `--file` attachment. Grok Terminal, whose TUI offers no ephemeral MCP registration
+or file flag, receives the newest bounded context inline. This is the only deliberately lossy
+transport; the durable snapshot and lineage remain complete within their stated bounds.
 
 **Deleting asks whatever the session is doing**, which is what separates it from everything
 above: they keep the session, and this one is the row itself going — the case a toast could not
@@ -722,9 +912,28 @@ silently in the direction of blocking a shutdown.
 **The `⋯` menu reads in groups, and the set-once items fold.** It had grown to seventeen
 top-level items with a twelve-item unbroken run in the middle — every conditional item just
 appended — so `populateSessionActions` now states its groups: lifecycle (Pin, Archive, Close),
-side chats, appearance and conduct, identity and housekeeping (Rename, Copy Session ID,
+side chats, appearance and conduct, identity and housekeeping (Rename, the Copy fold,
 sharing, account moves, continuation), then Delete, with Extensions always last
-(`RowExtensionCommandMenuTests` pins that). Theme and Permission Mode stay top-level because
+(`RowExtensionCommandMenuTests` pins that).
+
+**The Copy fold gathers what is needed *elsewhere*, and it copies two ids under two names,
+never one under a fallback.** "Copy Session ID" used to copy `externalIdentifier` — the
+agent's transcript id where one existed, Threading's own `SessionID` otherwise — so the
+string on the pasteboard meant a different thing on different rows, invisibly. **Copy ▸**
+(`sessionCopyEntry`, a pure builder tests call with resolved inputs) now holds **Agent
+Session ID** (the transcript id, absent rather than disabled until the agent has named the
+conversation), **Threading ID** (`AgentSession.threadingIdentifier`, the lowercased
+`SessionID` every app-side surface — settings file, MCP route, history file, extension
+context, journal — is keyed by), **Worktree Path** (the project's `folderPath`, which is
+exact: a session has no per-checkout override — routing to another worktree files it under
+that checkout's *project*), and **Transcript Path** (`SessionTranscript.url(for:in:)`,
+resolved at build because presence is the decision — the same cost `moveToAccountEntry`
+already pays through `canMigrate` — and absent for runtimes without a reader). For Claude and
+Grok the two ids are the same string because Threading mints the id; Codex and OpenCode name
+themselves, and the Threading id is the one that survives `Continue with…` and account moves
+intact. A standalone terminal carries the same fold — its `TerminalID` and its checkout,
+the latter resolved on the click via `displayProject(forTerminalID:)` because that lookup
+shells out to git. Theme and Permission Mode stay top-level because
 they are reached for repeatedly; what folds behind **Session Options** is what is set once and
 left alone — Interface, Claude Remote Control, Mute Notifications, Attachments. Three details
 are load-bearing: the fold's members carry their own targets, because the builder's retarget

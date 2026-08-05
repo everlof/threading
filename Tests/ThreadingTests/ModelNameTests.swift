@@ -56,6 +56,23 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(AgentModels.defaultEffort(for: .claude, account: account), "xhigh")
     }
 
+    func testEveryClaudeModelPublishesTheCLIsSessionEffortLevels() {
+        let expected = ["low", "medium", "high", "xhigh", "max"]
+
+        for option in AgentModels.options(for: .claude, account: nil) {
+            XCTAssertEqual(option.reasoningLevels.map(\.effort), expected, option.identifier)
+        }
+        XCTAssertEqual(
+            AgentModels.option(
+                identifier: "opus[1m]",
+                for: .claude,
+                account: nil
+            )?.reasoningLevels.map(\.effort),
+            expected,
+            "a configured long-context variant is still governed by Claude's session contract"
+        )
+    }
+
     func testCodexEffortComesFromTheRoutedAccountsConfig() throws {
         let directory = try temporaryAccountDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -178,7 +195,7 @@ final class ModelNameTests: XCTestCase {
             "medium"
         )
 
-        XCTAssertTrue(session.setCodexReasoningEffort("max"))
+        XCTAssertTrue(session.setReasoningEffort("max"))
         XCTAssertEqual(
             AgentModels.effectiveEffort(
                 for: session,

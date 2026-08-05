@@ -1,12 +1,12 @@
 import Foundation
 
-/// One reasoning level the installed Codex CLI says a model can use.
+/// One provider-native reasoning level an installed runtime says a model can use.
 struct AgentReasoningLevel: Equatable {
     let effort: String
     let description: String
 
-    /// Codex's config values are stable machine identifiers; the UI uses the names exposed by
-    /// its other surfaces while preserving an unfamiliar future value rather than dropping it.
+    /// Provider config values are stable machine identifiers; the UI uses familiar names while
+    /// preserving an unfamiliar future value rather than dropping it.
     var displayName: String {
         switch effort {
         case "low": return L10n.string("Light")
@@ -20,6 +20,43 @@ struct AgentReasoningLevel: Equatable {
                 .replacingOccurrences(of: "_", with: " ")
                 .replacingOccurrences(of: "-", with: " ")
                 .capitalized
+        }
+    }
+}
+
+/// The model a conversation runs when nothing pinned one, and where that name was read from.
+///
+/// `identifier` is nil when no source can name it — an account that configures no model whose
+/// runtime has not announced one yet — which is the one case a caller must render as a generic
+/// "Default model" rather than guessing the CLI's own fallback.
+struct ResolvedDefaultModel: Equatable {
+
+    /// Which source answered. Both mean "the CLI picks"; only one of them is a setting the user
+    /// can go and look at, so they are qualified differently on screen.
+    enum Source: Equatable {
+        /// The `model` key in the account's own `settings.json` (Claude) or `config.toml`
+        /// (Codex), or failing that its organisation's default.
+        case accountConfiguration
+        /// The id this session's runtime announced when it started.
+        case reportedByRuntime
+        /// What this account's runtime resolved an unpinned session to on an earlier run. A
+        /// report about the past, not a setting, and qualified differently on screen for it.
+        case rememberedFromEarlierRun
+    }
+
+    var identifier: String?
+    var source: Source
+
+    /// The model this may be *metered* by, which is narrower than the one it may be named after.
+    ///
+    /// A scoped window wrongly applied puts a session in the red over a model it is not running,
+    /// so only sources that speak for the session itself qualify: what the runtime reported, and
+    /// what the account is configured to run. An earlier run is a recollection — good enough to
+    /// print beside "last used", not good enough to charge a Fable window against.
+    var meteredIdentifier: String? {
+        switch source {
+        case .accountConfiguration, .reportedByRuntime: return identifier
+        case .rememberedFromEarlierRun: return nil
         }
     }
 }
@@ -86,14 +123,19 @@ enum AgentModels {
     static func options(for kind: AgentKind, account: AgentAccount?) -> [AgentModelOption] {
         switch kind {
         case .claude:
-            return AgentDefaults.claudeModels.map {
-                AgentModelOption(
-                    identifier: $0,
-                    displayName: ModelName.display(for: $0),
-                    fastServiceTier: nil,
-                    defaultServiceTier: nil
+            // The documented aliases first: they track the latest of each family, so they stay
+            // right as new versions ship and are what a user recognises. Anything the CLI has
+            // cached for *this login* is appended, which is the only way a model no alias names
+            // — `claude-fable-5[1m]` today, an org's grant tomorrow — reaches the menu at all.
+            let aliases = AgentDefaults.claudeModels.map { identifier in
+                claudeOption(
+                    identifier: identifier,
+                    displayName: ModelName.display(for: identifier)
                 )
             }
+            let known = Set(aliases.map(\.identifier))
+            return aliases + claudeAdditionalModels(account: account)
+                .filter { !known.contains($0.identifier) }
         case .codex:
             let catalog = codexCatalog(account: account)
             if !catalog.isEmpty { return catalog }
@@ -111,12 +153,50 @@ enum AgentModels {
                     )
                 ]
             } ?? []
+        case .grok, .openCode:
+            // These TUIs own live/custom model catalogs. An empty host catalog means the
+            // composer leaves `--model` unset and the runtime's TUI/config chooses honestly.
+            return []
         }
+    }
+
+    /// What "leave it to the CLI" resolves to for one conversation, and which source answered.
+    ///
+    /// Two sources describe the same thing at different removes: the account's config file is
+    /// our reading of what the CLI *would* pick, while the id the runtime announces on
+    /// `initialised` is what it actually picked. The runtime's answer therefore outranks the
+    /// file — but it speaks for the *default* only while the session has pinned nothing, since
+    /// after an explicit switch it names that choice instead, and calling the user's own pick
+    /// "the account default" would mislead in a way the generic string never did.
+    ///
+    /// Passed in rather than looked up so this stays pure: the caller knows its session, and
+    /// the rule is worth testing without an account directory on disk.
+    static func resolvedDefault(
+        sessionModel: String?,
+        reportedModel: String?,
+        configuredModel: String?,
+        rememberedModel: String? = nil
+    ) -> ResolvedDefaultModel {
+        if sessionModel == nil,
+           let reportedModel,
+           !reportedModel.isEmpty,
+           reportedModel != configuredModel {
+            return ResolvedDefaultModel(identifier: reportedModel, source: .reportedByRuntime)
+        }
+        if let configuredModel, !configuredModel.isEmpty {
+            return ResolvedDefaultModel(identifier: configuredModel, source: .accountConfiguration)
+        }
+        // Last, and only as a report: what this login resolved to the last time it ran is
+        // evidence rather than configuration, and the service can answer differently tomorrow.
+        if let rememberedModel, !rememberedModel.isEmpty {
+            return ResolvedDefaultModel(identifier: rememberedModel, source: .rememberedFromEarlierRun)
+        }
+        return ResolvedDefaultModel(identifier: nil, source: .accountConfiguration)
     }
 
     /// The model the CLI will use when Threading passes no `--model` flag at all.
     ///
-    /// Both agents record this per account, which is what lets the composer name the model
+    /// Claude and Codex record this per account, which is what lets the composer name the model
     /// instead of saying "Default" — the chip's whole job is to answer *which model will this
     /// session run on*, and "Default" makes the user go and look it up somewhere else.
     ///
@@ -128,6 +208,8 @@ enum AgentModels {
             return configuredClaudeModel(account: account)
         case .codex:
             return configuredCodexModel(account: account)
+        case .grok, .openCode:
+            return nil
         }
     }
 
@@ -146,6 +228,8 @@ enum AgentModels {
                 AgentDefaults.codexReasoningEffortKey,
                 account: account
             )
+        case .grok, .openCode:
+            return nil
         }
     }
 
@@ -160,15 +244,33 @@ enum AgentModels {
         model: String?,
         account: AgentAccount?
     ) -> String? {
-        let option = option(identifier: model, for: session.kind, account: account)
+        effectiveEffort(
+            selected: session.reasoningEffort,
+            kind: session.kind,
+            model: model,
+            account: account
+        )
+    }
 
-        if let selected = session.reasoningEffort,
+    /// The effort a not-yet-created session will request or inherit.
+    ///
+    /// Kept beside the existing-session form so the opening composer and reply composer cannot
+    /// disagree about an invalid inherited value after a model change.
+    static func effectiveEffort(
+        selected: String?,
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?
+    ) -> String? {
+        let option = option(identifier: model, for: kind, account: account)
+
+        if let selected,
            option?.reasoningLevels.isEmpty != false
             || option?.supports(reasoningEffort: selected) == true {
             return selected
         }
 
-        if let configured = defaultEffort(for: session.kind, account: account),
+        if let configured = defaultEffort(for: kind, account: account),
            option?.reasoningLevels.isEmpty != false
             || option?.supports(reasoningEffort: configured) == true {
             return configured
@@ -187,7 +289,7 @@ enum AgentModels {
         model: String?,
         account: AgentAccount?
     ) -> Bool? {
-        guard kind == .codex else { return nil }
+        guard kind.supports(.serviceTierFastMode) else { return nil }
 
         if let configured = configuredCodexValue(
             AgentDefaults.codexServiceTierKey,
@@ -212,6 +314,48 @@ enum AgentModels {
         return defaultTier == option.fastServiceTier
     }
 
+    /// Whether a Fast control belongs on screen for this runtime and model at all.
+    ///
+    /// The two mechanisms answer from different places — a service tier asks the account's
+    /// catalog, while a live control channel has no per-account signal to ask and so falls back
+    /// to the model family. Both are consulted here rather than in the view, which should only
+    /// be deciding whether to show a chip.
+    ///
+    /// The control-channel branch is still Claude's measured family test, because Claude is the
+    /// only runtime with that mechanism and no second one has been measured. A runtime granted
+    /// `.liveFastModeControl` needs its own answer written here, not inherited from this one.
+    static func supportsFastMode(
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?
+    ) -> Bool {
+        if kind.supports(.liveFastModeControl) {
+            return claudeSupportsFastMode(model)
+        }
+        guard kind.supports(.serviceTierFastMode) else { return false }
+        return option(identifier: model, for: kind, account: account)?.supportsFastMode == true
+    }
+
+    /// The Fast setting a conversation will actually run with, or nil where "whatever the
+    /// account defaults to" is the only honest answer.
+    ///
+    /// Three sources in the order the user set them, the same shape as `effectiveEffort`: the
+    /// conversation's own choice, then the account or catalog tier, and finally what *unset*
+    /// means for this runtime. A live control-channel flag starts off until Threading sends it,
+    /// so unset is a known `false`; an unreadable service tier stays nil rather than claiming
+    /// Standard.
+    static func effectiveFastMode(
+        for session: AgentSession,
+        model: String?,
+        account: AgentAccount?
+    ) -> Bool? {
+        if let chosen = session.fastMode { return chosen }
+        if let inherited = defaultFastMode(for: session.kind, model: model, account: account) {
+            return inherited
+        }
+        return session.kind.supports(.liveFastModeControl) ? false : nil
+    }
+
     /// Whether a Claude model can run in fast mode.
     ///
     /// Fast mode is a live control-channel flag, not a launch flag or a service tier, so it is
@@ -233,18 +377,119 @@ enum AgentModels {
         account: AgentAccount?
     ) -> AgentModelOption? {
         guard let identifier, !identifier.isEmpty else { return nil }
-        return options(for: kind, account: account).first { $0.identifier == identifier }
+        if let known = options(for: kind, account: account).first(where: {
+            $0.identifier == identifier
+        }) {
+            return known
+        }
+
+        switch kind {
+        case .claude:
+            // Settings and transcripts may name a dated or long-context variant that is not a
+            // picker row. Claude's effort contract is session-wide, so the resolved model still
+            // has real metadata even when its identifier came from outside the host catalog.
+            return claudeOption(
+                identifier: identifier,
+                displayName: ModelName.display(for: identifier)
+            )
+        case .codex, .grok, .openCode:
+            return nil
+        }
     }
 
     // MARK: - Private Methods
 
-    /// Reads `"model"` from the account's `settings.json`.
+    /// Reads `"model"` from the account's `settings.json`, then the organisation's default.
     ///
     /// The default account's settings live in `~/.claude`; an alternate account's live in the
     /// config directory it is routed to, which is exactly what `configPath` holds — so one
     /// path serves both and an account on a different model reports it.
+    ///
+    /// The org default is consulted only when the user's own file is silent, and never the other
+    /// way round: a login that states a model has already overridden its organisation, and
+    /// reporting the org's choice there would name a model the session will not run.
     private static func configuredClaudeModel(account: AgentAccount?) -> String? {
         configuredClaudeSetting(AgentDefaults.claudeModelKey, account: account)
+            ?? organisationClaudeModel(account: account)
+    }
+
+    /// Reads the organisation's default model out of the CLI's own state file.
+    ///
+    /// Null on every personal login measured, so this is a lead for managed accounts rather than
+    /// a fix for ordinary ones. **The value's shape is unverified** — it was null wherever it
+    /// could be observed — so a bare string and the two plausible object shapes are all accepted
+    /// and anything else reads as absent. Being wrong here costs a miss, never a wrong name.
+    private static func organisationClaudeModel(account: AgentAccount?) -> String? {
+        guard let value = claudeState(account: account)?[
+            AgentDefaults.claudeOrgDefaultModelKey
+        ] else { return nil }
+
+        if let identifier = value as? String {
+            return identifier.isEmpty ? nil : identifier
+        }
+        guard let nested = value as? [String: Any] else { return nil }
+        for key in AgentDefaults.claudeOrgDefaultNestedKeys {
+            if let identifier = nested[key] as? String, !identifier.isEmpty {
+                return identifier
+            }
+        }
+        return nil
+    }
+
+    /// The models this login may select beyond the documented aliases.
+    ///
+    /// The CLI's own label is preferred only where `ModelName` does not recognise the id — it
+    /// returns an unknown identifier verbatim, and a raw `claude-…-5[1m]` in a menu is worse
+    /// than the service's own word for it. Where both know the model, ours wins so one model
+    /// reads the same on the chip, the pill and this row.
+    private static func claudeAdditionalModels(account: AgentAccount?) -> [AgentModelOption] {
+        guard let entries = claudeState(account: account)?[
+            AgentDefaults.claudeAdditionalModelsKey
+        ] as? [[String: Any]] else { return [] }
+
+        return entries.compactMap { entry in
+            guard let identifier = entry["value"] as? String, !identifier.isEmpty else {
+                return nil
+            }
+            let display = ModelName.display(for: identifier)
+            let label = entry["label"] as? String
+            return claudeOption(
+                identifier: identifier,
+                displayName: display == identifier ? (label ?? identifier) : display
+            )
+        }
+    }
+
+    /// Claude documents one session-level effort set rather than per-model subsets. Attaching
+    /// those levels while the provider-specific option is built keeps presentation data-driven:
+    /// views still ask the selected model, never the runtime's name.
+    private static func claudeOption(
+        identifier: String,
+        displayName: String
+    ) -> AgentModelOption {
+        AgentModelOption(
+            identifier: identifier,
+            displayName: displayName,
+            fastServiceTier: nil,
+            defaultServiceTier: nil,
+            reasoningLevels: AgentDefaults.claudeReasoningEfforts.map {
+                AgentReasoningLevel(effort: $0, description: "")
+            }
+        )
+    }
+
+    /// The CLI's cached per-account state, or nil when it has never written one.
+    private static func claudeState(account: AgentAccount?) -> [String: Any]? {
+        guard let account else { return nil }
+
+        let url = URL(fileURLWithPath: account.configPath)
+            .appendingPathComponent(AgentDefaults.claudeStateFile)
+
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        return json
     }
 
     private static func configuredClaudeSetting(

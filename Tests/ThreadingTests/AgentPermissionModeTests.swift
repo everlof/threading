@@ -63,6 +63,40 @@ final class AgentPermissionModeTests: XCTestCase {
         XCTAssertEqual(Self.value(after: "--permission-mode", in: words), "plan")
     }
 
+    /// **Every** native transport states the mode, not just the two that had a test each.
+    ///
+    /// Grok's did not. The capability was granted, all three UI surfaces offered the control,
+    /// and `launchFlags(for: .grok)` returned a real `--permission-mode` — but `grokStreamPlan`
+    /// never called `appendPermissionMode`, so choosing Plan on a natively rendered Grok
+    /// session recorded the choice, redrew the chip, and left the process on whatever `grok`
+    /// defaults to. The ACP handshake carries no mode either, so nothing downstream recovered
+    /// it.
+    ///
+    /// Written over `allCases` rather than per-runtime because that is exactly why it was
+    /// missed: the two runtimes with native tests passed, and the third had no test to fail.
+    func testEveryNativeTransportStatesTheModeItWasGiven() throws {
+        for kind in AgentKind.allCases where kind.supports(.nativeUI)
+            && kind.supports(.permissionModes) {
+            let session = Self.session(kind: kind, mode: .plan, usesNativeUI: true)
+            let words = try Self.tokenizing(
+                XCTUnwrap(AgentLauncher.streamPlan(for: session, in: Self.project).arguments.last)
+            )
+
+            // Codex spends the mode on two axes and names neither `--permission-mode`; the
+            // shared claim is that *something* on the line carries it.
+            let stated = AgentPermissionMode.plan.launchFlags(for: kind)
+            XCTAssertFalse(stated.isEmpty, "\(kind) claims the vocabulary but produces no flags")
+
+            for flag in stated {
+                XCTAssertEqual(
+                    Self.value(after: flag.name, in: words),
+                    flag.value,
+                    "\(kind)'s native launch dropped \(flag.name)"
+                )
+            }
+        }
+    }
+
     // MARK: - Codex
 
     /// Codex has no mode flag, so each mode becomes an approval policy *and* a sandbox — and the
@@ -130,6 +164,26 @@ final class AgentPermissionModeTests: XCTestCase {
         }
     }
 
+    // MARK: - Grok
+
+    /// Grok names the same six modes. Only Manual differs on the wire: Grok calls the ordinary
+    /// ask-first posture `default`, while Claude's external spelling is `manual`.
+    func testEachModeReachesGrokAsItsOwnFlagValue() throws {
+        let expected: [AgentPermissionMode: String] = [
+            .manual: "default",
+            .plan: "plan",
+            .acceptEdits: "acceptEdits",
+            .auto: "auto",
+            .dontAsk: "dontAsk",
+            .bypassPermissions: "bypassPermissions"
+        ]
+
+        for (mode, value) in expected {
+            let words = try Self.launchWords(kind: .grok, mode: mode)
+            XCTAssertEqual(Self.value(after: "--permission-mode", in: words), value)
+        }
+    }
+
     // MARK: - Resolution
 
     /// No choice anywhere means **no flag** — not a mode Threading picked. Naming one would
@@ -139,7 +193,7 @@ final class AgentPermissionModeTests: XCTestCase {
         for kind in AgentKind.allCases {
             let words = try Self.launchWords(kind: kind, mode: nil)
 
-            XCTAssertFalse(words.contains("--permission-mode"), "\(kind) invented a Claude mode")
+            XCTAssertFalse(words.contains("--permission-mode"), "\(kind) invented a permission mode")
             XCTAssertFalse(words.contains("--ask-for-approval"), "\(kind) invented an approval policy")
             XCTAssertFalse(words.contains("--sandbox"), "\(kind) invented a sandbox")
         }
@@ -162,6 +216,154 @@ final class AgentPermissionModeTests: XCTestCase {
         let words = try Self.launchWords(kind: .claude, mode: .plan)
 
         XCTAssertEqual(Self.value(after: "--permission-mode", in: words), "plan")
+    }
+
+    // MARK: - One vocabulary, three surfaces
+
+    /// The chip names the mode that will actually apply, not merely the one chosen on it: the
+    /// session's own answer first, the app-wide default where it has none, and where the
+    /// decision goes when there is no default either.
+    func testTheChipNamesTheModeThatWillActuallyApply() {
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(selected: .plan, inherited: .dontAsk),
+            AgentPermissionMode.plan.displayName
+        )
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(selected: nil, inherited: .dontAsk),
+            AgentPermissionMode.dontAsk.displayName
+        )
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(selected: nil, inherited: nil),
+            PermissionModePresentation.agentSettingTitle
+        )
+    }
+
+    /// One posture, three entrances: the session row's menu, the opening composer's chip and
+    /// the reply composer's chip. They must offer the same choices, because three menus for one
+    /// setting can otherwise disagree about what the app-wide default is even called — which is
+    /// what `PermissionModePresentation` exists to close.
+    ///
+    /// The closing note is deliberately excluded from the comparison: *when* a choice applies is
+    /// the one thing these three genuinely differ about.
+    func testTheThreeSurfacesOfferTheSamePermissionModeRows() throws {
+        AppSettings.shared.defaultPermissionMode = .dontAsk
+        let chipTitle = PermissionModePresentation.chipTitle(
+            selected: nil,
+            inherited: PermissionModePresentation.appDefault
+        )
+
+        let sidebar = ProjectSidebarViewController()
+        let sidebarRows = try XCTUnwrap(
+            sidebar.sessionActionEntries(
+                for: AgentSession(kind: .claude, title: "Row", usesNativeUI: false)
+            )
+            .compactMap(\.item)
+            .first { $0.title == L10n.string("Permission Mode") }?
+            .submenu,
+            "the session menu offers no Permission Mode item"
+        )
+
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        composer.refreshDerivedState()
+        let composerRows = try XCTUnwrap(
+            Self.offeredRows(ofChipTitled: chipTitle, in: composer.view),
+            "the opening composer offers no permission-mode chip"
+        )
+
+        let conversation = Self.conversationController(kind: .claude)
+        let replyRows = try XCTUnwrap(
+            Self.offeredRows(ofChipTitled: chipTitle, in: conversation.view),
+            "the reply composer offers no permission-mode chip"
+        )
+
+        let expected = PermissionModePresentation.rows(
+            for: .claude,
+            selected: nil,
+            inherited: .dontAsk,
+            timing: .whenTheSessionStarts
+        )
+        XCTAssertEqual(Self.choices(in: sidebarRows), Self.choices(in: expected))
+        XCTAssertEqual(Self.choices(in: composerRows), Self.choices(in: expected))
+        XCTAssertEqual(Self.choices(in: replyRows), Self.choices(in: expected))
+
+        // The inherit row names the default rather than saying only "default", on all three.
+        XCTAssertEqual(
+            expected.first?.item?.title,
+            L10n.format("Use Default (%@)", AgentPermissionMode.dontAsk.displayName)
+        )
+    }
+
+    /// A menu that only writes a record says so. The session row's item has always been
+    /// record-only, and the reply composer's chip becomes so on a dormant conversation and on
+    /// every transport that cannot be asked mid-conversation.
+    func testTheRecordOnlyMenuSaysWhenItApplies() throws {
+        XCTAssertNil(PermissionModePresentation.note(for: .whenTheSessionStarts))
+        XCTAssertNil(PermissionModePresentation.note(for: .immediately))
+
+        let note = try XCTUnwrap(PermissionModePresentation.note(for: .whenTheChatRestarts))
+        let rows = PermissionModePresentation.rows(
+            for: .claude,
+            selected: nil,
+            inherited: nil,
+            timing: .whenTheChatRestarts
+        )
+        let last = try XCTUnwrap(rows.last?.item)
+        XCTAssertEqual(last.title, note)
+        XCTAssertFalse(last.isEnabled, "the note must not read as a seventh mode to choose")
+        XCTAssertNil(last.onChoose)
+    }
+
+    /// The chip is withheld where the runtime has no posture Threading can state. OpenCode owns
+    /// a richer per-tool policy in `opencode.json` that none of these six describes, so every
+    /// surface hides the control rather than offering a mapping it would not honour.
+    func testTheSurfacesWithholdTheChoiceWhereTheRuntimeHasNoMode() throws {
+        XCTAssertFalse(AgentKind.openCode.supportsPermissionModes)
+
+        let sidebar = ProjectSidebarViewController()
+        let titles = sidebar.sessionActionEntries(
+            for: AgentSession(kind: .openCode, title: "Row", usesNativeUI: false)
+        ).compactMap { $0.item?.title }
+        XCTAssertFalse(titles.contains(L10n.string("Permission Mode")))
+
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        composer.refreshDerivedState()
+        // By identifier rather than by title: the identity chip names the login beside the agent
+        // wherever the machine running this has more than one, so its title is not something a
+        // test can spell.
+        let identityChip = try XCTUnwrap(
+            Self.chip(identified: "composer.session-start.identity", in: composer.view),
+            "the composer offers no identity chip"
+        )
+        Self.choose(
+            titled: AgentKind.openCode.displayName,
+            on: identityChip
+        )
+        XCTAssertNil(
+            Self.chip(
+                titled: PermissionModePresentation.chipTitle(selected: nil, inherited: nil),
+                in: composer.view
+            ),
+            "a runtime with no permission mode was still offered one"
+        )
+    }
+
+    /// The mode chip's visibility is not the model catalog's business. Grok publishes no host
+    /// model catalog at all — which used to hide every control on the row, this one included,
+    /// through the early return the model chip needs.
+    func testTheReplyChipSurvivesAnEmptyModelCatalog() throws {
+        XCTAssertTrue(AgentKind.grok.supportsPermissionModes)
+        XCTAssertTrue(
+            AgentModels.options(for: .grok, account: nil).isEmpty,
+            "Grok grew a model catalog; this test no longer covers the empty case"
+        )
+
+        let conversation = Self.conversationController(kind: .grok, mode: .plan)
+        XCTAssertNotNil(
+            Self.chip(titled: AgentPermissionMode.plan.displayName, in: conversation.view),
+            "the mode chip went with the model catalog"
+        )
     }
 
     // MARK: - Persistence
@@ -262,8 +464,12 @@ final class AgentPermissionModeTests: XCTestCase {
         folderURL: URL(fileURLWithPath: "/tmp/p")
     )
 
-    private static func session(kind: AgentKind, mode: AgentPermissionMode?) -> AgentSession {
-        var session = AgentSession(kind: kind, title: "t")
+    private static func session(
+        kind: AgentKind,
+        mode: AgentPermissionMode?,
+        usesNativeUI: Bool = false
+    ) -> AgentSession {
+        var session = AgentSession(kind: kind, title: "t", usesNativeUI: usesNativeUI)
         session.permissionMode = mode
         return session
     }
@@ -278,6 +484,86 @@ final class AgentPermissionModeTests: XCTestCase {
                 AgentLauncher.plan(for: session(kind: kind, mode: mode), in: project).arguments.last
             )
         )
+    }
+
+    /// A natively rendered conversation, built but never started: the chips are configured from
+    /// the record, so nothing here needs a process.
+    private static func conversationController(
+        kind: AgentKind,
+        mode: AgentPermissionMode? = nil
+    ) -> ConversationViewController {
+        var session = AgentSession(kind: kind, title: "Reply", usesNativeUI: true)
+        session.permissionMode = mode
+        let controller = ConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Reply",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        return controller
+    }
+
+    /// The rows a chip would actually drop down, taken through its own presentation seam rather
+    /// than by calling the provider a test would have to reach past `private` to find.
+    private static func offeredRows(
+        ofChipTitled title: String,
+        in view: NSView
+    ) -> [ThemedMenuEntry]? {
+        guard let chip = self.chip(titled: title, in: view) else { return nil }
+        var offered: [ThemedMenuEntry]?
+        chip.menuPresentationOverride = { presentation in
+            offered = presentation.entries
+            return nil
+        }
+        _ = chip.accessibilityPerformShowMenu()
+        chip.menuPresentationOverride = nil
+        return offered
+    }
+
+    /// Presses a row on a chip by name, the way a pointer would.
+    private static func choose(titled title: String, on chip: ChipView) {
+        chip.menuPresentationOverride = { presentation in
+            presentation.entries.compactMap(\.item).first { $0.title == title }
+        }
+        _ = chip.accessibilityPerformShowMenu()
+        chip.menuPresentationOverride = nil
+    }
+
+    /// Finding a chip by its title is also how "the control is offered at all" is asserted, so
+    /// a hidden branch of the tree is not searched: a stack keeps its hidden arranged views as
+    /// subviews, and a chip nobody can see is not a chip on offer.
+    private static func chip(titled title: String, in view: NSView) -> ChipView? {
+        guard !view.isHidden else { return nil }
+        if let chip = view as? ChipView, chip.accessibilityTitle() == title { return chip }
+        for subview in view.subviews {
+            if let found = chip(titled: title, in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// The same search by identifier, for a chip whose title states something discovered from
+    /// the machine rather than something this test chose.
+    private static func chip(identified identifier: String, in view: NSView) -> ChipView? {
+        guard !view.isHidden else { return nil }
+        if let chip = view as? ChipView, chip.accessibilityIdentifier() == identifier {
+            return chip
+        }
+        for subview in view.subviews {
+            if let found = chip(identified: identifier, in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// The rows a person can actually pick, which is what has to match across the surfaces —
+    /// the closing note is a sentence, not a choice. Flattened to strings so the whole row
+    /// reads in a failure message rather than only the first field that differed.
+    private static func choices(in rows: [ThemedMenuEntry]) -> [String] {
+        rows.compactMap(\.item)
+            .filter(\.isEnabled)
+            .map { "\($0.isSelected ? "[x]" : "[ ]") \($0.title) | \($0.subtitle ?? "")" }
     }
 
     private static func value(after flag: String, in words: [String]) -> String? {
