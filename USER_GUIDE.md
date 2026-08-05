@@ -603,6 +603,26 @@ show them idle and ready, and opening one attaches a session that is already run
 of resuming it on the click. Only what was live at quit comes back — closed and archived
 sessions stay dormant — and after a crash nothing relaunches automatically.
 
+### Continuing with another provider
+
+Right-click a recorded chat and choose **Continue with…** to start a new session with any other
+runtime: Claude Code, Codex, Grok, or OpenCode. The source stays resumable. Threading freezes its
+visible conversation into a provider-neutral snapshot, creates a new provider-native conversation,
+and sends that snapshot through the safest launch path the destination supports. Private reasoning
+is not copied; bounded tool calls and results are copied as untrusted context.
+
+The new chat remembers the whole provider/model path across repeated continuations. Native Chat
+shows it in a **Context handoff** divider above the conversation; every session, including
+terminal-only OpenCode, shows the retained path in its sidebar hover card. Click the divider's
+source endpoint to return to the previous chat. If an older row was deleted, its frozen provider
+and model label remains but it is no longer navigable.
+
+Claude/Codex Terminal and native Chat use Threading's private paginated history tool. OpenCode
+receives the snapshot with its `--file` launch option. Grok Terminal receives a bounded inline
+copy because Grok's TUI has no per-launch MCP or file-attachment flag; Grok Chat uses the private
+history tool through ACP. Very long snapshots keep the newest context and say when earlier
+content was omitted.
+
 ### Standalone terminals
 
 Choose **New Terminal** from a project's hover **+** to add a terminal row and start its shell.
@@ -622,8 +642,10 @@ shown under, then from the app default.
 **⌃`** (Control-backtick), or **View ▸ Shell**, opens a tabbed drawer underneath the session
 you are reading. The first time it opens it holds the session's shell; the **+** at the end of
 its strip adds more — another shell, or a browser (private too). Drag the strip above it to
-resize; tabs reorder by drag or their secondary-click menu, exactly as the display panel's do,
-and **⌘⇧[ / ⌘⇧]** and **⌘1–⌘9** work here when the drawer has focus.
+resize; push it on past the drawer's floor and the drawer closes, the same gesture that closes
+the sidebar and the display panel at their dividers. Tabs reorder by drag or their
+secondary-click menu, exactly as the display panel's do, and **⌘⇧[ / ⌘⇧]** and **⌘1–⌘9** work
+here when the drawer has focus.
 
 It is not a session of its own — shells used to be, and it was the wrong shape: there was no
 conversation to resume, no transcript, and nothing to come back to. It belongs to the session
@@ -760,6 +782,26 @@ own. And it appears only when there is an agent running, it is between turns, an
 Tools ▸ This session** is switched on — the agent renames the chat by calling a tool, so with
 that group off there is nothing to ask. A name you typed yourself still wins: the agent's name
 is stored underneath it and shows through if you ever clear your own.
+
+### Copying identifiers and paths
+Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**
+submenu:
+
+- **Agent Session ID** — the agent's own id for the conversation: what a `--resume` takes in
+  a terminal and what the transcript file on disk is named after. It appears once the agent
+  has named the conversation, so a chat that has never launched does not offer it.
+- **Threading ID** — Threading's own id for the chat. It never changes: not when the
+  conversation moves to another account, not when it continues with another provider, not
+  across resumes. It is what extensions, support files and the diagnostics journal key by,
+  so it is the one to quote when the question is about the app. For Claude and Grok the two
+  ids are the same string, because Threading mints the id and hands it to the agent; Codex
+  and OpenCode name themselves, so there the two differ.
+- **Worktree Path** — the checkout the session runs in: its project's folder.
+- **Transcript Path** — where the agent's transcript lives on disk, for grepping or quoting.
+  Shown when Threading knows how to find it (Claude and Codex).
+
+A standalone terminal carries the same **Copy ▸** submenu with its own **Threading ID** and
+the **Worktree Path** of the checkout it is currently standing in.
 
 ### Permission mode
 How much a chat may do before it stops to ask. Claude Code and Codex support it, in one set of names:
@@ -1446,8 +1488,8 @@ browser, Git Review, Session Info) are reachable without an agent putting conten
 
 The tabs are yours to arrange: drag one along the strip to reorder it, middle-click one to
 close it, or use its secondary-click menu — **Close Tab**, **Close Other Tabs**,
-**Close Tabs to the Right**, then **Move Left** / **Move Right**. The order is the same one
-the agent sees, and it survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and
+**Close Tabs to the Right**, **Close All Tabs**, then **Move Left** / **Move Right**. The
+order is the same one the agent sees, and it survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
@@ -1511,8 +1553,8 @@ Four buttons sit at the header's right edge:
 
 - **Context** (⋯) — the same full menu as the session row's `⋯`: pinning, archiving, side
   chats, **Theme**, **Permission Mode**, **Session Options** (Interface, Claude Remote
-  Control, Mute Notifications, Attachments), rename, account moves, sharing, deletion, and
-  any installed extension actions that apply.
+  Control, Mute Notifications, Attachments), rename, the **Copy ▸** submenu, account moves,
+  sharing, deletion, and any installed extension actions that apply.
 - **Interface** — switches directly to the other renderer. Its icon points at the destination:
   chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
@@ -1542,6 +1584,18 @@ Five kinds of content:
   the ones the panel comes back to. Two text files render as a native diff instead.
   Agents open comparisons with a before and an after; you can open your own with the panel's
   **+ ▸ Compare Files…**, which asks for exactly two files (first chosen is the old side).
+  The mode chip and both buttons sit in a row at the top of the tab, so they stay put while a
+  tall screenshot scrolls under them.
+- **Sending a comparison to someone** — the ⇧ button in that row (or **Export Comparison…** on
+  the tab's right-click menu) writes the comparison as a web page the recipient opens in any
+  browser, with no copy of Threading and nothing to install. The exported page carries the same
+  five modes: they can drag the seam, hold the fade, and ask difference the same questions you
+  did, and it opens on whichever mode you left the tab in. A text comparison exports as the
+  same diff. The save panel offers two formats: **Single Page (.html)** is one file with the
+  images inside it — the fastest thing to drag into a chat window — and **Folder in a Zip
+  (.zip)** keeps the images as files beside the page, so the recipient also receives the
+  originals, and it survives mail that strips `.html` attachments. Nothing in the page loads
+  from the network, and it names the two files without saying where they live on your Mac.
 - **Native scenes** — bounded semantic maps supplied by an agent or another MCP server. Treemaps,
   heatmaps, timelines, dependency maps, scatter plots, and similar views use Threading's active
   theme and native AppKit accessibility rather than HTML. The scene is stored with its tab.
@@ -1686,8 +1740,10 @@ cookies and agent routing—not a replay or a screenshot.
 
 **Exact** means Threading retained the provider's decoded native JSON value. **Exact · redacted**
 means the same structure was retained but sensitive values were visibly replaced and listed:
-credential-shaped fields, typed/form values and image bytes are redacted. Tool output may still
-contain source code, terminal output, URLs or page data, so treat the ledger as local project data.
+credential-shaped fields and image bytes are redacted. Ordinary browser text and form values stay
+exact. There is not yet a share-safe audit export, so review and redact a copy before sharing it
+outside the project. Tool output may still contain source code, terminal output, URLs or page data,
+so treat the ledger as local project data.
 
 Claude, Codex and Grok Chat expose structured execution events and receive provider-native capture.
 Grok Terminal and OpenCode currently expose no equivalent structured feed through Threading's
@@ -1780,6 +1836,23 @@ viewer for the selected session's checkout, so you can watch what an agent is ch
 without leaving the terminal. You can stage and commit from it; **discarding is deliberately
 not offered** — everything the pane can do is reversible by the control beside it, and
 throwing away a change an agent just made is not.
+
+### Pull requests
+
+For a checkout whose `origin` is on GitHub, Git Review also shows the current branch's pull
+request, draft/review state and checks. Its main button always takes one explicit step: push the
+branch, create its pull request, push a newer head, or open the existing pull request. Uncommitted
+changes are named and stay local.
+
+The creation rule belongs to the repository. Choose it from the project's secondary-click menu
+under **Pull Requests**, or from the policy chip in Git Review; linked worktrees share the same
+setting. **Review before publishing** is the default and opens an editable title/description
+sheet. **Draft with Codex** can fill that sheet, but Codex cannot submit it — only pressing
+**Publish pull request** does. Repositories can instead make an explicit Create press publish a
+draft or ready pull request directly, or allow pushes without ever creating one.
+
+Threading uses the GitHub sign-in chain shown in **Settings ▸ GitHub**. Without an API sign-in it
+opens GitHub's prefilled compare form in the browser; it does not attempt an anonymous write.
 
 ### The status card
 
@@ -1907,22 +1980,37 @@ it — which is the one case that can report "the index is in use".
 For pointing at the interface itself — when you want to tell an agent (or a person) *which
 element* or *which spot* you mean, with a report you can paste straight into a conversation.
 
-Two modes, both under the View menu:
+**View ▸ Inspect…** (**Cmd+Option+I**) turns it on. A crosshair appears and the most specific
+view under the pointer is outlined live, with its class name and size in a badge. From there
+the gesture and the modifiers decide what gets captured — there is one command, not one per
+kind of capture:
 
-- **Inspect Element** (**Cmd+Option+I**): a crosshair appears and the most specific view
-  under the pointer is outlined live, with its class name and size in a badge. Click to
-  capture it.
-- **Inspect Geometry** (**Cmd+Option+Shift+I**): freeflow — nothing is detected. Guides
-  follow the pointer across the window; a **click** records the exact spot, a **drag**
-  rubber-bands and records the rectangle it drew.
+- **Click** captures the outlined element.
+- **Drag** rubber-bands a rectangle and captures it. Nothing is detected while you drag: this
+  is for a gap, a misalignment, or the middle of a terminal that is one view however much it
+  draws. The outline stays up until the drag is unmistakable, so a click that slips a little
+  is still a click.
+- **Hold Shift** and nothing is detected at all. Guides follow the pointer across the window
+  and a click records the exact spot.
 
-**Esc** backs out of either. Invoking one command while the other is active switches mode in
-place; invoking the same one again cancels. A capture ends the mode.
+**Esc** backs out, and invoking the command again cancels. A capture ends the mode.
+
+The corner of the overlay lists every control, and the one you are holding is the one drawn
+brightest — so the hint is also a readout of what is currently on. It moves to another corner
+rather than covering what you are pointing at, and if a drag leaves it nowhere to go it fades
+in place instead of chasing you around the window. It is **not** in the captured screenshot:
+it explains an overlay nobody reading the filed issue can still see.
+
+> If you had **Inspect Geometry** on **Cmd+Option+Shift+I**, that chord still opens freeflow.
+> Nothing special-cases it — the command reads the keyboard, and invoking it that way arrives
+> with Shift already held.
 
 ### Hierarchy and spacing layers
 
-While **Inspect Element** is active, two modifiers add layers to what is drawn. They are
-independent, so either or both can be held, and the hint in the corner of the overlay says so.
+While an element is outlined, two more modifiers add layers to what is drawn. They are
+independent, so either or both can be held, and the hint in the corner says so. Neither does
+anything while Shift is held, because there is no element to layer onto; the hint greys them
+out to say so.
 
 - **⌃ (Control) — hierarchy.** Every ancestor of the element is outlined too, each in its own
   colour, with a numbered chip at its top-left corner and a key in the opposite bottom corner
@@ -2221,6 +2309,15 @@ for example, leaves **General** as the matching destination. The page already op
 pane stays put until you choose one of those filtered destinations. Clearing the field restores
 the complete page list.
 
+Whenever something is typed, an **Ask AI** button appears beneath the filtered list — with
+results and without, because the filter matches words while the setting you *mean* may use
+different ones. Clicking it runs a short one-off agent turn (Claude Code if it has a login,
+otherwise Codex; the button is absent without either) that reads only the catalogue of
+Settings pages and answers in the right pane with up to four suggested pages, each carrying
+one sentence on why and an **Open** button. The run uses your own agent login and spends a
+small amount of its usage, which is why it only ever happens on the click — typing alone
+never launches anything. It can see which pages exist and their keywords, never your values.
+
 The page list is grouped under six quiet captions — **App** (General, Keyboard), **Appearance**
 (Themes, Profiles, Motion), **Agents** (Accounts, Tools, Usage), **Access** (Remote Access,
 GitHub, Privacy), **Data** (Storage, Archived, Advanced), and **Extensions**, which also holds
@@ -2412,7 +2509,7 @@ you send: Threading's version, its build, and your macOS version. Nothing else. 
 in your browser once it is filed, and if this Mac has no GitHub sign-in, the form opens
 prefilled instead so your browser session can file it.
 
-To report a *visual* problem, use **View ▸ Inspect Element** instead and press **Submit Issue**
+To report a *visual* problem, use **View ▸ Inspect…** instead and press **Submit Issue**
 on the capture: the ticket then carries the view, its frame, the measured spacing and a
 screenshot ready to paste.
 
@@ -2676,8 +2773,9 @@ sharing control.
 | Status Card (the session pane's floating corner card) | unbound by default — assign one in Settings ▸ Keyboard |
 | Previous / Next tab (in the focused tab strip — drawer or panel) | Cmd+Shift+[ / Cmd+Shift+] |
 | Tab by its place in the strip | Cmd+1 … Cmd+9 |
-| Inspect Element | Cmd+Option+I |
-| Inspect Geometry (freeflow) | Cmd+Option+Shift+I |
+| Inspect… | Cmd+Option+I |
+| …hold while inspecting: freeflow, click marks a point | Shift |
+| …drag while inspecting: capture the rectangle drawn | — |
 | …hold while inspecting: outline every parent | Ctrl |
 | …hold while inspecting: measure the spacing | Option |
 | Bigger Font | Cmd++ |

@@ -12,7 +12,7 @@ table under [Subsystems](#subsystems) says which one.
 Threading is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
-hosts a Claude Code or Codex process inside a project folder, with a shell available under it
+hosts a Claude Code, Codex, Grok, or OpenCode process inside a project folder, with a shell available under it
 on demand. Sessions outlive their
 terminals: when the agent exits, the PTY is torn down but the session record remains so the
 conversation can be resumed later by its agent-assigned identifier.
@@ -84,11 +84,17 @@ wrapper that drives it: see [`docs/architecture/dependencies.md`](docs/architect
   agents rewrite the title constantly; structural edits save immediately.
 - **AppSettings / AccountPreferencesStore**: `UserDefaults`-backed behavioural settings and
   per-account icon/name customisation.
+- **AgentKind.capabilities**: The one place a runtime is named to decide what the host may do
+  with it. Everything else asks `kind.supports(_:)`;
+  `scripts/check_architecture_boundaries.sh` fails the build on a `kind == .claude`-shaped
+  comparison outside `Models/Project.swift`. See [`sessions.md`](docs/architecture/sessions.md).
 - **AgentRuntime**: Caches live `AgentSessionViewController`s keyed by session id. A session
   with no entry is dormant.
 - **AgentLauncher**: Builds the command line for a fresh launch vs. a resume, including
   account routing.
 - **CodexSessionDiscovery**: Recovers the session id Codex assigns itself after launch.
+- **OpenCodeSessionDiscovery**: Recovers OpenCode's provider-assigned `ses_…` id through its
+  public JSON session listing.
 - **AgentAccountDiscovery**: Finds agent logins by scanning `~/.claude-*` / `~/.codex-*`.
 - **ShellAliasReader**: Labels accounts with the user's own alias name.
 
@@ -110,9 +116,13 @@ Agent Output ← LocalProcessTerminalView ← PTY
 ### Launching
 
 Launches go through a **login shell** because a GUI app does not inherit the user's interactive
-`PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix. Claude accepts
-`--session-id <uuid>`, so its id is minted up front; Codex has no equivalent, so its id is read
-back from the rollout it writes (or, better, reported by its `SessionStart` hook).
+`PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix. Claude and Grok accept
+`--session-id <uuid>`, so their ids are minted up front. `GrokSessionDiscovery` confirms the Grok
+record through `grok sessions list` before marking it resumable, because quitting first-login
+authentication creates no session. Codex has no equivalent, so its id is read back from the
+rollout it writes (or, better, reported by its `SessionStart` hook). OpenCode also assigns its own
+id; `OpenCodeSessionDiscovery` reads it through `opencode session list --format json`, never
+through a private database schema.
 
 ## Subsystems
 
@@ -125,9 +135,10 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
-| Session state (`dormant`/`idle`/`working`/`needsAttention`), lifecycle hooks for both CLIs, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
+| The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
+| Session state (`dormant`/`idle`/`working`/`needsAttention`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
-| Side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
+| The runtime capability matrix, side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
@@ -162,6 +173,13 @@ the canonical policy for both humans and agents.
 `scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a
 directory exclusion; fix the call site or add the smallest justified exception to
 `config/theme-boundary.json`.
+
+It runs from the **Enforce Repository Boundaries** build phase, together with
+`scripts/check_architecture_boundaries.sh` (structural invariants the type checker cannot
+express across files, including the provider-capability rule) and, through the theme script's
+own last line, `scripts/check_localization_boundaries.sh`. All three therefore fail an ordinary
+`xcodebuild`, which is the point: the push gate runs tests only, and this repository has no
+remote for it to gate. `scripts/ci.sh` runs the same three for CI and release preflight.
 
 `Design.swift` holds every measurement, weight and surface colour. Reach for a token rather
 than a number — a literal in a view is how the language erodes. The scale is deliberately
@@ -248,7 +266,7 @@ Sources/Threading/
 ├── App/                    # App entry point, AppDelegate
 ├── Core/
 │   ├── Constants/          # TerminalConstants.swift
-│   ├── Agent/              # AgentLauncher, AgentRuntime, CodexSessionDiscovery, GitInfo
+│   ├── Agent/              # AgentLauncher, AgentRuntime, session discovery, GitInfo
 │   ├── MCP/                # MCPServer, MCPConnection, MCPSessionRegistry, MCPTools
 │   ├── Logging/            # ThreadingLogger (os_log), EventLog (durable journal)
 │   └── Session/            # TerminalSession, ProjectStore, StateManager, DraftStore

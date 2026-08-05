@@ -4,6 +4,96 @@
 > history. The follow-up review on 31 July 2026 found and closed the smaller regressions that
 > accumulated during the next refactoring wave.
 
+## Provider-matrix review — 4 August 2026
+
+Prompted by a fourth and fifth runtime (Grok, OpenCode) landing beside Claude and Codex. The
+theme throughout: a provider difference that lived in more than one place, or that was expressed
+as *which runtime is this* rather than *what can this runtime do*, could not be reviewed and
+could not be extended without re-reading the whole app.
+
+- [x] Fifteen `kind == .claude`-shaped comparisons replaced by named `AgentCapabilities`
+      members. `AgentKind.capabilities` is now the only place a runtime is named to decide what
+      the host may do with it, enforced by `scripts/check_architecture_boundaries.sh`.
+- [x] That lint, and the theme and localization lints it sits beside, now run from the
+      **Enforce Repository Boundaries** Xcode build phase. Previously only `ci.sh` ran them, and
+      the push gate runs tests only — so with no git remote configured they gated nothing.
+- [x] Checks were *deleted* rather than renamed wherever something better already decided: the
+      effort chip is gated by the model catalog's `reasoningLevels`, and mid-conversation
+      reconfiguration by `FastModeConversation` conformance. A runtime that gains either now
+      gets the control with no code change.
+- [x] `ConversationStreamSession.acceptsConfigurationChange` moved "when does a configuration
+      change land" from a `switch kind` in the view onto the transport, where the answer is a
+      property of the wire protocol carrying it.
+- [x] Session construction moved into `AgentSessionConfiguration.init?`, which states the
+      clamp-vs-refuse rule once: a setting the runtime *ignores* is clamped, a setting it
+      *cannot honour* is refused. This closed a live bug — the composer offered Grok's
+      conversation surface, the capability allowed it, a transport existed, and the store
+      refused the record, so choosing it created nothing and reported nothing.
+- [x] `SessionTranscript` replaced two identical per-runtime transcript-location dispatches;
+      `AgentPermissionMode.launchFlags(for:)` replaced a launcher switch that had to agree with
+      four value properties in another file.
+- [x] `ComposerCapability.Availability` replaced `isEnabled: Bool` beside
+      `unavailableReason: String?`, which admitted a refusal with no explanation and an
+      available action carrying one. `isEnabled`/`unavailableReason` survive as computed
+      properties, so only construction changed.
+- [x] `AgentAccountDiscovery.account(for:handle:)` stopped warning for runtimes without account
+      routing — the sidebar looks an account up on every row reconfigure, so a Grok session
+      filled the log with the absence of a feature.
+- [x] `AgentCapabilitiesTests` holds each capability to the code it governs, because both
+      directions fail silently: a granted `.forking` with no `forkedConfiguration` puts Fork in
+      the menu and creates nothing; a granted `.nativeUI` the store refuses is the bug above.
+
+### Open, from the same review
+
+Found and verified against the tree, not yet done. Ordered by value against the number of call
+sites each would touch.
+
+- [ ] **`ThemedMenuItem.onChoose` and `.submenu` are mutually exclusive and the type does not
+      say so.** The doc comment at `ThemedMenu.swift:16` spells the rule out — "an item is a
+      parent *or* an action … which reads as a defect, so don't" — and it is enforced nowhere,
+      then re-derived identically at `:911`, `:966` and `:979`. A private `enum Activation`
+      with `onChoose`/`submenu` kept as computed accessors costs **4 call sites**: the three
+      guards, plus `ConversationContextRailView.swift:85`. Of 221 constructions none passes
+      both parameters, and no test file changes.
+- [ ] **"Which runtime has a transcript Threading can parse" is answered by name in nine
+      places** — `TranscriptReplay` ×3, `SubagentTimeline` ×2, `SessionNaming` ×2, and
+      `SessionImporter.swift:41` / `GlobalSessionScan.swift:107`, the last two as bare `.claude`
+      / `.codex` literals with no switch at all. `SessionTranscript` consolidated two of them;
+      the rest have no capability behind them. `.transcriptTitles`, `.transcriptModelRecord`
+      and `.transcriptUsageIndex` all presuppose the base fact without naming it.
+- [ ] **Attachment-reference detection runs for four runtimes and can be switched off for
+      two.** The model and both consumers are per-`AgentKind`
+      (`AppSettings.swift:508-552`); only the Settings ▸ General card is written per-name, with
+      hardcoded Claude and Codex rows. `SessionAttachmentsViewController.swift:576` can render
+      "Detection … is turned off in Settings › General" naming a runtime whose toggle does not
+      exist.
+- [ ] **`.threadingBridge` and `appendMCPFlags` disagree about Grok.** `routed(_:for:)` and
+      `appendHookEnvironment` both gate on the capability, so a Grok *terminal* launch exports
+      `THREADING_MCP_PORT` and a session token — then `appendMCPFlags`
+      (`AgentLauncher.swift:443`) drops the runtime by name, so it is never told where the
+      server is. Grok's *native* transport registers it correctly. One of the two answers is
+      wrong; a fifth runtime added to the capability list would inherit the same half-connection
+      with no compiler complaint.
+- [ ] **`ConversationContinuation.destinations` is gated on account discovery, not on what the
+      store will accept.** The menu comes from `AgentKind.allCases.flatMap { accounts(for:) }`
+      (`SessionMigration.swift:129`) while the refusal lives in
+      `AgentSessionConfiguration.init?`. They agree today only because Grok and OpenCode have no
+      accounts — the exact shape of the composer/Grok bug fixed above.
+- [ ] **`PlaywrightAutomationOutput`** (`text` means result *or* error message, beside
+      `succeeded: Bool`) → two cases; **5 call sites**, 1 test file.
+- [ ] **`HookLifecycleReport.agentSessionID: String?`** is `TranscriptID`'s domain verbatim, and
+      `AgentRuntime.swift:252` re-wraps it *and* re-checks emptiness at read time; **4 call
+      sites**, 1 test file.
+- [ ] **`SubagentSummaryItem.transcriptURL` + `canOpenTranscript`** encode three meaningful
+      states as four representable ones, and the two reads never consult each other; **~8 call
+      sites**, 2 test files.
+- [ ] **`AccountUsageService.Entry`** — nil carries two meanings on both `usage` and
+      `errorMessage`, and `AccountUsageItemView.swift:198` reconstructs "nothing yet" from the
+      pair. The stale-value-survives-a-failed-refresh behaviour is right; the state machine is
+      just unnamed. **11 call sites**, no test files. Lowest value/cost of the set.
+- [ ] `GitDiffParser.status(fromPorcelainV2:)` constructs a `GitStatus` that nothing in the app
+      or tests consumes. Confirm it is dead and delete it rather than typing it better.
+
 ## Follow-up review — 31 July 2026
 
 - [x] Sidebar collapse state is published synchronously; animation completion is reserved for

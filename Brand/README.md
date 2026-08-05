@@ -15,4 +15,6 @@ Run `scripts/export_brand_assets.sh` after changing either SVG. It regenerates
 the checked-in PNG masters and synchronizes the website and static app-icon
 inputs. Runtime themed Dock geometry is drawn in
 `Sources/Threading/UI/Design/GeneratedAppIcon.swift` and is pinned against the
-iOS generator by `AppIconRenderTests`.
+iOS generator by `AppIconRenderTests`. Run `scripts/generate_mobile_theme_icons.sh` to rebuild
+the manually selectable iOS stock-theme alternates and their Settings previews from that same
+Dock renderer.

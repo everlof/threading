@@ -201,6 +201,27 @@ Each assistant turn ends with a summary card (`ChangedFilesTree.tsx`,
 Collapse past 8 lines / 600 chars behind a real CSS gradient mask (not an overlay), with
 "Show full message" and a copy button that works while collapsed.
 
+### 3.5a Context-handoff path (post-v0.0.28 follow-up)
+
+Researched 2026-08-04 from [PR #2829](https://github.com/pingdotgg/t3code/pull/2829) and its
+[UI polish in PR #5307](https://github.com/pingdotgg/t3code/pull/5307), which postdate the base
+commit for this document. T3 does not infer the visible path from whichever provider owns the
+current row. The server computes completed source runs the destination has not already consumed
+and stamps their provider/model endpoints into a durable handoff timeline event **before** the
+user turn that triggered the continuation.
+
+The web client renders that event as quiet conversation chrome: a `Context handoff` label, each
+provider mark and model display name, and arrows between endpoints. Its generated context summary
+is deliberately hidden. Missing catalog metadata falls back first to the raw model slug and then
+to the provider name, so a new model cannot make provenance disappear. The later polish tightened
+spacing, icon alignment and colour rather than changing the underlying event contract.
+
+Threading adopts the durable-path principle but not T3's server-run representation. Its providers
+are local CLI sessions with different export and launch contracts, so `ConversationHandoff` is a
+bounded provider/model/session-id path stored on the destination, while a separate normalised
+snapshot carries the actual context. Native Chat shows the compact divider; the sidebar hover card
+is the universal presentation for opaque terminal surfaces such as OpenCode.
+
 ### 3.6 Sidebar V2 — the inbox model
 
 `apps/web/src/components/SidebarV2.tsx` + `packages/client-runtime/src/state/threadSettled.ts`.
@@ -371,12 +392,13 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    (`AttentionAlertPolicy` / `AttentionAlertCenter`). As cheap as predicted, with one design
    decision the doc records: `.finished` is gated on `reportsOwnTurns`, so shells going
    quiet never notify.
-3. **Diff-comment → composer round trip** — §3.7. Connects two systems Threading already has
+3. ~~**Diff-comment → composer round trip**~~ — §3.7. Connects two systems Threading already has
    (Git Review's `DiffView` + the composer) into "tell the agent what to fix, anchored to
-   the lines it wrote." *Open — the next big pass.* Scouted 2026-07-28: needs line-selection
-   API in `NativeDiffKit` first (its rows are inert text fields), then `PromptView`'s
-   attachment model generalized beyond image paths, a new timeline row kind, and replay
-   parsing so the card survives a resume. Four subsystems deep; budget accordingly.
+   the lines it wrote." **Adopted 2026-08-02** →
+   `docs/architecture/native-conversations.md` (`ConversationContextAttachment`). The package's
+   one-arranged-row-per-line invariant was enough for single-line anchoring, so no package API
+   was required. The pass generalized composer context beyond image paths, added message/file/
+   attachment entry points, transcript reconstruction, and the RemoteKit wire shape.
 4. ~~**The three-mode auto-scroll machine**~~ — §3.2. **Adopted 2026-07-28** →
    `ConversationAutoScroll`, documented in `native-conversations.md`. The
    gesture-generation counter proved unnecessary on AppKit: `scrollWheel` and the
@@ -435,13 +457,13 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
 
 1. ~~Turn folding~~ — adopted
 2. ~~macOS notifications on `needsAttention`~~ — adopted
-3. Diff-comment → composer loop — **the one shortlist item still open**
+3. ~~Diff-comment → composer loop~~ — adopted
 4. ~~Auto-scroll state machine for the native surface~~ — adopted
 5. ~~Tool-row outcome glyphs~~ — adopted
 
-Four of five landed 2026-07-28, plus #8, #9, #11 and #13 from the longer list the same day —
-nine of sixteen closed, one struck as overtaken. Still open: the diff-comment loop (#3, the
-big pass), settle/snooze (#6, the design pass), checkpoints-as-refs (#7, needs measurement),
+All five landed by 2026-08-02, plus #8, #9, #11 and #13 from the longer list — ten of sixteen
+closed, one struck as overtaken. Still open: settle/snooze (#6, the design pass),
+checkpoints-as-refs (#7, needs measurement),
 steering (#10, needs a probe), and composer triggers (#12). Settle/snooze is deliberately
 *not* on the shortlist despite being the biggest idea — it changes the sidebar's philosophy
 and must be designed against our grouping model, not copied.
