@@ -97,6 +97,47 @@ number goes up.
 The remaining manual step is tagging: `git tag v0.1.0` before a release. This repo has no tags
 yet, so the first one establishes the sequence.
 
+## Channels
+
+Four, of which the release pipeline can stamp three:
+
+| Channel | Made by | Version | Badge |
+|---|---|---|---|
+| `release` | `scripts/release.sh` on a tag | the tag's semver | none |
+| `beta` | `scripts/release.sh --channel beta` | *(pipeline not built yet — see below)* | BETA |
+| `nightly` | `scripts/release.sh --channel nightly` with `THREADING_VERSION` | the date as dotted digits, e.g. `2026.8.2` | NIGHTLY |
+| `dev` | every build made any other way | `0.0.0` | DEV |
+
+The channel travels the version's road exactly: `release.sh` passes `THREADING_CHANNEL` to
+`xcodebuild archive`, `Info.plist` carries it as `$(THREADING_CHANNEL)` under the
+`ThreadingBuildChannel` key, and the value is **read back off the exported bundle** with the
+same guard as the version fields. The placeholder story is also the version's: an uninjected
+build expands to the empty string, which `AppInfo.buildChannel` reads as `.dev` — so a local
+build can no more claim to be a release than it can carry a real number, and `release.sh`
+refuses `--channel dev` outright while forcing an untagged dry run *onto* `dev`, because an
+artefact with no real version is not a member of any channel whatever was asked for.
+
+What the user sees is `BuildChannelBadge`: a quiet mark beside Settings in the sidebar's
+footer naming the flavour — and nothing at all on a release build, because a mark every
+install wore would be wallpaper. The exact version deliberately stays out of the chrome; the
+badge answers "which kind of build is this screenshot", not "which build".
+
+**Nightlies get their own feed, never a channel tag on the stable one.** A nightly's
+`2026.x` outranks every `1.x` under `SUStandardVersionComparator`, so in a shared feed a
+nightly install would permanently outrank stable and stop seeing updates the moment it
+should return there. A separate `SUFeedURL` — a rolling `nightly` pre-release tag serving its
+own `appcast.xml` — sidesteps the comparison entirely, and date-dotted versions satisfy both
+the dotted-digits guard and Sparkle's ordering within the feed. The nightly *pipeline* (a
+scheduled workflow that runs `ci.sh`, skips an unmoved `master`, and needs the Developer ID
+certificate, notary credentials and the Sparkle private key as CI secrets) is not built yet;
+its open questions live below.
+
+**Beta is a feed feature, not a third pipeline.** Sparkle 2 items can carry
+`<sparkle:channel>beta</sparkle:channel>` in the stable appcast, invisible to updaters unless
+the delegate opts in — so "include beta updates" becomes a Settings toggle when wanted, with
+no separate feed and no separate versioning scheme. The `--channel beta` stamp exists so
+those builds wear their badge the day that arrives; until then nothing publishes it.
+
 ## The export is verified before it is uploaded
 
 Notarization rejects a bundle whose *nested* code is development-signed, untimestamped, or
@@ -283,3 +324,13 @@ echo "$SPARKLE_PRIVATE_KEY" | ./sign_update --ed-key-file - <archive>
   this app's state that lives outside the usual containers.
 - Whether Threading is distributed publicly at all, or only to a handful of machines. A private
   feed changes nothing technically but makes the Homebrew cask and website steps moot.
+- **Whether the claudex key sharing survives open-sourcing and nightly CI.** The shared keypair
+  above was chosen when both apps signed on one private machine. A nightly pipeline puts the
+  private key in GitHub Actions secrets of a public repository, which extends *claudex's* blast
+  radius to anyone who compromises Threading's CI. Nothing has shipped through Sparkle yet, so
+  the "lose this key and no install updates again" constraint has not started — minting
+  Threading its own EdDSA key is free today and impossible after the first published build.
+  Decide before anything publishes.
+- A dev build (`0.0.0`) that checks the stable feed will be offered every release as an
+  "update" forever. Harmless until the feed exists; once it does, `AppUpdater` probably wants
+  to leave scheduled checks off for `.dev` builds while keeping the explicit menu command.

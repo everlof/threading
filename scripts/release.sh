@@ -14,6 +14,9 @@
 # Usage:
 #   scripts/release.sh                 # build, export, verify (no upload)
 #   scripts/release.sh --notarize      # also submit to Apple, staple, and Gatekeeper-check
+#   scripts/release.sh --channel nightly
+#                                      # stamp a channel other than release into the bundle;
+#                                      # the app shows it as the sidebar badge (BuildChannelBadge)
 #   THREADING_SKIP_RELEASE_CHECKS=1 scripts/release.sh
 #                                      # explicit emergency escape hatch for the quality gate
 #
@@ -43,12 +46,26 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 NOTARIZE=0
-for argument in "$@"; do
-    case "$argument" in
+CHANNEL="release"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --notarize) NOTARIZE=1 ;;
-        *) fail "unknown argument '$argument'" ;;
+        --channel)
+            shift
+            CHANNEL="${1:-}"
+            ;;
+        *) fail "unknown argument '$1'" ;;
     esac
+    shift
 done
+
+# `dev` is not offered: it is what every build gets *without* this script, and a shipped
+# artefact deliberately claiming to be a dev build would wear the badge while carrying a
+# Developer ID signature — a contradiction nothing downstream could interpret.
+case "$CHANNEL" in
+    release|beta|nightly) ;;
+    *) fail "channel '$CHANNEL' is not release, beta or nightly" ;;
+esac
 
 run_xcodebuild() {
     local phase="$1"
@@ -114,6 +131,12 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' "$ROOT/$PROJECT/project.pbxproj" | head -1)"
     echo "  no tag on HEAD — using the project's $VERSION for this dry run"
     DEV_BUILD=1
+    # An artefact with no real version is not a member of any channel, whatever was asked for —
+    # it wears the dev badge for the same reason it carries 0.0.0.
+    if [[ "$CHANNEL" != "release" ]]; then
+        echo "  no version, so the requested '$CHANNEL' channel becomes 'dev' for this dry run"
+    fi
+    CHANNEL="dev"
 else
     [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
         || fail "version '$VERSION' is not dotted digits, so Sparkle cannot order it"
@@ -123,7 +146,7 @@ fi
 
 # MARK: - Archive
 
-say "Archiving $SCHEME"
+say "Archiving $SCHEME ($CHANNEL)"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
@@ -133,6 +156,7 @@ run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     -destination 'generic/platform=macOS' \
     MARKETING_VERSION="$VERSION" \
     CURRENT_PROJECT_VERSION="$VERSION" \
+    THREADING_CHANNEL="$CHANNEL" \
     -archivePath "$ARCHIVE"
 
 [[ -d "$ARCHIVE" ]] || fail "the archive was not produced"
@@ -198,6 +222,7 @@ codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 say "Packaging"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+channel="$(/usr/libexec/PlistBuddy -c 'Print :ThreadingBuildChannel' "$APP/Contents/Info.plist")"
 
 # claudex's safety net, moved after the fact: it checks the tag against the plist before
 # building, which cannot catch a build setting that failed to take. Reading it back off the
@@ -205,6 +230,13 @@ build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info
 # update no installed copy will ever accept.
 if [[ "$version" != "$VERSION" || "$build" != "$VERSION" ]]; then
     fail "asked for $VERSION but the bundle carries $version ($build)"
+fi
+
+# The channel gets the same read-back, and the failure it prevents is the same shape: a
+# nightly whose badge claims nothing, or a release wearing NIGHTLY, is a build setting that
+# failed to take — visible only after someone installs it.
+if [[ "$channel" != "$CHANNEL" ]]; then
+    fail "asked for a $CHANNEL build but the bundle carries '$channel'"
 fi
 
 zip="$BUILD_DIR/$SCHEME-$version.zip"
@@ -238,6 +270,6 @@ ditto -c -k --keepParent --sequesterRsrc "$APP" "$zip"
 say "Gatekeeper assessment"
 spctl -a -vvv -t install "$APP"
 
-say "Ready: $SCHEME $version ($build)"
+say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"
 echo "  zip: $zip"
