@@ -122,6 +122,13 @@ final class TerminalMouseReportingTests: XCTestCase {
     }
 
     /// A wheel event as AppKit delivers one: classic notches, or a trackpad's precise points.
+    ///
+    /// The flags are always stated, never merely left alone. A `CGEvent` built from a nil source
+    /// takes its modifiers from the *combined session state* — the keys physically down on the
+    /// developer's keyboard at that instant — and a modifier rides straight into the report:
+    /// shift turns wheel-up from button 64 into 68, so the assertions below stop matching. It
+    /// fails as "the wheel reports nothing", in whichever tests happen to run while someone is
+    /// typing, which is as intermittent as it sounds.
     private func scroll(notches: Int32 = 0, points: Int32 = 0, option: Bool = false) throws -> NSEvent {
         let precise = points != 0
         let cg = try XCTUnwrap(CGEvent(
@@ -132,7 +139,7 @@ final class TerminalMouseReportingTests: XCTestCase {
             wheel2: 0,
             wheel3: 0
         ))
-        if option { cg.flags = [.maskAlternate] }
+        cg.flags = option ? [.maskAlternate] : []
         return try XCTUnwrap(NSEvent(cgEvent: cg))
     }
 
