@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
-"""One-shot, isolated Playwright runner for Threading's agent browser tools.
+"""One-shot Playwright runner for Threading's agent browser tools.
 
-The protocol is one bounded JSON request on stdin and one JSON response on stdout. Every run
-creates a new browser plus non-persistent context and closes both before returning.
+The protocol is one bounded JSON request on stdin and one JSON response on stdout.
+
+Two modes, two guarantees, and deliberately two code paths:
+
+* ``isolated`` (the default) creates a new browser plus non-persistent context and closes both
+  before returning. It imports nothing: no cookies, no credentials, no storage, no history.
+* ``attach`` launches a persistent context against a Threading-owned Chrome profile the user has
+  already signed into. Everything it can reach is therefore fenced by an origin allowlist that is
+  granted before launch, checked before every step, and re-checked on every navigation and every
+  new page.
+
+The isolated path is not shared with, called by, or parameterised for the attached one, so its
+stated guarantees stay true by construction rather than by review.
 """
 
 from __future__ import annotations
@@ -40,6 +51,11 @@ MAX_STEPS = 50
 MAX_PERMISSIONS = 12
 MAX_TIMEOUT_MS = 60_000
 MAX_SNAPSHOT_CHARS = 12_000
+MAX_ALLOWED_ORIGINS = 10
+ATTACH_BACKEND = "playwright_attached_chrome"
+# The page a fresh context or a just-opened pop-up sits on before it has navigated anywhere.
+# It carries no site content, so it is neither an allowlist hit nor a violation.
+BLANK_URLS = ("", "about:blank")
 SENSITIVE_QUERY = re.compile(
     r"(?:pass(?:word)?|secret|token|auth|key|code|session|credential)", re.I
 )
@@ -370,6 +386,210 @@ def run(request: dict) -> dict:
             browser.close()
 
 
+class OriginViolation(Exception):
+    """An attached run reached an origin the user never granted.
+
+    Carried as an exception rather than a return value because every escape route out of a step
+    loop has to end the run: the point of the allowlist is that a page outside it is never read,
+    never acted on, and never described back to the agent.
+    """
+
+    def __init__(self, origin: str, kind: str, step_index: int) -> None:
+        super().__init__(f"{kind} reached {origin}")
+        self.origin = origin
+        self.kind = kind
+        self.step_index = step_index
+
+
+def origin_key(value: object) -> str:
+    """The origin of a URL in exactly the app's `BrowserOrigin.key` spelling.
+
+    Both sides have to agree character for character, because this string is the whole of the
+    comparison: `scheme://host[:port]`, host lower-cased, default ports omitted as the URL spells
+    them, and a non-http(s) scheme collapsed to `scheme:` the way the app's own origins are.
+    """
+    try:
+        parsed = urlsplit(str(value or ""))
+    except ValueError:
+        return ""
+    scheme = (parsed.scheme or "").lower()
+    if not scheme:
+        return ""
+    if scheme not in ("http", "https"):
+        return f"{scheme}:"
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    return f"{scheme}://{host}" + (f":{port}" if port else "")
+
+
+def normalized_origins(request: dict) -> list[str]:
+    raw = request.get("allowed_origins")
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_ALLOWED_ORIGINS:
+        raise ValueError(
+            f"allowed_origins must contain between 1 and {MAX_ALLOWED_ORIGINS} origins"
+        )
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValueError("every allowed origin must be a string")
+        key = origin_key(item)
+        if not key or key != item.strip().lower().rstrip("/"):
+            raise ValueError(
+                f"allowed origin {clean_line(item, 120)} must be exactly scheme://host[:port]"
+            )
+        result.append(key)
+    return result
+
+
+class OriginGuard:
+    """Every place an attached run could touch an origin, in one object.
+
+    It records rather than raises, because Playwright's navigation and page events fire from
+    inside a call the run is in the middle of; the loop turns the first recorded miss into an
+    abort at the next boundary it controls, and closes the context on the way out.
+    """
+
+    def __init__(self, allowed: list[str]) -> None:
+        self.allowed = set(allowed)
+        self.violation: OriginViolation | None = None
+        self.step_index = 0
+
+    def permits(self, url: object) -> bool:
+        text = str(url or "")
+        return text in BLANK_URLS or origin_key(text) in self.allowed
+
+    def record(self, url: object, kind: str) -> None:
+        if self.permits(url) or self.violation is not None:
+            return
+        self.violation = OriginViolation(
+            origin=origin_key(url) or "an unreadable origin",
+            kind=kind,
+            step_index=self.step_index,
+        )
+
+    def raise_if_violated(self) -> None:
+        if self.violation is not None:
+            raise self.violation
+
+    def check(self, url: object, kind: str) -> None:
+        self.record(url, kind)
+        self.raise_if_violated()
+
+    def watch(self, page) -> None:
+        def navigated(frame) -> None:
+            if frame == page.main_frame:
+                self.record(page.url, "navigation")
+
+        page.on("framenavigated", navigated)
+
+    def watch_new_pages(self, context) -> None:
+        def opened(page) -> None:
+            self.watch(page)
+            if self.permits(page.url):
+                return
+            self.record(page.url, "pop-up")
+            try:
+                page.close()
+            except (PlaywrightError, PlaywrightTimeoutError):
+                pass
+
+        context.on("page", opened)
+
+
+def run_attached(request: dict) -> dict:
+    """Drive the user's signed-in automation profile in real Chrome, inside an origin fence.
+
+    Deliberately separate from `run`: that function's promise is that nothing authenticated is
+    reachable, and the way to keep a promise like that is to not add a flag to it.
+    """
+    user_data_dir = str(request.get("user_data_dir") or "")
+    if not user_data_dir.startswith("/"):
+        raise ValueError("user_data_dir must be an absolute path")
+    channel = request.get("channel")
+    if channel is not None and (not isinstance(channel, str) or len(channel) > 32):
+        raise ValueError("channel must be a short string such as chrome")
+    steps = request.get("steps")
+    if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_STEPS:
+        raise ValueError(f"steps must contain between 1 and {MAX_STEPS} entries")
+    if not all(isinstance(item, dict) for item in steps):
+        raise ValueError("every step must be an object")
+
+    allowed = normalized_origins(request)
+    guard = OriginGuard(allowed)
+    screenshot_path = request.get("_screenshot_path")
+    completed: list[dict] = []
+
+    # Headful is not a preference here: the password manager's extension and the user's own fill
+    # both need a window, and a hidden browser holding a signed-in profile is the shape of the
+    # thing this design refuses to build.
+    options: dict = {
+        "headless": False,
+        "accept_downloads": False,
+        "strict_selectors": True,
+        "no_viewport": True,
+        "args": ["--no-first-run", "--no-default-browser-check"],
+    }
+    if channel:
+        options["channel"] = channel
+
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(user_data_dir, **options)
+        try:
+            guard.watch_new_pages(context)
+            page = context.pages[0] if context.pages else context.new_page()
+            guard.watch(page)
+            page.set_default_timeout(bounded_timeout(request.get("timeout_ms")))
+            for index, step in enumerate(steps):
+                guard.step_index = index
+                guard.check(page.url, "step")
+                # A `goto` is checked against its *target* before the request is sent, so a
+                # disallowed host never receives one. Redirects are caught by the navigation
+                # watcher after the fact, which is the only moment they can be known.
+                if str(step.get("action") or "").strip().lower() == "goto":
+                    guard.check(validate_url(step.get("url")), "navigation")
+                result = execute_step(page, step, index)
+                guard.check(page.url, "step")
+                completed.append(result)
+            guard.check(page.url, "result")
+            if screenshot_path:
+                page.screenshot(path=screenshot_path, full_page=bool(request.get("full_page")))
+            return {
+                "ok": True,
+                "backend": ATTACH_BACKEND,
+                "channel": channel or "chromium",
+                "playwright_version": playwright_version,
+                "allowed_origins": allowed,
+                "final_url": redact_url(page.url),
+                "title": clean_line(page.title()),
+                "steps": completed,
+            }
+        except OriginViolation as violation:
+            return {
+                "ok": False,
+                "backend": ATTACH_BACKEND,
+                "error_type": "OriginNotAllowed",
+                "error": (
+                    f"The run stopped at step {violation.step_index + 1}: a {violation.kind} "
+                    f"reached {violation.origin}, which the user did not allow. Nothing about "
+                    "that page was read or returned."
+                ),
+                "violation": {
+                    "origin": violation.origin,
+                    "kind": violation.kind,
+                    "step_index": violation.step_index,
+                },
+                "allowed_origins": allowed,
+                "steps": completed,
+            }
+        finally:
+            context.close()
+
+
 def main() -> int:
     if len(sys.argv) == 2 and sys.argv[1] == "--probe":
         print(
@@ -387,7 +607,10 @@ def main() -> int:
         request = json.load(sys.stdin)
         if not isinstance(request, dict):
             raise ValueError("request must be a JSON object")
-        response = run(request)
+        mode = str(request.get("mode") or "isolated").strip().lower()
+        if mode not in ("isolated", "attach"):
+            raise ValueError("mode must be isolated or attach")
+        response = run_attached(request) if mode == "attach" else run(request)
     except (ValueError, PlaywrightTimeoutError, PlaywrightError, OSError) as error:
         response = {
             "ok": False,

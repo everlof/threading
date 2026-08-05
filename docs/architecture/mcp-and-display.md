@@ -21,21 +21,28 @@ identity. `AgentSession.id` is the key, not
 
 Grok native Chat receives the same private endpoint through ACP's `mcpServers` member on
 `session/new` and `session/load`. This is per-process and per-session, so no `.mcp.json` or user
-configuration is rewritten. Grok and OpenCode terminal sessions do not receive this registration
-yet: Grok's TUI exposes only persistent MCP configuration, while OpenCode has a future path through
-its local server once Threading owns and measures that lifecycle. Until those contracts exist, the
+configuration is rewritten. Claude and Codex Terminal receive the same scoped server through
+their launch configuration. Grok and OpenCode terminal sessions do not receive this registration:
+Grok's TUI exposes only persistent MCP configuration, while OpenCode has a future path through its
+local server once Threading owns and measures that lifecycle. Until those contracts exist, the
 tools stay absent rather than appearing configured while calls cannot route.
 
 One tool uses that routing as a data boundary rather than merely a destination.
-`conversation_history` exists for a session created by **Continue with Claude/Codex** and reads
-only the frozen handoff named by that destination session's id. Its argument is just an opaque
-page cursor: the caller cannot supply a project, source session or filesystem path. The app
-resolves lineage on the main actor, parses the snapshot off it, and returns a provider-neutral
-page of visible dialogue and bounded tool context; private thinking is omitted. A `next_cursor`
-continues large histories, and the response says when `TranscriptReplay` had to use its bounded
-replay window. The tool lives in the default-enabled **Conversation handoff** catalog group;
-turning that group off also removes the Continue menu because the destination could no longer
-receive its context.
+`conversation_history` exists for any handoff destination with a scoped bridge and reads only the
+normalised snapshot named by that destination session's id. Its argument is just an opaque page
+cursor: the caller cannot supply a project, source session or filesystem path. The app resolves
+lineage on the main actor, parses the snapshot off it, and returns a provider-neutral page of
+visible dialogue and bounded tool context; private thinking is omitted. A `next_cursor` continues
+large histories, and the response says when capture had to truncate. The tool lives in the
+default-enabled **Conversation handoff** catalog group; turning that group off removes the
+Continue menu because no continuation is then admitted.
+
+The two terminal runtimes without that bridge use explicit launch contracts rather than a fake
+tool registration. OpenCode receives the same snapshot through its documented `--file` option;
+Grok Terminal receives a bounded inline `<conversation_history>` because its TUI has neither an
+ephemeral MCP flag nor an opening-file flag. Capture itself is independent of delivery: Grok's
+documented Markdown export and OpenCode's documented JSON export are converted once when they are
+the source, after which no consumer depends on either provider's private storage format.
 
 The **This session** group uses the same routing to act rather than to read, and every tool in
 it acts on the session the call arrived on — which is why none takes a session argument. An
@@ -74,7 +81,10 @@ Three deliberate choices in the launch line:
   permission prompt and the feature costs more attention than it saves. Other tools are
   unaffected.
 - **No `--strict-mcp-config`**, which would suppress the user's own MCP servers for every
-  session Threading launches — a far larger change than adding one.
+  session Threading launches — a far larger change than adding one. The settings-research
+  one-shot is the deliberate exception (below): it is our process answering our question, and
+  a helper that loaded the user's servers and built-in tools would spend the user's tokens
+  reading capability the answer must not use.
 - **The `instructions` field of the `initialize` response** carries the "you have a panel,
   prefer it over describing a file" guidance. Capability alone does not change behaviour: an
   agent in a terminal has no reason to believe anything it emits can be seen as an image.
@@ -121,6 +131,45 @@ edits to an untyped transport switch spread across one window-controller file.
 MCP behavior annotations are emitted from the typed identity as conservative promises to
 clients. Unknown or state-changing behavior is not marked read-only or idempotent. Tools that
 can affect resources beyond Threading's local process are marked open-world.
+
+## Scoped ad-hoc endpoints and the AI settings search
+
+The settings search's Ask AI button runs a one-shot helper (`SettingsSearchResearch`) that must
+see **one tool** — `list_settings`, the read-only catalogue of Settings pages — and nothing of
+the session surface. Client-side flags alone cannot deliver that: `--allowedTools` is
+pre-approval, not visibility, and a cheap model handed sixty schemas in `tools/list` spends its
+run reading them. So the restriction is the server's:
+
+- `MCPSessionRegistry.beginAdHoc(allowedTools:)` mints a **synthetic** session id, a token, and
+  a scope. The id exists only in the registry; `endAdHoc` revokes it when the run finishes.
+- The retain sweep (`retainOnly`) skips ad-hoc ids. They are not `ProjectStore`'s to revoke,
+  and without the exemption a helper lost its endpoint mid-run whenever any unrelated session
+  was deleted.
+- `MCPServer` consults the scope in **all three** places the enabled catalogue is consulted
+  globally — `tools/list` advertises `scopedDefinitions`, dispatch admits via `scopedAdmits`
+  over the same list, and `initialize` carries `scopedInstructions` (only the groups owning a
+  scoped tool, no panel addendum). The same-list invariant holds inside a scope or the scope
+  is a lie.
+- The scope deliberately ignores the user's group toggles: the run *is* the user's explicit
+  click, naming exactly these tools. Toggles govern what full sessions may reach.
+
+The launch line is built by `AgentLauncher.settingsResearchCommand` on whichever runtime claims
+`.headlessResearch` (Claude first, then Codex — the first with an enabled login answers):
+`codexResearchPlan`'s posture — default account through `env -u`, read-only sandbox, no session
+of ours — plus the scoped MCP wiring. Claude runs `--print --output-format json --tools ''
+--strict-mcp-config` with only `mcp__threading__list_settings` pre-approved; Codex takes the
+per-run `mcp_servers` overrides plus `--skip-git-repo-check`, because the run works in a
+scratch directory. The command lines are pinned word-for-word in `AgentLaunchQuotingTests`, and
+the capability pairing (a plan exists exactly where `.headlessResearch` is claimed) is what
+lets the Ask AI affordance hide by asking `SettingsSearchResearch.provider` instead of naming a
+runtime.
+
+`list_settings` itself answers with page ids, titles, groups and each page's search vocabulary
+— `SettingsPages.all`, the same catalogue both search paths read. It holds no values: which
+pages exist is not a secret, what is set on them stays behind the pages. The helper's reply is
+JSON naming page ids; `SettingsSearchResearch.validated` lets through only pages the catalogue
+vouches for (an unknown id gets one second chance as a title), so the UI never navigates on an
+invented destination.
 
 ## Display Panel
 
@@ -333,6 +382,42 @@ mode and the scrub the tab is holding, and hands back whatever the user settled 
 at `CompareViewController` through the same `onModeChange` that persists the mode on
 `PersistedTab`. The affordance belongs to `ImageCompareView` rather than to the tab, so a Git
 Review image row got it in the same change without knowing it had.
+
+**The comparison leaves the app as a comparison, not as a picture of one.** `CompareExport` is
+the tab frozen into a `Sendable` value — the two sides' bytes, their pixel sizes, the mode, the
+diff — and `CompareExportPage` writes it as one HTML document that reproduces
+`ImageCompareLayout`'s rules in CSS: both sides fitted against the *union* of the two pixel
+sizes so a resized asset stays visibly resized, captions in bands beside the pixels, the five
+modes as buttons, the seam dragged or arrow-keyed. A screenshot of the tab would have lost
+exactly the thing worth sending, which is that the recipient can ask difference the same
+question the sender did. Nothing in the page loads from the network — a CDN in an exported file
+is a page that stops working on a plane and reports every read to a third party — and the
+document names the two files without their paths, because `git diff --no-index` reports absolute
+ones and the sender's home directory is not part of the comparison.
+
+Two formats, because they answer different questions: a single page inlines the images as
+`data:` URIs and is one file to drag into a chat window, and a zip keeps them as files, which
+avoids base64's third on every byte, hands the recipient the originals, and survives mail
+clients that strip `.html` attachments. `ZipArchive` writes the archive itself — three records
+that have not changed since 1993, against a package dependency for the same — deflating only
+what actually shrinks, since a PNG passed through deflate reliably comes back larger. An image
+a browser cannot draw (TIFF, HEIC) is re-encoded to PNG on the way out: the comparison would
+otherwise arrive at half the recipients as two broken-image icons, which reads as *the files
+were empty* rather than as *the format was wrong*.
+
+Packaging runs off the main actor, which is what `CompareExport` being a value buys: base64 of
+two 64 MB sides plus a deflate pass is not work to do between two frames, and by then the sheet
+is gone and nothing on screen is waiting for it.
+
+**The Compare tab's controls are in a header, and they are the surface's own.** `hostControls()`
+hands `ImageCompareView`'s mode chip and expand button to the tab and stops the surface drawing
+a row for them; the tab puts them in a row above its scroll view with the export button, Git
+Review's shape without the band or the hairline — the pane's own header is the tab strip a few
+points up, and a second banded header under it would read as chrome about chrome. Below the
+canvas the controls were part of the scrolled content, so on a tall screenshot the modes left
+the screen exactly when a reader had got far enough down it to want another one. Every other
+host — the review row, the inspector — is unchanged, because the row is only detached where a
+host has asked for it.
 
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.

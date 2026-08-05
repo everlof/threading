@@ -18,6 +18,9 @@ enum MCPSessionRegistry {
     private struct Storage {
         var tokensBySession: [SessionID: String] = [:]
         var sessionsByToken: [String: SessionID] = [:]
+        /// Scopes of the ad-hoc endpoints — synthetic sessions belonging to helper runs, not
+        /// to `ProjectStore`. Membership here is also what exempts an id from `retainOnly`.
+        var adHocScopesBySession: [SessionID: [String]] = [:]
     }
 
     /// Launch and deletion happen on main while requests resolve tokens on the MCP queue.
@@ -41,6 +44,47 @@ enum MCPSessionRegistry {
     /// The session a request path belongs to, or nil if the token is unknown.
     static func session(forToken token: String) -> SessionID? {
         storage.withLock { $0.sessionsByToken[token] }
+    }
+
+    /// Mints an endpoint for a short-lived helper run, restricted to the named tools.
+    ///
+    /// The returned id is synthetic — it exists in this registry and nowhere else. The server
+    /// consults its scope for `tools/list`, admission and instructions, so the helper is
+    /// advertised exactly the tools it was launched for and nothing of the session surface.
+    /// Ad-hoc ids survive `retainOnly` (they are not `ProjectStore`'s to retain) and are
+    /// instead revoked explicitly by `endAdHoc` when the run finishes.
+    static func beginAdHoc(allowedTools: [String]) -> SessionID {
+        let sessionID = SessionID()
+        storage.withLock { storage in
+            storage.adHocScopesBySession[sessionID] = allowedTools
+            let token = UUID().uuidString.lowercased()
+            storage.tokensBySession[sessionID] = token
+            storage.sessionsByToken[token] = sessionID
+        }
+        return sessionID
+    }
+
+    /// The tool scope of an ad-hoc endpoint, or nil for an ordinary session.
+    static func adHocScope(for sessionID: SessionID) -> [String]? {
+        storage.withLock { $0.adHocScopesBySession[sessionID] }
+    }
+
+    /// Revokes an ad-hoc endpoint and removes any launch files written for it.
+    static func endAdHoc(_ sessionID: SessionID) {
+        let wasAdHoc: Bool = storage.withLock { storage in
+            guard storage.adHocScopesBySession.removeValue(forKey: sessionID) != nil else {
+                return false
+            }
+            if let token = storage.tokensBySession.removeValue(forKey: sessionID) {
+                storage.sessionsByToken.removeValue(forKey: token)
+            }
+            return true
+        }
+        guard wasAdHoc else { return }
+
+        for directory in MCPDefaults.cleanupDirectories {
+            try? FileManager.default.removeItem(at: supportFile(sessionID, in: directory))
+        }
     }
 
     /// The Streamable HTTP endpoint for a session.
@@ -223,7 +267,10 @@ enum MCPSessionRegistry {
             // context and treats a non-zero `Stop` hook as a reason to keep going — so a
             // lifecycle report that leaked either would change the conversation it is only
             // supposed to observe.
-            let command = "curl -s --max-time \(Int(MCPDefaults.lifecycleTimeout))"
+            let timeout = event == .turnStarted
+                ? MCPDefaults.turnStartLifecycleTimeout
+                : MCPDefaults.lifecycleTimeout
+            let command = "curl -s --max-time \(Int(timeout))"
                 + " -H 'Content-Type: application/json' --data-binary @- \(url)"
                 + " >/dev/null 2>&1 || true"
 
@@ -240,7 +287,12 @@ enum MCPSessionRegistry {
     @MainActor
     static func retainOnly(sessionIDs: Set<SessionID>) {
         let removedSessionIDs = storage.withLock { storage in
-            let removed = storage.tokensBySession.keys.filter { !sessionIDs.contains($0) }
+            // Ad-hoc endpoints are not in `ProjectStore`, so the sweep must not read their
+            // absence from the retained set as deletion — a helper mid-run would lose its
+            // endpoint because an unrelated session was removed.
+            let removed = storage.tokensBySession.keys.filter {
+                !sessionIDs.contains($0) && storage.adHocScopesBySession[$0] == nil
+            }
 
             for sessionID in removed {
                 guard let token = storage.tokensBySession.removeValue(forKey: sessionID) else {

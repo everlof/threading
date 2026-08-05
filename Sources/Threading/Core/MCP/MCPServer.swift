@@ -30,6 +30,14 @@ enum RequestID: Codable, Equatable, Sendable {
         case .null: try container.encodeNil()
         }
     }
+
+    var auditValue: String {
+        switch self {
+        case .integer(let value): return String(value)
+        case .string(let value): return value
+        case .null: return "null"
+        }
+    }
 }
 
 struct JSONRPCRequest: Decodable, Sendable {
@@ -44,6 +52,7 @@ struct JSONRPCRequest: Decodable, Sendable {
     let id: RequestID?
     let method: String
     let parameters: Parameters
+    let rawParameters: JSONValue?
 
     private enum CodingKeys: String, CodingKey {
         case jsonrpc, id, method, params
@@ -56,6 +65,7 @@ struct JSONRPCRequest: Decodable, Sendable {
         id = container.contains(.id)
             ? try container.decode(RequestID.self, forKey: .id)
             : nil
+        rawParameters = try? container.decode(JSONValue.self, forKey: .params)
 
         switch method {
         case "initialize":
@@ -414,9 +424,15 @@ final class MCPServer: @unchecked Sendable {
             // The panel-state addendum reads the display store through the handler, which is
             // main-queue bound; enabled-tool settings share that isolation. The connection is
             // held until the hop returns, which the client already expects for `initialize`.
+            // A scoped ad-hoc endpoint gets its scope's instructions and no panel addendum —
+            // a helper run has no panel for the addendum to describe.
             DispatchQueue.main.async { [weak self] in
-                let base = MCPToolCatalog.instructions
-                let addendum = self?.handler?.panelState(for: sessionID) ?? ""
+                let scope = MCPSessionRegistry.adHocScope(for: sessionID)
+                let base = scope.map(MCPToolCatalog.scopedInstructions)
+                    ?? MCPToolCatalog.instructions
+                let addendum = scope == nil
+                    ? (self?.handler?.panelState(for: sessionID) ?? "")
+                    : ""
 
                 completion(Self.result(
                     id: id,
@@ -438,9 +454,12 @@ final class MCPServer: @unchecked Sendable {
 
         case "tools/list":
             DispatchQueue.main.async {
+                let tools = MCPSessionRegistry.adHocScope(for: sessionID)
+                    .map(MCPToolCatalog.scopedDefinitions)
+                    ?? MCPToolCatalog.enabledDefinitions
                 completion(Self.result(
                     id: id,
-                    .toolsList(ToolsListResult(tools: MCPToolCatalog.enabledDefinitions))
+                    .toolsList(ToolsListResult(tools: tools))
                 ))
             }
 
@@ -449,6 +468,16 @@ final class MCPServer: @unchecked Sendable {
                 completion(Self.error(id: id, code: -32602, message: "Invalid params"))
                 return
             }
+            let input = message.rawParameters?.objectValue?["arguments"] ?? .object([:])
+            ExecutionAuditStore.shared.recordToolRequest(
+                sessionID: sessionID,
+                source: .threadingMCP,
+                provider: nil,
+                operation: call.name,
+                callID: id.auditValue,
+                input: input,
+                fidelity: .exact
+            )
             callTool(call, id: id, for: sessionID, completion: completion)
 
         default:
@@ -468,20 +497,36 @@ final class MCPServer: @unchecked Sendable {
     ) {
         // The handler touches AppKit and the model layer, neither of which is thread-safe.
         DispatchQueue.main.async { [weak self] in
-            guard MCPToolCatalog.admits(call) else {
-                completion(Self.result(
-                    id: id,
-                    .tool(.failure(
-                        "Tool \(call.name) is unavailable or disabled in Threading."
-                    ))
-                ))
+            let finish: @MainActor (MCPToolResult) -> Void = { result in
+                let encoded = (try? JSONEncoder().encode(result))
+                    .flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
+                    ?? .object(["isError": .bool(result.isError), "content": .string(result.text)])
+                ExecutionAuditStore.shared.recordToolResult(
+                    sessionID: sessionID,
+                    source: .threadingMCP,
+                    provider: nil,
+                    operation: call.name,
+                    callID: id.auditValue,
+                    output: encoded,
+                    isError: result.isError,
+                    fidelity: .exact
+                )
+                completion(Self.result(id: id, .tool(result)))
+            }
+            // Inside a scope, `tools/list` and admission must agree exactly as they do
+            // globally, so both derive from the same scoped definitions.
+            let admitted: Bool
+            if let scope = MCPSessionRegistry.adHocScope(for: sessionID) {
+                admitted = MCPToolCatalog.scopedAdmits(call, allowedTools: scope)
+            } else {
+                admitted = MCPToolCatalog.admits(call)
+            }
+            guard admitted else {
+                finish(.failure("Tool \(call.name) is unavailable or disabled in Threading."))
                 return
             }
             guard let handler = self?.handler else {
-                completion(Self.result(
-                    id: id,
-                    .tool(.failure("Threading is not ready to display content."))
-                ))
+                finish(.failure("Threading is not ready to display content."))
                 return
             }
 
@@ -491,7 +536,7 @@ final class MCPServer: @unchecked Sendable {
 
                 // A failing tool reports through `isError` in the result, not a protocol error:
                 // the call itself succeeded, and the agent should see why it did not work.
-                completion(Self.result(id: id, .tool(result)))
+                finish(result)
             }
         }
     }

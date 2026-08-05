@@ -295,6 +295,19 @@ final class ElementInspectionTests: XCTestCase {
         XCTAssertEqual(upLeft, expected)
     }
 
+    // MARK: - Mode
+
+    /// One command, and ⇧ is what suppresses detection while it is held. The chord that used
+    /// to be the second command still opens freeflow for exactly this reason: invoking ⌥⇧⌘I
+    /// arrives with ⇧ down, and the overlay reads the keyboard rather than the menu item.
+    func testModeIsReadFromTheShiftKey() {
+        XCTAssertEqual(InspectorMode.held([]), .element)
+        XCTAssertEqual(InspectorMode.held(.shift), .freeflow)
+        // The layer modifiers do not change which mode is showing, only what is drawn on it.
+        XCTAssertEqual(InspectorMode.held([.control, .option]), .element)
+        XCTAssertEqual(InspectorMode.held([.shift, .control]), .freeflow)
+    }
+
     // MARK: - Layers
 
     func testLayersReadTheModifiersHeld() {
@@ -509,5 +522,157 @@ final class ElementInspectionTests: XCTestCase {
         XCTAssertTrue(report.markdown.contains("200×50 at (100, 100) in window"))
         XCTAssertTrue(report.markdown.contains("200×50 at (100, 750) from top-left"))
         XCTAssertTrue(report.markdown.contains("/tmp/threading-inspect-region.png"))
+    }
+
+    // MARK: - Control Hint
+
+    /// Every control stays on the line whatever is held, so the hint is a fixed list rather
+    /// than a thing that reshuffles under the pointer. What changes is the emphasis.
+    func testHintNamesEveryControlAndMarksWhatIsHeld() {
+        let levels = InspectorHierarchy.levels(for: makeTree().front)
+
+        let idle = InspectorHint.tokens(for: .element(levels: levels, layers: []))
+        XCTAssertEqual(
+            idle.map(\.text),
+            [
+                InspectorStrings.pointHint,
+                InspectorStrings.regionHint,
+                InspectorStrings.hierarchyHint,
+                InspectorStrings.spacingHint,
+                InspectorStrings.exitHint
+            ]
+        )
+        XCTAssertTrue(idle.allSatisfy { $0.emphasis == .available })
+
+        let held = InspectorHint.tokens(for: .element(levels: levels, layers: .hierarchy))
+        XCTAssertEqual(held.map(\.text), idle.map(\.text), "the line does not reshuffle")
+        XCTAssertEqual(
+            held.first { $0.text == InspectorStrings.hierarchyHint }?.emphasis,
+            .held,
+            "the hint doubles as a readout of what is on"
+        )
+        XCTAssertEqual(
+            held.first { $0.text == InspectorStrings.spacingHint }?.emphasis,
+            .available
+        )
+    }
+
+    /// Nothing is detected under ⇧ or mid-drag, so ⌃ and ⌥ have no element to layer onto. They
+    /// stay listed and read as off — a control that vanishes reads as a control that broke.
+    func testHintCallsTheLayerModifiersOffWhereNothingIsDetected() {
+        let point = InspectorHint.tokens(for: .point(NSPoint(x: 10, y: 10), label: "(10, 10)"))
+        let region = InspectorHint.tokens(
+            for: .region(NSRect(x: 0, y: 0, width: 40, height: 20), label: "40×20")
+        )
+
+        for tokens in [point, region] {
+            XCTAssertEqual(
+                tokens.first { $0.text == InspectorStrings.hierarchyHint }?.emphasis,
+                .inapplicable
+            )
+            XCTAssertEqual(
+                tokens.first { $0.text == InspectorStrings.spacingHint }?.emphasis,
+                .inapplicable
+            )
+            XCTAssertEqual(
+                tokens.first { $0.text == InspectorStrings.exitHint }?.emphasis,
+                .available,
+                "Esc backs out of everything"
+            )
+        }
+
+        XCTAssertEqual(point.first { $0.text == InspectorStrings.pointHint }?.emphasis, .held)
+        XCTAssertEqual(region.first { $0.text == InspectorStrings.regionHint }?.emphasis, .held)
+    }
+
+    /// The key takes the bottom corner away from the pick; the hint takes the other one. The
+    /// two therefore divide the window between them, and neither jumps when ⌃ is pressed.
+    func testTheHintTakesTheBottomCornerTheKeyDoesNot() {
+        let bounds = NSRect(x: 0, y: 0, width: 720, height: 460)
+        let levels = [
+            InspectorLevel(
+                depth: 0,
+                rect: NSRect(x: 600, y: 300, width: 60, height: 24),
+                classNames: ["ProbeView"],
+                address: "0x0",
+                identifier: nil
+            )
+        ]
+        let indicator = InspectorIndicator.element(levels: levels, layers: .hierarchy)
+
+        XCTAssertEqual(
+            InspectorLegendPlacement.preferredCorner(target: levels[0].rect, within: bounds),
+            .bottomLeading,
+            "a pick on the right pushes the key left"
+        )
+        XCTAssertEqual(
+            InspectorHint.preferredCorner(for: indicator, within: bounds),
+            .bottomTrailing
+        )
+    }
+
+    // MARK: - Panel Placement
+
+    /// The requested corner when it is clear — the rule the key has always followed.
+    func testAPanelTakesItsPreferredCornerWhenNothingIsInTheWay() {
+        let bounds = NSRect(x: 0, y: 0, width: 720, height: 460)
+        let size = NSSize(width: 200, height: 60)
+
+        let placement = InspectorPanelPlacement.place(
+            size: size,
+            preferring: .bottomTrailing,
+            avoiding: [NSRect(x: 40, y: 300, width: 100, height: 40)],
+            within: bounds
+        )
+
+        XCTAssertFalse(placement.isObstructed)
+        XCTAssertEqual(
+            placement.rect,
+            InspectorPanelPlacement.rect(size: size, corner: .bottomTrailing, within: bounds)
+        )
+    }
+
+    /// The point of the change: a panel pinned to one corner covers the capture whenever the
+    /// capture is in that corner, which is exactly when the picture matters most.
+    func testAPanelStepsAsideWhenItsPreferredCornerIsCovered() {
+        let bounds = NSRect(x: 0, y: 0, width: 720, height: 460)
+        let size = NSSize(width: 200, height: 60)
+        let preferred = InspectorPanelPlacement.rect(
+            size: size,
+            corner: .bottomTrailing,
+            within: bounds
+        )
+
+        let placement = InspectorPanelPlacement.place(
+            size: size,
+            preferring: .bottomTrailing,
+            avoiding: [preferred],
+            within: bounds
+        )
+
+        XCTAssertFalse(placement.isObstructed)
+        XCTAssertNotEqual(placement.rect, preferred)
+        XCTAssertFalse(placement.rect.intersects(preferred))
+    }
+
+    /// A drag across the whole window covers every corner. Moving is then no longer an answer,
+    /// so it fades in place: a panel that keeps running away is worse than one to read through.
+    func testAPanelFadesInPlaceWhenEveryCornerIsCovered() {
+        let bounds = NSRect(x: 0, y: 0, width: 720, height: 460)
+        let size = NSSize(width: 200, height: 60)
+
+        let placement = InspectorPanelPlacement.place(
+            size: size,
+            preferring: .bottomLeading,
+            avoiding: [bounds],
+            within: bounds
+        )
+
+        XCTAssertTrue(placement.isObstructed)
+        XCTAssertEqual(
+            placement.rect,
+            InspectorPanelPlacement.rect(size: size, corner: .bottomLeading, within: bounds),
+            "it stays where it was asked to be and is drawn faded instead"
+        )
     }
 }

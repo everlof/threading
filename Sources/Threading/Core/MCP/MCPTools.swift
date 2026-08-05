@@ -628,35 +628,137 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let panelRadius: Double?
   let controlRadius: Double?
   let borderWidth: Double?
+  let controlBorderWidth: Double?
+  let removeControlBorderWidth: Bool?
+  let backdropPattern: AppThemeBackdropPatternArguments?
+  let removeBackdropPattern: Bool?
   let textScale: Double?
   let glow: AppThemeGlowArguments?
   let removeGlow: Bool?
+  let popoverStyle: AppThemePopoverStyleArguments?
+  let removePopoverStyle: Bool?
   let controlGlow: AppThemeGlowArguments?
   let removeControlGlow: Bool?
+  let buttonStyle: AppThemeButtonStyleArguments?
+  let removeButtonStyle: Bool?
+  let headingStyle: AppThemeHeadingStyleArguments?
+  let removeHeadingStyle: Bool?
   let bevel: AppThemeBevelArguments?
   let removeBevel: Bool?
   let typeface: String?
   let fontFamily: String?
   let removeFontFamily: Bool?
+  let fontFallbacks: [String]?
+  let removeFontFallbacks: Bool?
   let scrollerPlacement: String?
   let scrollerTrackStyle: String?
+  let progressStyle: String?
+  let choiceStyle: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
     case controlRadius = "control_radius"
     case borderWidth = "border_width"
+    case controlBorderWidth = "control_border_width"
+    case removeControlBorderWidth = "remove_control_border_width"
+    case backdropPattern = "backdrop_pattern"
+    case removeBackdropPattern = "remove_backdrop_pattern"
     case textScale = "text_scale"
     case glow
     case removeGlow = "remove_glow"
+    case popoverStyle = "popover_style"
+    case removePopoverStyle = "remove_popover_style"
     case controlGlow = "control_glow"
     case removeControlGlow = "remove_control_glow"
+    case buttonStyle = "button_style"
+    case removeButtonStyle = "remove_button_style"
+    case headingStyle = "heading_style"
+    case removeHeadingStyle = "remove_heading_style"
     case bevel
     case removeBevel = "remove_bevel"
     case typeface
     case fontFamily = "font_family"
     case removeFontFamily = "remove_font_family"
+    case fontFallbacks = "font_fallbacks"
+    case removeFontFallbacks = "remove_font_fallbacks"
     case scrollerPlacement = "scroller_placement"
     case scrollerTrackStyle = "scroller_track_style"
+    case progressStyle = "progress_style"
+    case choiceStyle = "choice_style"
+  }
+}
+
+struct AppThemePopoverStyleArguments: Decodable, Sendable {
+  let arrow: String?
+  let surfaceRole: String?
+  let edge: String?
+  let shadow: String?
+  let density: String?
+  let glyphStyle: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case arrow, edge, shadow, density
+    case surfaceRole = "surface_role"
+    case glyphStyle = "glyph_style"
+  }
+}
+
+struct AppThemeBackdropPatternArguments: Decodable, Sendable {
+  let kind: String?
+  let role: String?
+  let opacity: Double?
+  let spacing: Double?
+  let lineWidth: Double?
+
+  private enum CodingKeys: String, CodingKey {
+    case kind, role, opacity, spacing
+    case lineWidth = "line_width"
+  }
+}
+
+struct AppThemeButtonStyleArguments: Decodable, Sendable {
+  let textTransform: String?
+  let fontWeight: String?
+  let typeface: String?
+  let fontFamily: String?
+  let tracking: Double?
+  let primaryTreatment: String?
+  let primaryRole: String?
+  let primaryBorderRole: String?
+  let removePrimaryBorder: Bool?
+  let hoverOffsetX: Double?
+  let hoverOffsetY: Double?
+  let pressedOffsetX: Double?
+  let pressedOffsetY: Double?
+  let collapseShadowOnHover: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case textTransform = "text_transform"
+    case fontWeight = "font_weight"
+    case typeface, tracking
+    case fontFamily = "font_family"
+    case primaryTreatment = "primary_treatment"
+    case primaryRole = "primary_role"
+    case primaryBorderRole = "primary_border_role"
+    case removePrimaryBorder = "remove_primary_border"
+    case hoverOffsetX = "hover_offset_x"
+    case hoverOffsetY = "hover_offset_y"
+    case pressedOffsetX = "pressed_offset_x"
+    case pressedOffsetY = "pressed_offset_y"
+    case collapseShadowOnHover = "collapse_shadow_on_hover"
+  }
+}
+
+struct AppThemeHeadingStyleArguments: Decodable, Sendable {
+  let typeface: String?
+  let fontFamily: String?
+  let fontWeight: String?
+  let italic: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case typeface, italic
+    case fontFamily = "font_family"
+    case fontWeight = "font_weight"
   }
 }
 
@@ -1140,6 +1242,7 @@ enum AgentCommand: Sendable {
   case setSessionName(SetSessionNameArguments)
   case listReclaimableStorage(EmptyToolArguments)
   case proposeStorageCleanup(StorageCleanupArguments)
+  case listSettings(EmptyToolArguments)
   case notifyUser(NotifyUserArguments)
   case listThemes(ListThemesArguments)
   case setTheme(SetThemeArguments)
@@ -1207,6 +1310,7 @@ enum AgentCommand: Sendable {
     case .setSessionName: return .setSessionName
     case .listReclaimableStorage: return .listReclaimableStorage
     case .proposeStorageCleanup: return .proposeStorageCleanup
+    case .listSettings: return .listSettings
     case .notifyUser: return .notifyUser
     case .listThemes: return .listThemes
     case .setTheme: return .setTheme
@@ -1550,6 +1654,11 @@ struct MCPToolCallParameters: Decodable, Sendable {
       call = .proposeStorageCleanup(
         try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
           ?? StorageCleanupArguments(paths: nil, reason: nil)
+      )
+    case .listSettings:
+      call = .listSettings(
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
       )
     case .notifyUser:
       call = .notifyUser(
@@ -3850,6 +3959,17 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .listSettings,
+      description: """
+        List Threading's own Settings pages — every destination the app's Settings \
+        sidebar offers, each with its stable id, the sidebar group it sits under, and \
+        the vocabulary of what it contains. Use it to answer where a *Threading* \
+        preference lives (it says nothing about the agent CLI's own configuration), and \
+        answer with the page's id. One call returns the whole catalogue.
+        """,
+      inputSchema: MCPInputSchema(properties: [:], required: [])
+    ),
+    MCPToolDefinition(
       tool: .listThemes,
       description: """
         List the terminal colour themes available in Threading — each one's stable ID, name, \
@@ -4543,7 +4663,46 @@ enum MCPTools {
       ),
       "border_width": MCPPropertySchema(
         type: .number,
-        description: "Border width, 0.5–4 points."
+        description: "Structural border and rule width, 0.5–4 points."
+      ),
+      "control_border_width": MCPPropertySchema(
+        type: .number,
+        description: "Compact-control border width, 0.5–4 points. Omit to inherit border_width."
+      ),
+      "remove_control_border_width": MCPPropertySchema(
+        type: .boolean,
+        description: "True clears the compact-control override so it inherits border_width."
+      ),
+      "backdrop_pattern": MCPPropertySchema(
+        type: .object,
+        description: "Optional repeating treatment on broad app backdrops. Cards and controls "
+          + "do not inherit it.",
+        properties: [
+          "kind": MCPPropertySchema(
+            type: .string,
+            description: "\"dots\", \"grid\", \"diagonal_grid\", or \"perspective_grid\"."
+          ),
+          "role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role whose colour supplies the pattern ink."
+          ),
+          "opacity": MCPPropertySchema(
+            type: .number,
+            description: "Pattern opacity, 0–1."
+          ),
+          "spacing": MCPPropertySchema(
+            type: .number,
+            description: "Distance between repeated marks, 8–64 points."
+          ),
+          "line_width": MCPPropertySchema(
+            type: .number,
+            description: "Grid stroke width or dot diameter, 0.5–6 points."
+          ),
+        ]
+      ),
+      "remove_backdrop_pattern": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the base theme's backdrop pattern."
       ),
       "text_scale": MCPPropertySchema(
         type: .number,
@@ -4615,6 +4774,44 @@ enum MCPTools {
         type: .boolean,
         description: "True removes the base theme's glow."
       ),
+      "popover_style": MCPPropertySchema(
+        type: .object,
+        description: "The shared chrome for every app-owned anchored popover. It controls "
+          + "the stem, semantic fill, edge construction, depth, density, and glyph language.",
+        properties: [
+          "arrow": MCPPropertySchema(
+            type: .string,
+            description: "\"triangle\" (default) or \"none\" for stemless cards and infotips."
+          ),
+          "surface_role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role supplying the popover fill; default \"floating_surface\"."
+          ),
+          "edge": MCPPropertySchema(
+            type: .string,
+            description: "\"flat\" (default), \"material\" to consume the theme bevel, or \"none\". "
+              + "A material edge requires a stemless popover so one coherent silhouette owns it."
+          ),
+          "shadow": MCPPropertySchema(
+            type: .string,
+            description: "\"automatic\" (authored panel shadow when present, otherwise native), "
+              + "\"system\", \"material\", or \"none\"."
+          ),
+          "density": MCPPropertySchema(
+            type: .string,
+            description: "\"regular\" (default) or \"compact\" for tighter anchoring and stem metrics."
+          ),
+          "glyph_style": MCPPropertySchema(
+            type: .string,
+            description: "\"system\" (default) or \"classic\" for simple period folder, branch, "
+              + "handoff, and status marks inside shared hover cards."
+          ),
+        ]
+      ),
+      "remove_popover_style": MCPPropertySchema(
+        type: .boolean,
+        description: "True resets the base theme's popovers to the System response."
+      ),
       "control_glow": MCPPropertySchema(
         type: .object,
         description: """
@@ -4679,6 +4876,110 @@ enum MCPTools {
         type: .boolean,
         description: "True removes the base theme's compact-control shadow."
       ),
+      "button_style": MCPPropertySchema(
+        type: .object,
+        description: "Theme-authored action typography, primary treatment, and visual "
+          + "hover/press response. It applies to ThemedButton without changing its hit target.",
+        properties: [
+          "text_transform": MCPPropertySchema(
+            type: .string,
+            description: "\"none\" (default) or \"uppercase\" for the painted title. "
+              + "Accessibility keeps the original title."
+          ),
+          "font_weight": MCPPropertySchema(
+            type: .string,
+            description: "\"regular\", \"medium\" (default), \"semibold\" or \"bold\"."
+          ),
+          "typeface": MCPPropertySchema(
+            type: .string,
+            description: "Optional button-only class: \"default\", \"serif\", "
+              + "\"rounded\", or \"monospaced\". Unset inherits the material prose face."
+          ),
+          "font_family": MCPPropertySchema(
+            type: .string,
+            description: "Optional installed button-only font family. It takes precedence over "
+              + "the button typeface class and material prose face."
+          ),
+          "tracking": MCPPropertySchema(
+            type: .number,
+            description: "Additional title spacing, -1–4 points; default 0."
+          ),
+          "primary_treatment": MCPPropertySchema(
+            type: .string,
+            description: "\"filled\" (default), \"outlined\", or \"raised\" for a classic "
+              + "default pushbutton that keeps the ordinary control face and adds an outer frame."
+          ),
+          "primary_role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role supplying a primary action's fill, outline, and title."
+          ),
+          "primary_border_role": MCPPropertySchema(
+            type: .string,
+            description: "Optional theme role for the rule around a filled primary action."
+          ),
+          "remove_primary_border": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the filled primary action's explicit border."
+          ),
+          "hover_offset_x": MCPPropertySchema(
+            type: .number,
+            description: "Horizontal face travel on hover, -8–8 points."
+          ),
+          "hover_offset_y": MCPPropertySchema(
+            type: .number,
+            description: "Vertical face travel on hover, -8–8 points; positive moves down."
+          ),
+          "pressed_offset_x": MCPPropertySchema(
+            type: .number,
+            description: "Horizontal face travel while pressed, -8–8 points."
+          ),
+          "pressed_offset_y": MCPPropertySchema(
+            type: .number,
+            description: "Vertical face travel while pressed, -8–8 points; positive moves down."
+          ),
+          "collapse_shadow_on_hover": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the compact-control shadow on hover, for hard-print "
+              + "faces that move into their shadow."
+          ),
+        ]
+      ),
+      "remove_button_style": MCPPropertySchema(
+        type: .boolean,
+        description: "True resets the base theme's button style to the System response."
+      ),
+      "heading_style": MCPPropertySchema(
+        type: .object,
+        description: "Optional display typography for semantic headings. Unstated fields "
+          + "inherit the material's prose recipe; body and controls are unchanged.",
+        properties: [
+          "typeface": MCPPropertySchema(
+            type: .string,
+            description: "Optional heading-only class: \"default\", \"serif\", "
+              + "\"rounded\", or \"monospaced\"."
+          ),
+          "font_family": MCPPropertySchema(
+            type: .string,
+            description: "Optional installed family for headings alone. If unavailable when "
+              + "the document is read elsewhere, it falls through to this style's typeface "
+              + "and then the material's prose recipe."
+          ),
+          "font_weight": MCPPropertySchema(
+            type: .string,
+            description: "Optional heading weight: \"regular\", \"medium\", \"semibold\", "
+              + "or \"bold\". Omit to keep each semantic heading role's normal weight."
+          ),
+          "italic": MCPPropertySchema(
+            type: .boolean,
+            description: "True sets semantic headings in italics. Default false."
+          ),
+        ]
+      ),
+      "remove_heading_style": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the base theme's heading-specific recipe so headings "
+          + "inherit ordinary prose typography."
+      ),
       "typeface": MCPPropertySchema(
         type: .string,
         description: """
@@ -4691,17 +4992,28 @@ enum MCPTools {
       "font_family": MCPPropertySchema(
         type: .string,
         description: """
-          An installed font family — "Baskerville", "Iowan Old Style" — for a theme \
+          A preferred font family — "Baskerville", "MS Sans Serif" — for a theme \
           whose identity is a particular face rather than one of the four classes. \
-          Wins over typeface where it resolves. Must be installed on this machine; \
-          call list_app_themes or get_app_theme to see what a theme currently uses. \
-          A theme that names a family the reading machine lacks falls back to \
-          typeface rather than failing.
+          Wins over typeface where it resolves. It may name an unavailable historical \
+          face when font_fallbacks contains an installed substitute; installing the exact \
+          face later promotes it automatically. If no family in the chain resolves on the \
+          reading machine, the theme falls back to typeface rather than failing.
           """
       ),
       "remove_font_family": MCPPropertySchema(
         type: .boolean,
         description: "True removes the base theme's font family, falling back to typeface."
+      ),
+      "font_fallbacks": MCPPropertySchema(
+        type: .array,
+        description: "Ordered family substitutes tried after font_family. Earlier historical "
+          + "names may also be unavailable, but the authored chain must contain at least one "
+          + "family installed on this machine.",
+        items: MCPArrayItemSchema(type: .string)
+      ),
+      "remove_font_fallbacks": MCPPropertySchema(
+        type: .boolean,
+        description: "True clears the base theme's ordered font fallback chain."
       ),
       "scroller_placement": MCPPropertySchema(
         type: .string,
@@ -4713,6 +5025,16 @@ enum MCPTools {
         type: .string,
         description: "\"solid\" (the default) or \"stippled\" for a crisp workstation-era "
           + "checker track behind the thumb."
+      ),
+      "progress_style": MCPPropertySchema(
+        type: .string,
+        description: "Determinate progress treatment: \"continuous\" (the default) or "
+          + "\"segmented\" for the classic Win32 recessed block control."
+      ),
+      "choice_style": MCPPropertySchema(
+        type: .string,
+        description: "Compact chooser anatomy: \"chip\" (the default) or \"dropdown\" for a "
+          + "square sunken value well with a separate raised arrow button."
       ),
       "bevel": MCPPropertySchema(
         type: .object,

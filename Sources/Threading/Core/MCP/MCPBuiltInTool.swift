@@ -23,6 +23,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case browserEmulate = "browser_emulate"
   case browserCapabilities = "browser_capabilities"
   case browserRunIsolated = "browser_run_isolated"
+  case browserAttachChrome = "browser_attach_chrome"
   case browserSnapshot = "browser_snapshot"
   case browserAnnotations = "browser_annotations"
   case browserScreenshot = "browser_screenshot"
@@ -50,6 +51,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case setSessionName = "set_session_name"
   case listReclaimableStorage = "list_reclaimable_storage"
   case proposeStorageCleanup = "propose_storage_cleanup"
+  case listSettings = "list_settings"
   case notifyUser = "notify_user"
   case listThemes = "list_themes"
   case setTheme = "set_theme"
@@ -77,6 +79,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case storage
     case notifications
     case appearance
+    case settings
     case extensionAuthoring
   }
 
@@ -87,7 +90,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case .displayImage, .displayScene, .displayHTML, .displayCompareFiles: return .display
     case .browserNavigate, .browserHistory, .browserStop, .browserTabs, .browserStorage,
       .browserTrace, .browserUpload, .browserDownload, .browserResize, .browserEmulate,
-      .browserCapabilities, .browserRunIsolated, .browserSnapshot, .browserAnnotations,
+      .browserCapabilities, .browserRunIsolated, .browserAttachChrome, .browserSnapshot,
+      .browserAnnotations,
       .browserScreenshot, .browserVisualCompare, .browserQuery, .browserClick,
       .browserHover, .browserDrag, .browserType, .browserFillForm, .browserSelect,
       .browserSetChecked, .browserPressKey, .browserScroll, .browserWait, .browserConsole,
@@ -97,6 +101,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case .setProjectIcon: return .project
     case .archiveSession, .cancelSessionArchive, .setSessionName: return .session
     case .listReclaimableStorage, .proposeStorageCleanup: return .storage
+    case .listSettings: return .settings
     case .notifyUser: return .notifications
     case .listThemes, .setTheme, .createTheme, .listAppThemes, .getAppTheme, .setAppTheme,
       .createAppTheme, .duplicateAppTheme, .updateAppTheme:
@@ -115,7 +120,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case .conversationHistory, .browserCapabilities, .browserSnapshot, .browserAnnotations,
       .browserScreenshot, .browserVisualCompare, .browserQuery, .browserConsole,
       .browserNetwork, .browserPerformance, .browserAccessibilityAudit, .panelListTabs,
-      .listReclaimableStorage, .listThemes, .listAppThemes, .getAppTheme,
+      .listReclaimableStorage, .listSettings, .listThemes, .listAppThemes, .getAppTheme,
       .extensionListComponents, .extensionDescribeComponent,
       .extensionValidateComponentPatch:
       return MCPToolAnnotations(
@@ -152,7 +157,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
 
     case .displayImage, .displayScene, .displayHTML, .displayCompareFiles, .browserNavigate,
       .browserHistory, .browserStop, .browserTabs, .browserUpload, .browserDownload,
-      .browserResize, .browserEmulate, .browserRunIsolated, .browserClick, .browserHover,
+      .browserResize, .browserEmulate, .browserRunIsolated, .browserAttachChrome,
+      .browserClick, .browserHover,
       .browserDrag, .browserType, .browserFillForm, .browserSelect, .browserSetChecked,
       .browserPressKey, .browserScroll, .browserWait, .panelActivateTab, .setProjectIcon,
       .notifyUser, .setTheme, .createTheme, .setAppTheme, .createAppTheme,

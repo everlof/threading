@@ -113,6 +113,7 @@ enum MCPToolCatalog {
     project,
     session,
     storage,
+    settings,
     notifications,
     appearance,
     extensionAuthoring,
@@ -289,6 +290,12 @@ enum MCPToolCatalog {
         symbol: "testtube.2"
       ),
       MCPToolInfo(
+        tool: .browserAttachChrome,
+        title: "Use signed-in Chrome",
+        detail: "Drive the user's Chrome automation profile inside an allowed origin list.",
+        symbol: "person.badge.key"
+      ),
+      MCPToolInfo(
         tool: .browserSnapshot,
         title: "Read page",
         detail: "Read a semantic page tree with stable references for interaction.",
@@ -435,6 +442,11 @@ enum MCPToolCatalog {
       them as supported. Use browser_run_isolated for a bounded, fresh Playwright scenario \
       when engine choice or richer emulation matters and no signed-in browser state is \
       needed; it never imports the visible browser's cookies or storage. \
+      Use browser_attach_chrome only when a task genuinely needs the user's own signed-in \
+      session in real Chrome: it drives a separate Chrome profile the user set up and signed \
+      into, where a password manager's browser extension and passkeys work. It is neither the \
+      in-app browser nor the isolated one. List every origin it may reach; the user authorizes \
+      each one before Chrome opens, and the run stops at any other origin. \
       browser_click supports \
       pointer-faithful single, double, right, and middle clicks for application-style pages, \
       and refuses targets that are hidden, moving, disabled, or covered by another element. \
@@ -606,6 +618,29 @@ enum MCPToolCatalog {
       """
   )
 
+  static let settings = MCPToolGroup(
+    id: "settings-directory",
+    family: .settings,
+    title: "Settings directory",
+    summary: "Let agents read which Settings pages exist, to point you at the right one.",
+    symbol: "gearshape",
+    tools: [
+      MCPToolInfo(
+        tool: .listSettings,
+        title: "List settings pages",
+        detail: "Read the Settings pages, their sidebar groups, and their vocabulary.",
+        symbol: "list.bullet.rectangle"
+      )
+    ],
+    instruction: """
+      list_settings returns the catalogue of Threading's Settings pages — each page's \
+      stable id, its sidebar group, and its own vocabulary. When the user asks where a \
+      Threading preference lives, read the catalogue and name the page rather than \
+      guessing. It describes Threading's Settings only, never the agent CLI's own \
+      configuration files.
+      """
+  )
+
   static let notifications = MCPToolGroup(
     id: "notifications",
     family: .notifications,
@@ -731,7 +766,8 @@ enum MCPToolCatalog {
       titlebar, traffic lights and rounded corners while the theme is worn, live in \
       both directions. The band's ink must read on every active-gradient stop, and an \
       adaptive theme states chrome in both variants or neither. Pair it with the \
-      material's `bevel` (square corners required) for the full mid-nineties treatment. \
+      material's hard `bevel` (square corners required; soft follows rounded surfaces) \
+      for the full mid-nineties treatment. \
       Windows 98 and Mac OS 9 Platinum are worked examples of different button placement, \
       glyph and texture choices — read them with get_app_theme.
       """
@@ -920,6 +956,34 @@ enum MCPToolCatalog {
   @MainActor
   static func admits(_ command: AgentCommand) -> Bool {
     enabledToolNames.contains(command.name)
+  }
+
+  // MARK: Scoped Access
+
+  /// The `tools/list` payload for a scope-restricted ad-hoc endpoint — see
+  /// `MCPSessionRegistry.beginAdHoc`. Deliberately independent of the group toggles above:
+  /// an ad-hoc helper runs because the user explicitly clicked for it, naming exactly these
+  /// tools, whereas the toggles govern what full sessions may reach. External tools are
+  /// excluded — a scope names built-ins only.
+  static func scopedDefinitions(_ allowedTools: [String]) -> [MCPToolDefinition] {
+    MCPBuiltInTool.allCases
+      .filter { allowedTools.contains($0.rawValue) }
+      .compactMap(MCPTools.definition)
+  }
+
+  /// Admission inside a scope, derived from the same scoped definitions `tools/list`
+  /// advertises — the invariant `enabledToolNames` states, kept inside the scope too.
+  static func scopedAdmits(_ command: AgentCommand, allowedTools: [String]) -> Bool {
+    scopedDefinitions(allowedTools).contains { $0.name == command.name }
+  }
+
+  /// The `initialize` instructions for a scoped endpoint: only the groups owning a scoped
+  /// tool speak, and the session intro is skipped — a helper has no terminal or panel.
+  static func scopedInstructions(_ allowedTools: [String]) -> String {
+    groups
+      .filter { group in group.tools.contains { allowedTools.contains($0.name) } }
+      .map(\.instruction)
+      .joined(separator: "\n\n")
   }
 
   /// The `initialize` instructions, assembled from the enabled groups so the model is told about

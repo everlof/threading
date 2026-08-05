@@ -68,6 +68,166 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertNil(BrowserOrigin(url: fileURL))
     }
 
+    /// `isLocal` is the one answer that skips the consent prompt outright, so it must mean
+    /// loopback and nothing wider.
+    ///
+    /// `127.` is a legal subdomain label, so the prefix test that used to stand here read
+    /// `127.evil.com` — an ordinary domain anyone can register — as this machine, and handed it
+    /// Threading's signed-in browser with no prompt at all.
+    func testOnlyRealLoopbackHostsSkipTheGrantPrompt() throws {
+        func origin(_ string: String) throws -> BrowserOrigin {
+            try XCTUnwrap(BrowserOrigin(url: XCTUnwrap(URL(string: string))))
+        }
+
+        for loopback in [
+            "http://127.0.0.1:8080/",
+            "http://127.0.0.1/",
+            "http://127.1.2.3/",
+            "http://127.255.255.255/",
+            "http://localhost:3000/",
+            "http://sub.localhost/",
+            "http://[::1]:9000/"
+        ] {
+            XCTAssertTrue(try origin(loopback).isLocal, "should need no grant: \(loopback)")
+        }
+
+        for remote in [
+            "https://127.evil.com/",
+            "https://127.0.0.1.evil.com/",
+            "https://1270.0.0.1/",
+            "https://127.0.0.256/",
+            "https://127.0.0/",
+            "https://127.0.0.1.5/",
+            "https://notlocalhost/",
+            "https://localhost.evil.com/",
+            "https://example.com/"
+        ] {
+            XCTAssertFalse(try origin(remote).isLocal, "MUST prompt for a grant: \(remote)")
+        }
+    }
+
+    /// The grant prompt has to name the page it is asking about. The host alone cannot answer the
+    /// question — one host serves both an article and an account page — so the prompt shows the
+    /// URL the browser would load, bounded and free of characters that could reorder it on screen.
+    func testGrantPromptShowsTheWholeTargetURLWithinBounds() throws {
+        let plain = try XCTUnwrap(URL(string: "https://example.com/settings/billing?tab=cards"))
+        XCTAssertEqual(
+            BrowserOrigin.displayURL(plain),
+            "https://example.com/settings/billing?tab=cards"
+        )
+
+        let padded = try XCTUnwrap(
+            URL(string: "https://example.com/" + String(repeating: "a", count: 400))
+        )
+        let shown = BrowserOrigin.displayURL(padded)
+        XCTAssertEqual(shown.count, BrowserGrantPromptDefaults.displayedURLCharacters + 1)
+        XCTAssertTrue(shown.hasPrefix("https://example.com/"), "the origin must survive the cut")
+        XCTAssertTrue(shown.hasSuffix(BrowserGrantPromptDefaults.truncationMark))
+
+        // Foundation percent-encodes a bidi override on the way into `URL` today, so this asserts
+        // the property the prompt depends on rather than one parser's behaviour: whatever reaches
+        // the alert carries no Cc/Cf scalar that could visually reorder the host.
+        let bidi = try XCTUnwrap(URL(string: "https://example.com/\u{202E}gnp.exe"))
+        XCTAssertFalse(
+            BrowserOrigin.displayURL(bidi).unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+        )
+    }
+
+    /// The grant is keyed on the host, so the prompt has to state the host WebKit will really
+    /// reach. `https://example.com:secret@evil.example/pay` is a page on evil.example that reads
+    /// as example.com, and it carries a password that has no business being drawn in an alert —
+    /// so the credentials come out of the shown URL and the true host is named on its own.
+    func testTheGrantIsKeyedToTheTrueHostAndTheShownURLCarriesNoCredentials() throws {
+        let deceptive = try XCTUnwrap(URL(string: "https://example.com:secret@evil.example/pay?ref=1"))
+        let origin = try XCTUnwrap(BrowserOrigin(url: deceptive))
+
+        XCTAssertEqual(origin.displayName, "evil.example")
+        XCTAssertEqual(origin.key, "https://evil.example")
+
+        let shown = BrowserOrigin.displayURL(deceptive)
+        XCTAssertEqual(shown, "https://evil.example/pay?ref=1")
+        XCTAssertFalse(shown.contains("secret"), "a password must never be drawn in the prompt")
+        XCTAssertFalse(shown.contains("example.com@"))
+    }
+
+    /// `about:` is waved through with no prompt at all, and the prompt would call it "this blank
+    /// page", so the scheme cannot mean more than the blank page.
+    func testOnlyTheBlankDocumentIsAnOriginInTheAboutScheme() throws {
+        let blank = try XCTUnwrap(BrowserOrigin(url: XCTUnwrap(URL(string: "about:blank"))))
+        XCTAssertEqual(blank.key, "about:")
+        XCTAssertEqual(blank.scheme, "about")
+
+        for notBlank in ["about:srcdoc", "about:blank#blocked", "about:"] {
+            XCTAssertNil(
+                BrowserOrigin(url: try XCTUnwrap(URL(string: notBlank))),
+                "must not pass as the blank page: \(notBlank)"
+            )
+        }
+    }
+
+    @MainActor
+    func testTheAddressNormaliserResolvesOnlyTheBlankDocumentInTheAboutScheme() throws {
+        XCTAssertEqual(
+            BrowserViewController.normalizedURL(from: "about:blank")?.absoluteString,
+            "about:blank"
+        )
+        XCTAssertNotEqual(
+            BrowserViewController.normalizedURL(from: "about:srcdoc")?.scheme,
+            "about",
+            "an unopenable about: URL must not be handed on as one"
+        )
+    }
+
+    /// Prefixing `https://` onto an input that already names a scheme built a second scheme in
+    /// front of the first: `file:///notes.html` became `https://file:///notes.html`, whose host is
+    /// the word "file" — so the grant prompt read "Allow the agent to use file?" and allowing it
+    /// would have navigated somewhere nobody named.
+    @MainActor
+    func testAbsoluteSchemeIsHonouredOrRefusedButNeverPrefixed() throws {
+        for unopenable in [
+            "file:///Users/someone/notes.html",
+            "mailto:someone@example.com",
+            "javascript:fetch.call()"
+        ] {
+            XCTAssertNil(
+                BrowserViewController.normalizedURL(from: unopenable),
+                "must be refused rather than mangled into a host: \(unopenable)"
+            )
+        }
+
+        // A foreign scheme that does carry a host stays exactly as written and is stopped at the
+        // grant instead — no origin, so no prompt. Either way the browser is never sent to a host
+        // the input never named.
+        for foreign in ["file://localhost/etc/passwd", "ftp://files.example.com/x"] {
+            let url = try XCTUnwrap(BrowserViewController.normalizedURL(from: foreign))
+            XCTAssertEqual(url.absoluteString, foreign)
+            XCTAssertNil(BrowserOrigin(url: url), "no grant can be asked for: \(foreign)")
+        }
+
+        // A bare domain with a port parses its own host as a scheme, so it must still be prefixed.
+        let ported = try XCTUnwrap(BrowserViewController.normalizedURL(from: "example.com:8080/path"))
+        XCTAssertEqual(ported.host, "example.com")
+        XCTAssertEqual(ported.port, 8080)
+        XCTAssertEqual(
+            BrowserViewController.normalizedURL(from: "example.com")?.absoluteString,
+            "https://example.com"
+        )
+        XCTAssertEqual(
+            BrowserViewController.normalizedURL(from: "127.0.0.1:3000")?.host,
+            "127.0.0.1"
+        )
+        XCTAssertEqual(
+            BrowserViewController.normalizedURL(from: "https://example.com/x")?.absoluteString,
+            "https://example.com/x"
+        )
+        XCTAssertEqual(BrowserViewController.normalizedURL(from: "about:blank")?.scheme, "about")
+
+        let search = try XCTUnwrap(BrowserViewController.normalizedURL(from: "how to write swift"))
+        XCTAssertTrue(search.absoluteString.hasPrefix(BrowserDefaults.searchPrefix))
+    }
+
     func testSemanticLocatorDecodesAndIsAdvertisedAsStructuredTarget() throws {
         let request = try JSONDecoder().decode(
             JSONRPCRequest.self,
@@ -1341,7 +1501,11 @@ final class BrowserAgentBridgeTests: XCTestCase {
         let capabilityBackends = try XCTUnwrap(
             capabilitiesJSON["backends"] as? [[String: Any]]
         )
-        XCTAssertEqual(capabilityBackends.count, 2)
+        XCTAssertEqual(
+            capabilityBackends.map { $0["id"] as? String },
+            ["webkit_in_app", "playwright_isolated", "playwright_attached_chrome"],
+            "every backend an agent can call has to appear in the capability matrix"
+        )
         let webKitCapabilities = try XCTUnwrap(capabilityBackends.first)
         XCTAssertEqual(webKitCapabilities["id"] as? String, "webkit_in_app")
         XCTAssertEqual(webKitCapabilities["status"] as? String, "available")
@@ -2728,6 +2892,135 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             second.text.contains("isolated=1"),
             "A second isolated run must not inherit cookies from the first"
         )
+    }
+
+    /// The origin fence is the whole of the attached backend's safety, so it is exercised for
+    /// real rather than asserted about.
+    ///
+    /// Playwright's bundled Chromium stands in for Chrome — the channel is what differs, not the
+    /// enforcement — and two loopback servers give two genuinely different origins on the same
+    /// host, which is the case a host-only comparison would wave through. The profile is a
+    /// throwaway directory: nothing here is ever signed into anything.
+    func testAttachedRunStopsAtTheFirstOriginTheUserDidNotAllow() async throws {
+        guard PlaywrightAutomationRunner().availability() else {
+            throw XCTSkip("Local Python Playwright runtime is not installed.")
+        }
+        let allowedServer = try BrowserLoopbackHTTPServer(
+            pages: [
+                "/allowed": #"""
+                    <!doctype html>
+                    <html>
+                      <head><title>Allowed fixture</title></head>
+                      <body><p id="here">allowed-origin-body</p></body>
+                    </html>
+                    """#
+            ]
+        )
+        defer { allowedServer.stop() }
+        let blockedServer = try BrowserLoopbackHTTPServer(
+            pages: [
+                "/blocked": #"""
+                    <!doctype html>
+                    <html>
+                      <head><title>Blocked fixture</title></head>
+                      <body><p id="here">blocked-origin-body</p></body>
+                    </html>
+                    """#
+            ]
+        )
+        defer { blockedServer.stop() }
+
+        let allowedURL = allowedServer.url(host: "localhost", path: "/allowed")
+        let blockedURL = blockedServer.url(host: "localhost", path: "/blocked")
+        let allowedOrigin = try XCTUnwrap(BrowserOrigin(url: allowedURL)).key
+        let profileDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attach-profile-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: profileDirectory) }
+        let runner = PlaywrightAutomationRunner()
+        // An empty channel means Playwright's own Chromium: the test needs enforcement, not a
+        // real Google Chrome, and asking a machine to have one would make this untestable.
+        let profile = PlaywrightAutomationRunner.AttachProfile(
+            userDataDirectory: profileDirectory,
+            channel: "",
+            allowedOrigins: [allowedOrigin]
+        )
+
+        let permitted = await attachedRun(
+            runner,
+            profile: profile,
+            steps: """
+                {"action":"goto","url":"\(allowedURL.absoluteString)"},
+                {"action":"snapshot","css":"#here"}
+                """
+        )
+        if !permitted.succeeded,
+           permitted.text.contains("playwright install")
+            || permitted.text.contains("Executable doesn't exist") {
+            throw XCTSkip("The matching local Playwright browser binary is not installed.")
+        }
+        XCTAssertTrue(permitted.succeeded, permitted.text)
+        XCTAssertTrue(
+            permitted.text.contains("\"backend\" : \"playwright_attached_chrome\""),
+            permitted.text
+        )
+        XCTAssertTrue(permitted.text.contains("allowed-origin-body"), permitted.text)
+
+        let refused = await attachedRun(
+            runner,
+            profile: profile,
+            steps: """
+                {"action":"goto","url":"\(allowedURL.absoluteString)"},
+                {"action":"goto","url":"\(blockedURL.absoluteString)"},
+                {"action":"snapshot","css":"#here"}
+                """
+        )
+        XCTAssertFalse(refused.succeeded, refused.text)
+        XCTAssertTrue(refused.text.contains("step 2"), refused.text)
+        XCTAssertTrue(
+            refused.text.contains(try XCTUnwrap(BrowserOrigin(url: blockedURL)).key),
+            refused.text
+        )
+        XCTAssertFalse(
+            refused.text.contains("blocked-origin-body"),
+            "a page outside the allowlist is never read, so nothing of it can be returned"
+        )
+    }
+
+    private func attachedRun(
+        _ runner: PlaywrightAutomationRunner,
+        profile: PlaywrightAutomationRunner.AttachProfile,
+        steps: String
+    ) async -> PlaywrightAutomationOutput {
+        let arguments: BrowserAttachRunArguments
+        do {
+            arguments = try JSONDecoder().decode(
+                BrowserAttachRunArguments.self,
+                from: Data(
+                    """
+                    {
+                      "allowed_origins":\(
+                        String(
+                            data: try JSONEncoder().encode(profile.allowedOrigins),
+                            encoding: .utf8
+                        ) ?? "[]"
+                    ),
+                      "steps":[\(steps)]
+                    }
+                    """.utf8
+                )
+            )
+        } catch {
+            return PlaywrightAutomationOutput(
+                text: "Could not build attached arguments: \(error)",
+                screenshotPNG: nil,
+                succeeded: false
+            )
+        }
+        return await withCheckedContinuation { continuation in
+            runner.run(arguments, profile: profile) { output in
+                continuation.resume(returning: output)
+            }
+        }
     }
 
     /// The annotation overlay outlines a component, not the deepest node under the pointer.
@@ -5980,7 +6273,7 @@ final class BrowserRuleWeightTests: XCTestCase {
 
         XCTAssertEqual(
             openRuleWeights(in: browser.view),
-            [3],
+            [AppThemeStyles.neoBrutalism.material.borderWidth],
             "the browser did not open ruling at Neo Brutalism's weight throughout"
         )
 
@@ -5988,7 +6281,7 @@ final class BrowserRuleWeightTests: XCTestCase {
 
         XCTAssertEqual(
             openRuleWeights(in: browser.view),
-            [1],
+            [AppThemeStyles.editorial.material.borderWidth],
             "a rule kept the weight of the theme that just left"
         )
     }

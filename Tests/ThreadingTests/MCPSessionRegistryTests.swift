@@ -153,6 +153,64 @@ final class MCPSessionRegistryTests: XCTestCase {
     XCTAssertNil(MCPSessionRegistry.session(forToken: removedToken))
     XCTAssertEqual(MCPSessionRegistry.token(for: retainedSessionID), retainedToken)
   }
+
+  /// An ad-hoc endpoint is not `ProjectStore`'s to revoke: the retain sweep runs because some
+  /// unrelated session was deleted, and a helper mid-run must keep its endpoint through it.
+  /// Only its own explicit end revokes it — and does, in both directions, scope included.
+  @MainActor
+  func testAnAdHocEndpointSurvivesTheRetainSweepUntilEndedExplicitly() {
+    let scope = [MCPBuiltInTool.listSettings.rawValue]
+    let adHocSessionID = MCPSessionRegistry.beginAdHoc(allowedTools: scope)
+    let token = MCPSessionRegistry.token(for: adHocSessionID)
+
+    XCTAssertEqual(MCPSessionRegistry.session(forToken: token), adHocSessionID)
+    XCTAssertEqual(MCPSessionRegistry.adHocScope(for: adHocSessionID), scope)
+
+    MCPSessionRegistry.retainOnly(sessionIDs: [])
+    XCTAssertEqual(
+      MCPSessionRegistry.session(forToken: token),
+      adHocSessionID,
+      "deleting an unrelated session revoked a helper's endpoint mid-run"
+    )
+
+    MCPSessionRegistry.endAdHoc(adHocSessionID)
+    XCTAssertNil(MCPSessionRegistry.session(forToken: token))
+    XCTAssertNil(MCPSessionRegistry.adHocScope(for: adHocSessionID))
+  }
+
+  /// Inside a scope, `tools/list`, admission and instructions must agree exactly as the
+  /// enabled catalogue does globally — all three derive from the scope, so a scoped helper is
+  /// advertised one tool, admitted for that tool, and told about nothing else.
+  func testAScopedEndpointAdvertisesAdmitsAndDescribesExactlyItsScope() throws {
+    let scope = [MCPBuiltInTool.listSettings.rawValue]
+
+    XCTAssertEqual(
+      MCPToolCatalog.scopedDefinitions(scope).map(\.name),
+      scope
+    )
+
+    let scopedCall = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(#"{"name":"list_settings"}"#.utf8)
+    ).call
+    guard case .listSettings = scopedCall else {
+      return XCTFail("Expected a typed list_settings command")
+    }
+    let unscopedCall = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(#"{"name":"list_themes"}"#.utf8)
+    ).call
+
+    XCTAssertTrue(MCPToolCatalog.scopedAdmits(scopedCall, allowedTools: scope))
+    XCTAssertFalse(MCPToolCatalog.scopedAdmits(unscopedCall, allowedTools: scope))
+
+    let instructions = MCPToolCatalog.scopedInstructions(scope)
+    XCTAssertTrue(instructions.contains("list_settings"))
+    XCTAssertFalse(
+      instructions.contains("display panel"),
+      "a scoped helper was told about a session surface it cannot reach"
+    )
+  }
 }
 
 final class MCPWireTests: XCTestCase {

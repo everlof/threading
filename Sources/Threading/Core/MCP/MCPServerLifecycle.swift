@@ -5,27 +5,23 @@ import Foundation
 /// The listener's second non-MCP endpoint, alongside permissions.
 ///
 /// It lives in its own file rather than in `MCPServer` because it shares only the socket with
-/// the JSON-RPC surface: a lifecycle report is a plain JSON POST from a command hook, speaks no
-/// MCP, and is answered before it is even read.
+/// the JSON-RPC surface: a lifecycle report is a plain JSON POST from a command hook and speaks
+/// no MCP. Turn starts are the deliberate exception to immediate acknowledgement: their reply
+/// is the barrier that keeps the agent behind its git baseline.
 extension MCPServer {
 
     /// Records a lifecycle hook's report of a turn boundary.
     ///
-    /// The opposite of `routePermission` in the one way that matters: it answers immediately and
-    /// never blocks. These hooks fire on the agent's own turn boundaries, so any pause here is
-    /// latency the user feels before their prompt is answered — and nothing in the reply is
-    /// read.
+    /// Most boundaries answer immediately. A turn start answers only after its checkout snapshot
+    /// is stored, because acknowledging that hook is what lets the agent begin changing files.
     ///
     /// The event is named in the query string rather than taken from the body, which keeps one
     /// endpoint per session while still distinguishing the events, and avoids depending on the
     /// payload's own event field — the two CLIs spell it differently.
     func routeLifecycle(
         _ request: HTTPRequest,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
-        // Answer first. Reading the body is this app's problem, not the agent's to wait for.
-        respond(.accepted)
-
         let target = request.path.dropFirst(MCPDefaults.lifecyclePathPrefix.count)
         let parts = target.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
         let query = parts.count > 1 ? String(parts[1]) : nil
@@ -35,6 +31,7 @@ extension MCPServer {
         // different causes — one is a stale `hooks.json`, the other a CLI that is not firing.
         guard let token = parts.first.map(String.init),
               let sessionID = MCPSessionRegistry.session(forToken: token) else {
+            respond(.accepted)
             ThreadingLogger.mcp.warning("Lifecycle report for unknown token")
             EventLog.shared.record(.hooks, "Lifecycle report for unknown session token", [
                 "query": query ?? ""
@@ -43,6 +40,7 @@ extension MCPServer {
         }
 
         guard let event = Self.event(inQuery: query) else {
+            respond(.accepted)
             ThreadingLogger.mcp.warning("Lifecycle report naming no event: \(query ?? "", privacy: .public)")
             EventLog.shared.record(.hooks, "Lifecycle report named no known event", [
                 "session": sessionID.uuidString,
@@ -70,11 +68,25 @@ extension MCPServer {
             event: event,
             payload: payload
         ) else {
+            respond(.accepted)
+            return
+        }
+
+        guard event == .turnStarted else {
+            respond(.accepted)
+            DispatchQueue.main.async {
+                HookLifecycleRelay.deliver(report)
+            }
             return
         }
 
         DispatchQueue.main.async {
-            HookLifecycleRelay.deliver(report)
+            GitTurnBaselineStore.shared.prepareTurn(sessionID: sessionID) {
+                // Stored before the response: once curl sees this acknowledgement the CLI may
+                // run a tool immediately, and Last Turn must already have its immutable start.
+                respond(.accepted)
+                HookLifecycleRelay.deliver(report)
+            }
         }
     }
 

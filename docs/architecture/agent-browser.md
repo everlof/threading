@@ -11,6 +11,74 @@ itself is pre-approved. Localhost is admitted for development, other origins off
 persistent-host, or deny choices. After an action navigates, the new origin is checked before
 any resulting page state is returned.
 
+Browser traces remain bounded diagnostics returned to the agent. They are not the user's execution
+history. The [Execution Audit](execution-audit.md) records the exact structured browser tool calls,
+results and permission decisions instead; its Browser split embeds this same live controller and
+filters the ledger to Browser events.
+
+**"Localhost" has to mean the loopback and nothing wider**, because `BrowserOrigin.isLocal` is
+the one answer that skips the prompt outright — `hasBrowserAccess` returns true on it alone. It
+was `host.hasPrefix("127.")`, and `127.` is a legal subdomain label: `127.evil.com` is an
+ordinary domain anyone can register, and it read as this machine and was handed the browser's
+signed-in state with no prompt at all. The octets are parsed now — four dotted, all plain ASCII
+digits, all 0–255, the first exactly 127 — so a hostname cannot pass by looking like an address.
+`.localhost` stays a *suffix* test on purpose: RFC 6761 reserves the whole TLD for the loopback,
+so `sub.localhost` genuinely is this machine.
+
+## What the grant prompt guarantees
+
+The prompt is the whole of the security this feature offers: an agent reaching a signed-in
+browser is stopped by one alert, and everything downstream trusts the answer. So the promises it
+makes are listed here, each one enforced by something that fails rather than by care at the call
+site. A change that cannot keep one of these is a change to the contract, not an implementation
+detail.
+
+**1. Nothing is guessed into existence.** An input that cannot be resolved to a page this browser
+opens is refused; it is never rewritten until it looks like one. This is the rule that broke:
+`normalizedURL` prefixed `https://` onto anything containing a dot, so an agent asking for
+`file:///notes.html` produced `https://file:///notes.html` — whose *host* is the word `file` — and
+the alert read "Allow the agent to use file?", about a host that does not exist. A scheme with no
+host is now honoured or refused, never prefixed, which also keeps a local path out of the search
+fallback. The port form still gets its prefix, because `example.com:8080/x` parses its own host as
+a scheme — the test is on what follows the colon, not on the colon. A foreign scheme that *does*
+carry a host (`ftp://files.example.com/x`) stays as written and dies at `BrowserOrigin`, so no
+prompt is raised for it at all.
+
+**2. The prompt names the exact page.** The title carries the host, because the host is what the
+grant is keyed on; the body carries the URL that will load. A host alone cannot answer the
+question — one host serves both an article and an account page. `BrowserOrigin.displayURL` cuts
+from the tail at 120 characters so padding cannot push the origin off screen, drops Cc/Cf scalars
+so a bidi override cannot visually reorder a host, and removes credentials: this is the one place
+the shown string deliberately differs from the loaded string, because `https://example.com:pw@evil.example/`
+is a page on evil.example that reads as example.com, and a password does not belong in an alert.
+The true host is stated separately for exactly that reason.
+
+**3. What was approved is what loads.** `authorizeBrowserTarget` hands back an
+`ApprovedBrowserTarget` — a value whose initializer is private to the file that raises the prompt
+— and `BrowserViewController.navigate(to:)` starts an agent navigation from nothing else. Before
+that, the command authorized `normalizedURL(from: input)` and then navigated from `input`,
+normalizing a second time on the far side of the user's answer: the same function ran twice, so
+prompt and load agreed by coincidence. `check_architecture_boundaries.sh` fails the build on an
+agent handler that navigates to anything but the approved value.
+
+**4. The page cannot change under an open prompt.** Every command that acts on the current page
+re-checks its lease (`browserPageLeaseIsCurrent`) or its document identity (`agentPageIdentity`)
+after the decision returns, and fails with "retry against the page now on screen" rather than
+acting on a page the user did not see. The browser is shared with the user, who can navigate it
+while the sheet is up.
+
+**5. A redirect is a new decision.** `finishBrowserNavigation` re-authorizes the *final* URL
+before any page content is returned, so a granted origin that bounces to another one prompts
+again instead of leaking the destination's content.
+
+**6. Only two things skip the prompt, and both are pinned by parse.** Loopback (see above) and
+`about:blank` — the whole `about:` scheme used to qualify while the prompt described it as "this
+blank page"; only the blank document does now.
+
+**7. Every undecidable state is a refusal.** No origin, no lease, no page URL, a display string
+that cannot be rebuilt without credentials, a decision provider that never answers — each ends in
+denial or an error, never in an unprompted load.
+
 `BrowserAgentBridge` reads the page into a compact accessibility-oriented snapshot. Interactive
 elements receive stable `eN` refs kept in WebKit's isolated client world; click, hover, type,
 drag, select, key and scroll tools prefer those refs over guessed CSS. Hover sends DOM
@@ -163,12 +231,65 @@ Chromium, Firefox, or Playwright-WebKit context, runs at most fifty strict seman
 closes both context and browser. It can honestly emulate viewport, locale, time zone, geolocation,
 permissions, offline state, touch/mobile behavior, scale factor, colour/media preferences, and
 User-Agent. It never imports the in-app browser's cookies, credentials, storage, history, or
-certificate state; downloads, password fills, arbitrary JavaScript, persistent profiles, and
-network interception are deliberately absent. The app bundles only its small audited bridge, not
-Playwright's hundreds of megabytes of version-coupled browsers. If the local package or matching
-browser binary is absent the tool returns the exact install command and does not download anything
-implicitly. Optional final screenshots are size-bounded, cached with the existing rolling browser
-artifacts, and can be returned as an MCP image.
+certificate state; downloads, password fills, arbitrary JavaScript, a persistent profile of its
+own, and network interception are deliberately absent from *this* backend, which is what makes
+its "nothing authenticated is reachable" promise checkable. The app bundles only its small audited
+bridge, not Playwright's hundreds of megabytes of version-coupled browsers. If the local package
+or matching browser binary is absent the tool returns the exact install command and does not
+download anything implicitly. Optional final screenshots are size-bounded, cached with the
+existing rolling browser artifacts, and can be returned as an MCP image.
+
+## Attached Chrome
+
+`browser_attach_chrome` is the third backend, for the one job neither of the others can do: work
+that genuinely needs the user's own signed-in session, a browser extension, or a passkey. It
+launches a persistent Playwright context, headful, against **a Chrome profile of Threading's own**
+under `~/Library/Application Support/Threading/ChromeAutomationProfile` — set up from Settings ▸
+Tools, where the user signs in once and installs their password manager's extension.
+
+Not the user's everyday profile, and not by choice. Since Chrome 136 (May 2025) Chrome refuses
+`--remote-debugging-port` and `--remote-debugging-pipe` against the default user-data directory,
+precisely to stop tools — and infostealers — driving the profile that holds a person's sessions.
+Playwright's persistent-context launch speaks CDP too, so no transport reaches the everyday
+profile on current Chrome. "Signed into what Chrome is signed into" therefore softens honestly to
+"signed in once, kept". What it buys is exactly what a `WKWebView` cannot have: the 1Password
+extension's ⌘\ recognises the domain, fills both fields, and the whole sign-in reduces to one
+Touch ID — with no plaintext ever crossing into Threading, because Threading is not in that path
+at all.
+
+Threading still reads no cookie, no Keychain item, and no credential. Chrome's own "Chrome Safe
+Storage" key never leaves Chrome; device-bound tokens and passkeys keep working because this is
+real Chrome. Password fields are refused here as everywhere, so the intended shape of a run is:
+navigate to the sign-in page, then `wait_for` a post-sign-in element while the user fills it
+themselves.
+
+The fence is an **origin allowlist granted before the browser launches**. The bridge is a one-shot
+batch subprocess — it executes up to fifty steps and exits, with nothing to call back into the app
+mid-run — so it cannot ask the way the live browser asks per read. Every origin in
+`allowed_origins` therefore goes through the same `authorizeBrowserAccess` once/always/deny sheet
+the WKWebView browser uses, one at a time, before Chrome opens; a single deny refuses the whole
+run rather than quietly running a shorter one. A step-at-a-time grant bridge, which would match
+the live browser's per-read semantics exactly, is the documented upgrade path.
+
+Inside the bridge the same list is enforced three ways: before every step, on every main-frame
+navigation, and on every new page through `context.on("page")`, which closes an out-of-allowlist
+pop-up and reports it identically. A `goto` is checked against its *target* before the request is
+sent, so a disallowed host never receives one; a redirect into a disallowed origin is caught by
+the navigation watcher, which is the only moment it can be known. A violation stops the run,
+closes the context, and returns a structured result naming the origin and the step index — and
+the violating step's own result is never appended, so nothing about that page reaches the agent.
+Origins compare as exact `BrowserOrigin.key` strings on both sides, which is why two loopback
+servers on the same host are two different origins rather than one.
+
+The isolated and attached paths are deliberately two functions in the bridge and two argument
+types in Swift. Their promises are opposites, and the way to keep a promise like "nothing
+authenticated is reachable" is to not add a flag to the function that makes it. `browser_capabilities`
+lists all three backends, and reports the attached one as `chrome_missing`, `profile_not_set_up`,
+`runtime_missing`, or `available`, so an agent can find out before it asks. One profile directory
+is one Chrome, so a run while the setup window is open fails on Chrome's `SingletonLock`; that is
+detected and said in plain words rather than fought. The profile lives under Threading's own
+Application Support directory, so Reset Everything moves it aside with the rest of the app's
+state.
 Page-world user scripts capture console/error output and network metadata, because isolated-world
 wrappers cannot see calls made through the page's own `console`, `fetch`, or XHR. Network capture
 never records request or response bodies, headers, cookies, or credentials, and sensitive query
@@ -250,6 +371,19 @@ third-party password manager's macOS integration, copy from Apple Passwords, or 
 The observation bridge sends native code one opaque per-frame document token plus a boolean —
 focused or not — and never a field name, account, or value. Native state keeps a set of focused
 frame tokens so a late message from an unrelated iframe cannot hide the active handoff.
+
+Every password refusal goes through one coordinator helper, `beginPasswordTakeover`, in a fixed
+order: **activate, select, reveal, focus**. The order is the substance. Universal autofill and
+system AutoFill fill the focused field of the *frontmost application*, and `revealDisplayPane`
+returns `false` and does nothing at all when the asking session is not the one on screen — so
+before this, a takeover in a background session unhid nothing while the user's own fill shortcut
+landed in whatever they happened to be reading. The app is brought forward and the session
+selected the same way a clicked notification does it (`NSApp.activate` behind an injectable seam,
+then `SessionNotificationOpened`, which the sidebar already observes), and only once the selection
+has landed is the pane revealed. `browser_fill_form` shares the helper too; it used to reveal the
+pane and then leave the field unfocused for no reason. Beside the affordance, while a password
+field has focus and the strip is wide enough to hold it, a quiet hint names the one-touch paths.
+It is copy, not capability: Threading invokes no vault and still never sees the value.
 
 This distinction is load-bearing. Public Authentication Services password requests return an
 `ASPasswordCredential` containing plaintext user and password strings to the app, while the
