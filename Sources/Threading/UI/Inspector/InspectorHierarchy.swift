@@ -378,14 +378,20 @@ enum InspectorLegendPlacement {
         let title: String
     }
 
+    /// The corner the key asks for before anything is known about what is in the way: the
+    /// bottom one furthest from the pick.
+    static func preferredCorner(target: NSRect, within bounds: NSRect) -> InspectorPanelCorner {
+        target.midX > bounds.midX ? .bottomLeading : .bottomTrailing
+    }
+
+    /// Where the key lands when that corner is clear. `InspectorPanelPlacement` takes it from
+    /// here when it is not — the preference is the rule this type owns, the dodging is not.
     static func origin(size: NSSize, target: NSRect, within bounds: NSRect) -> NSPoint {
-        let onLeft = target.midX > bounds.midX
-        return NSPoint(
-            x: onLeft
-                ? bounds.minX + Design.Spacing.inset
-                : bounds.maxX - Design.Spacing.inset - size.width,
-            y: bounds.minY + Design.Spacing.inset
-        )
+        InspectorPanelPlacement.rect(
+            size: size,
+            corner: preferredCorner(target: target, within: bounds),
+            within: bounds
+        ).origin
     }
 
     /// The rows the window has room for, target first, with anything past that folded into a
@@ -422,7 +428,7 @@ enum InspectorLegendPlacement {
         }
 
         let rowHeight = InspectorDefaults.legendRowHeight
-        let chrome = Design.Spacing.inset * 2 + Design.Spacing.medium * 2 + rowHeight
+        let chrome = Design.Spacing.inset * 2 + Design.Spacing.medium * 2
         let capacity = max(1, Int((bounds.height - chrome) / rowHeight))
 
         guard rows.count > capacity else { return rows }

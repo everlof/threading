@@ -120,8 +120,15 @@ enum InspectorHierarchyDrawing {
 
     // MARK: - Public Methods
 
-    static func draw(levels: [InspectorLevel], layers: InspectorLayers, within bounds: NSRect) {
-        guard let target = levels.first else { return }
+    /// Returns the rectangle the colour key took, so the hint can be placed clear of it —
+    /// `NSRect.null` when no layer is held and there is no key.
+    @discardableResult
+    static func draw(
+        levels: [InspectorLevel],
+        layers: InspectorLayers,
+        within bounds: NSRect
+    ) -> NSRect {
+        guard let target = levels.first else { return .null }
 
         let layered = !layers.isEmpty
         let shown = InspectorHierarchy.shown(levels, for: layers)
@@ -167,7 +174,7 @@ enum InspectorHierarchyDrawing {
             border: layered ? target.hue.color : Design.Surface.border
         )
 
-        legend(shown, layers: layers, within: bounds)
+        return legend(shown, layers: layers, badge: badgeRect, within: bounds)
     }
 
     /// The target's own badge text, which is what the plain unlayered outline shows too.
@@ -341,44 +348,47 @@ enum InspectorHierarchyDrawing {
 
     // MARK: - Legend
 
-    /// The colour key, plus the line that says the two modifiers exist at all.
+    /// The colour key, and nothing else.
     ///
-    /// The hint is drawn whether anything is held or not: a modifier nothing mentions is a
-    /// feature nobody finds, and element mode is exactly where the question it answers gets
-    /// asked. Under a modifier the legend grows above it.
+    /// **The control hint used to be the bottom row of this panel and is now its own**
+    /// (`InspectorHintDrawing`). Two reasons, both of which the shared panel got wrong: the key
+    /// belongs in the captured screenshot because the report's text names its hues, while a hint
+    /// about working an overlay does not and was being baked into every filed issue; and only
+    /// element mode drew this panel at all, so freeflow — the mode where nothing on screen says
+    /// a drag means a region — was the one place the hint never appeared.
+    ///
+    /// Returns the rectangle it took, or `NSRect.null` when no layer is held and there is no key.
     private static func legend(
         _ levels: [InspectorLevel],
         layers: InspectorLayers,
+        badge: NSRect,
         within bounds: NSRect
-    ) {
+    ) -> NSRect {
+        guard !layers.isEmpty else { return .null }
+
+        // Truncating rather than wrapping: the panel is sized from these very strings, and a
+        // string measured a hair narrower than the box it is drawn in breaks at the space and
+        // puts its last word on a line the box has no room for.
         let rowAttributes = InspectorDrawing.textAttributes(
             font: Design.Typography.code(),
             color: Design.Text.label,
             truncating: true
         )
-        // Truncating rather than wrapping, both of them: the panel is sized from these very
-        // strings, and a string measured a hair narrower than the box it is drawn in breaks at
-        // the space and puts its last word on a line the box has no room for.
         let hintAttributes = InspectorDrawing.textAttributes(
             font: Design.Typography.detail(),
             color: Design.Text.secondary,
             truncating: true
         )
 
-        let rows = layers.isEmpty
-            ? []
-            : InspectorLegendPlacement.rows(for: levels, layers: layers, within: bounds)
+        let rows = InspectorLegendPlacement.rows(for: levels, layers: layers, within: bounds)
         let titles = rows.map(\.title)
-        let hint = InspectorStrings.layerHint
+        guard !titles.isEmpty else { return .null }
 
         let titleCap = min(
             InspectorDefaults.legendTitleWidth,
             bounds.width * InspectorDefaults.legendTitleFraction
         )
-        let textWidth = titles.reduce(
-            (hint as NSString).size(withAttributes: hintAttributes).width
-                - InspectorDefaults.legendSwatch - Design.Spacing.small
-        ) { widest, title in
+        let textWidth = titles.reduce(0) { widest, title in
             max(widest, min(
                 (title as NSString).size(withAttributes: rowAttributes).width,
                 titleCap
@@ -390,30 +400,40 @@ enum InspectorHierarchyDrawing {
             + InspectorDefaults.legendSwatch
             + Design.Spacing.small
             + ceil(textWidth)
-        let height = Design.Spacing.medium * 2
-            + rowHeight * CGFloat(titles.count)
-            + rowHeight
+        let height = Design.Spacing.medium * 2 + rowHeight * CGFloat(titles.count)
 
         let size = NSSize(width: width, height: height)
-        let panel = NSRect(
-            origin: InspectorLegendPlacement.origin(
-                size: size,
-                target: levels.first?.rect ?? .zero,
-                within: bounds
-            ),
-            size: size
+        let target = levels.first?.rect ?? .zero
+        let placement = InspectorPanelPlacement.place(
+            size: size,
+            preferring: InspectorLegendPlacement.preferredCorner(target: target, within: bounds),
+            avoiding: [target, badge],
+            within: bounds
         )
-        InspectorDrawing.panel(panel, radius: Design.Radius.panel, border: Design.Surface.border)
+        let panel = placement.rect
 
-        (hint as NSString).draw(
-            in: NSRect(
-                x: panel.minX + Design.Spacing.medium,
-                y: panel.minY + Design.Spacing.medium,
-                width: width - Design.Spacing.medium * 2,
-                height: rowHeight
-            ),
-            withAttributes: hintAttributes
-        )
+        let alpha = placement.isObstructed ? InspectorDefaults.obstructedPanelAlpha : 1
+        InspectorPanelPlacement.withAlpha(alpha) {
+            drawLegend(
+                rows,
+                in: panel,
+                rowHeight: rowHeight,
+                rowAttributes: rowAttributes,
+                hintAttributes: hintAttributes
+            )
+        }
+
+        return panel
+    }
+
+    private static func drawLegend(
+        _ rows: [InspectorLegendPlacement.Row],
+        in panel: NSRect,
+        rowHeight: CGFloat,
+        rowAttributes: [NSAttributedString.Key: Any],
+        hintAttributes: [NSAttributedString.Key: Any]
+    ) {
+        InspectorDrawing.panel(panel, radius: Design.Radius.panel, border: Design.Surface.border)
 
         // Target first, reading outward — the order the report's own legend is written in, so
         // the picture and the pasted text can be followed together.

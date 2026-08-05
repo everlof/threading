@@ -1,14 +1,15 @@
 import AppKit
 
-/// Inspect mode, wired to the View menu. Element mode outlines the view under the pointer;
-/// freeflow mode marks the pointer's exact position. Clicking either opens the report sheet:
-/// a window screenshot with the capture marked, the text naming it, and a copy button whose
-/// markdown pastes straight into a session composer.
+/// Inspect mode, wired to the View menu. One command: the view under the pointer is outlined
+/// as you move, a click picks it, a drag captures the rectangle it draws, and ⇧ suppresses
+/// detection so a click marks the pointer's exact position instead. Any of the three opens the
+/// report sheet: a window screenshot with the capture marked, the text naming it, and a copy
+/// button whose markdown pastes straight into a session composer.
 extension MainWindowController {
 
     // MARK: - Public Methods
 
-    func toggleElementInspector(mode: InspectorMode) {
+    func toggleElementInspector() {
         guard let window else { return }
 
         elementInspector.onPick = { [weak self] picked, layers in
@@ -21,7 +22,7 @@ extension MainWindowController {
             self?.presentRegionReport(for: rect)
         }
 
-        elementInspector.toggle(mode, over: window)
+        elementInspector.toggle(over: window)
     }
 
     /// Help ▸ Report a Problem. Lives beside the inspector's own sheet because both file the

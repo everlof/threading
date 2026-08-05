@@ -87,7 +87,18 @@ final class InspectorHierarchyRenderTests: XCTestCase {
         written += try write(story: "05-tight-spacing", levels: tight, layers: .spacing)
         written += try write(story: "06-tight-hierarchy-spacing", levels: tight, layers: [.hierarchy, .spacing])
 
-        XCTAssertEqual(written, 12, "Every story should render in both appearances")
+        // The live overlay, which is the only surface the control hint appears on. Worth a
+        // picture because the hint and the key now sit in opposite corners, and whether that
+        // reads as two panels or as clutter is not something an assertion can answer.
+        written += try write(story: "07-hint", levels: levels, layers: [], showingHint: true)
+        written += try write(
+            story: "08-hint-hierarchy-spacing",
+            levels: levels,
+            layers: [.hierarchy, .spacing],
+            showingHint: true
+        )
+
+        XCTAssertEqual(written, 16, "Every story should render in both appearances")
         print("Rendered inspector overlay storybook to \(Render.directory.path)")
     }
 
@@ -201,6 +212,60 @@ final class InspectorHierarchyRenderTests: XCTestCase {
         )
     }
 
+    /// The hint is drawn on the live overlay and on nothing else.
+    ///
+    /// Every report filed from here was carrying a keyboard hint baked into its screenshot —
+    /// an instruction for an overlay that is gone by the time anyone reads the issue. The
+    /// colour key stays in the capture, because the report's own text names those hues and a
+    /// reader holding only the picture and the markdown needs both halves.
+    func testTheHintIsOnTheOverlayAndNotInTheCapture() throws {
+        let levels = InspectorHierarchy.levels(for: makeTree())
+        let bounds = NSRect(origin: .zero, size: Render.size)
+
+        // The pick sits left of centre, so the key wants the bottom-trailing corner and the
+        // hint the bottom-leading one.
+        XCTAssertEqual(
+            InspectorHint.preferredCorner(
+                for: .element(levels: levels, layers: []),
+                within: bounds
+            ),
+            .bottomLeading
+        )
+        let captured = try draw(levels: levels, layers: [], appearance: .aqua)
+        let live = try draw(levels: levels, layers: [], appearance: .aqua, showingHint: true)
+
+        // A band inside the hint panel and clear of both its border and the fixture's slab,
+        // counted rather than sampled: in light appearance the panel's fill is the window's
+        // own white, so it is the *ink* that proves the panel is there.
+        let ground = try XCTUnwrap(colour(in: captured, x: 700, y: 20))
+        var paintedInCapture = 0
+        var paintedOnOverlay = 0
+
+        for x in stride(from: CGFloat(16), through: 200, by: 2) {
+            for y in stride(from: CGFloat(16), through: 36, by: 2) {
+                if let inCapture = colour(in: captured, x: x, y: y),
+                   distance(inCapture, ground) > 0.02 {
+                    paintedInCapture += 1
+                }
+                if let onOverlay = colour(in: live, x: x, y: y),
+                   distance(onOverlay, ground) > 0.02 {
+                    paintedOnOverlay += 1
+                }
+            }
+        }
+
+        XCTAssertEqual(
+            paintedInCapture,
+            0,
+            "the captured bitmap leaves that corner as the window drew it"
+        )
+        XCTAssertGreaterThan(
+            paintedOnOverlay,
+            0,
+            "the live overlay puts the hint panel there"
+        )
+    }
+
     /// Nothing is drawn outside the window: the overlay is exactly the host's size, so a badge
     /// or a key that ran past it would be clipped away rather than merely ugly.
     func testEveryLayerStaysInsideTheWindow() throws {
@@ -213,13 +278,23 @@ final class InspectorHierarchyRenderTests: XCTestCase {
 
     // MARK: - Harness
 
-    private func write(story: String, levels: [InspectorLevel], layers: InspectorLayers) throws -> Int {
+    private func write(
+        story: String,
+        levels: [InspectorLevel],
+        layers: InspectorLayers,
+        showingHint: Bool = false
+    ) throws -> Int {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         var written = 0
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-            let rep = try draw(levels: levels, layers: layers, appearance: appearance)
+            let rep = try draw(
+                levels: levels,
+                layers: layers,
+                appearance: appearance,
+                showingHint: showingHint
+            )
             let data = try XCTUnwrap(
                 rep.representation(using: .png, properties: [:]),
                 "Failed to render \(story) in \(name)"
@@ -235,7 +310,8 @@ final class InspectorHierarchyRenderTests: XCTestCase {
     private func draw(
         levels: [InspectorLevel],
         layers: InspectorLayers,
-        appearance name: NSAppearance.Name
+        appearance name: NSAppearance.Name,
+        showingHint: Bool = false
     ) throws -> NSBitmapImageRep {
         let bounds = NSRect(origin: .zero, size: Render.size)
         let rep = try XCTUnwrap(NSBitmapImageRep(
@@ -262,7 +338,8 @@ final class InspectorHierarchyRenderTests: XCTestCase {
 
             InspectorIndicatorDrawing.draw(
                 .element(levels: levels, layers: layers),
-                within: bounds
+                within: bounds,
+                showingHint: showingHint
             )
 
             context.flushGraphics()

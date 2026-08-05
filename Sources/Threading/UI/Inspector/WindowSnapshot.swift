@@ -135,7 +135,10 @@ enum WindowSnapshot {
         // point space set above — and maps them onto the backing pixels itself. Scaling here
         // as well drew every marker displaced and doubled on retina. Measured, and pinned by
         // `testBitmapContextSpeaksTheRepsSizeUnits`.
-        InspectorIndicatorDrawing.draw(indicator, within: bounds)
+        //
+        // No hint: the colour key is evidence the report's text refers to, the keyboard hint is
+        // an instruction for an overlay nobody reading the filed issue can still see.
+        InspectorIndicatorDrawing.draw(indicator, within: bounds, showingHint: false)
 
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()

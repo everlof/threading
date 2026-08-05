@@ -6,9 +6,21 @@ import AppKit
 /// for referring to a *thing*. Freeflow mode detects nothing and records geometry the
 /// pointer draws itself — a click for a *place*, a drag for a *region*: a gap, a
 /// misalignment, the middle of a terminal that is one view however much it draws.
+///
+/// **Not a stored mode: a reading of the keyboard.** There is one inspect command, and ⇧ is
+/// what suppresses detection while it is held — the same treatment `InspectorLayers` gives ⌃
+/// and ⌥, for the same reason. Two commands meant two shortcuts, two menu items and a
+/// switch-in-place rule to explain, for a distinction the hand can make while pointing.
+///
+/// It also means the chord that used to open freeflow directly still does: invoking the
+/// command as ⌥⇧⌘I arrives with ⇧ already down, so the overlay opens reading exactly that.
 enum InspectorMode {
     case element
     case freeflow
+
+    static func held(_ flags: NSEvent.ModifierFlags) -> InspectorMode {
+        flags.contains(.shift) ? .freeflow : .element
+    }
 }
 
 // MARK: - Inspector Defaults
@@ -62,6 +74,15 @@ enum InspectorDefaults {
 
     static let legendRowHeight: CGFloat = 15
     static let legendSwatch: CGFloat = 9
+
+    /// What a panel drops to when every corner is covered. A hint that keeps running away is
+    /// worse than one you can read through, so the last resort is transparency rather than a
+    /// fifth position.
+    static let obstructedPanelAlpha: CGFloat = 0.25
+
+    /// The room a panel keeps from the capture it is dodging, so "clear of it" means visibly
+    /// clear rather than sharing an edge.
+    static let panelClearance: CGFloat = 6
 
     /// Past this a class name is truncated rather than widening the key — one
     /// `ComponentContentContainerView = _NSCoreHostingView` would otherwise set the panel's

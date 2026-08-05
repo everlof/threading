@@ -93,7 +93,11 @@ final class InspectorReportViewController: NSViewController {
     private func setupViews() {
         // The sheet is its own little window, and a window the theme does not reach is a
         // system panel floating over a styled app. Ground, matching the chrome it slid out of.
-        view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
 
         let headingLabel = NSTextField(labelWithString: heading)
         headingLabel.applyFont(.heading)
@@ -475,9 +479,18 @@ enum InspectorStrings {
         L10n.string("The screenshot is on the clipboard — ⌘V adds it.")
     }
 
-    /// Drawn on the overlay whether anything is held or not: a modifier nothing mentions is a
-    /// feature nobody finds, and element mode is where the question it answers gets asked.
-    static var layerHint: String { L10n.string("⌃ hierarchy · ⌥ spacing") }
+    /// The overlay's control line, one token each. Drawn whether anything is held or not, in
+    /// both modes — with the two inspect commands collapsed into one there is no menu item left
+    /// to name freeflow, so this is the only place the app says ⇧ and a drag mean anything.
+    ///
+    /// Separate keys rather than one sentence because each is coloured by whether it currently
+    /// applies, which makes the line a readout of what is held as well as a list of what could
+    /// be. `InspectorHint` decides that; these are only the words.
+    static var pointHint: String { L10n.string("⇧ point") }
+    static var regionHint: String { L10n.string("drag region") }
+    static var hierarchyHint: String { L10n.string("⌃ hierarchy") }
+    static var spacingHint: String { L10n.string("⌥ spacing") }
+    static var exitHint: String { L10n.string("esc exits") }
     static var flushOnEverySide: String { L10n.string("flush on every side") }
 
     /// The key is bounded by the window; the drawing and the report are not.

@@ -60,7 +60,11 @@ final class ReportProblemViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.applySurface(
+            fill: Design.Surface.ground,
+            radius: .fixed(0),
+            pattern: .backdrop
+        )
 
         let headingLabel = NSTextField(labelWithString: ReportProblemStrings.heading)
         headingLabel.applyFont(.heading)
