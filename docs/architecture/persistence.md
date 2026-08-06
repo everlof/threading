@@ -34,18 +34,63 @@ an update that recreated its storage directory without migrating took users' leg
 with it. The same applies to the panel layouts, which were `panels/<uuid>.json` and are now
 rows; their cached PNGs stay files, because a PNG in a database is a PNG with extra steps.
 
-The panel payload (`PersistedPanel`) carries **both tab hosts** for a session: the display
-panel's tabs (`host` absent — which is what every pre-drawer layout implicitly says, so old
-rows migrate by decoding) and the drawer's (`host == "drawer"`, plus `drawerActiveTabID` and
-`drawerOpen`). Each host saves only its own slice (`saveLayout` / `saveDrawerLayout` preserve
-the other's), and the agent-facing `signature`/`agentDescription` filter to panel tabs so the
-user rearranging their drawer never re-briefs an agent about a panel that did not change.
-Never delete on decode failure; the `try?`-and-fall-back posture stands.
+The panel payload (`PersistedPanel`) carries **every tab host** for a session in one flat list,
+told apart by each tab's `host`: the display panel's (`host` absent — which is what every
+pre-drawer layout implicitly says, so old rows migrate by decoding), the drawer's
+(`host == "drawer"`, plus `drawerActiveTabID` and `drawerOpen`), and each detached window's
+(`host == "window:<uuid>"`, plus a `detachedWindows` record carrying that window's frame,
+selection and fullscreen state). Each host saves only its own slice and **rebuilds `tabs` from
+the slices it is not replacing** — the one rule that keeps a flat list with three writers
+honest, because a slice no writer preserves is one the next save silently drops. The
+agent-facing `signature`/`agentDescription` filter to panel tabs, so the user rearranging their
+drawer never re-briefs an agent about a panel that did not change.
+
+**The document validates rather than interprets charitably.** An unknown `host`, a `window:`
+host that is not a well-formed id, a tab naming a window the document does not declare, a
+duplicate window id, or a window claiming a selection from another host each refuse the whole
+document. Every one of those describes a tab that no pane would show and the next save would
+drop, so refusing is how that loss stays visible instead of silent.
+
+**`formatVersion` is 2**, raised when detached windows arrived. The bump is the point: a build
+that predates them cannot show a `window:` tab, and the version is what makes it say so.
+
+Which is only half an answer, so the other half is here too: `DisplayPaneStore` **quarantines a
+payload it could not decode**. `loadLayout` returns nil for "nothing stored" and for "stored but
+unreadable" alike, and every writer rebuilds from that answer — so without quarantine, opening a
+session written by a *newer* build would read as "nothing stored" and the first save would
+replace the user's panel, drawer and windows with whatever this build happened to be showing.
+That is the same promise `ProjectStore` makes for the database, kept for this document too, and
+it is what makes the version bump a refusal rather than a wipe. Never delete on decode failure.
 
 Quarantine still works exactly as it did for the document, because `ProjectStore` never learned
-the difference: an unopenable database is moved aside (with its `-wal` and `-shm` sidecars
-deleted, or SQLite would recover a fresh database from them) and reported, which is what lets
-the store refuse to write over state it could not read.
+the difference: an unopenable database is moved aside and reported, which is what lets the store
+refuse to write over state it could not read.
+
+**The write-ahead log moves with it, and for months it did not — which made quarantine the data
+loss it exists to prevent.** In WAL mode the committed rows sit in `-wal` until a checkpoint, and
+a checkpoint runs when the *last* connection closes; on a machine where a second build or a hosted
+test target has the same store open, that never happens. So the file kept "for recovery" was an
+empty shell while the only real copy was unlinked. Measured on the store that hit it (6 Aug 2026):
+zero project rows in `threading.db`, four projects and 138 sessions in a 498KB `threading.db-wal`,
+and a quarantined copy containing nothing. SQLite finds a log by name, so it is renamed alongside —
+`X.corrupt-<stamp>` gets `X.corrupt-<stamp>-wal`. `-shm` is only an index over that log and is
+rebuilt on demand, so it is deleted rather than kept: left beside a database that has been moved
+away, *that* is the sidecar a fresh database would be recovered from.
+
+**One unreadable auxiliary row costs that row, not the store.** `panel_layout` and
+`session_attachments` used to be validated inside `load`'s all-or-nothing contract, on the sound
+reasoning that a document which merely looked *missing* to its feature would be overwritten by
+that feature's next ordinary edit. The reasoning was right and the blast radius was wrong: a
+failed load quarantines the database, so one panel written by a build a format version ahead
+took every project and chat with it — which is exactly what happened, from a row reading
+`{"formatVersion":2,…,"tabs":[]}` that a pre-detached-windows build refused. `ProjectDatabase.load`
+now returns a `ProjectsStateLoad`: the project graph, plus the rows it could not read. What the
+all-or-nothing rule protected is protected one row at a time — `StateManager` reports the row to
+its feature as absent so the pane rebuilds, and refuses every write to it for the rest of the
+launch, so the bytes are still there for the build that can read them. A row whose `session_id`
+is not an identifier at all is tracked apart as `containsUnkeyedRows`, because no feature can ask
+for it by id and only skipping the table's prune keeps it. The project and session rows stay
+all-or-nothing: those are the copy of record.
 
 Agent execution evidence has different write and trust needs from mutable application state, so it
 does not live in SQLite. [Execution Audit](execution-audit.md) keeps a bounded append-only,

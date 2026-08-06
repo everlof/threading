@@ -4,6 +4,8 @@ import Foundation
 ///
 /// Loading the project graph is deliberately all-or-nothing. Returning a partial graph would
 /// make the next whole-state save delete every row that was skipped while decoding it.
+///
+/// The auxiliary tables are *not* part of that contract — see `UnreadableRows`.
 enum ProjectDatabaseLoadError: LocalizedError {
     case corruptRow(table: String, id: String?, reason: String)
 
@@ -14,6 +16,49 @@ enum ProjectDatabaseLoadError: LocalizedError {
             return "Corrupt \(table) row\(identity): \(reason)"
         }
     }
+}
+
+/// The rows of one auxiliary table this build could not read.
+///
+/// A panel layout or attachment list that does not decode is not the same failure as a session
+/// row that does not decode, and treating it as one cost a user every project and chat they had:
+/// one `panel_layout` row written by a build one format version ahead failed the authoritative
+/// load, and a failed load quarantines the database. The panel is a pane that rebuilds itself
+/// from nothing; the session is a chat with no other copy.
+///
+/// So an unreadable auxiliary row is reported rather than thrown, and what the all-or-nothing
+/// rule was protecting is protected one row at a time instead: the feature is told the row is
+/// absent, and `StateManager` refuses to write over it for the rest of the launch. A newer build,
+/// or a build with the fix for whatever produced it, still reads it.
+struct UnreadableRows {
+
+    /// Sessions whose stored payload did not decode.
+    var sessions: Set<SessionID> = []
+
+    /// Whether a row's `session_id` is not a session identifier at all.
+    ///
+    /// Tracked separately because no feature can ask for such a row by id, so refusing writes to
+    /// it protects nothing — only leaving the table unpruned does.
+    var containsUnkeyedRows = false
+
+    var isEmpty: Bool { sessions.isEmpty && !containsUnkeyedRows }
+}
+
+/// Every auxiliary row a load could not read, by the table it came from.
+struct UnreadableAuxiliaryRows {
+    var panelLayouts = UnreadableRows()
+    var sessionAttachments = UnreadableRows()
+
+    var isEmpty: Bool { panelLayouts.isEmpty && sessionAttachments.isEmpty }
+}
+
+/// A successful load: the authoritative project graph, plus the auxiliary rows it had to skip.
+///
+/// Returned together rather than read separately, so a caller cannot take the state and forget to
+/// ask what it could not read — which would put those rows back in reach of the next write.
+struct ProjectsStateLoad {
+    let state: ProjectsState
+    let unreadable: UnreadableAuxiliaryRows
 }
 
 /// The projects and sessions store, in SQLite.
@@ -71,7 +116,7 @@ final class ProjectDatabase {
         try database.scalar("SELECT COUNT(*) FROM project") == 0
     }
 
-    func load() throws -> ProjectsState {
+    func load() throws -> ProjectsStateLoad {
         var projects: [Project] = []
         var sessionsByProject: [ProjectID: [AgentSession]] = [:]
 
@@ -214,19 +259,22 @@ final class ProjectDatabase {
             )
         }
 
-        try validateAuxiliaryRows(
-            table: "panel_layout",
-            as: PersistedPanel.self
-        )
-        try validateAuxiliaryRows(
-            table: "session_attachments",
-            as: PersistedSessionAttachments.self
-        )
-
-        return ProjectsState(
-            projects: projects,
-            selectedSessionID: try selectedSessionID(),
-            savedAt: Date()
+        return ProjectsStateLoad(
+            state: ProjectsState(
+                projects: projects,
+                selectedSessionID: try selectedSessionID(),
+                savedAt: Date()
+            ),
+            unreadable: UnreadableAuxiliaryRows(
+                panelLayouts: try unreadableRows(
+                    in: ProjectDatabaseSchema.panelTable,
+                    as: PersistedPanel.self
+                ),
+                sessionAttachments: try unreadableRows(
+                    in: ProjectDatabaseSchema.attachmentsTable,
+                    as: PersistedSessionAttachments.self
+                )
+            )
         )
     }
 
@@ -308,7 +356,7 @@ final class ProjectDatabase {
     /// whichever wrote first fail. `retainPanels` prunes instead, which is what the file layout
     /// did too.
     func panelPayload(for sessionID: SessionID) throws -> String? {
-        let statement = try database.prepare("SELECT data FROM panel_layout WHERE session_id = ?")
+        let statement = try database.prepare("SELECT data FROM \(ProjectDatabaseSchema.panelTable) WHERE session_id = ?")
         defer { statement.finalize() }
         statement.bind(1, sessionID.uuidString)
         return try statement.step() ? statement.text(0) : nil
@@ -322,13 +370,17 @@ final class ProjectDatabase {
     }
 
     func deletePanel(for sessionID: SessionID) throws {
-        let statement = try database.prepare("DELETE FROM panel_layout WHERE session_id = ?")
+        let statement = try database.prepare("DELETE FROM \(ProjectDatabaseSchema.panelTable) WHERE session_id = ?")
         statement.bind(1, sessionID.uuidString)
         try statement.run()
     }
 
     func retainPanels(sessionIDs: Set<SessionID>) throws {
-        try deleteRows(in: "panel_layout", column: "session_id", keeping: Set(sessionIDs.map(\.uuidString)))
+        try deleteRows(
+            in: ProjectDatabaseSchema.panelTable,
+            column: "session_id",
+            keeping: Set(sessionIDs.map(\.uuidString))
+        )
     }
 
     // MARK: - Public Methods — Session Attachments
@@ -338,7 +390,7 @@ final class ProjectDatabase {
     /// reason: the two are written on their own schedules, and `retainAttachments` prunes.
     func attachmentsPayload(for sessionID: SessionID) throws -> String? {
         let statement = try database.prepare(
-            "SELECT data FROM session_attachments WHERE session_id = ?"
+            "SELECT data FROM \(ProjectDatabaseSchema.attachmentsTable) WHERE session_id = ?"
         )
         defer { statement.finalize() }
         statement.bind(1, sessionID.uuidString)
@@ -354,7 +406,7 @@ final class ProjectDatabase {
 
     func retainAttachments(sessionIDs: Set<SessionID>) throws {
         try deleteRows(
-            in: "session_attachments",
+            in: ProjectDatabaseSchema.attachmentsTable,
             column: "session_id",
             keeping: Set(sessionIDs.map(\.uuidString))
         )
@@ -401,33 +453,50 @@ final class ProjectDatabase {
 
     // MARK: - Private Methods — App State
 
-    /// Auxiliary rows are part of the same authoritative database and therefore participate in
-    /// its all-or-nothing load. Otherwise a malformed panel or attachment document would look
-    /// missing to its feature and the next ordinary edit would overwrite the only copy.
-    private func validateAuxiliaryRows<Value: Decodable>(
-        table: String,
+    /// Reads every row of an auxiliary table through its own decoder, and names the ones that
+    /// failed instead of failing the load.
+    ///
+    /// This used to throw, which put a panel and an attachment list under the same all-or-nothing
+    /// contract as the project graph. The reason it did is still sound and still honoured: a
+    /// document that merely looked *missing* to its feature would be overwritten by that feature's
+    /// next ordinary edit, and the only copy would be gone. What was wrong was the blast radius —
+    /// the whole database was quarantined over one row, taking every project and chat with it. The
+    /// caller keeps these ids and refuses writes to exactly those rows.
+    ///
+    /// Still throwing on a SQL failure is deliberate: a table that cannot be read at all is a
+    /// database that cannot be trusted, which is the case quarantine exists for.
+    private func unreadableRows<Value: Decodable>(
+        in table: String,
         as type: Value.Type
-    ) throws {
+    ) throws -> UnreadableRows {
+        var unreadable = UnreadableRows()
+
         let statement = try database.prepare("SELECT session_id, data FROM \(table)")
         defer { statement.finalize() }
         while try statement.step() {
-            let rawID = statement.text(0)
-            guard let rawID, SessionID(uuidString: rawID) != nil else {
-                throw corruptRow(table, id: rawID, reason: "invalid session identifier")
+            guard let rawID = statement.text(0), let sessionID = SessionID(uuidString: rawID) else {
+                unreadable.containsUnkeyedRows = true
+                continue
             }
             guard let payload = statement.text(1) else {
-                throw corruptRow(table, id: rawID, reason: "missing JSON payload")
+                unreadable.sessions.insert(sessionID)
+                continue
             }
             do {
                 _ = try Self.decoder.decode(type, from: Data(payload.utf8))
             } catch {
-                throw corruptRow(
-                    table,
-                    id: rawID,
-                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                ThreadingLogger.agent.error(
+                    """
+                    Unreadable \(table, privacy: .public) row for session \
+                    \(sessionID.uuidString, privacy: .public): \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
+                unreadable.sessions.insert(sessionID)
             }
         }
+
+        return unreadable
     }
 
     private func selectedSessionID() throws -> SessionID? {
@@ -495,6 +564,12 @@ enum ProjectDatabaseSchema {
     static let selectedSessionKey = "selectedSessionID"
 
     static let runningSessionsKey = "runningSessionIDs"
+
+    /// The auxiliary tables are named outside their own statements — a load reports what it could
+    /// not read per table — so the name is a constant rather than a literal per call site.
+    static let panelTable = "panel_layout"
+
+    static let attachmentsTable = "session_attachments"
 
     /// Columns exist to be ordered by, filtered on, or joined; everything else is in `data`.
     /// `kind` and `last_active_at` are duplicated out of the payload on purpose — they are what

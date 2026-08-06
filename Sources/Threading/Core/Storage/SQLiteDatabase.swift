@@ -209,6 +209,14 @@ enum SQLiteDefaults {
 
     static let databaseName = "threading.db"
 
+    /// The write-ahead log. SQLite finds it by name, so anything that moves the database has to
+    /// move this with it or the committed rows still sitting in it are gone.
+    static let walSuffix = "-wal"
+
+    /// The shared-memory index over the log. Rebuilt on demand, so it is never worth keeping —
+    /// and beside a database that has been moved away it is actively dangerous.
+    static let sharedMemorySuffix = "-shm"
+
     /// What the migrated JSON document is renamed to. Kept rather than deleted: opencode's own
     /// storage migration is the cautionary tale, and a file that is still there is a rollback.
     static let migratedSuffix = "migrated"

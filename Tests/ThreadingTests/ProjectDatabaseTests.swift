@@ -39,7 +39,7 @@ final class ProjectDatabaseTests: XCTestCase {
     func testEmptyDatabaseIsEmpty() throws {
         let database = try makeDatabase()
         XCTAssertTrue(try database.isEmpty())
-        XCTAssertTrue(try database.load().projects.isEmpty)
+        XCTAssertTrue(try database.load().state.projects.isEmpty)
     }
 
     func testProjectsAndSessionsRoundTrip() throws {
@@ -53,7 +53,7 @@ final class ProjectDatabaseTests: XCTestCase {
         )
         try database.save(state)
 
-        let restored = try database.load()
+        let restored = try database.load().state
         XCTAssertEqual(restored.projects.map(\.name), ["alpha", "beta"], "order is a column, not luck")
         XCTAssertEqual(restored.projects[0].sessions.map(\.id), [session.id])
         XCTAssertEqual(restored.projects[0].sessions[0].title, "Chat")
@@ -72,7 +72,7 @@ final class ProjectDatabaseTests: XCTestCase {
         project.terminals = [terminal]
 
         try database.save(ProjectsState(projects: [project]))
-        let restored = try XCTUnwrap(try database.load().projects.first?.terminals.first)
+        let restored = try XCTUnwrap(try database.load().state.projects.first?.terminals.first)
 
         XCTAssertEqual(restored.id, terminal.id)
         XCTAssertEqual(restored.displayTitle, "Server")
@@ -95,7 +95,7 @@ final class ProjectDatabaseTests: XCTestCase {
         )
 
         // …and the row still comes back attached.
-        XCTAssertEqual(try database.load().projects[0].sessions.count, 1)
+        XCTAssertEqual(try database.load().state.projects[0].sessions.count, 1)
     }
 
     func testOrderSurvivesReordering() throws {
@@ -105,7 +105,7 @@ final class ProjectDatabaseTests: XCTestCase {
         try database.save(ProjectsState(projects: [first, second]))
         try database.save(ProjectsState(projects: [second, first]))
 
-        XCTAssertEqual(try database.load().projects.map(\.name), ["second", "first"])
+        XCTAssertEqual(try database.load().state.projects.map(\.name), ["second", "first"])
     }
 
     // MARK: - Incremental Writes
@@ -121,7 +121,7 @@ final class ProjectDatabaseTests: XCTestCase {
         ]))
         try database.save(ProjectsState(projects: [makeProject("alpha", sessions: [kept])]))
 
-        let restored = try database.load()
+        let restored = try database.load().state
         XCTAssertEqual(restored.projects.map(\.name), ["alpha"])
         XCTAssertEqual(restored.projects[0].sessions.map(\.title), ["Kept"])
     }
@@ -149,7 +149,7 @@ final class ProjectDatabaseTests: XCTestCase {
         beta.sessions = [session]
         try database.save(ProjectsState(projects: [makeProject("alpha"), beta]))
 
-        let restored = try database.load()
+        let restored = try database.load().state
         XCTAssertTrue(restored.projects[0].sessions.isEmpty)
         XCTAssertEqual(restored.projects[1].sessions.map(\.id), [session.id])
     }
@@ -159,7 +159,7 @@ final class ProjectDatabaseTests: XCTestCase {
         try database.save(ProjectsState(projects: [makeProject("alpha")], selectedSessionID: SessionID()))
         try database.save(ProjectsState(projects: [makeProject("alpha")], selectedSessionID: nil))
 
-        XCTAssertNil(try database.load().selectedSessionID)
+        XCTAssertNil(try database.load().state.selectedSessionID)
     }
 
     func testSelectionCanBeSavedWithoutRewritingProjectRows() throws {
@@ -173,7 +173,7 @@ final class ProjectDatabaseTests: XCTestCase {
         let selected = SessionID()
         try database.saveSelectedSessionID(selected)
 
-        let restored = try database.load()
+        let restored = try database.load().state
         XCTAssertEqual(restored.selectedSessionID, selected)
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
     }
@@ -188,7 +188,7 @@ final class ProjectDatabaseTests: XCTestCase {
 
         XCTAssertEqual(try database.runningSessionIDs(), ids)
         XCTAssertNil(
-            try database.load().selectedSessionID,
+            try database.load().state.selectedSessionID,
             "the record rides app_state without becoming part of the projects load"
         )
     }
@@ -230,7 +230,7 @@ final class ProjectDatabaseTests: XCTestCase {
             payload: "{ not-json"
         )
 
-        XCTAssertThrowsError(try database.load()) { error in
+        XCTAssertThrowsError(try database.load().state) { error in
             guard let loadError = error as? ProjectDatabaseLoadError,
                   case .corruptRow(let table, let id, _) = loadError else {
                 return XCTFail("Expected a corrupt-row error, got \(error)")
@@ -266,7 +266,7 @@ final class ProjectDatabaseTests: XCTestCase {
             payload: mismatched
         )
 
-        XCTAssertThrowsError(try database.load()) { error in
+        XCTAssertThrowsError(try database.load().state) { error in
             guard let loadError = error as? ProjectDatabaseLoadError,
                   case .corruptRow(let table, let id, let reason) = loadError else {
                 return XCTFail("Expected a corrupt-row error, got \(error)")
@@ -289,7 +289,7 @@ final class ProjectDatabaseTests: XCTestCase {
             .bind(2, project.id.uuidString)
             .run()
 
-        XCTAssertThrowsError(try database.load()) { error in
+        XCTAssertThrowsError(try database.load().state) { error in
             guard let loadError = error as? ProjectDatabaseLoadError,
                   case .corruptRow(_, _, let reason) = loadError else {
                 return XCTFail("Expected a corrupt-row error, got \(error)")
@@ -308,7 +308,7 @@ final class ProjectDatabaseTests: XCTestCase {
             .bind(2, "not-a-session-id")
             .run()
 
-        XCTAssertThrowsError(try database.load()) { error in
+        XCTAssertThrowsError(try database.load().state) { error in
             guard let loadError = error as? ProjectDatabaseLoadError,
                   case .corruptRow(let table, _, _) = loadError else {
                 return XCTFail("Expected a corrupt-row error, got \(error)")
@@ -317,24 +317,33 @@ final class ProjectDatabaseTests: XCTestCase {
         }
     }
 
-    func testMalformedPanelFailsTheAuthoritativeDatabaseLoad() throws {
+    /// The row this asserts on is the one that cost a user four projects and 138 chats.
+    ///
+    /// An unreadable panel used to fail the authoritative load, and a failed load quarantines the
+    /// database — so one display panel written by a build a format version ahead took the whole
+    /// store with it. The panel is a pane that rebuilds itself from nothing; the sessions beside
+    /// it are the only copy of anything.
+    func testMalformedPanelIsReportedRatherThanFailingTheLoad() throws {
         let database = try makeDatabase()
         let sessionID = SessionID()
         try database.save(ProjectsState(projects: [makeProject("alpha")]))
         try database.savePanelPayload("{", for: sessionID)
 
-        XCTAssertThrowsError(try database.load()) { error in
-            guard let loadError = error as? ProjectDatabaseLoadError,
-                  case .corruptRow(let table, let id, _) = loadError else {
-                return XCTFail("Expected a corrupt-row error, got \(error)")
-            }
-            XCTAssertEqual(table, "panel_layout")
-            XCTAssertEqual(id, sessionID.uuidString)
-        }
-        XCTAssertEqual(try rowCount("panel_layout"), 1)
+        let load = try database.load()
+
+        XCTAssertEqual(load.state.projects.map(\.name), ["alpha"])
+        XCTAssertEqual(load.unreadable.panelLayouts.sessions, [sessionID])
+        XCTAssertFalse(load.unreadable.panelLayouts.containsUnkeyedRows)
+        XCTAssertTrue(load.unreadable.sessionAttachments.isEmpty)
+        XCTAssertEqual(
+            try rowCount("panel_layout"),
+            1,
+            "naming a row unreadable must not be a way of deleting it"
+        )
     }
 
-    func testFutureAttachmentDocumentIsRefusedWithoutDeletingIt() throws {
+    /// The real shape of the failure: not damage, but a document from a build that knows more.
+    func testFutureAttachmentDocumentIsReportedWithoutDeletingIt() throws {
         let database = try makeDatabase()
         let sessionID = SessionID()
         try database.save(ProjectsState(projects: [makeProject("alpha")]))
@@ -343,15 +352,35 @@ final class ProjectDatabaseTests: XCTestCase {
             for: sessionID
         )
 
-        XCTAssertThrowsError(try database.load()) { error in
-            guard let loadError = error as? ProjectDatabaseLoadError,
-                  case .corruptRow(let table, let id, _) = loadError else {
-                return XCTFail("Expected a corrupt-row error, got \(error)")
-            }
-            XCTAssertEqual(table, "session_attachments")
-            XCTAssertEqual(id, sessionID.uuidString)
-        }
+        let load = try database.load()
+
+        XCTAssertEqual(load.state.projects.map(\.name), ["alpha"])
+        XCTAssertEqual(load.unreadable.sessionAttachments.sessions, [sessionID])
+        XCTAssertTrue(load.unreadable.panelLayouts.isEmpty)
         XCTAssertEqual(try rowCount("session_attachments"), 1)
+    }
+
+    /// A row no feature can ever ask for by id, which is why it is tracked apart: refusing writes
+    /// to it protects nothing, and only leaving the table unpruned keeps it.
+    func testAuxiliaryRowWithoutASessionIdentifierIsReportedAsUnkeyed() throws {
+        let database = try makeDatabase()
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        try raw.prepare(ProjectDatabaseSchema.upsertPanel)
+            .bind(1, "not-a-session-identifier")
+            .bind(2, "{}")
+            .run()
+
+        let load = try database.load()
+
+        XCTAssertEqual(load.state.projects.map(\.name), ["alpha"])
+        XCTAssertTrue(load.unreadable.panelLayouts.containsUnkeyedRows)
+        XCTAssertTrue(
+            load.unreadable.panelLayouts.sessions.isEmpty,
+            "there is no session to name, which is the whole difference"
+        )
+        XCTAssertEqual(try rowCount("panel_layout"), 1)
     }
 
     func testProviderSpecificMutationCannotCreateAnImpossibleWrite() throws {
@@ -362,7 +391,7 @@ final class ProjectDatabaseTests: XCTestCase {
         try database.save(
             ProjectsState(projects: [makeProject("alpha", sessions: [session])])
         )
-        XCTAssertNil(try database.load().projects[0].sessions[0].reasoningEffort)
+        XCTAssertNil(try database.load().state.projects[0].sessions[0].reasoningEffort)
     }
 
     func testClaudeReasoningEffortSurvivesThePayload() throws {
@@ -374,7 +403,7 @@ final class ProjectDatabaseTests: XCTestCase {
             ProjectsState(projects: [makeProject("alpha", sessions: [session])])
         )
 
-        let restored = try database.load().projects[0].sessions[0]
+        let restored = try database.load().state.projects[0].sessions[0]
         XCTAssertEqual(restored.kind, .claude)
         XCTAssertEqual(restored.reasoningEffort, "xhigh")
     }
@@ -399,7 +428,7 @@ final class ProjectDatabaseTests: XCTestCase {
         var project = makeProject("alpha", sessions: [session])
         project.themeID = .homebrew
         try database.save(ProjectsState(projects: [project]))
-        let restoredProject = try XCTUnwrap(try database.load().projects.first)
+        let restoredProject = try XCTUnwrap(try database.load().state.projects.first)
         let restored = try XCTUnwrap(restoredProject.sessions.first)
 
         XCTAssertEqual(restored.customTitle, "Renamed")

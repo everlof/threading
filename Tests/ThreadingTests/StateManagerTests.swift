@@ -535,6 +535,156 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(recordedURL, quarantineURL)
     }
 
+    /// The whole of the 2026-08-06 data loss, end to end.
+    ///
+    /// A display panel row carrying a format version this build does not know is not damage — it
+    /// is a build one step ahead having written it. It used to fail the authoritative load, and a
+    /// failed load quarantines the database: four projects and 138 chats, gone, over an empty tab
+    /// list. The panel is reported absent so the pane rebuilds, its bytes are refused to the
+    /// writer so the newer build still finds them, and everything else loads.
+    func testPanelFromANewerBuildCostsThePanelRatherThanTheStore() throws {
+        let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        let sessionID = SessionID()
+        let futurePanel = #"{"formatVersion":99,"observedSignature":"h:Output·Fixture","tabs":[]}"#
+        do {
+            let database = try ProjectDatabase(url: databaseURL)
+            try database.save(ProjectsState(projects: [
+                Project(name: "Keep me", folderURL: URL(fileURLWithPath: "/tmp/keep-me"))
+            ]))
+            try database.savePanelPayload(futurePanel, for: sessionID)
+        }
+
+        let manager = makeManager()
+        guard case .loaded(let state) = manager.loadProjectsState() else {
+            return XCTFail("One unreadable panel must not fail the load that carries the projects")
+        }
+        XCTAssertEqual(state.projects.map(\.name), ["Keep me"])
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: databaseURL.path + ".corrupt"),
+            "nothing here warrants moving the store aside"
+        )
+        guard case .healthy = manager.persistenceHealth else {
+            return XCTFail("The store is readable; writes must stay open")
+        }
+
+        XCTAssertNil(
+            manager.loadPanelPayload(for: sessionID),
+            "the pane is told it has nothing, so it rebuilds rather than showing half a layout"
+        )
+
+        manager.savePanelPayload(#"{"tabs":[]}"#, for: sessionID)
+        let stored = try SQLiteDatabase(path: databaseURL.path)
+        let payload = try stored.prepare(
+            "SELECT data FROM \(ProjectDatabaseSchema.panelTable) WHERE session_id = ?"
+        )
+        defer { payload.finalize() }
+        payload.bind(1, sessionID.uuidString)
+        XCTAssertTrue(try payload.step())
+        XCTAssertEqual(
+            payload.text(0),
+            futurePanel,
+            "a row this build could not read must not be replaced by what it would have written"
+        )
+
+        XCTAssertTrue(
+            manager.saveProjectsState(ProjectsState(projects: [
+                Project(name: "Still writable", folderURL: URL(fileURLWithPath: "/tmp/writable"))
+            ])),
+            "the store itself was never in doubt"
+        )
+    }
+
+    /// Quarantine has to leave something behind, and for months it did not.
+    ///
+    /// In WAL mode the committed rows sit in `-wal` until a checkpoint, and a checkpoint happens
+    /// when the *last* connection closes — which never happens while a second build or a hosted
+    /// test target holds the same store open. Quarantine deleted that file, so the copy it kept
+    /// for recovery was an empty shell and the only real copy was unlinked. Measured on the store
+    /// that hit it: zero project rows in the database, every project in a 498KB log.
+    func testQuarantineKeepsTheWriteAheadLogThatHoldsTheRows() throws {
+        let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        let project = Project(name: "In the log", folderURL: URL(fileURLWithPath: "/tmp/in-the-log"))
+
+        // The schema first, on its own, so closing it checkpoints and the file starts clean.
+        _ = try ProjectDatabase(url: databaseURL)
+
+        // Then a reader holding an open snapshot from before the rows are written. A checkpoint
+        // may only copy frames older than the oldest reader, so this pins every row that follows
+        // inside the log — deterministically reproducing the state the running app is in, where
+        // the second connection is another build or a hosted test target.
+        let concurrentReader = try SQLiteDatabase(path: databaseURL.path)
+        try concurrentReader.execute("BEGIN")
+        _ = try concurrentReader.scalar("SELECT COUNT(*) FROM project")
+
+        do {
+            let database = try ProjectDatabase(url: databaseURL)
+            try database.save(ProjectsState(projects: [project]))
+        }
+        do {
+            let raw = try SQLiteDatabase(path: databaseURL.path)
+            try raw.prepare("UPDATE project SET data = ? WHERE id = ?")
+                .bind(1, "{ damaged-json")
+                .bind(2, project.id.uuidString)
+                .run()
+        }
+
+        let log = URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.walSuffix)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: log.path),
+            "the fixture has to reproduce an unchecked-pointed store or it proves nothing"
+        )
+        let manager = makeManager()
+        guard case .failed(let quarantinedAt) = manager.loadProjectsState() else {
+            return XCTFail("A damaged project row is still all-or-nothing")
+        }
+        let quarantineURL = try XCTUnwrap(quarantinedAt)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: quarantineURL.path + SQLiteDefaults.walSuffix
+            ),
+            "the log moves with the database it belongs to, under the name SQLite will look for"
+        )
+        // Read through copies rather than in place: the abandoned connection above still holds
+        // the original inode, and two connections reaching one inode by different names is a
+        // conflict SQLite reports as an I/O error. Recovery copies the files anyway.
+        let withoutTheLog = testDirectory.appendingPathComponent("quarantined-alone.db")
+        try FileManager.default.copyItem(at: quarantineURL, to: withoutTheLog)
+        XCTAssertEqual(
+            (try? SQLiteDatabase(path: withoutTheLog.path)
+                .scalar("SELECT COUNT(*) FROM project")) ?? 0,
+            0,
+            "the database file on its own is empty — which is all the old behaviour kept"
+        )
+
+        let recovered = testDirectory.appendingPathComponent("recovered.db")
+        try FileManager.default.copyItem(at: quarantineURL, to: recovered)
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: quarantineURL.path + SQLiteDefaults.walSuffix),
+            to: URL(fileURLWithPath: recovered.path + SQLiteDefaults.walSuffix)
+        )
+        XCTAssertEqual(
+            try SQLiteDatabase(path: recovered.path).scalar("SELECT COUNT(*) FROM project"),
+            1,
+            "with its log the quarantined copy is the state, which is the point of keeping it"
+        )
+
+        // Nothing may be left beside the live path: SQLite would read it as the log of whatever
+        // database is created there next.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: log.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: databaseURL.path + SQLiteDefaults.sharedMemorySuffix
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+
+        // Held to here and then abandoned rather than committed: a connection whose database has
+        // been moved out from under it is finished, which is true of the running app too and is
+        // not what this test is about.
+        withExtendedLifetime(concurrentReader) {}
+    }
+
     /// Version 2 removed `AgentKind.shell`. A version-1 document naming that kind must still
     /// import — one session that no longer decodes would otherwise fail the whole document,
     /// which for this user is every project they have.
@@ -709,7 +859,7 @@ final class StateManagerTests: XCTestCase {
         let adopted = try ProjectDatabase(
             url: current.appendingPathComponent(SQLiteDefaults.databaseName)
         )
-        XCTAssertEqual(try adopted.load().projects.map(\.name), ["Real work"])
+        XCTAssertEqual(try adopted.load().state.projects.map(\.name), ["Real work"])
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: legacy.path),
             "The old directory is copied, never moved — a bad adoption must not be the only copy"
@@ -760,7 +910,7 @@ final class StateManagerTests: XCTestCase {
         let reopened = try ProjectDatabase(
             url: current.appendingPathComponent(SQLiteDefaults.databaseName)
         )
-        XCTAssertEqual(try reopened.load().projects.map(\.name), ["Current work"])
+        XCTAssertEqual(try reopened.load().state.projects.map(\.name), ["Current work"])
     }
 
     /// A user who deliberately started over must not be handed the old state back every launch.

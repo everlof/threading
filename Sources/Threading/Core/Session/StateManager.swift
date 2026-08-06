@@ -55,6 +55,17 @@ final class StateManager {
     private var didAttemptPanelImport = false
     private(set) var persistenceHealth: PersistenceHealth = .healthy
 
+    /// The auxiliary rows the last load could not decode, kept for the rest of the launch.
+    ///
+    /// This is the whole of the protection that used to be spelled "quarantine the database": a
+    /// panel or attachment payload this build cannot read is reported to its feature as absent so
+    /// the pane rebuilds, and refused to the writer so the stored bytes survive until a build that
+    /// can read them opens the store.
+    private var unreadableAuxiliaryRows = UnreadableAuxiliaryRows()
+
+    /// Sessions already named in a refusal, so a pane that saves on every navigation says it once.
+    private var reportedUnreadableWrites: Set<String> = []
+
     /// The injectable directory and clock keep persistence tests away from the user's real state.
     init(
         appSupportDirectory: URL? = nil,
@@ -214,7 +225,10 @@ final class StateManager {
                 return result
             }
 
-            let state = try database.load()
+            let load = try database.load()
+            record(load.unreadable)
+
+            let state = load.state
             return state.projects.isEmpty && state.selectedSessionID == nil ? .missing : .loaded(state)
         } catch {
             ThreadingLogger.agent.error(
@@ -366,28 +380,59 @@ final class StateManager {
 
     /// Moves an unopenable database aside, so the next launch starts on a fresh one rather than
     /// failing forever — and so the broken file is still there to look at.
+    ///
+    /// **The write-ahead log moves with it, and that is the whole point.** Deleting the sidecars
+    /// was the old behaviour, and it turned quarantine into the data loss it exists to prevent:
+    /// in WAL mode the committed rows live in `-wal` until a checkpoint, and a checkpoint happens
+    /// when the *last* connection to the database closes — which never happens while a second
+    /// build or a hosted test target holds the same store open. Measured on the store that hit
+    /// this: the main file had zero project rows and every project was in a 498KB `-wal`. So the
+    /// file left behind for recovery was empty, and the only copy had been unlinked.
+    ///
+    /// SQLite recovers a WAL by name, so the log has to land beside the file it belongs to under
+    /// the quarantined name. `-shm` is only an index over that log, rebuilt on demand, and it is
+    /// the one sidecar that must not stay behind: left next to a database that is no longer there,
+    /// it is what would let the next open recover a fresh database from someone else's bytes.
     private func quarantineDatabase() -> URL? {
         openDatabase = nil
 
         let destination = uniqueQuarantineURL(named: "\(SQLiteDefaults.databaseName).corrupt")
         do {
             try fileManager.moveItem(at: databaseURL, to: destination)
-            // WAL and shared-memory sidecars belong to the file they were written beside; left
-            // behind, SQLite would try to recover a fresh database from them.
-            for sidecar in ["-wal", "-shm"] {
-                let url = URL(fileURLWithPath: databaseURL.path + sidecar)
-                try? fileManager.removeItem(at: url)
-            }
-            ThreadingLogger.agent.error(
-                "Quarantined unreadable database at \(destination.path, privacy: .public)"
-            )
-            return destination
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to quarantine the database: \(error.localizedDescription, privacy: .public)"
             )
             return nil
         }
+
+        let log = URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.walSuffix)
+        if fileManager.fileExists(atPath: log.path) {
+            do {
+                try fileManager.moveItem(
+                    at: log,
+                    to: URL(fileURLWithPath: destination.path + SQLiteDefaults.walSuffix)
+                )
+            } catch {
+                // Keeping it where it is would be worse than losing it: it would be read as the
+                // log of whatever database is created here next.
+                try? fileManager.removeItem(at: log)
+                ThreadingLogger.agent.error(
+                    """
+                    Could not keep the write-ahead log with the quarantined database: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
+                )
+            }
+        }
+        try? fileManager.removeItem(
+            at: URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.sharedMemorySuffix)
+        )
+
+        ThreadingLogger.agent.error(
+            "Quarantined unreadable database at \(destination.path, privacy: .public)"
+        )
+        return destination
     }
 
     private func uniqueQuarantineURL(named baseName: String) -> URL {
@@ -413,6 +458,7 @@ final class StateManager {
     /// each other for no benefit.
     func loadPanelPayload(for sessionID: SessionID) -> String? {
         guard case .healthy = persistenceHealth else { return nil }
+        guard !isUnreadable(unreadableAuxiliaryRows.panelLayouts, for: sessionID) else { return nil }
         importLegacyPanelLayoutsIfNeeded()
         do {
             return try database().panelPayload(for: sessionID)
@@ -427,6 +473,11 @@ final class StateManager {
 
     func savePanelPayload(_ payload: String, for sessionID: SessionID) {
         guard writesAreAllowed(for: "display panel") else { return }
+        guard !isUnreadable(
+            unreadableAuxiliaryRows.panelLayouts,
+            for: sessionID,
+            refusing: "display panel"
+        ) else { return }
         do {
             try database().savePanelPayload(payload, for: sessionID)
         } catch {
@@ -439,6 +490,10 @@ final class StateManager {
 
     func retainPanelLayouts(sessionIDs: Set<SessionID>) {
         guard writesAreAllowed(for: "display panel cleanup") else { return }
+        guard prunePermitted(
+            unreadableAuxiliaryRows.panelLayouts,
+            for: "display panel cleanup"
+        ) else { return }
         do {
             try database().retainPanels(sessionIDs: sessionIDs)
         } catch {
@@ -455,6 +510,10 @@ final class StateManager {
     /// same reason: both are what the display pane rebuilds after a relaunch.
     func loadAttachmentsPayload(for sessionID: SessionID) -> String? {
         guard case .healthy = persistenceHealth else { return nil }
+        guard !isUnreadable(
+            unreadableAuxiliaryRows.sessionAttachments,
+            for: sessionID
+        ) else { return nil }
         do {
             return try database().attachmentsPayload(for: sessionID)
         } catch {
@@ -468,6 +527,11 @@ final class StateManager {
 
     func saveAttachmentsPayload(_ payload: String, for sessionID: SessionID) {
         guard writesAreAllowed(for: "session attachments") else { return }
+        guard !isUnreadable(
+            unreadableAuxiliaryRows.sessionAttachments,
+            for: sessionID,
+            refusing: "session attachments"
+        ) else { return }
         do {
             try database().saveAttachmentsPayload(payload, for: sessionID)
         } catch {
@@ -480,6 +544,10 @@ final class StateManager {
 
     func retainAttachments(sessionIDs: Set<SessionID>) {
         guard writesAreAllowed(for: "session attachment cleanup") else { return }
+        guard prunePermitted(
+            unreadableAuxiliaryRows.sessionAttachments,
+            for: "session attachment cleanup"
+        ) else { return }
         do {
             try database().retainAttachments(sessionIDs: sessionIDs)
         } catch {
@@ -619,6 +687,69 @@ final class StateManager {
     private func requireRecovery(quarantinedAt: URL? = nil) {
         guard case .healthy = persistenceHealth else { return }
         persistenceHealth = .recoveryRequired(quarantinedAt: quarantinedAt)
+    }
+
+    // MARK: - Unreadable Auxiliary Rows
+
+    /// Records what a load could not decode, and says so once rather than per write.
+    ///
+    /// Reported at `error` level on purpose: nothing is lost yet, but a session is running with a
+    /// panel it cannot see and will not replace, and the launch that produced the row is worth
+    /// finding while the two builds still exist.
+    private func record(_ unreadable: UnreadableAuxiliaryRows) {
+        unreadableAuxiliaryRows = unreadable
+        reportedUnreadableWrites.removeAll()
+        guard !unreadable.isEmpty else { return }
+
+        let unkeyed = unreadable.panelLayouts.containsUnkeyedRows
+            || unreadable.sessionAttachments.containsUnkeyedRows
+        ThreadingLogger.agent.error(
+            """
+            Loaded the store with \(unreadable.panelLayouts.sessions.count, privacy: .public) \
+            unreadable display panels, \
+            \(unreadable.sessionAttachments.sessions.count, privacy: .public) unreadable \
+            attachment lists\(unkeyed ? ", and a row naming no session" : "", privacy: .public); \
+            those rows are kept and will not be written over this launch
+            """
+        )
+    }
+
+    /// Whether this session's row in an auxiliary table is one the load could not read.
+    ///
+    /// A read answers nil so the feature rebuilds from nothing, and a write is refused so the
+    /// bytes it could not read are still there for the build that can.
+    private func isUnreadable(
+        _ rows: UnreadableRows,
+        for sessionID: SessionID,
+        refusing operation: String? = nil
+    ) -> Bool {
+        guard rows.sessions.contains(sessionID) else { return false }
+        if let operation, reportedUnreadableWrites.insert("\(operation):\(sessionID.uuidString)").inserted {
+            ThreadingLogger.mcp.error(
+                """
+                Refusing to write \(operation, privacy: .public) for \
+                \(sessionID.uuidString, privacy: .public): its stored row could not be read by \
+                this build, and overwriting it would destroy the only copy
+                """
+            )
+        }
+        return true
+    }
+
+    /// Whether pruning a table would delete a row the load could not read *and* could not key.
+    ///
+    /// Every prune keeps the rows belonging to live sessions, so an unreadable row with a valid
+    /// session id looks after itself. One whose `session_id` is not an identifier at all belongs
+    /// to no session, so a prune would take it — and this is the only thing that stops that.
+    private func prunePermitted(_ rows: UnreadableRows, for operation: String) -> Bool {
+        guard rows.containsUnkeyedRows else { return true }
+        ThreadingLogger.mcp.error(
+            """
+            Skipping \(operation, privacy: .public): the store holds a row this build could not \
+            read and cannot match to a session, which a prune would delete
+            """
+        )
+        return false
     }
 
     // MARK: - Legacy Cleanup
