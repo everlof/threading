@@ -402,6 +402,47 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - The Window's Size Is Not The Pane's To Decide
+
+    /// The pane hosted where it ships: in a window whose height Auto Layout may change. AppKit
+    /// reads a window's minimum size out of every constraint at `windowSizeStayPut` (500) and
+    /// above, so a content-derived height above that is not a preference inside the pane — it
+    /// is the pane resizing the window. The preview's fitted height carried `.defaultHigh`,
+    /// and a full-page screenshot grew the main window to 3386 points on a 1084-point screen
+    /// every time the session holding it was opened. None of the fixtures above could see it:
+    /// a detached fixture's own frame is `required`, while a window's size merely stays put
+    /// at 500 — the same lesson as the sidebar row asserted outside its outline view.
+    func testATallScreenshotCannotGrowTheWindowHoldingThePane() throws {
+        let sessionID = SessionID()
+        let recorded = SessionAttachmentStore.shared.record(
+            urls: [try writePNG(size: NSSize(width: 400, height: 4000))],
+            sessionID: sessionID,
+            projectRoot: root
+        )
+        XCTAssertEqual(recorded.count, 1, "a fixture attachment was refused")
+
+        // Built, never shown — an unshown window still lays out, which is all this needs.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 353, height: 700),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = SessionAttachmentsViewController(sessionID: sessionID)
+        window.setContentSize(NSSize(width: 353, height: 700))
+        // Twice for the same fixpoint the detached fixtures reach: the first pass gives the
+        // preview its width, the second lays the chain out against its fitted height.
+        window.layoutIfNeeded()
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(
+            window.contentRect(forFrameRect: window.frame).height,
+            700,
+            accuracy: 1,
+            "the preview's height reached the window — a constraint above windowSizeStayPut is loose in the pane"
+        )
+    }
+
     // MARK: - The Scope Band
 
     /// Quiet where it would say nothing. A session whose files are all inside its project is

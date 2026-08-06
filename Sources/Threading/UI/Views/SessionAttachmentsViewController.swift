@@ -418,7 +418,7 @@ final class SessionAttachmentsViewController: NSViewController {
         NSLayoutConstraint.activate(scopeBandConstraints)
 
         let previewHeight = previewHost.heightAnchor.constraint(equalToConstant: 0)
-        previewHeight.priority = .defaultHigh
+        previewHeight.priority = SessionAttachmentsDefaults.previewHeightPriority
         previewHeightConstraint = previewHeight
 
         // Always active, unlike the preview's: a list with no rows asks for no height, which is
@@ -1156,16 +1156,30 @@ enum SessionAttachmentsDefaults {
     static let minimumPreviewHeight: CGFloat = 96
     /// The well around a sentence — "too large to preview", "could not be decoded".
     static let messagePreviewHeight: CGFloat = 160
-    /// Gentle on purpose: it loses to an image's own height (`.defaultHigh`) and wins only
-    /// when nothing states one — a PDF, which fills whatever room the pane has.
+    /// Gentle on purpose: it loses to an image's own height (`previewHeightPriority`) and wins
+    /// only when nothing states one — a PDF, which fills whatever room the pane has.
     static let footerPullPriority = NSLayoutConstraint.Priority(300)
 
     /// How much of the pane the list may take before it starts scrolling. Half: the rows and
     /// what they are describing are two halves of the same pane, and neither may swallow the
     /// other on the way to the footer.
     static let listShareOfPane: CGFloat = 0.5
-    /// Above the preview's `.defaultHigh`, below `required`. A pane too short for everything
+
+    /// Both height priorities sit **below** `windowSizeStayPut` (500), and that line is the
+    /// whole point: AppKit reads a window's minimum size out of every constraint it finds at
+    /// 500 and above, so a content-derived height any higher is not a preference inside the
+    /// pane — it is the pane resizing the window. The preview's constant is an image's fitted
+    /// height with no ceiling, and at the old `.defaultHigh` a full-page screenshot grew the
+    /// main window to 3386 points on a 1084-point screen every time its session was opened
+    /// (`MainWindowFrame` is what brings such a window back; this is what stops it leaving).
+    /// Inside the pane nothing moves: both still outrank `footerPullPriority`, and the order
+    /// between them still compresses the preview before the list. The pane's own height is
+    /// `required` at its edges, so below 500 these constraints shape the pane and only the
+    /// pane — which is what the detached-fixture tests always saw, while a hosted window
+    /// quietly obeyed the 750.
+    static let previewHeightPriority = NSLayoutConstraint.Priority(480)
+    /// Above the preview's, below `windowSizeStayPut`. A pane too short for everything
     /// therefore compresses the preview first and the list only after it — and the footer's
     /// floor, which is `required`, never.
-    static let listHeightPriority = NSLayoutConstraint.Priority(760)
+    static let listHeightPriority = NSLayoutConstraint.Priority(490)
 }

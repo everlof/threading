@@ -457,14 +457,33 @@ points tall on a 1084-point screen with its composer 2302 points below the botto
 and came back that way again after a relaunch. It was reported as a window stuck too tall that
 would not resize, which is what it looks like from outside — dragging the top edge down does
 shrink it, but the bottom edge is off screen and the composer never returns, and the frameless
-window has no clamp to put it back. Nothing in the panes held it: `MainWindowSizingTests` builds
-the real controller and drags it to `WindowDefaults.minHeight`. So
+window has no clamp to put it back. Nothing in the panes held it *down*: `MainWindowSizingTests`
+builds the real controller and drags it to `WindowDefaults.minHeight`. So
 `TitlebarActionWindow.constrainFrameRect` performs AppKit's own two steps for the untitled case —
 size into `visibleFrame`, then move inside it (`MainWindowFrame.held`) — and `applyInitialFrame`
 holds the restored frame the same way. Fullscreen is excepted: AppKit sizes a fullscreen window
 to the screen's *full* frame, menu bar included, and holding that inside `visibleFrame` would
 shrink a window the platform had just sized on purpose. The held frame is asserted **equal** to
 what AppKit gives a titled window across the same rectangles, so the two cannot drift.
+
+**What wrote 3386 was found the next day, reported as "opening one session throws the window
+off the screen".** The attachments pane's preview stated an image's *fitted height* — unbounded —
+on a `.defaultHigh` (750) constraint, and AppKit reads a window's minimum size out of every
+constraint it finds at `windowSizeStayPut` (500) and above. Opening a session whose panel
+previewed a full-page screenshot therefore resized the window to the picture, and while that
+session stayed selected every layout pass re-asserted the demand — which with the clamp above is
+also why the window then *snapped back* wherever the user dragged it: layout regrew it downward
+from its top edge, the clamp held the giant frame inside `visibleFrame` again, and the two met at
+"pinned to the top of the screen, immovable". Both of the pane's content-derived heights now sit
+below 500 (`SessionAttachmentsDefaults.previewHeightPriority` / `listHeightPriority`), and
+`SessionAttachmentsLayoutTests` hosts the pane in a real (unshown) window and asserts a
+4000-point screenshot cannot move it — measured, the old priority grows that fixture to 3396.
+The pane's own detached fixtures passed throughout, because a detached fixture's frame is
+`required` while a hosted window's size merely *stays put*. The rule this leaves behind: **a
+constraint whose constant is derived from content may not carry a priority above 500 anywhere in
+the window's own layout tree** — above 500 it is not a preference inside a pane, it is the pane
+resizing the window. The clamp stays: it is what makes the next writer's mistake recoverable
+rather than permanent.
 
 **A pixel-art glyph is not a vector glyph with antialiasing disabled.** Windows 95/98 drew its
 caption figures from Marlett (`0` Minimize, `1` Maximize, `2` Restore, `r` Close) inside a 16×14
