@@ -1760,6 +1760,17 @@ taken, so scrolling away says so in the badge rather than pretending the missing
 Nothing about the overlay reaches the page, so a screenshot taken while it is up is of the page and
 not of the overlay.
 
+**Settings ▸ General ▸ Keep the page as it was before each agent action.** Off until you turn it on.
+With it on, Threading photographs the page just before each thing the agent does to it, so the agent
+can ask what its own click changed rather than guessing. Those pictures live in memory for the chat
+only and never join your baselines. It sees the agent's actions and nothing else: your own clicks, a
+timer, or a page updating itself are not covered, and the answer says so.
+
+An agent can also compare the page against another open tab rather than against a baseline, which is
+how staging is held against production. Both sites need your permission, because both are being
+looked at. And a baseline can be captured at an exact device size and compared at that size later,
+so a phone layout is checked against a phone baseline rather than being stretched into one.
+
 ### Execution audit
 
 Open **Execution Audit** from the display panel's **+** menu to review what an agent actually asked

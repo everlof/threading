@@ -555,6 +555,23 @@ final class AppSettings {
         }
     }
 
+    /// Whether a before-shot of the page is kept in front of each agent mutation, so a comparison
+    /// can answer "what did that click change?".
+    ///
+    /// Off by default, and the default is a cost decision rather than a safety one: every
+    /// mutating browser tool would otherwise pay for a screenshot on the main actor, in the hot
+    /// path, for an answer nobody may ask for. Stored as the opt-*in* so an unreadable value and a
+    /// machine the user has never opened this page on both mean off. The captures are runtime-only
+    /// and separately bounded — see `BrowserAutoCaptureRing`, which is deliberately not the
+    /// approved baseline library.
+    var capturesPageBeforeAgentActions: Bool {
+        get { defaults.bool(forKey: Keys.capturesPageBeforeAgentActions) }
+        set {
+            defaults.set(newValue, forKey: Keys.capturesPageBeforeAgentActions)
+            notifyChanged()
+        }
+    }
+
     func setAttachmentReferenceDetection(for kind: AgentKind, enabled: Bool) {
         var disabled = disabledAttachmentDetectionAgentKinds
         if enabled {
@@ -973,6 +990,7 @@ final class AppSettings {
         static let playsAttentionAlertSound = "playsAttentionAlertSound"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let includesAttachmentsOutsideProject = "includesAttachmentsOutsideProject"
+        static let capturesPageBeforeAgentActions = "capturesPageBeforeAgentActions"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
         static let workspaceNavigatorSelection = "workspaceNavigatorSelection"

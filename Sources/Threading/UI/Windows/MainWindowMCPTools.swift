@@ -523,6 +523,50 @@ final class AgentToolCoordinator: AgentCommandHandling {
       completion(result)
     }
 
+    // The page as it stands *before* an agent changes it, when the user has asked for that. It
+    // has to happen here rather than inside each command: this is the one place that sees the call
+    // before it runs, and a before-shot taken after the fact is not a before-shot.
+    if let tool = call.builtInTool,
+      BrowserAutoCaptureDefaults.mutatingTools.contains(tool),
+      dependencies.settings.capturesPageBeforeAgentActions,
+      let browser = loadedBrowser(for: sessionID) {
+      captureBeforeAgentAction(tool, in: browser, for: sessionID) { [weak self] in
+        self?.dispatch(call, for: sessionID, completion: observed, plain: completion)
+      }
+      return
+    }
+    dispatch(call, for: sessionID, completion: observed, plain: completion)
+  }
+
+  /// Takes the before-shot and then runs the action, whatever the capture did.
+  ///
+  /// A failed capture never blocks the tool. The history is a convenience, and refusing to click
+  /// because a screenshot did not come back would trade a real capability for an optional one.
+  private func captureBeforeAgentAction(
+    _ tool: MCPBuiltInTool,
+    in browser: BrowserViewController,
+    for sessionID: SessionID,
+    then run: @escaping @MainActor () -> Void
+  ) {
+    Task { @MainActor in
+      if let capture = try? await browser.captureBaseline(kind: .viewport) {
+        BrowserAutoCaptureRing.shared.record(
+          action: tool.rawValue,
+          pngData: capture.pngData,
+          conditions: capture.conditions,
+          for: sessionID
+        )
+      }
+      run()
+    }
+  }
+
+  private func dispatch(
+    _ call: MCPToolCall,
+    for sessionID: SessionID,
+    completion observed: @escaping @MainActor @Sendable (MCPToolResult) -> Void,
+    plain completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
     switch call {
     case .conversationHistory(let arguments):
       ConversationContinuation.loadHistoryPage(

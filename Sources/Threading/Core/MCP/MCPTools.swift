@@ -543,11 +543,20 @@ struct BrowserIgnoreRectArguments: Decodable, Sendable {
 }
 
 struct BrowserVisualCompareArguments: Decodable, Sendable {
-  /// Exactly one of these three names the baseline. Legacy `baseline_path` is still accepted; the
-  /// other two address the project's own library and need no filesystem path at all.
+  /// Exactly one of these names what the page is compared *with*. The first three are stored
+  /// baselines; the last two are the other things worth diffing against — another live tab, and
+  /// the page's own past.
   let baselineID: String?
   let baselineName: String?
   let baselinePath: String?
+  /// A second live tab in this session, from browser_tabs list. Staging against production.
+  let baselineTabID: String?
+  /// The most recent before-shot from the opt-in auto-capture ring: what the page looked like
+  /// immediately before the last agent mutation.
+  let baselinePrevious: Bool?
+  /// Resize to the baseline's own recorded viewport before capturing, so a comparison across
+  /// device presets compares like with like rather than failing on dimensions.
+  let matchBaselineViewport: Bool?
   let fullPage: Bool?
   let ref: String?
   let selector: String?
@@ -569,6 +578,9 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
     case baselineID = "baseline_id"
     case baselineName = "baseline_name"
     case baselinePath = "baseline_path"
+    case baselineTabID = "baseline_tab_id"
+    case baselinePrevious = "baseline_previous"
+    case matchBaselineViewport = "match_baseline_viewport"
     case fullPage = "full_page"
     case channelThreshold = "channel_threshold"
     case maximumDifferentRatio = "maximum_different_ratio"
@@ -583,6 +595,9 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
     baselineID: String? = nil,
     baselineName: String? = nil,
     baselinePath: String? = nil,
+    baselineTabID: String? = nil,
+    baselinePrevious: Bool? = nil,
+    matchBaselineViewport: Bool? = nil,
     fullPage: Bool? = nil,
     ref: String? = nil,
     selector: String? = nil,
@@ -599,6 +614,9 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
     self.baselineID = baselineID
     self.baselineName = baselineName
     self.baselinePath = baselinePath
+    self.baselineTabID = baselineTabID
+    self.baselinePrevious = baselinePrevious
+    self.matchBaselineViewport = matchBaselineViewport
     self.fullPage = fullPage
     self.ref = ref
     self.selector = selector
@@ -645,13 +663,20 @@ struct BrowserBaselinesArguments: Decodable, Sendable {
   let selector: String?
   let note: String?
   let urlContains: String?
+  /// Capture at this exact CSS viewport, restoring whatever was there afterwards.
+  let viewportWidth: Int?
+  let viewportHeight: Int?
+  /// For list: keep only baselines captured at this commit.
+  let commit: String?
   var locator: BrowserSemanticLocator? = nil
 
   private enum CodingKeys: String, CodingKey {
-    case action, name, ref, selector, locator, note
+    case action, name, ref, selector, locator, note, commit
     case baselineID = "baseline_id"
     case fullPage = "full_page"
     case urlContains = "url_contains"
+    case viewportWidth = "viewport_width"
+    case viewportHeight = "viewport_height"
   }
 
   init(
@@ -663,6 +688,9 @@ struct BrowserBaselinesArguments: Decodable, Sendable {
     selector: String? = nil,
     note: String? = nil,
     urlContains: String? = nil,
+    viewportWidth: Int? = nil,
+    viewportHeight: Int? = nil,
+    commit: String? = nil,
     locator: BrowserSemanticLocator? = nil
   ) {
     self.action = action
@@ -3841,8 +3869,30 @@ enum MCPTools {
           "baseline_path": MCPPropertySchema(
             type: .string,
             description: """
-              Absolute path to a readable PNG, for a baseline outside the library. Provide \
-              exactly one of baseline_id, baseline_name, or baseline_path.
+              Absolute path to a readable PNG, for a baseline outside the library.
+              """
+          ),
+          "baseline_tab_id": MCPPropertySchema(
+            type: .string,
+            description: """
+              Compare against another live tab in this chat, from browser_tabs list. Both tabs \
+              are captured now and both origins are authorized, so this is staging against \
+              production rather than against a record.
+              """
+          ),
+          "baseline_previous": MCPPropertySchema(
+            type: .boolean,
+            description: """
+              Compare against the page as it was immediately before your last page-changing tool \
+              call. Needs the user to have turned on capturing before agent actions; it covers \
+              agent-originated changes only, never a user's own click or a timer.
+              """
+          ),
+          "match_baseline_viewport": MCPPropertySchema(
+            type: .boolean,
+            description: """
+              Resize to the baseline's own recorded viewport before capturing, then restore. Use \
+              it to compare one page across device presets; nothing is ever scaled to fit.
               """
           ),
           "threshold": MCPPropertySchema(
@@ -3974,6 +4024,24 @@ enum MCPTools {
           "url_contains": MCPPropertySchema(
             type: .string,
             description: "For list, keep only baselines whose recorded URL contains this."
+          ),
+          "commit": MCPPropertySchema(
+            type: .string,
+            description: """
+              For list, keep only baselines captured at a commit starting with this. Captures \
+              record the checkout's commit; nothing here ever checks one out.
+              """
+          ),
+          "viewport_width": MCPPropertySchema(
+            type: .number,
+            description: """
+              For capture, take the picture at this exact CSS viewport width and put the browser \
+              back afterwards. Give both dimensions or neither.
+              """
+          ),
+          "viewport_height": MCPPropertySchema(
+            type: .number,
+            description: "For capture, the CSS viewport height to capture at."
           ),
         ],
         required: []

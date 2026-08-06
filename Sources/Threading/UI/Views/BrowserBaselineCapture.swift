@@ -63,7 +63,8 @@ extension BrowserViewController {
         ref: String? = nil,
         selector: String? = nil,
         locator: BrowserSemanticLocator? = nil,
-        includesAttribution: Bool = false
+        includesAttribution: Bool = false,
+        commitSHA: String? = nil
     ) async throws -> BrowserBaselineCapture {
         guard let page = agentPageIdentity, currentURL != nil else {
             throw BrowserBaselineCaptureError.noPage
@@ -140,7 +141,8 @@ extension BrowserViewController {
                 userAgent: agentUserAgent.value,
                 browserContext: contextKind.rawValue,
                 clipped: clipped,
-                elementScope: scope
+                elementScope: scope,
+                commitSHA: commitSHA
             ),
             page: page,
             attribution: attribution,
@@ -225,11 +227,83 @@ extension BrowserViewController {
         set { baselineOverlayView.mode = newValue }
     }
 
+    /// Captures at one exact CSS viewport, putting the browser back however it was.
+    ///
+    /// The restore is in a `defer`, because a capture that throws must not leave the user looking
+    /// at a 375-point phone viewport they never asked for. Comparing across device presets is the
+    /// reason this exists: each preset gets its own baseline, and none of them is ever a scaled
+    /// stand-in for another.
+    @MainActor
+    func captureBaseline(
+        kind: BrowserBaselineCaptureKind,
+        atViewport viewport: CGSize,
+        ref: String? = nil,
+        selector: String? = nil,
+        locator: BrowserSemanticLocator? = nil,
+        includesAttribution: Bool = false,
+        commitSHA: String? = nil
+    ) async throws -> BrowserBaselineCapture {
+        let previous = agentViewportSize
+        let resized = await agentSetResponsiveViewport(
+            width: Int(viewport.width.rounded()),
+            height: Int(viewport.height.rounded())
+        )
+        guard resized.ok else {
+            throw BrowserBaselineCaptureError.targetFailed(resized.message)
+        }
+        defer {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                _ = await self.agentSetResponsiveViewport(
+                    width: previous.map { Int($0.width.rounded()) },
+                    height: previous.map { Int($0.height.rounded()) }
+                )
+            }
+        }
+        // Layout and paint after a viewport change are asynchronous; capturing in the same turn
+        // photographs the page mid-reflow.
+        try? await Task.sleep(nanoseconds: BrowserBaselineCaptureDefaults.viewportSettleNanoseconds)
+        return try await captureBaseline(
+            kind: kind,
+            ref: ref,
+            selector: selector,
+            locator: locator,
+            includesAttribution: includesAttribution,
+            commitSHA: commitSHA
+        )
+    }
+
     /// Anchors and query-strings are different questions. A fragment is not: two anchors into one
     /// document render the same pixels, so keying a baseline on one would file the same page twice.
     static func fragmentStripped(_ url: String) -> String {
         guard var components = URLComponents(string: url) else { return url }
         components.fragment = nil
         return components.string ?? url
+    }
+}
+
+
+// MARK: - Defaults
+
+enum BrowserBaselineCaptureDefaults {
+    /// How long a resized viewport is given to reflow and repaint before it is photographed.
+    static let viewportSettleNanoseconds: UInt64 = 120_000_000
+}
+
+// MARK: - Git
+
+/// The checkout's commit, for a baseline that wants to say which build it is a picture of.
+///
+/// Read, never acted on. Nothing here checks anything out: reproducing a baseline's commit would
+/// mean stashing and restoring the user's working tree behind their back, which the plan this comes
+/// from rules out explicitly.
+enum BrowserBaselineGit {
+
+    static func commitSHA(forProjectAt root: URL?) -> String? {
+        guard let root else { return nil }
+        guard let data = try? GitProcess.run(["rev-parse", "HEAD"], in: root) else { return nil }
+        let sha = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sha.count == 40 ? sha : nil
     }
 }

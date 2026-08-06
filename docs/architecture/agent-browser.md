@@ -689,6 +689,38 @@ viewport baseline is valid only at its recorded offset, and scrolling away is **
 rather than silently misaligned — an overlay that slid a viewport capture around would present pixels
 at positions they were never captured at.
 
+### More things to diff against
+
+A baseline is one right-hand side. Three others are worth having, and each needed a boundary rather
+than just a byte array.
+
+**The page's own past.** `BrowserAutoCaptureRing` keeps a small in-memory history of what the page
+looked like immediately *before* each agent mutation, and `baseline_previous` compares against the
+most recent one. Three rules hold it in place. It is **opt-in and off by default**, because otherwise
+every page-changing tool call pays for a screenshot on the main actor for an answer nobody may want.
+It is **not the baseline library**: these are automatic and unapproved, and letting an agent's own
+before-shot sit among approved pictures would blur the one distinction the whole subsystem rests on.
+And it covers **agent-originated changes only** — the entry names the tool it was taken in front of,
+so "what did my click change?" is answerable while a user's own click, a timer, or a late network
+response is honestly outside what it saw. Navigation is deliberately not in `mutatingTools`: a new
+document is not a change to the old one.
+
+**Another tab.** `baseline_tab_id` captures a second live tab in the same session, now, and compares
+the two. Both origins are authorized separately, because a comparison discloses pixels from each.
+The report says both sides are live, since a difference may be a change in either of them.
+
+**A git ref.** Captures record the checkout's commit in their conditions, comparisons report when
+the two commits differ, and `browser_baselines list` filters by commit prefix. Nothing here ever
+checks anything out: reproducing a baseline's commit would mean stashing and restoring the user's
+working tree behind them, which is ruled out explicitly.
+
+**Across viewports.** `browser_baselines capture` takes `viewport_width`/`viewport_height` and puts
+the browser back afterwards (in a `defer`, so a failed capture cannot strand the user at a phone
+size); `browser_visual_compare` takes `match_baseline_viewport` to re-render at the baseline's own
+recorded viewport before capturing. So N presets means N baselines, each compared at its own size.
+One viewport's baseline is never scaled to stand in for another — that is the same rule the
+dimension handling already enforces, reached from the other direction.
+
 ### Deliberately not built
 
 CPU and network throttling stay unsupported in `WKWebView` and `browser_capabilities` keeps saying so;

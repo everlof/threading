@@ -1,6 +1,30 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Keep the page as it was before each agent action": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behåll sidan som den var före varje agentåtgärd" } } }
+    },
+    "Lets an agent ask what its own click changed, by comparing the page with a picture taken just before it. The pictures stay in memory for the chat and are never added to your visual baselines. Off by default because every page-changing tool call then costs a screenshot. It covers the agent's own actions only, not your clicks or a page updating itself.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Låter en agent fråga vad dess eget klick ändrade, genom att jämföra sidan med en bild tagen strax innan. Bilderna finns bara i minnet för chatten och läggs aldrig till bland dina visuella baslinjer. Av som standard, eftersom varje sidändrande verktygsanrop då kostar en skärmbild. Det täcker bara agentens egna åtgärder, inte dina klick eller en sida som uppdaterar sig själv." } } }
+    },
+    "tab %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "flik %@" } } }
+    },
+    "the page before %@ at %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "sidan före %@ kl. %@" } } }
+    },
+    "commit %@ vs %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "incheckning %@ mot %@" } } }
+    },
+    "none": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ingen" } } }
+    },
+    "Other tab": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Annan flik" } } }
+    },
+    "Before %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Före %@" } } }
+    },
     "A baseline needs a name.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En baslinje behöver ett namn." } } }
     },

@@ -2464,6 +2464,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         containerViewController.retainDrawerSessions(liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
+        // The before-shot ring is per session and in memory, so a deleted chat's pixels go with it.
+        BrowserAutoCaptureRing.shared.retainOnly(sessionIDs: liveSessionIDs)
         AgentRuntime.shared.retainOnly(sessionIDs: liveSessionIDs)
         // Visual baselines are the project's, not the session's, so this sweep is by project: a
         // deleted chat leaves the library alone, and a removed project takes its own with it. The

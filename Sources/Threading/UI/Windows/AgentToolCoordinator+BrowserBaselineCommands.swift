@@ -71,6 +71,14 @@ extension AgentToolCoordinator {
                 ($0.activeRevision?.conditions.url ?? "").lowercased().contains(filter)
             }
         }
+        // Prefix matching, so a short SHA an agent read from a log finds its baselines.
+        if let commit = arguments.commit?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(), !commit.isEmpty {
+            listed = listed.filter {
+                ($0.activeRevision?.conditions.commitSHA ?? "").lowercased().hasPrefix(commit)
+            }
+        }
         let total = listed.count
         listed = Array(listed.prefix(BrowserBaselineDefaults.maximumListedBaselines))
 
@@ -121,6 +129,9 @@ extension AgentToolCoordinator {
                 + "\(Int(revision.conditions.viewportHeight)); "
                 + "\(revision.conditions.colorScheme); "
                 + "zoom \(Int((revision.conditions.pageZoom * 100).rounded()))%"
+            if let commit = revision.conditions.commitSHA {
+                line += "\n  Commit: \(commit.prefix(12))"
+            }
             line += "\n  Provenance: \(baseline.provenance.rawValue); "
                 + "\(baseline.revisions.count) revisions; "
                 + "captured \(Self.baselineTimestamp.string(from: revision.capturedAt))"
@@ -206,15 +217,35 @@ extension AgentToolCoordinator {
                 return
             }
             Task { @MainActor in
+                // Which build this is a picture of. Read once here rather than at comparison time:
+                // the checkout will have moved on by then, and the answer belongs to the capture.
+                let commit = BrowserBaselineGit.commitSHA(
+                    forProjectAt: self.dependencies.projects.project(withID: projectID)
+                        .map { URL(fileURLWithPath: $0.folderPath) }
+                )
+                let viewport = Self.requestedViewport(arguments)
                 let capture: BrowserBaselineCapture
                 do {
-                    capture = try await browser.captureBaseline(
-                        kind: kind,
-                        ref: arguments.ref,
-                        selector: arguments.selector,
-                        locator: arguments.locator,
-                        includesAttribution: true
-                    )
+                    if let viewport {
+                        capture = try await browser.captureBaseline(
+                            kind: kind,
+                            atViewport: viewport,
+                            ref: arguments.ref,
+                            selector: arguments.selector,
+                            locator: arguments.locator,
+                            includesAttribution: true,
+                            commitSHA: commit
+                        )
+                    } else {
+                        capture = try await browser.captureBaseline(
+                            kind: kind,
+                            ref: arguments.ref,
+                            selector: arguments.selector,
+                            locator: arguments.locator,
+                            includesAttribution: true,
+                            commitSHA: commit
+                        )
+                    }
                 } catch {
                     completion(.failure(
                         "Could not capture the baseline: \(error.localizedDescription)"
@@ -281,6 +312,19 @@ extension AgentToolCoordinator {
         }
     }
 
+    /// The exact viewport a capture was asked for, when both dimensions were given.
+    ///
+    /// One dimension alone is refused rather than guessed: half a viewport is not a viewport, and
+    /// filling the other half from whatever the window happens to be would record a size nobody
+    /// chose into a baseline that outlives the window.
+    static func requestedViewport(_ arguments: BrowserBaselinesArguments) -> CGSize? {
+        guard let width = arguments.viewportWidth, let height = arguments.viewportHeight,
+              width > 0, height > 0 else {
+            return nil
+        }
+        return CGSize(width: Double(width), height: Double(height))
+    }
+
     private func deleteBaseline(
         _ arguments: BrowserBaselinesArguments,
         in projectID: ProjectID
@@ -308,12 +352,14 @@ extension AgentToolCoordinator {
         let named = [
             arguments.baselineID?.isEmpty == false,
             arguments.baselineName?.isEmpty == false,
-            arguments.baselinePath?.isEmpty == false
+            arguments.baselinePath?.isEmpty == false,
+            arguments.baselineTabID?.isEmpty == false,
+            arguments.baselinePrevious == true
         ].filter { $0 }.count
         guard named == 1 else {
             completion(.failure(
-                "Name the baseline with exactly one of baseline_id, baseline_name, or "
-                    + "baseline_path."
+                "Name what to compare with using exactly one of baseline_id, baseline_name, "
+                    + "baseline_path, baseline_tab_id, or baseline_previous."
             ))
             return
         }
@@ -403,6 +449,7 @@ extension AgentToolCoordinator {
                     ),
                     show: arguments.show,
                     includeImage: arguments.includeImage ?? true,
+                    matchesBaselineViewport: arguments.matchBaselineViewport ?? false,
                     ref: arguments.ref,
                     selector: arguments.selector,
                     locator: arguments.locator,
@@ -423,6 +470,29 @@ extension AgentToolCoordinator {
         /// A loose PNG named by absolute path. No conditions, no approval, no attribution — the
         /// legacy shape, kept working.
         case path(URL)
+        /// A second live tab in this session. Captured on demand, so it is the page as it is now
+        /// rather than a record of how it once was.
+        case tab(BrowserViewController, tabID: UUID)
+        /// The page's own past, from the opt-in before-shot ring.
+        case previous(BrowserAutoCapture)
+    }
+
+    /// What a source is called in the answer.
+    static func describe(_ source: BaselineSource) -> String {
+        switch source {
+        case .stored(_, let baseline, let revision):
+            return "\(baseline.name) [\(baseline.id.uuidString)] revision \(revision.id.uuidString)"
+        case .path(let url):
+            return url.lastPathComponent
+        case .tab(_, let tabID):
+            return L10n.format("tab %@", tabID.uuidString)
+        case .previous(let entry):
+            return L10n.format(
+                "the page before %@ at %@",
+                entry.action,
+                Self.baselineTimestamp.string(from: entry.capturedAt)
+            )
+        }
     }
 
     struct BaselineResolutionFailure: Error {
@@ -433,6 +503,42 @@ extension AgentToolCoordinator {
         _ arguments: BrowserVisualCompareArguments,
         for sessionID: SessionID
     ) throws -> BaselineSource {
+        if arguments.baselinePrevious == true {
+            guard dependencies.settings.capturesPageBeforeAgentActions else {
+                throw BaselineResolutionFailure(
+                    message: "Comparing with the page's own past needs the user to turn on "
+                        + "capturing before agent actions in Settings; it is off by default."
+                )
+            }
+            guard let entry = BrowserAutoCaptureRing.shared.latest(for: sessionID) else {
+                throw BaselineResolutionFailure(
+                    message: "No before-shot has been taken yet in this chat. One is kept in front "
+                        + "of each page-changing tool call, so act on the page first."
+                )
+            }
+            return .previous(entry)
+        }
+
+        if let raw = arguments.baselineTabID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty {
+            guard let tabID = UUID(uuidString: raw) else {
+                throw BaselineResolutionFailure(message: "baseline_tab_id is not a valid tab id.")
+            }
+            guard let tab = displayPaneController.tabs(for: sessionID)
+                .first(where: { $0.id == tabID }),
+                  let browser = tab.browser else {
+                throw BaselineResolutionFailure(
+                    message: "No browser tab in this chat has that id. Use browser_tabs list."
+                )
+            }
+            guard browser.currentURL != nil else {
+                throw BaselineResolutionFailure(
+                    message: "That tab has no page loaded, so there is nothing to compare with."
+                )
+            }
+            return .tab(browser, tabID: tabID)
+        }
+
         if let path = arguments.baselinePath?.trimmingCharacters(in: .whitespacesAndNewlines),
            !path.isEmpty {
             guard (path as NSString).isAbsolutePath else {
@@ -518,21 +624,40 @@ extension AgentToolCoordinator {
         options: BrowserVisualComparisonOptions,
         show: Bool?,
         includeImage: Bool,
+        matchesBaselineViewport: Bool,
         ref: String?,
         selector: String?,
         locator: BrowserSemanticLocator?,
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) async {
+        // Comparing a phone baseline against a desktop window fails on dimensions, correctly and
+        // uselessly. Resizing to the baseline's own recorded viewport first is the honest way to
+        // compare across presets: the page is re-rendered at that size rather than the picture
+        // being stretched to it.
+        let matchViewport = matchesBaselineViewport
+            ? Self.recordedViewport(of: source)
+            : nil
         let capture: BrowserBaselineCapture
         do {
-            capture = try await browser.captureBaseline(
-                kind: kind,
-                ref: ref,
-                selector: selector,
-                locator: locator,
-                includesAttribution: detail.includesRegions
-            )
+            if let matchViewport {
+                capture = try await browser.captureBaseline(
+                    kind: kind,
+                    atViewport: matchViewport,
+                    ref: ref,
+                    selector: selector,
+                    locator: locator,
+                    includesAttribution: detail.includesRegions
+                )
+            } else {
+                capture = try await browser.captureBaseline(
+                    kind: kind,
+                    ref: ref,
+                    selector: selector,
+                    locator: locator,
+                    includesAttribution: detail.includesRegions
+                )
+            }
         } catch {
             completion(.failure(
                 "Could not capture the page for visual comparison: \(error.localizedDescription)"
@@ -665,6 +790,21 @@ extension AgentToolCoordinator {
         ))
     }
 
+    /// The viewport a source was captured at, when it recorded one. A live tab has no *recorded*
+    /// viewport — it has a current one, and matching a moving target is not a contract worth making.
+    static func recordedViewport(of source: BaselineSource) -> CGSize? {
+        let conditions: BrowserBaselineConditions?
+        switch source {
+        case .stored(_, _, let revision): conditions = revision.conditions
+        case .previous(let entry): conditions = entry.conditions
+        case .path, .tab: conditions = nil
+        }
+        guard let conditions, conditions.viewportWidth > 0, conditions.viewportHeight > 0 else {
+            return nil
+        }
+        return CGSize(width: conditions.viewportWidth, height: conditions.viewportHeight)
+    }
+
     private func baselineAttribution(for source: BaselineSource) -> BrowserAttributionState? {
         guard case .stored(let projectID, let baseline, let revision) = source,
               revision.hasAttribution,
@@ -686,9 +826,13 @@ extension AgentToolCoordinator {
         summary: String,
         for sessionID: SessionID
     ) {
+        // Approval exists only where there is something durable to approve into. A live tab and a
+        // before-shot are moments, not records: writing "the other tab, a minute ago" into a
+        // baseline library would be minting a claim nobody made.
         var approval: BrowserComparisonViewController.Approval?
         var baselineTitle = L10n.string("Baseline")
-        if case .stored(let projectID, let baseline, _) = source {
+        switch source {
+        case .stored(let projectID, let baseline, _):
             baselineTitle = baseline.name
             approval = BrowserComparisonViewController.Approval(
                 projectID: projectID,
@@ -697,8 +841,12 @@ extension AgentToolCoordinator {
                 capturePNG: capture.pngData,
                 conditions: capture.conditions
             )
-        } else if case .path(let url) = source {
+        case .path(let url):
             baselineTitle = url.lastPathComponent
+        case .tab:
+            baselineTitle = L10n.string("Other tab")
+        case .previous(let entry):
+            baselineTitle = L10n.format("Before %@", entry.action)
         }
 
         displayPaneController.presentBrowserComparison(

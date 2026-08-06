@@ -55,6 +55,25 @@ struct BrowserComparisonReport {
             }
         case .path(let url):
             lines.append("Baseline: \(url.lastPathComponent) (no stored capture conditions)")
+
+        case .tab(_, let tabID):
+            lines.append(
+                "Compared with tab \(tabID.uuidString), captured just now. Both sides are live "
+                    + "pages, so a difference may be a change in either of them."
+            )
+
+        case .previous(let entry):
+            lines.append(
+                "Compared with the page as it was before \(entry.action). This covers "
+                    + "agent-originated changes only: a user's own click, a timer or a network "
+                    + "response is not something the before-shot saw."
+            )
+            let differences = capture.conditions.differences(from: entry.conditions)
+            if !differences.isEmpty {
+                lines.append(
+                    "Conditions differ from the before-shot: " + differences.joined(separator: "; ")
+                )
+            }
         }
 
         lines.append(

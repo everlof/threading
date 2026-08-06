@@ -14,6 +14,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let claudeAttachmentToggle = ThemedToggle()
     private let codexAttachmentToggle = ThemedToggle()
     private let outsideProjectAttachmentToggle = ThemedToggle()
+    private let beforeActionCaptureToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
     private let relaunchSessionsToggle = ThemedToggle()
     private let attentionNotificationToggle = ThemedToggle()
@@ -102,6 +103,11 @@ final class GeneralPreferencesViewController: NSViewController {
             outsideProjectAttachmentToggle,
             isOn: AppSettings.shared.includesAttachmentsOutsideProject,
             action: #selector(outsideProjectAttachmentsChanged)
+        )
+        configure(
+            beforeActionCaptureToggle,
+            isOn: AppSettings.shared.capturesPageBeforeAgentActions,
+            action: #selector(beforeActionCaptureChanged)
         )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(relaunchSessionsToggle,
@@ -305,6 +311,15 @@ final class GeneralPreferencesViewController: NSViewController {
                     + "handoff. Turn this on to list them wherever they are; Threading copies "
                     + "each one in. Images you attach or the agent shows are never affected.",
                 control: outsideProjectAttachmentToggle
+            ),
+            SettingsUI.row(
+                title: "Keep the page as it was before each agent action",
+                subtitle: "Lets an agent ask what its own click changed, by comparing the page "
+                    + "with a picture taken just before it. The pictures stay in memory for the "
+                    + "chat and are never added to your visual baselines. Off by default because "
+                    + "every page-changing tool call then costs a screenshot. It covers the "
+                    + "agent's own actions only, not your clicks or a page updating itself.",
+                control: beforeActionCaptureToggle
             )
         ])
     }
@@ -625,6 +640,10 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func outsideProjectAttachmentsChanged() {
         AppSettings.shared.includesAttachmentsOutsideProject =
             outsideProjectAttachmentToggle.state == .on
+    }
+
+    @objc private func beforeActionCaptureChanged() {
+        AppSettings.shared.capturesPageBeforeAgentActions = beforeActionCaptureToggle.state == .on
     }
 
     @objc private func branchGroupingChanged() {

@@ -118,6 +118,14 @@ struct BrowserBaselineConditions: Codable, Equatable, Sendable {
     /// deliberately not what a durable record is keyed on.
     let elementScope: BrowserBaselineElementScope?
 
+    /// The project checkout's commit at capture time, when it had one.
+    ///
+    /// Recorded rather than resolved later, and never acted on: a comparison says which commits the
+    /// two captures came from and stops there. Checking out the baseline's commit to reproduce it
+    /// would mean stashing and restoring a working tree behind the user, which is the one thing
+    /// git-ref capture is explicitly not allowed to do.
+    let commitSHA: String?
+
     private enum CodingKeys: String, CodingKey {
         case url, origin, clipped
         case captureKind = "capture_kind"
@@ -135,6 +143,74 @@ struct BrowserBaselineConditions: Codable, Equatable, Sendable {
         case userAgent = "user_agent"
         case browserContext = "browser_context"
         case elementScope = "element_scope"
+        case commitSHA = "commit_sha"
+    }
+
+    init(
+        url: String,
+        origin: String,
+        captureKind: BrowserBaselineCaptureKind,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        viewportWidth: Double,
+        viewportHeight: Double,
+        documentWidth: Double,
+        documentHeight: Double,
+        scrollX: Double,
+        scrollY: Double,
+        pageZoom: Double,
+        colorScheme: String,
+        mediaType: String,
+        userAgent: String?,
+        browserContext: String,
+        clipped: Bool,
+        elementScope: BrowserBaselineElementScope?,
+        commitSHA: String? = nil
+    ) {
+        self.url = url
+        self.origin = origin
+        self.captureKind = captureKind
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.viewportWidth = viewportWidth
+        self.viewportHeight = viewportHeight
+        self.documentWidth = documentWidth
+        self.documentHeight = documentHeight
+        self.scrollX = scrollX
+        self.scrollY = scrollY
+        self.pageZoom = pageZoom
+        self.colorScheme = colorScheme
+        self.mediaType = mediaType
+        self.userAgent = userAgent
+        self.browserContext = browserContext
+        self.clipped = clipped
+        self.elementScope = elementScope
+        self.commitSHA = commitSHA
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        origin = try c.decode(String.self, forKey: .origin)
+        captureKind = try c.decode(BrowserBaselineCaptureKind.self, forKey: .captureKind)
+        pixelWidth = try c.decode(Int.self, forKey: .pixelWidth)
+        pixelHeight = try c.decode(Int.self, forKey: .pixelHeight)
+        viewportWidth = try c.decode(Double.self, forKey: .viewportWidth)
+        viewportHeight = try c.decode(Double.self, forKey: .viewportHeight)
+        documentWidth = try c.decode(Double.self, forKey: .documentWidth)
+        documentHeight = try c.decode(Double.self, forKey: .documentHeight)
+        scrollX = try c.decode(Double.self, forKey: .scrollX)
+        scrollY = try c.decode(Double.self, forKey: .scrollY)
+        pageZoom = try c.decode(Double.self, forKey: .pageZoom)
+        colorScheme = try c.decode(String.self, forKey: .colorScheme)
+        mediaType = try c.decode(String.self, forKey: .mediaType)
+        userAgent = try c.decodeIfPresent(String.self, forKey: .userAgent)
+        browserContext = try c.decode(String.self, forKey: .browserContext)
+        clipped = try c.decode(Bool.self, forKey: .clipped)
+        elementScope = try c.decodeIfPresent(BrowserBaselineElementScope.self, forKey: .elementScope)
+        // Absent in every revision written before git-ref capture existed, which is an ordinary
+        // older record rather than a damaged one.
+        commitSHA = try c.decodeIfPresent(String.self, forKey: .commitSHA)
     }
 }
 
@@ -1219,7 +1295,8 @@ extension BrowserBaselineConditions {
             userAgent: userAgent,
             browserContext: browserContext,
             clipped: clipped,
-            elementScope: elementScope
+            elementScope: elementScope,
+            commitSHA: commitSHA
         )
     }
 
@@ -1270,6 +1347,13 @@ extension BrowserBaselineConditions {
         }
         if userAgent != other.userAgent {
             differences.append(L10n.string("user-agent override"))
+        }
+        if commitSHA != other.commitSHA {
+            differences.append(L10n.format(
+                "commit %@ vs %@",
+                other.commitSHA.map { String($0.prefix(7)) } ?? L10n.string("none"),
+                commitSHA.map { String($0.prefix(7)) } ?? L10n.string("none")
+            ))
         }
         if captureKind == .viewport,
            Int(scrollX) != Int(other.scrollX) || Int(scrollY) != Int(other.scrollY) {
