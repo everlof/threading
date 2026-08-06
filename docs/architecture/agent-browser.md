@@ -79,6 +79,19 @@ blank page"; only the blank document does now.
 that cannot be rebuilt without credentials, a decision provider that never answers — each ends in
 denial or an error, never in an unprompted load.
 
+**8. The prompt is raised over the window showing the page.** An alert about a page the user
+cannot see is one they answer about something else, which is the same as not asking. So the
+browser prompts — the origin grant, the sensitive-action confirmation, the site-data clear — take
+their window from `SessionBrowserResolver.window(for:)` rather than from the app's main window,
+and that answer comes from the **host** holding the browser (`SessionBrowserHosting.hostWindow`),
+not from the browser's own `view.window`: a host installs only its active tab, so a browser
+sitting behind another tab is in no window at all and would otherwise have sent its prompt
+wherever the app considered primary. The main window remains the fallback when no host can be
+named, and `ConfirmationAlert` runs app-modal rather than as a sheet when there is no window at
+all — a prompt with nowhere to attach is still answerable, never skipped. The host is asked only
+when its view is already loaded, so answering "which window" never builds a pane for a session
+nobody has opened.
+
 `BrowserAgentBridge` reads the page into a compact accessibility-oriented snapshot. Interactive
 elements receive stable `eN` refs kept in WebKit's isolated client world; click, hover, type,
 drag, select, key and scroll tools prefer those refs over guessed CSS. Hover sends DOM
@@ -614,9 +627,15 @@ origin is authorized separately before its bytes leave. A `list` withholds URLs 
 grant rather than prompting once per row — the same thing `browser_tabs` already does with page
 metadata.
 
-Private-context captures default to **user-only**, whoever made them. Provenance is not permission:
-an agent that captured authenticated pixels in a private tab has not thereby earned the right to read
-them back later. Making one agent-readable is a separate, explicit choice in the baseline browser.
+Private-context captures are **user-only**, whoever made them, and the context wins over whatever
+the record already said. Provenance is not permission: an agent that captured authenticated pixels in
+a private tab has not thereby earned the right to read them back later. Making one agent-readable is
+a separate, explicit choice in the baseline browser.
+
+The record's existing answer is deliberately *not* inherited by a new revision. Adding a private-tab
+revision to an already-readable baseline would publish authenticated pixels under a permission the
+user granted about entirely different ones — and the first version did exactly that, while printing
+"this record is user-only" beside it.
 
 ### The comparator
 
@@ -753,6 +772,13 @@ It draws each shift's **previous** rectangle, because that is where the reader w
 page pulled it away, and it weights opacity by the shift's own score so a jolt and a hairline do not
 shout equally. A page WebKit records no layout-shift entries for is reported as unavailable, which
 is a different answer from a page that stayed still.
+
+**Support is asked for directly, not inferred from a thrown error.** `PerformanceObserver.observe`
+does *not* throw on an entry type the engine has never heard of — the spec has it warn and return —
+so the first version's try/catch reported every engine as supporting layout shift and every page as
+perfectly steady. Since WebKit implements no `layout-shift` entries at all, that was the answer for
+every page Threading can show, and the overlay silently did nothing while the docs claimed it would
+say so. `supportedEntryTypes` is the question that actually has an answer.
 
 ### Deliberately not built
 

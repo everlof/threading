@@ -3353,6 +3353,15 @@ enum BrowserAgentScripts {
     /// somebody just typed is not the failure this measures.
     static let layoutShiftRects = #"""
         const maximum = Math.max(1, Math.min(Number(maximumRects) || 0, 200));
+        // Asked directly, because `observe` does *not* throw on an entry type the engine does not
+        // implement: the spec has it warn and return, so a try/catch reports every engine as
+        // supporting layout-shift and every page as perfectly steady. WebKit implements no
+        // layout-shift entries at all, which made that the answer for every page Threading shows.
+        const supported = Array.isArray(PerformanceObserver.supportedEntryTypes)
+          && PerformanceObserver.supportedEntryTypes.indexOf('layout-shift') !== -1;
+        if (!supported) {
+          return JSON.stringify({ supported: false, total: 0, rects: [] });
+        }
         let entries = [];
         try {
           const observer = new PerformanceObserver(() => {});

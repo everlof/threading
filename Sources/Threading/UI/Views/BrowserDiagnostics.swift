@@ -426,7 +426,7 @@ enum BrowserVisualComparator {
         var differentPixels = 0
         var antiAliasedPixels = 0
         var maximumChannelDelta = 0
-        var maximumPerceptualDelta = 0.0
+        var maximumSquaredDelta = 0.0
 
         for y in 0..<common.height {
             for x in 0..<common.width {
@@ -437,10 +437,9 @@ enum BrowserVisualComparator {
                 maximumChannelDelta = max(maximumChannelDelta, channelDelta)
 
                 let delta = abs(colorDelta(baseline, actual, x: x, y: y, luminanceOnly: false))
-                maximumPerceptualDelta = max(
-                    maximumPerceptualDelta,
-                    (delta / BrowserVisualComparisonDefaults.maximumYIQDistance).squareRoot()
-                )
+                // The squared distance is what ranks; the root is taken once at the end rather
+                // than per pixel, because this loop runs twenty million times on a full-page pair.
+                maximumSquaredDelta = max(maximumSquaredDelta, delta)
                 guard delta > maximumDelta else { continue }
 
                 if options.ignoresAntiAliasing,
@@ -487,7 +486,11 @@ enum BrowserVisualComparator {
             antiAliasedPixels: antiAliasedPixels,
             ignoredPixels: ignoredPixels,
             maximumChannelDelta: maximumChannelDelta,
-            maximumPerceptualDelta: min(1, maximumPerceptualDelta),
+            maximumPerceptualDelta: min(
+                1,
+                (maximumSquaredDelta / BrowserVisualComparisonDefaults.maximumYIQDistance)
+                    .squareRoot()
+            ),
             diffPNG: diff,
             changedMask: BrowserChangedPixelMask(
                 width: common.width,

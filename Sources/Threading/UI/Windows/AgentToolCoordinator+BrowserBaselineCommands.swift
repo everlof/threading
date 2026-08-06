@@ -262,7 +262,11 @@ extension AgentToolCoordinator {
                     pngData: capture.pngData,
                     conditions: capture.conditions,
                     provenance: .agentCaptured,
-                    isAgentReadable: existing?.isAgentReadable ?? !isPrivate,
+                    // A private context wins over whatever the record already said. Revising an
+                    // agent-readable baseline from a private tab would otherwise publish
+                    // authenticated pixels the user never made readable — the record's old answer
+                    // was given about different pixels.
+                    isAgentReadable: isPrivate ? false : (existing?.isAgentReadable ?? true),
                     sourceSessionID: sessionID,
                     sourceTabID: self.displayPaneController.tabs(for: sessionID)
                         .first { $0.browser === browser }?.id,
@@ -297,8 +301,11 @@ extension AgentToolCoordinator {
                     ]
                     if isPrivate {
                         lines.append(
-                            "This tab is private, so the record is user-only: you will not see it "
-                                + "in browser_baselines list until the user makes it readable."
+                            record.isAgentReadable
+                                ? "This tab is private, but the baseline is still readable."
+                                : "This tab is private, so the record is user-only: you will not "
+                                    + "see it in browser_baselines list until the user makes it "
+                                    + "readable."
                         )
                     }
                     if capture.attribution == nil {
@@ -541,6 +548,15 @@ extension AgentToolCoordinator {
             guard browser.currentURL != nil else {
                 throw BaselineResolutionFailure(
                     message: "That tab has no page loaded, so there is nothing to compare with."
+                )
+            }
+            guard arguments.ref?.isEmpty != false else {
+                // Refs are document-local. `e12` in the other tab is some arbitrary element, and if
+                // it happens to resolve, the comparison is confidently between the wrong pixels.
+                throw BaselineResolutionFailure(
+                    message: "ref cannot address an element in another tab, because refs are only "
+                        + "meaningful inside the document that minted them. Use selector or "
+                        + "locator for an element comparison against baseline_tab_id."
                 )
             }
             return .tab(browser, tabID: tabID)

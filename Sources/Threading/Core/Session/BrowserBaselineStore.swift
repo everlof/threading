@@ -735,8 +735,7 @@ final class BrowserBaselineStore {
     func addRevision(
         _ request: BrowserBaselineCaptureRequest,
         to baselineID: BrowserBaselineID,
-        in projectID: ProjectID,
-        requiresUserOwnership: Bool = false
+        in projectID: ProjectID
     ) throws -> BrowserBaseline {
         try requireWritable()
         loadIfNeeded(projectID)
@@ -744,12 +743,10 @@ final class BrowserBaselineStore {
         else {
             throw BrowserBaselineStoreError.notFound
         }
+        // No ownership guard here on purpose. Who may revise what is an MCP-surface question —
+        // the agent path refuses a user-captured record, the user path refuses nothing — and a
+        // flag here was both unreachable and, when read, backwards.
         var baseline = baselinesByProject[projectID]![index]
-        if requiresUserOwnership, !baseline.provenance.isUserOwned {
-            // Not an error the other way round: the user may always approve a revision of an
-            // agent-captured baseline, which is exactly the review gesture.
-            throw BrowserBaselineStoreError.userOwned
-        }
         try requireProjectSpace(for: request.pngData.count, in: projectID, freeing: 0)
 
         let revision = try writeRevision(request, for: baselineID, in: projectID)
