@@ -700,6 +700,38 @@ extension AgentToolCoordinator {
         // picture of an internal admin page is not covered by a grant to the site currently loaded.
         let baselineData: Data
         switch source {
+        case .previous(let entry):
+            // Already in hand, and already from this session's own authorized page. No second
+            // origin to clear: these pixels came from the page the agent was working on.
+            baselineData = entry.pngData
+
+        case .tab(let other, _):
+            guard let otherURL = other.currentURL else {
+                completion(.failure("That tab lost its page before it could be captured."))
+                return
+            }
+            let otherAllowed = await authorizeBrowserAccess(
+                to: otherURL,
+                for: sessionID,
+                purpose: "return pixels from the other tab being compared,"
+            )
+            guard otherAllowed else {
+                completion(.failure(
+                    "The user did not allow the other tab's pixels to be returned."
+                ))
+                return
+            }
+            guard let otherCapture = try? await other.captureBaseline(
+                kind: kind,
+                ref: ref,
+                selector: selector,
+                locator: locator
+            ) else {
+                completion(.failure("Could not capture the other tab for comparison."))
+                return
+            }
+            baselineData = otherCapture.pngData
+
         case .path(let url):
             guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
                 completion(.failure("Could not read the PNG baseline."))
