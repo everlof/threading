@@ -933,7 +933,14 @@ final class BrowserAgentBridgeTests: XCTestCase {
             JSONSerialization.jsonObject(with: compareSchemaData) as? [String: Any]
         )
         let compareInput = try XCTUnwrap(compareSchema["inputSchema"] as? [String: Any])
-        XCTAssertEqual(compareInput["required"] as? [String], ["baseline_path"])
+        // Nothing is required any more: a baseline is named by id, by name, *or* by path, and the
+        // handler enforces "exactly one of the three" — which a JSON Schema `required` list cannot
+        // express and would otherwise misstate as "always a path".
+        XCTAssertEqual(compareInput["required"] as? [String], [])
+        let compareProperties = try XCTUnwrap(compareInput["properties"] as? [String: Any])
+        for property in ["baseline_id", "baseline_name", "baseline_path", "detail"] {
+            XCTAssertNotNil(compareProperties[property], property)
+        }
 
         let resizeRequest = try JSONDecoder().decode(
             JSONRPCRequest.self,
@@ -1437,7 +1444,14 @@ final class BrowserAgentBridgeTests: XCTestCase {
         )
         XCTAssertFalse(dimensions.matches)
         XCTAssertFalse(dimensions.dimensionsMatch)
-        XCTAssertNil(dimensions.diffPNG)
+        // A size change used to answer "ratio 1.0, no picture", which is no information at all
+        // about the most common real change. It now compares the overlap and reports the signed
+        // deltas, and still fails: the two captures are not of the same thing.
+        XCTAssertEqual(dimensions.widthDelta, 1)
+        XCTAssertEqual(dimensions.heightDelta, 0)
+        XCTAssertEqual(dimensions.comparedWidth, 2)
+        XCTAssertEqual(dimensions.differentPixels, 0)
+        XCTAssertNotNil(dimensions.diffPNG)
     }
 
     @MainActor

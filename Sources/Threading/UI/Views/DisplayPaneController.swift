@@ -778,6 +778,7 @@ final class DisplayPaneController: NSViewController {
   ) -> BrowserViewController {
     let controller = browserFactory(contextKind)
     addChild(controller)
+    controller.baselineSessionID = sessionID
     controller.onPageChange = { [weak self] in
       guard let self else { return }
       self.persist(sessionID)
@@ -970,6 +971,41 @@ final class DisplayPaneController: NSViewController {
     activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
 
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  /// Shows a baseline against the page as it is now.
+  ///
+  /// One comparison tab per session, reused: a session comparing a page repeatedly wants the newest
+  /// answer where the last one was, not a strip of stale ones. The tab is never persisted — see
+  /// `BrowserComparisonViewController` for why a comparison is a moment rather than a document.
+  @discardableResult
+  func presentBrowserComparison(
+    for sessionID: SessionID,
+    content: BrowserComparisonViewController.Content,
+    onAcceptRevision: @escaping (BrowserComparisonViewController.Approval) -> Void
+  ) -> BrowserComparisonViewController {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+
+    if let existing = tabs.first(where: { $0.browserComparison != nil }),
+      let comparison = existing.browserComparison {
+      comparison.onAcceptRevision = onAcceptRevision
+      comparison.update(content)
+      activeTabIDBySession[sessionID] = existing.id
+      if sessionID == currentSessionID { render() }
+      return comparison
+    }
+
+    let controller = BrowserComparisonViewController(sessionID: sessionID, content: content)
+    controller.onAcceptRevision = onAcceptRevision
+    addChild(controller)
+    let tab = DisplayTab(body: .browserComparison(controller), owningSessionID: sessionID)
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
+    // Deliberately no `persist`: the layout would name a tab whose bytes do not survive a relaunch.
     if sessionID == currentSessionID { render() }
     return controller
   }
@@ -1743,6 +1779,16 @@ final class DisplayPaneController: NSViewController {
       // The same deferred rule: a restored comparison reads its two files when looked at.
       compare.refresh(force: false)
 
+    case .browserComparison(let comparison):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      // No deferred read: its bytes are already in hand, which is the whole reason this tab is
+      // ephemeral rather than persisted.
+      installHosted(comparison)
+
     case .info(let info):
       imageView.image = nil
       imageView.isHidden = true
@@ -1892,6 +1938,7 @@ final class DisplayPaneController: NSViewController {
     case .sharing: return "sharing"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
+    case .browserComparison: return "browser-comparison"
     case nil: return "empty"
     }
   }

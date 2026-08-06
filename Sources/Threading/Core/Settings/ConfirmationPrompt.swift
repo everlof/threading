@@ -62,6 +62,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case deleteArchivedSession
     case deleteAppTheme
     case deleteTerminalTheme
+    case removeBrowserBaseline
     case removeReclaimableDirectories
     case approveAgentStorageCleanup
     case resetAppData
@@ -198,6 +199,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .deleteArchivedSession,
              .deleteAppTheme,
              .deleteTerminalTheme,
+             .removeBrowserBaseline,
              .removeReclaimableDirectories,
              .approveAgentStorageCleanup,
              .clearBrowserWebsiteData,

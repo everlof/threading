@@ -884,6 +884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.browser, action: #selector(openBrowser)))
         menu.addItem(commandItem(AppCommands.ID.files, action: #selector(openFilesTab)))
         menu.addItem(commandItem(AppCommands.ID.review, action: #selector(openReview)))
+        menu.addItem(commandItem(AppCommands.ID.saveBaseline, action: #selector(saveBrowserBaseline)))
         menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
         menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
         menu.addItem(commandItem(AppCommands.ID.displayPanel, action: #selector(toggleDisplayPanel)))
@@ -1272,6 +1273,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func openReview() {
         mainWindowController?.showReview()
+    }
+
+    @objc private func saveBrowserBaseline() {
+        mainWindowController?.saveVisibleBrowserBaseline()
     }
 
     @objc private func openInfo() {

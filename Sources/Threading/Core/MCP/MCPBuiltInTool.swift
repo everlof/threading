@@ -28,6 +28,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case browserAnnotations = "browser_annotations"
   case browserScreenshot = "browser_screenshot"
   case browserVisualCompare = "browser_visual_compare"
+  case browserBaselines = "browser_baselines"
   case browserQuery = "browser_query"
   case browserClick = "browser_click"
   case browserHover = "browser_hover"
@@ -93,7 +94,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
       .browserTrace, .browserUpload, .browserDownload, .browserResize, .browserEmulate,
       .browserCapabilities, .browserRunIsolated, .browserAttachChrome, .browserSnapshot,
       .browserAnnotations,
-      .browserScreenshot, .browserVisualCompare, .browserQuery, .browserClick,
+      .browserScreenshot, .browserVisualCompare, .browserBaselines, .browserQuery, .browserClick,
       .browserHover, .browserDrag, .browserType, .browserFillForm, .browserFillCredentials,
       .browserSelect,
       .browserSetChecked, .browserPressKey, .browserScroll, .browserWait, .browserConsole,
@@ -132,8 +133,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
         openWorldHint: family == .browser
       )
 
-    case .browserStorage, .browserTrace, .proposeStorageCleanup, .extensionProposeInstall,
-      .archiveSession:
+    case .browserStorage, .browserTrace, .browserBaselines, .proposeStorageCleanup,
+      .extensionProposeInstall, .archiveSession:
       return MCPToolAnnotations(
         readOnlyHint: false,
         destructiveHint: true,

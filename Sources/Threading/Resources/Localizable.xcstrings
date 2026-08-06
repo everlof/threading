@@ -1,6 +1,294 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A baseline needs a name.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En baslinje behöver ett namn." } } }
+    },
+    "A baseline name can be at most %lld characters.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett baslinjenamn får vara högst %lld tecken." } } }
+    },
+    "This project already has a baseline named “%@”.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektet har redan en baslinje som heter ”%@”." } } }
+    },
+    "That baseline is not in this project.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den baslinjen finns inte i det här projektet." } } }
+    },
+    "That baseline revision is no longer stored.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den baslinjeversionen är inte längre sparad." } } }
+    },
+    "This baseline was captured by the user, so only the user can replace or remove it.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjen togs av användaren, så bara användaren kan ersätta eller ta bort den." } } }
+    },
+    "The capture is not a decodable PNG.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilden går inte att avkoda som PNG." } } }
+    },
+    "The capture is %lld bytes, over the %lld byte limit for one baseline.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilden är %lld byte, över gränsen på %lld byte för en baslinje." } } }
+    },
+    "This project already holds %lld baselines. Remove one before adding another.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektet rymmer redan %lld baslinjer. Ta bort en innan du lägger till fler." } } }
+    },
+    "This project’s baselines already use the %lld bytes they are allowed.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektets baslinjer använder redan de %lld byte de får ta." } } }
+    },
+    "Baseline storage is read-only because damaged data could not be set aside.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjelagringen är skrivskyddad eftersom skadad data inte kunde flyttas undan." } } }
+    },
+    "That baseline was written by a newer version of Threading (format %lld).": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjen skrevs av en nyare version av Threading (format %lld)." } } }
+    },
+    "The baseline could not be saved: %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjen kunde inte sparas: %@" } } }
+    },
+    "the stored image did not match what was captured": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "den sparade bilden stämde inte med det som fångades" } } }
+    },
+    "the stored manifest could not be read back": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det sparade manifestet kunde inte läsas tillbaka" } } }
+    },
+    "capture kind %@ vs %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "fångsttyp %@ mot %@" } } }
+    },
+    "viewport %lld×%lld vs %lld×%lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "vyport %lld×%lld mot %lld×%lld" } } }
+    },
+    "color scheme %@ vs %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "färgschema %@ mot %@" } } }
+    },
+    "CSS media %@ vs %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "CSS-media %@ mot %@" } } }
+    },
+    "page zoom %lld%% vs %lld%%": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "sidzoom %lld%% mot %lld%%" } } }
+    },
+    "user-agent override": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "överstyrd user agent" } } }
+    },
+    "scroll offset %lld,%lld vs %lld,%lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "rullningsläge %lld,%lld mot %lld,%lld" } } }
+    },
+    "threshold must be between 0 and 1, and channel_threshold between 0 and 255.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "threshold måste vara mellan 0 och 1, och channel_threshold mellan 0 och 255." } } }
+    },
+    "%@ %@ → %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ %@ → %@" } } }
+    },
+    "Accept New Revision": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Godkänn ny version" } } }
+    },
+    "Baseline and current": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinje och nuläge" } } }
+    },
+    "Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinje" } } }
+    },
+    "Compare a capture with a stored baseline, and say which regions changed.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Jämför en bild med en sparad baslinje och säg vilka områden som ändrats." } } }
+    },
+    "Couldn’t Accept This Revision": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte godkänna versionen" } } }
+    },
+    "Current": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nuläge" } } }
+    },
+    "List, capture, or remove this project’s approved page pictures.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lista, fånga eller ta bort projektets godkända sidbilder." } } }
+    },
+    "Manage visual baselines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hantera visuella baslinjer" } } }
+    },
+    "No page is loaded in this browser.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen sida är laddad i den här webbläsaren." } } }
+    },
+    "Record the current capture as this baseline’s new approved revision": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara den här bilden som baslinjens nya godkända version" } } }
+    },
+    "The page changed during capture; take the baseline again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sidan ändrades under fångsten. Ta baslinjen igen." } } }
+    },
+    "Visual diff": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visuell skillnad" } } }
+    },
+    "WebKit did not return pixels for the capture.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WebKit lämnade inga bildpunkter för fångsten." } } }
+    },
+    "matches %lld baseline candidates and %lld current ones, so nothing is claimed about it": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "matchar %lld kandidater i baslinjen och %lld i nuläget, så inget påstås om den" } } }
+    },
+    "moved %@%lld, %@%lld pixels": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "flyttad %@%lld, %@%lld bildpunkter" } } }
+    },
+    "present in the baseline and absent now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "finns i baslinjen men inte nu" } } }
+    },
+    "present now and absent in the baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "finns nu men inte i baslinjen" } } }
+    },
+    "resized %@%lld×%@%lld pixels": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "storleksändrad %@%lld×%@%lld bildpunkter" } } }
+    },
+    "the captured page state was not stored beside its image": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det fångade sidtillståndet sparades inte bredvid bilden" } } }
+    },
+    "unset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "osatt" } } }
+    },
+    "%@ · %lld revisions · %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %lld versioner · %@" } } }
+    },
+    "%@ · %lld×%lld · %@ · zoom %lld%%": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %lld×%lld · %@ · zoom %lld%%" } } }
+    },
+    "%lld baselines in %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld baslinjer i %@" } } }
+    },
+    "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld chattar eller terminaler som körs avslutas. Sparade konversationer raderas inte, men projektets visuella baslinjer gör det." } } }
+    },
+    "%lld were written by a newer version and were left untouched.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld skrevs av en nyare version och lämnades orörda." } } }
+    },
+    "Agent can read this baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten kan läsa den här baslinjen" } } }
+    },
+    "Agent can read this": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten kan läsa denna" } } }
+    },
+    "An agent captured this": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En agent tog den här" } } }
+    },
+    "Captured in a private tab.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tagen i en privat flik." } } }
+    },
+    "Couldn’t Capture This Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte ta baslinjen" } } }
+    },
+    "Couldn’t Change This Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte ändra baslinjen" } } }
+    },
+    "Couldn’t Save This Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte spara baslinjen" } } }
+    },
+    "Its %lld stored revisions are removed from this project. Nothing else is affected.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess %lld sparade versioner tas bort från projektet. Inget annat påverkas." } } }
+    },
+    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess chattar och terminaler tas bort från sidofältet. Sparade konversationer raderas inte, men projektets visuella baslinjer gör det." } } }
+    },
+    "Keep this page as what correct looks like": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara sidan som det som är rätt" } } }
+    },
+    "Keeps the visible browser page as this project's approved picture of it.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparar den synliga webbsidan som projektets godkända bild av den." } } }
+    },
+    "Load a page in this browser first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ladda en sida i webbläsaren först." } } }
+    },
+    "No stored revision.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen sparad version." } } }
+    },
+    "Nothing here yet. Use Save as Baseline in Browser Options to keep a picture of a page you have decided is correct.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inget här än. Använd Spara som baslinje i webbläsarens alternativ för att spara en bild av en sida du bestämt är rätt." } } }
+    },
+    "Nothing to Capture": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inget att fånga" } } }
+    },
+    "Private-tab captures start user-only, because provenance is not permission to disclose signed-in pixels.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilder från privata flikar är först bara dina, eftersom ursprung inte är tillstånd att lämna ut inloggade bildpunkter." } } }
+    },
+    "Rename Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt namn på baslinje" } } }
+    },
+    "Rename, remove, or share this project's baselines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt namn på, ta bort eller dela projektets baslinjer" } } }
+    },
+    "Save as Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara som baslinje" } } }
+    },
+    "Save as Baseline…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara som baslinje…" } } }
+    },
+    "Save": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara" } } }
+    },
+    "Signed-in dashboard": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inloggad översikt" } } }
+    },
+    "Storage is read-only because damaged data could not be set aside.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lagringen är skrivskyddad eftersom skadad data inte kunde flyttas undan." } } }
+    },
+    "The picture is stored with this project, under the name you give it. The agent can compare the page against it later.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilden sparas i projektet under det namn du ger den. Agenten kan senare jämföra sidan mot den." } } }
+    },
+    "This Chat Has No Project": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chatten hör inte till något projekt" } } }
+    },
+    "Visual Baselines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visuella baslinjer" } } }
+    },
+    "Visual Baselines…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visuella baslinjer…" } } }
+    },
+    "Visual baselines belong to a project, so a chat outside one has nowhere to keep them.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visuella baslinjer hör till ett projekt, så en chatt utanför ett har ingenstans att spara dem." } } }
+    },
+    "You captured this": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Du tog den här" } } }
+    },
+    "%@ · %lld×%lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %lld×%lld" } } }
+    },
+    "Baseline opacity": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjens genomskinlighet" } } }
+    },
+    "Baseline overlay": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjelager" } } }
+    },
+    "Baseline wipe position": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinjens svepläge" } } }
+    },
+    "Baseline · %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Baslinje · %@" } } }
+    },
+    "Drag or use the arrow keys to move the baseline against the live page": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dra eller använd piltangenterna för att flytta baslinjen mot den levande sidan" } } }
+    },
+    "Hold a Baseline Over This Page": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll en baslinje över sidan" } } }
+    },
+    "Hold a Baseline Over This Page…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll en baslinje över sidan…" } } }
+    },
+    "No baselines in this project yet": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga baslinjer i projektet än" } } }
+    },
+    "Stop Holding a Baseline": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sluta hålla baslinjen" } } }
+    },
+    "The page stays live underneath it": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sidan förblir levande under den" } } }
+    },
+    "Wipe": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Svep" } } }
+    },
+    "scrolled away from where this was captured": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "bortrullad från där den togs" } } }
+    },
+    "A control on the page beneath": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En kontroll på sidan under" } } }
+    },
+    "BrowserBaselineOverlay stopped holding its baseline.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "BrowserBaselineOverlay slutade hålla sin baslinje." } } }
+    },
+    "The control under BrowserBaselineOverlay took the click.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollen under BrowserBaselineOverlay tog klicket." } } }
+    },
+    "BrowserBaselineOverlay": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "BrowserBaselineOverlay" } } }
+    },
+    "An approved picture held over a live page. Drag the handle; click anywhere else and the button underneath answers.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En godkänd bild som hålls över en levande sida. Dra i handtaget; klicka någon annanstans och knappen under svarar." } } }
+    },
     "#%lld · %@ · %@ · SHA-256 linked": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "#%lld · %@ · %@ · SHA-256-länkad" } } }
     },

@@ -2001,6 +2001,64 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    func testWindows98DropdownCarriesClassicGrammarIntoItsMenu() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        XCTAssertTrue(ThemedMenuMetrics.usesClassicGrammar)
+        XCTAssertEqual(ThemedMenuLayout.gap, 0)
+        XCTAssertEqual(ThemedMenuLayout.submenuOverlap, 5)
+        XCTAssertEqual(ThemedMenuMetrics.outerInset, 2)
+        XCTAssertEqual(ThemedMenuMetrics.rowHeight, 21)
+        XCTAssertEqual(ThemedMenuMetrics.subtitleRowHeight, 31)
+        XCTAssertEqual(ThemedMenuMetrics.separatorHeight, 9)
+        XCTAssertEqual(ThemedMenuMetrics.contentInset, 5)
+        XCTAssertEqual(ThemedMenuMetrics.checkSize, 8)
+        XCTAssertEqual(ThemedMenuMetrics.imageInset, 5)
+        XCTAssertEqual(
+            ThemedMenuMetrics.titleInset(hasImageColumn: true, hasPreviewColumn: false),
+            24
+        )
+        XCTAssertEqual(ThemedMenuMetrics.submenuChevronSize, 6)
+        XCTAssertEqual(ThemedMenuMetrics.submenuTrailingInset, 4)
+        XCTAssertEqual(ThemedMenuMetrics.titleBaselineOffset, -1)
+        XCTAssertEqual(ThemedMenuMetrics.imageBaselineOffset, 1)
+        XCTAssertEqual(
+            ThemedMenuMetrics.titleFont.pointSize,
+            Design.Typography.controlRegular().pointSize * 10 / 9,
+            accuracy: 0.001,
+            "the 96-dpi Win32 menu raster scale drifted back to AppKit's 72-dpi point size"
+        )
+        let nativeEntry = ThemedMenuEntry.item(ThemedMenuItem(
+            title: "Native",
+            image: NSImage(size: NSSize(width: 16, height: 16)),
+            submenu: [.item(ThemedMenuItem(title: "Child"))]
+        ))
+        let nativeTextWidth = ceil(("Native" as NSString).size(
+            withAttributes: [.font: ThemedMenuMetrics.titleFont]
+        ).width)
+        XCTAssertEqual(
+            ThemedMenuMetrics.width(for: [nativeEntry], minimum: 0),
+            ThemedMenuMetrics.outerInset * 2
+                + ThemedMenuMetrics.contentInset * 2
+                + ThemedMenuMetrics.imageSlot
+                + nativeTextWidth
+                + ThemedMenuMetrics.submenuChevronSlot,
+            "Win32 must not allocate independent check and icon columns"
+        )
+        XCTAssertFalse(ThemedMenuMetrics.panelHasGlow)
+        assertRGB(
+            ThemedMenuMetrics.panelFill,
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "the classic menu inherited the modern elevated card fill"
+        )
+
+        AppThemePalette.set(.system)
+        XCTAssertFalse(ThemedMenuMetrics.usesClassicGrammar)
+        XCTAssertEqual(ThemedMenuLayout.gap, Design.Spacing.tight)
+        XCTAssertEqual(ThemedMenuMetrics.rowHeight, 28)
+        XCTAssertTrue(ThemedMenuMetrics.panelHasGlow)
+    }
+
     /// A pressable control has to behave like `NSButton` at the call sites it replaces: a click
     /// inside fires once, and a click that wanders off before releasing fires not at all.
     func testAButtonFiresOnAClickAndNotOnAClickDraggedAway() {

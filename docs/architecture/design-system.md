@@ -1325,3 +1325,38 @@ with the theme too.
 which is the part that was missing: `ThemedTableRowView`'s own documentation had claimed "the
 accent held far enough back that the row's own label tiers still read over it" since it was
 written, and no theme had ever been checked against it.
+
+## 2026-08-05 — an overlay that must not take the click
+
+`BrowserBaselineOverlay` holds an approved picture of a page over the live page. It looked, at first,
+like a mode of `BrowserAnnotationOverlay`: both are native layers above WebKit, both watch document
+scroll through the same isolated-world channel, both draw the accent mode frame and corner badge that
+say "this surface is in a mode". Reusing the annotation overlay would have been three lines.
+
+It would also have made the page unusable. Annotation mode overrides `hitTest` to return **itself**
+over its whole bounds, because that is how a pin gets placed. A baseline overlay exists so the user
+and the agent can *keep working* on the live page while watching the seam, so it must return the
+handle and nothing else — every other point passes through.
+
+Two things follow, and both are the reason this is a sibling component rather than a flag:
+
+- **The handle is a real subview, not something drawn.** A drawn control would need `hitTest` to
+  answer "yes" over a region, which is one refactor away from swallowing a click on a link. As a
+  subview, the pass-through rule is one `guard` that cannot drift.
+- **It is a `ThemedControl`.** The overlay is otherwise invisible to the keyboard and to VoiceOver,
+  which for a surface drawn over the user's own page is not acceptable. The handle reports itself as a
+  slider, takes focus, answers arrow keys at `ImageCompareDefaults.keyboardStep` — the same nudge the
+  compare surface uses, so the app's two scrubbing gestures move by the same amount — and its press is
+  the mid-point reset.
+
+The bug the test caught is worth recording, because every assertion about the *page* still passing
+would have kept passing while it was there: `hitTest(_:)` takes its point in the **superview's**
+space, and `NSView.hitTest` on a child wants it in that child's superview — which is this view.
+Converting a second time, into the handle's own coordinates, made the handle unclickable. Assert on
+the control you must be able to reach, not only on the clicks that must get past it.
+
+Two other rules landed with it. The overlay is native, so `browser_screenshot` never bakes it into
+page pixels — a documented non-goal that this component is the most able to break by accident. And a
+viewport baseline is only true at the offset it was captured at: scrolling away is stated in the badge
+rather than corrected by sliding the image, because sliding it would present pixels at positions they
+were never captured at.

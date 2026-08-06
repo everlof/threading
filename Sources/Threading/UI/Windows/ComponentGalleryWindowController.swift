@@ -2115,12 +2115,48 @@ final class ComponentGalleryViewController: NSViewController {
             border: Design.Surface.border
         )
 
+        // The baseline overlay's story needs something under it to be a story at all: the whole
+        // point of the component is that the surface beneath stays reachable, so the card puts a
+        // real button behind it and the receipt says which of the two took the click.
+        let underlying = ThemedButton(
+            title: L10n.string("A control on the page beneath"),
+            target: self,
+            action: #selector(baselineOverlayPassThroughClicked)
+        )
+        underlying.translatesAutoresizingMaskIntoConstraints = false
+
+        let baselineOverlay = BrowserBaselineOverlay()
+        baselineOverlay.translatesAutoresizingMaskIntoConstraints = false
+        baselineOverlay.content = BrowserBaselineOverlayContent(
+            image: Self.baselineOverlaySample(),
+            name: "Signed-in dashboard",
+            captureKind: .viewport,
+            capturedScroll: .zero,
+            captureSize: CGSize(width: 460, height: 120)
+        )
+        baselineOverlay.onDismiss = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserBaselineOverlay stopped holding its baseline."))
+        }
+
+        let baselineCard = NSView()
+        baselineCard.translatesAutoresizingMaskIntoConstraints = false
+        baselineCard.addSubview(underlying)
+        baselineCard.addSubview(baselineOverlay)
+
         for bar in [findBar, deviceToolbar] as [NSView] {
             bar.widthAnchor.constraint(equalToConstant: 460).isActive = true
         }
         NSLayoutConstraint.activate([
             overlay.widthAnchor.constraint(equalToConstant: 460),
-            overlay.heightAnchor.constraint(equalToConstant: 120)
+            overlay.heightAnchor.constraint(equalToConstant: 120),
+            baselineCard.widthAnchor.constraint(equalToConstant: 460),
+            baselineCard.heightAnchor.constraint(equalToConstant: 120),
+            underlying.centerXAnchor.constraint(equalTo: baselineCard.centerXAnchor),
+            underlying.centerYAnchor.constraint(equalTo: baselineCard.centerYAnchor),
+            baselineOverlay.topAnchor.constraint(equalTo: baselineCard.topAnchor),
+            baselineOverlay.bottomAnchor.constraint(equalTo: baselineCard.bottomAnchor),
+            baselineOverlay.leadingAnchor.constraint(equalTo: baselineCard.leadingAnchor),
+            baselineOverlay.trailingAnchor.constraint(equalTo: baselineCard.trailingAnchor)
         ])
 
         return section(
@@ -2141,9 +2177,29 @@ final class ComponentGalleryViewController: NSViewController {
                     "BrowserAnnotationOverlay",
                     "The agent-visible pin layer, shown in annotation mode — click the panel to place one.",
                     overlay
+                ),
+                story(
+                    "BrowserBaselineOverlay",
+                    "An approved picture held over a live page. Drag the handle; click anywhere else and the button underneath answers.",
+                    baselineCard
                 )
             ]
         )
+    }
+
+    @objc private func baselineOverlayPassThroughClicked() {
+        showReceipt(L10n.string("The control under BrowserBaselineOverlay took the click."))
+    }
+
+    /// A stand-in capture: two bands, so a seam dragged across it is visibly a seam.
+    private static func baselineOverlaySample() -> NSImage {
+        NSImage(size: NSSize(width: 460, height: 120), flipped: false) { bounds in
+            Design.Surface.panel.setFill()
+            bounds.fill()
+            Design.Surface.accent.withAlphaComponent(0.35).setFill()
+            bounds.insetBy(dx: 24, dy: 24).fill()
+            return true
+        }
     }
 
     private func makeColourSection() -> NSView {

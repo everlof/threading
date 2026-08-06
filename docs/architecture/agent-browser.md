@@ -538,3 +538,162 @@ Tools settings page.
 Do not wait on `requestAnimationFrame` in an agent action: WebKit pauses it in an occluded
 display-panel tab. Browser waits use bounded timers, navigation and snapshots have timeouts, and
 full-page captures are capped to keep one tool call from pinning the app.
+
+## Visual baselines
+
+A baseline is an approved picture of a page: what somebody decided correct looks like. The whole
+subsystem exists to make one claim durable and one comparison honest, and every decision below
+follows from that.
+
+**The judgment is the user's.** If the agent both captures the baseline and decides whether the new
+render matches it, the loop is circular and asserts nothing — which is why Percy, Chromatic and
+Applitools all put a human in the approve step. `BrowserBaselineUI` puts **Save as Baseline…** in
+Browser Options, gives it a command id (`view.saveBaseline`, no default chord) so it can be bound,
+and **Accept New Revision** lives only on the comparison surface. Some states are also structurally
+user-only: a password field refuses agent typing by design, so anything behind a sign-in, a passkey
+or a 2FA prompt can only be captured by a person.
+
+**Symmetry, though.** `browser_baselines` gives the agent `list`, `capture` and `delete` through the
+same contract, at the same project scope, because the panel's `+` already creates shared and private
+browser tabs for both parties and a baseline should not be the one browser resource only one side can
+make. What the agent cannot do is replace, approve or delete a **user-captured** record.
+
+### One capture path
+
+`BrowserViewController.captureBaseline` is the only way a baseline is made. The visible-page
+screenshot exporter still uses a bare `WKWebView.takeSnapshot`; a baseline must not, because that
+produces backing-store pixels rather than the CSS-pixel-normalized ones `browser_screenshot` and
+`browser_click` agree about. Two capture paths would mean a user baseline and an agent comparison
+quietly disagreeing about what a pixel is.
+
+Conditions are recorded beside the pixels, not derived later: fragment-stripped URL and origin,
+capture kind, viewport, document size, scroll offset, page zoom, **resolved** colour scheme (what the
+page's own media query answered, not the `auto` emulation setting), CSS media, user-agent override,
+browser context, pixel dimensions, clipping, capture time, schema version and content hash. A
+comparison whose conditions differ from the baseline's says so, because that alone can change every
+pixel on the page.
+
+The screenshot, the page metrics and the attribution state are three WebKit calls and cannot be made
+atomic through the public API. They are taken back to back against one `BrowserPageIdentity` and the
+capture is refused if the document was replaced in between. A page animating through the sequence can
+still drift; attribution is therefore described as best-effort wherever it is returned.
+
+### The store
+
+`BrowserBaselineStore` is per **project**, under
+`~/Library/Application Support/Threading/BrowserBaselines/<project>/<baseline>/<revision>/`, holding
+`manifest.json`, `baseline.png` and optionally `state.json`. It is deliberately **not** the rolling
+browser-artifact cache: that ring evicts by count, which is right for evidence and wrong for a claim.
+
+- **Immutable revisions.** Approval adds one and moves the active pointer. The image it replaced keeps
+  its directory, so the last approved copy is always recoverable.
+- **Atomic writes.** A revision is assembled in a sibling `staging-<uuid>` directory, re-read,
+  re-hashed and re-measured there, and only then moved into place. The active pointer never advances
+  onto a revision that has not proven itself.
+- **Damage is set aside.** A record that will not decode is moved under `Quarantine/`. If that move
+  fails, **writes are blocked** rather than continuing over data nobody has looked at.
+- **A newer schema is not corruption.** A record from a later build is left exactly as found and
+  counted, not quarantined: downgrading and losing a colleague's baselines is not a recovery.
+- **Quotas refuse visibly.** Per-image bytes, baselines per project, revisions per baseline, project
+  bytes and attribution bytes are all bounded, and exceeding one is a typed error with a route to the
+  baseline browser. An approved baseline is never silently evicted.
+
+Deleting a session leaves the library alone. Removing a **project** takes its baselines, which is why
+the removal confirmation says so and why the sweep in `projectSidebarDidRemoveSessions` is by project
+id. Reset Everything already moves the whole support directory aside recoverably.
+
+The numbers in `BrowserBaselineDefaults` are provisional. What is not provisional is that every
+dimension has a bound. Real capture sizes across viewport, full-page and element captures are the
+measurement still owed before they are fixed.
+
+### Two origins
+
+Returning a comparison discloses pixels from the live page **and** from the baseline, which may be a
+different site. The current document's origin is authorized as it always was; the baseline's stored
+origin is authorized separately before its bytes leave. A `list` withholds URLs for origins with no
+grant rather than prompting once per row — the same thing `browser_tabs` already does with page
+metadata.
+
+Private-context captures default to **user-only**, whoever made them. Provenance is not permission:
+an agent that captured authenticated pixels in a private tab has not thereby earned the right to read
+them back later. Making one agent-readable is a separate, explicit choice in the baseline browser.
+
+### The comparator
+
+`BrowserVisualComparator` was a max-per-channel absolute delta, which weights a blue shift the eye
+barely sees exactly as heavily as a luminance shift it cannot miss, and reported every line of
+re-rasterized text as a change.
+
+- **YIQ perceptual distance**, pixelmatch's, normalized to 0…1. The legacy `channel_threshold` is
+  still accepted and *translated*: a grey step of Δ moves luminance by exactly Δ, so the mapping is a
+  computation rather than a constant somebody picked.
+- **Anti-aliasing suppression**, pixelmatch's detector ported: a pixel with both a distinctly darker
+  and a distinctly lighter neighbour, at least one of which has three or more identical siblings in
+  *both* images. The "in both" half is what stops a genuinely new edge being written off. Suppressed
+  pixels are counted and reported, never silently dropped.
+- **Alpha is composited, not compared.** The decode is premultiplied (`CGBitmapContext` offers no
+  straight-alpha 8-bit RGBA), so compositing onto white is `channel + 255·(1 − α)`. Both sides get
+  the same ground. Getting this backwards is silent: opaque pixels agree under either formula.
+- **A size change fails, and still answers.** The common region is compared, signed width and height
+  deltas are returned, and the diff is drawn at the union of both extents with the uncompared band in
+  a flat tint. Images are never scaled into a pass.
+- **Ignore rectangles** leave both halves of the ratio, so a large ignore cannot make a small change
+  look smaller than it is. Semantic ignores wait on attribution state, because a PNG baseline has no
+  old element geometry to resolve them against.
+
+SSIM is deliberately absent from pass/fail: two independent oracles must not silently disagree about
+whether one comparison passed.
+
+### Regions and structure
+
+`browser_visual_compare` takes a bounded `detail` level rather than splitting into a second tool: the
+question is the same visual question either way, and an agent should not have to choose a tool before
+it knows whether the page changed.
+
+- `summary` — numbers only.
+- `regions` — `BrowserRegionLabeller` dilates the changed-pixel mask (separably, so the cost is linear
+  in the radius), floods it, recomputes each box from the **original** mask so no region claims the
+  dilation's padding, merges near neighbours, ranks by changed pixels and caps. Raw connected-component
+  labelling would turn one changed sentence into dozens of letter rectangles. `BrowserRegionAttributor`
+  then names what each region sits on, preferring the **deepest** element rather than the largest —
+  `html` and `body` overlap everything and explain nothing. A region over no element says exactly that:
+  canvas, images, background painting and pseudo content are all real answers.
+- `structure` — `BrowserStructuralDiff` matches the two captured trees on bounded semantic evidence:
+  test id, then role and accessible name, then structural position. **Never on ref equality** — the
+  bridge restarts `nextRef` at 1 for each document and assigns as it walks, so `e12` in two captures
+  is not evidence of anything. A key that appears more than once on either side produces an
+  `ambiguous` finding instead of an invented pairing. Findings are ordered by the pixels they overlap
+  and worded as "associated with", because sharing a rectangle is evidence and not proof of cause.
+
+`BrowserAttributionState` is a **visual-attribution snapshot**, not a Percy-style reproducible archive:
+a bounded tree of visible nodes with a curated, fixed list of visual computed properties, plus visible
+`::before`/`::after`. It mints no refs — a capture must not renumber the page the agent is working
+against. Coordinate space is explicit per capture kind and lives in `BrowserCaptureSpace`; getting it
+wrong does not fail, it silently attributes every region to whatever is near the top of the page.
+
+### The two surfaces
+
+`BrowserComparisonViewController` shows baseline against current on `ImageCompareView`, with the diff
+map available as a second view and **Accept New Revision** in the header. Its bytes live in the
+controller and **the tab is deliberately not persisted**: a persisted tab pointing at the rolling
+artifact ring would come back after a relaunch naming files that had been swept. A comparison is a
+moment rather than a document, and re-running it is one tool call. The baseline itself is durable;
+only the comparison is ephemeral.
+
+`BrowserBaselineOverlay` holds an approved picture over the live page. It is a **sibling** of
+`BrowserAnnotationOverlay`, sharing its scroll observation, mode frame and badge, and deliberately not
+its hit testing: annotation mode takes page clicks because a click places a pin, while this overlay
+must pass every click through except on its own handle. It is native, so `browser_screenshot` never
+bakes it into page pixels. A full-page baseline tracks document scroll over its captured extent; a
+viewport baseline is valid only at its recorded offset, and scrolling away is **stated in the badge**
+rather than silently misaligned — an overlay that slid a viewport capture around would present pixels
+at positions they were never captured at.
+
+### Deliberately not built
+
+CPU and network throttling stay unsupported in `WKWebView` and `browser_capabilities` keeps saying so;
+the honest path is Playwright through `browser_run_isolated`. No cloud baselines, approval service or
+review dashboard: the compare surface and the panel are the review surface. No reproducible DOM
+archive. No baking overlays or annotations into page pixels. Imported design images would need their
+own `imported_reference` provenance, alignment offset and scale contract — the provenance case exists,
+and nothing feeds it yet, precisely so a Figma export cannot wander into a pass/fail comparison.

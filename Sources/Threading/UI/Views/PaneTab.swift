@@ -69,6 +69,7 @@ final class PaneTab {
     case sharing(SessionSharingViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
+    case browserComparison(BrowserComparisonViewController)
   }
 
   let id: UUID
@@ -150,6 +151,14 @@ final class PaneTab {
     return nil
   }
 
+  /// The live baseline-versus-current surface. Deliberately absent from `persistedTab`: its bytes
+  /// are held by the controller and nothing on disk outlives it. See
+  /// `BrowserComparisonViewController`.
+  var browserComparison: BrowserComparisonViewController? {
+    if case .browserComparison(let comparison) = body { return comparison }
+    return nil
+  }
+
   /// The tab's view controller, when its body is a live surface rather than rendered content.
   var hostedController: NSViewController? {
     switch body {
@@ -165,6 +174,7 @@ final class PaneTab {
     case .sharing(let sharing): return sharing
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
+    case .browserComparison(let comparison): return comparison
     }
   }
 
@@ -198,6 +208,8 @@ final class PaneTab {
       return "puzzlepiece.extension"
     case .compare:
       return "rectangle.on.rectangle"
+    case .browserComparison:
+      return "square.on.square.dashed"
     }
   }
 
@@ -234,6 +246,8 @@ final class PaneTab {
       return panel.panelTitle
     case .compare:
       return "Compare"
+    case .browserComparison:
+      return L10n.string("Visual diff")
     }
   }
 }

@@ -1263,11 +1263,11 @@ private extension ProjectSidebarViewController {
             title: L10n.format("Remove “%@”?", project.name),
             message: runningCount > 0
                 ? L10n.format(
-                    "%lld running chats or terminals will be terminated. Saved conversations are not deleted.",
+                    "%lld running chats or terminals will be terminated. Saved conversations are not deleted, but this project's visual baselines are.",
                     Int64(runningCount)
                 )
                 : L10n.string(
-                    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted."
+                    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted, but this project's visual baselines are."
                 ),
             confirmTitle: L10n.string("Remove")
         )

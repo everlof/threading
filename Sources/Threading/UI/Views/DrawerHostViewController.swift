@@ -362,6 +362,7 @@ final class DrawerHostViewController: NSViewController {
     ) -> BrowserViewController {
         let controller = browserFactory(contextKind)
         addChild(controller)
+        controller.baselineSessionID = sessionID
         controller.onPageChange = { [weak self] in
             guard let self else { return }
             persist(sessionID)

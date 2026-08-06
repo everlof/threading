@@ -94,6 +94,23 @@ A feature is not stable merely because its happy path works. Before calling one 
 - a support-report or durable event seam for failures that otherwise disappear;
 - inclusion in the non-interactive CI and release gate.
 
+## Three failure states, not two
+
+`BrowserBaselineStore` is where "missing or corrupt" stopped being enough. A durable bundle written
+by a *newer* build of the app is neither: quarantining it would mean a downgrade silently confiscated
+data it simply cannot read, and listing it would mean decoding a shape this build does not know. The
+store reads the schema version first, keeps a newer record untouched and counts it, and reports the
+count so the UI can say so.
+
+The same type carries the other half of the rule the SQLite store already states: when the recovery
+itself fails — the damaged directory cannot even be moved aside — writing is *blocked* rather than
+logged and continued. A store that cannot preserve what it is about to write over has one safe move,
+and it is to stop.
+
+Validation re-reads from disk rather than trusting the bytes still in hand. A short write, a full
+disk and a truncated PNG all look like success at the call site; the failure they cause surfaces
+weeks later as a record that will not decode.
+
 ## Shipping contract
 
 `scripts/ci.sh` is the canonical non-interactive gate: structural policy, localization and theme

@@ -149,6 +149,9 @@ struct AgentToolDependencies {
   let settings: AppSettings
   let notifications: RemoteNotificationService
   let archiveScheduler: SessionArchiveScheduler
+  /// The project's durable visual baselines. Injected rather than reached for as a singleton from
+  /// the handler, so a test drives its own directory instead of the developer's.
+  let baselines: BrowserBaselineStore
 
   static let live = AgentToolDependencies(
     projects: .shared,
@@ -159,7 +162,8 @@ struct AgentToolDependencies {
     remoteMirror: .shared,
     settings: .shared,
     notifications: .shared,
-    archiveScheduler: .shared
+    archiveScheduler: .shared,
+    baselines: .shared
   )
 }
 
@@ -323,6 +327,11 @@ final class AgentToolCoordinator: AgentCommandHandling {
           selector: arguments.selector,
           locator: arguments.locator
         )
+    // Names the action and how the baseline was addressed, never the baseline's own name: a
+    // name is the user's words, and the trace is deliberately structural.
+    case .browserBaselines(let arguments):
+      let addressed = arguments.baselineID != nil ? "by id" : "by name"
+      return "\(arguments.action ?? "list"); \(addressed)"
     case .browserQuery:
       return "CSS query"
     case .browserClick(let arguments):
@@ -591,6 +600,8 @@ final class AgentToolCoordinator: AgentCommandHandling {
       browserScreenshot(arguments, for: sessionID, completion: observed)
     case .browserVisualCompare(let arguments):
       browserVisualCompare(arguments, for: sessionID, completion: observed)
+    case .browserBaselines(let arguments):
+      browserBaselines(arguments, for: sessionID, completion: observed)
     case .panelListTabs:
       observed(panelListTabs(for: sessionID))
     case .panelActivateTab(let arguments):

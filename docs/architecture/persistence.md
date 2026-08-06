@@ -283,3 +283,39 @@ file reset. That is the one intentionally non-recoverable piece: backing up live
 plain files would turn the reset folder into a credential export. A settings-only reset keeps
 pairings; a full reset is explicit authority to delete even a corrupt Keychain item that normal
 fail-closed revocation refuses to overwrite.
+
+## Visual baselines
+
+`BrowserBaselineStore` is the app's second durable bundle store, under
+`~/Library/Application Support/Threading/BrowserBaselines/`. It is worth reading beside the SQLite
+store because it takes the same posture with different machinery, and because it is the first place
+that had to distinguish three failure states rather than two.
+
+**Missing, corrupt, and newer are three different answers.** A record whose `record.json` will not
+decode is corrupt and is quarantined. A record whose `schema_version` is *higher* than this build's
+is not corrupt at all — it is from a later Threading, and quarantining it would mean a downgrade
+silently confiscated a colleague's approved baselines. It is left exactly as found, excluded from the
+list, and counted, so the UI can say how many this build cannot read. Absent is simply absent.
+
+**Quarantine failing is not a logging opportunity.** If the damaged directory cannot be moved aside,
+`isWriteBlocked` goes true and every write refuses. Continuing would mean writing beside data the
+store has just proven it cannot manage, and the one outcome that cannot be undone is destroying
+something nobody has looked at yet.
+
+**Validation re-reads.** A revision is written into a sibling `staging-<uuid>` directory, then read
+back, re-hashed and re-measured *from disk* before the directory is moved into place. A short write, a
+full disk and a truncated PNG all look fine from the caller's side; the failure they cause arrives
+weeks later as a baseline that will not decode.
+
+**Replacement is additive.** Approval writes a new revision and moves a pointer; the revision it
+replaced keeps its bytes. Only revisions past the per-baseline cap are removed, never the active one,
+and never before the record naming the new active revision is on disk.
+
+**Quotas refuse rather than evict.** Every dimension is bounded — image bytes, attribution bytes,
+baselines per project, revisions per baseline, project bytes — and exceeding a durable one is a typed,
+visible error. A ring that quietly dropped the oldest approved baseline would make a user's claim
+about what correct looks like expire without anyone deciding it should.
+
+**Lifecycle is by project.** Deleting a session leaves the library alone; removing a project takes its
+baselines, and the removal confirmation says so. Reset Everything already moves the whole support
+directory aside recoverably, so no separate handling is needed.

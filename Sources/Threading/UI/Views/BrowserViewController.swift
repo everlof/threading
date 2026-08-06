@@ -509,6 +509,14 @@ final class BrowserViewController: NSViewController {
     private var addressField: ThemedTextField { chromeBar.addressField }
     private let progressBar = ThemedProgressBar()
     private let annotationOverlay = BrowserAnnotationOverlay()
+    /// The approved picture held over the live page, when the user has one up. A sibling of
+    /// the annotation overlay and not a mode of it: this one passes clicks through.
+    private let baselineOverlay = BrowserBaselineOverlay()
+    private var baselineOverlayMenuSession: AnyObject?
+
+    /// The overlay, for the extension that drives it. Internal rather than private because the
+    /// baseline commands live in `BrowserBaselineCapture` beside the capture path they belong with.
+    var baselineOverlayView: BrowserBaselineOverlay { baselineOverlay }
     private let deviceToolbar = BrowserDeviceToolbar()
     private let deviceToolbarSeparator = SeparatorView()
     private var deviceToolbarHeightConstraint: NSLayoutConstraint?
@@ -559,11 +567,11 @@ final class BrowserViewController: NSViewController {
     private var probedAnnotationTargetPoint: CGPoint?
     private var pendingAnnotationTargetPoint: CGPoint?
     private var isProbingAnnotationTarget = false
-    private var agentViewportSize: CGSize?
-    private var agentColorScheme: BrowserColorScheme = .auto
-    private var agentUserAgent: BrowserUserAgentOverride = .automatic
-    private var agentMediaType: BrowserMediaType = .auto
-    private var browserPageZoom = 1.0
+    private(set) var agentViewportSize: CGSize?
+    private(set) var agentColorScheme: BrowserColorScheme = .auto
+    private(set) var agentUserAgent: BrowserUserAgentOverride = .automatic
+    private(set) var agentMediaType: BrowserMediaType = .auto
+    private(set) var browserPageZoom = 1.0
 
     private var observations: [NSKeyValueObservation] = []
     private var consoleMessages: [BrowserConsoleMessage] = []
@@ -596,6 +604,13 @@ final class BrowserViewController: NSViewController {
     /// A page URL restored from disk but not yet loaded, so a background session's browser stays
     /// idle until it is actually shown. The display pane navigates to it on first appearance.
     var restoredURL: String?
+
+    /// Whose chat this browser belongs to, set by whichever host built it.
+    ///
+    /// The one thing this controller cannot work out for itself, and the only thing the baseline
+    /// commands need: a session resolves to a project, and a project owns the library. Unset — a
+    /// fixture, a gallery sample — the baseline commands are simply not offered.
+    var baselineSessionID: SessionID?
 
     /// Fired when the page a caller asked for finishes (or fails, or times out), so an agent's
     /// navigate tool can wait for the page before querying it.
@@ -799,6 +814,12 @@ final class BrowserViewController: NSViewController {
         view.addSubview(viewportScrollView)
         installWebView(webView)
         webViewHost.addSubview(annotationOverlay, positioned: .above, relativeTo: nil)
+        // Above the annotation overlay, because a baseline held over the page should not disappear
+        // under a layer that is inert whenever annotation mode is off. Its own hit testing keeps
+        // annotation clicks reaching the layer beneath it.
+        webViewHost.addSubview(baselineOverlay, positioned: .above, relativeTo: nil)
+        baselineOverlay.isHidden = true
+        baselineOverlay.onDismiss = { [weak self] in self?.hideBaselineOverlay() }
 
         deviceToolbar.isHidden = true
         deviceToolbarSeparator.isHidden = true
@@ -962,6 +983,9 @@ final class BrowserViewController: NSViewController {
         if annotationOverlay.superview != nil {
             webViewHost.addSubview(annotationOverlay, positioned: .above, relativeTo: nil)
         }
+        if baselineOverlay.superview != nil {
+            webViewHost.addSubview(baselineOverlay, positioned: .above, relativeTo: nil)
+        }
         layoutWebViews()
         webViewStack.forEach { $0.isHidden = $0 !== candidate }
         candidate.isHidden = false
@@ -990,6 +1014,7 @@ final class BrowserViewController: NSViewController {
         let frame = CGRect(origin: webOrigin, size: viewport)
         webViewStack.forEach { $0.frame = frame }
         annotationOverlay.frame = frame
+        baselineOverlay.frame = frame
         updateAnnotationOverlay()
 
         if resetScrollPosition {
@@ -1977,6 +2002,29 @@ final class BrowserViewController: NSViewController {
         try await callAgentScript(BrowserAgentScripts.pageDimensions, arguments: [:])
     }
 
+    /// The page's own capture conditions. The browser's half is read from this controller's
+    /// emulation state; see `BrowserBaselineCapture`.
+    func captureContext() async throws -> BrowserCaptureContext {
+        try await callAgentScript(BrowserAgentScripts.captureContext, arguments: [:])
+    }
+
+    /// The bounded visual-attribution state behind one capture.
+    ///
+    /// Deliberately not part of `snapshot`: that answers "what can I act on", is capped at 180
+    /// nodes, and mints refs as it goes. This answers "what is drawn where, and why", keeps its own
+    /// caps, and mints nothing — a capture must not renumber the page the agent is working against.
+    func attributionState(maximumNodes: Int) async throws -> BrowserAttributionState {
+        // The script shares the target prelude for `roleOf`/`nameOf`/`clean`, so it takes the same
+        // argument shape even though it resolves no target of its own.
+        var arguments = targetArguments(ref: nil, selector: nil, locator: nil)
+        arguments["maximumNodes"] = maximumNodes
+        arguments["maximumElements"] = BrowserAgentDefaults.maximumAttributionElements
+        return try await callAgentScript(
+            BrowserAgentScripts.attributionState,
+            arguments: arguments
+        )
+    }
+
     func agentPerformanceReport(
         maximumResources: Int
     ) async throws -> BrowserPerformanceReport {
@@ -2889,6 +2937,57 @@ final class BrowserViewController: NSViewController {
             ),
             onChoose: { [weak self] in self?.saveVisiblePageScreenshot() }
         )))
+        if let baselineSessionID {
+            // Beside Take a Screenshot rather than as another address-bar glyph: the strip protects
+            // the address field at its 260pt minimum, and a permanent target has to earn that width
+            // with evidence this command does not have yet.
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Save as Baseline…"),
+                subtitle: L10n.string("Keep this page as what correct looks like"),
+                image: BrowserChromeBar.image(
+                    "checkmark.seal",
+                    accessibility: L10n.string("Save as Baseline")
+                ),
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    BrowserBaselineUI.captureBaseline(from: self, sessionID: baselineSessionID)
+                }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: isShowingBaselineOverlay
+                    ? L10n.string("Stop Holding a Baseline")
+                    : L10n.string("Hold a Baseline Over This Page…"),
+                subtitle: L10n.string("The page stays live underneath it"),
+                image: BrowserChromeBar.image(
+                    "square.on.square.dashed",
+                    accessibility: L10n.string("Hold a Baseline Over This Page")
+                ),
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    if self.isShowingBaselineOverlay {
+                        self.hideBaselineOverlay()
+                        return
+                    }
+                    self.baselineOverlayMenuSession = BrowserBaselineUI.presentOverlayPicker(
+                        from: self,
+                        anchor: self.chromeBar.overflowButton,
+                        sessionID: baselineSessionID
+                    )
+                }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Visual Baselines…"),
+                subtitle: L10n.string("Rename, remove, or share this project's baselines"),
+                image: BrowserChromeBar.image(
+                    "photo.stack",
+                    accessibility: L10n.string("Visual Baselines")
+                ),
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    BrowserBaselineUI.showLibrary(from: self, sessionID: baselineSessionID)
+                }
+            )))
+        }
         entries.append(.separator)
         let zoomPercent = Int((browserPageZoom * 100).rounded())
         entries.append(.item(ThemedMenuItem(
@@ -3944,6 +4043,10 @@ extension BrowserViewController: WKScriptMessageHandler {
             if messageWebView === webView {
                 updateAnnotationOverlay()
                 refreshAnnotationTargetUnderPointer()
+                // The baseline overlay reads the same channel: it carries scroll coordinates and
+                // nothing else, so there is no reason for a second observer inside the page.
+                baselineOverlay.documentScroll =
+                    annotationViewportOffsets[ObjectIdentifier(messageWebView)] ?? .zero
             }
             return
         }

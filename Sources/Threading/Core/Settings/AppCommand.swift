@@ -117,6 +117,7 @@ enum AppCommands {
         static let browser = "view.browser"
         static let files = "view.files"
         static let review = "view.review"
+        static let saveBaseline = "view.saveBaseline"
         static let sessionInfo = "view.info"
         static let shell = "view.shell"
         static let displayPanel = "view.displayPanel"
@@ -194,6 +195,13 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "p", modifiers: .command), isEditable: true),
         AppCommand(id: ID.review, group: .view, title: "Git Review",
                    defaultShortcut: KeyboardShortcut(key: "r", modifiers: [.command, .shift]), isEditable: true),
+        // No default chord. It is a real command with a real menu item, and the plan it comes from
+        // is explicit that a baseline capture has not yet earned permanent space — not on the
+        // browser strip, and not in the app's small stock of unclaimed two-modifier keys. The
+        // Keyboard page lets anyone who uses it constantly bind one.
+        AppCommand(id: ID.saveBaseline, group: .view, title: "Save as Baseline…",
+                   detail: "Keeps the visible browser page as this project's approved picture of it.",
+                   defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.sessionInfo, group: .view, title: "Session Info",
                    defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .shift]), isEditable: true),
         AppCommand(id: ID.shell, group: .view, title: "Shell",

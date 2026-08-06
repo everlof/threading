@@ -597,3 +597,25 @@ Settings' per-agent **attachment detection** toggle gates *scanning* only. A dec
 not detection, so turning it off does not hide the images you attach or the ones the agent shows
 in the panel — which the empty state now says, because an empty pane that blames a setting for
 something the setting does not control is worse than an empty pane.
+
+## Browser comparisons in the panel
+
+`browser_visual_compare` opens its result in the panel as a `.browserComparison` tab —
+`BrowserComparisonViewController` on `ImageCompareView`, with the computed diff map as a second view
+and **Accept New Revision** as a user-only header action.
+
+**That tab is deliberately not persisted, and the reason is a contract rather than an oversight.**
+The panel's rolling browser-artifact ring (`cacheBrowserVisualArtifact`) evicts by count, so a
+persisted tab pointing into it comes back after a relaunch naming files that have been swept — a
+comparison showing two empty boxes, which is worse than no tab. The alternative was a comparison
+bundle whose lifetime is tied to the tab; this codebase picked the other contract, because a
+comparison is a moment rather than a document: the page has moved on by the next launch, and
+re-running it is one tool call. The controller therefore holds its own bytes and
+`persistedTab(_:)` has no branch for it.
+
+The ring is still written, and the tool still reports `Actual PNG:` and `Diff PNG:` paths — a terminal
+agent reads files, and an MCP image block is not one. The two uses are simply not the same use: the
+ring is evidence with a lifetime, and the tab is a surface with bytes in hand.
+
+The durable half lives elsewhere: baselines are project-scoped in `BrowserBaselineStore`, not in the
+panel's per-session cache. See [`agent-browser.md`](agent-browser.md).

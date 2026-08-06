@@ -174,6 +174,117 @@ struct BrowserPageDimensions: Decodable, Equatable {
     let height: Int
 }
 
+/// The page half of a capture's conditions, read in one call beside the pixels.
+struct BrowserCaptureContext: Decodable, Equatable {
+    let url: String
+    let viewportWidth: Double
+    let viewportHeight: Double
+    let documentWidth: Double
+    let documentHeight: Double
+    let scrollX: Double
+    let scrollY: Double
+    /// What the page's own media query answers, which is what actually decided its colours —
+    /// `auto` emulation means "whatever the system says", and the system's answer is here.
+    let resolvedColorScheme: String
+
+    private enum CodingKeys: String, CodingKey {
+        case url
+        case viewportWidth = "viewport_width"
+        case viewportHeight = "viewport_height"
+        case documentWidth = "document_width"
+        case documentHeight = "document_height"
+        case scrollX = "scroll_x"
+        case scrollY = "scroll_y"
+        case resolvedColorScheme = "resolved_color_scheme"
+    }
+}
+
+// MARK: - Visual attribution
+
+/// The semantic state behind one capture: what was drawn, where, and the curated visual properties
+/// that could explain it.
+///
+/// **This is not a reproducible DOM archive.** Percy and Chromatic capture the markup, stylesheets
+/// and assets needed to re-render a page elsewhere. This captures only what is needed to *attribute*
+/// a visual difference to something addressable, which is a far smaller and far more bounded thing.
+/// See `docs/architecture/agent-browser.md`.
+///
+/// **Best-effort by construction.** The screenshot and this state are two WebKit operations and
+/// cannot be made atomic through the public API. Both are tied to one `BrowserPageIdentity` and
+/// taken immediately together, and a document replacement between them is rejected — but a page
+/// animating during the pair will still drift, and that is reported rather than hidden.
+struct BrowserAttributionState: Codable, Equatable, Sendable {
+
+    /// One element, or one visible pseudo-element, as it stood at capture time.
+    struct Node: Codable, Equatable, Sendable {
+        /// Capture-local. Two captures' ids mean nothing to each other; matching is done on the
+        /// evidence below.
+        let id: Int
+        let parent: Int?
+        let depth: Int
+        /// The ref this element already had, when it had one. Never minted here.
+        let ref: String?
+        let tag: String
+        let role: String?
+        let name: String?
+        let testID: String?
+        let siblingIndex: Int
+        /// Up to four composed ancestors, each named by test id, role or tag.
+        let ancestors: String?
+        /// `::before` or `::after` when this row is pseudo content rather than an element.
+        let pseudo: String?
+        let x: Double
+        let y: Double
+        let width: Double
+        let height: Double
+        let styles: [String: String]
+
+        private enum CodingKeys: String, CodingKey {
+            case id, parent, depth, ref, tag, role, name, ancestors, pseudo, x, y, width, height
+            case styles
+            case testID = "test_id"
+            case siblingIndex = "sibling_index"
+        }
+
+        /// The bounded evidence a cross-capture match is made on, never raw ref equality.
+        ///
+        /// Ordered by how much it constrains: a test id is the page author saying "this is the
+        /// thing", a role and name is what a person would call it, and the structural position is
+        /// what is left when the page names nothing.
+        var matchKey: String {
+            if let testID, !testID.isEmpty { return "test:\(testID)" }
+            if let role, !role.isEmpty, let name, !name.isEmpty { return "role:\(role)|name:\(name)" }
+            if let pseudo { return "pseudo:\(pseudo)|\(ancestors ?? "")|\(tag)|\(siblingIndex)" }
+            return "path:\(ancestors ?? "")|\(tag)|\(role ?? "")|\(siblingIndex)|\(depth)"
+        }
+
+        /// What the agent is shown when a region overlaps this node.
+        var label: String {
+            var parts: [String] = []
+            if let ref, !ref.isEmpty { parts.append(ref) }
+            if let role, !role.isEmpty { parts.append(role) } else { parts.append(tag) }
+            if let name, !name.isEmpty { parts.append("“\(name)”") }
+            if let pseudo { parts.append(pseudo) }
+            return parts.joined(separator: " ")
+        }
+    }
+
+    let schemaVersion: Int
+    let scrollX: Double
+    let scrollY: Double
+    let nodes: [Node]
+    let truncated: Bool
+    let visitedElements: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case nodes, truncated
+        case schemaVersion = "schema_version"
+        case scrollX = "scroll_x"
+        case scrollY = "scroll_y"
+        case visitedElements = "visited_elements"
+    }
+}
+
 struct BrowserScreenshotTarget: Decodable, Equatable {
     let ok: Bool
     let message: String
@@ -3016,6 +3127,201 @@ enum BrowserAgentScripts {
         });
         """#
 
+    /// Everything about the page that decided what a capture looks like.
+    ///
+    /// Read in one call immediately beside the snapshot rather than assembled from several, because
+    /// the answers have to describe the same moment: a scroll offset read a frame later belongs to a
+    /// different picture than the one just taken.
+    ///
+    /// The page's own state only. Colour scheme, CSS media and the user-agent override are the
+    /// *browser's* conditions and are read from Threading's own emulation state, which is the only
+    /// place that knows whether the value came from the system or from `browser_emulate`.
+    static let captureContext = #"""
+        const root = document.documentElement;
+        const media = query => {
+          try { return Boolean(globalThis.matchMedia?.(query)?.matches); } catch (_) { return false; }
+        };
+        return JSON.stringify({
+          url: String(location.href || ''),
+          viewport_width: Math.round(globalThis.innerWidth || 0),
+          viewport_height: Math.round(globalThis.innerHeight || 0),
+          document_width: Math.round(
+            Math.max(root?.scrollWidth || 0, document.body?.scrollWidth || 0)
+          ),
+          document_height: Math.round(
+            Math.max(root?.scrollHeight || 0, document.body?.scrollHeight || 0)
+          ),
+          scroll_x: Math.round(globalThis.scrollX || 0),
+          scroll_y: Math.round(globalThis.scrollY || 0),
+          resolved_color_scheme: media('(prefers-color-scheme: dark)') ? 'dark' : 'light'
+        });
+        """#
+
+    /// The bounded semantic tree behind one capture: what is drawn, where, and the curated visual
+    /// properties that could explain it.
+    ///
+    /// **Bounded, not exhaustive.** An unbounded dump of every CSS property on every node is neither
+    /// something a page can be trusted to keep small nor something an agent can read; the property
+    /// list is fixed and stated here, and the node count and element visit count are both capped.
+    ///
+    /// **Mints nothing.** A current ref is copied when the element already has one and is otherwise
+    /// null. Refs are document-local and are not identity across captures — the evidence beside them
+    /// is: a test id, the role and accessible name, the position among siblings, and a bounded
+    /// ancestor path. That is what a later match is made on.
+    ///
+    /// **Includes visible `::before`/`::after`.** Pseudo content is a routine way to draw a
+    /// checkmark, a chevron or a badge, and a tree that omits it cannot explain the pixels those
+    /// occupy. It is emitted only when it has content and takes space.
+    static let attributionState = targetPrelude + #"""
+        const nodeCap = Math.max(1, Math.min(Number(maximumNodes) || 0, 1200));
+        const elementCap = Math.max(1, Number(maximumElements) || 20000);
+        const PROPERTIES = [
+          'display', 'position', 'visibility', 'opacity', 'z-index',
+          'color', 'background-color', 'background-image',
+          'border-top-width', 'border-top-color', 'border-radius',
+          'box-shadow', 'outline-color',
+          'font-family', 'font-size', 'font-weight', 'font-style',
+          'letter-spacing', 'line-height', 'text-align', 'text-decoration-line',
+          'text-transform', 'white-space', 'overflow', 'transform'
+        ];
+        const testIDOf = element => clean(
+          element.getAttribute?.('data-testid')
+            || element.getAttribute?.('data-test-id')
+            || element.getAttribute?.('data-test')
+            || element.getAttribute?.('data-qa'),
+          80
+        );
+        const styleOf = (element, pseudo) => {
+          const computed = getComputedStyle(element, pseudo || null);
+          const values = {};
+          for (const property of PROPERTIES) {
+            const value = clean(computed.getPropertyValue(property), 120);
+            if (value) values[property] = value;
+          }
+          return values;
+        };
+
+        const nodes = [];
+        let visited = 0;
+        let truncated = false;
+
+        // The offset from a frame's own client coordinates back to the top-level viewport, so every
+        // box in the tree is in one space regardless of how deeply nested its document is.
+        const emit = (element, parentID, depth, offsetX, offsetY) => {
+          const rect = element.getBoundingClientRect();
+          const id = nodes.length + 1;
+          const siblings = element.parentElement
+            ? Array.prototype.indexOf.call(element.parentElement.children, element)
+            : 0;
+          let ancestors = '';
+          let walker = composedParent(element);
+          for (let step = 0; step < 4 && walker; step += 1) {
+            const tag = walker.tagName ? walker.tagName.toLowerCase() : '';
+            const identity = testIDOf(walker) || roleOf(walker) || tag;
+            ancestors = ancestors ? `${identity}>${ancestors}` : identity;
+            walker = composedParent(walker);
+          }
+          nodes.push({
+            id,
+            parent: parentID,
+            depth,
+            ref: state.elementToRef.get(element) || null,
+            tag: element.tagName ? element.tagName.toLowerCase() : '',
+            role: roleOf(element) || null,
+            name: clean(nameOf(element), 120) || null,
+            test_id: testIDOf(element) || null,
+            sibling_index: siblings,
+            ancestors: ancestors || null,
+            pseudo: null,
+            x: rect.left + offsetX,
+            y: rect.top + offsetY,
+            width: rect.width,
+            height: rect.height,
+            styles: styleOf(element, null)
+          });
+
+          for (const pseudo of ['::before', '::after']) {
+            if (nodes.length >= nodeCap) break;
+            const computed = getComputedStyle(element, pseudo);
+            const content = clean(computed.getPropertyValue('content'), 60);
+            if (!content || content === 'none' || content === 'normal') continue;
+            if (computed.getPropertyValue('display') === 'none') continue;
+            nodes.push({
+              id: nodes.length + 1,
+              parent: id,
+              depth: depth + 1,
+              ref: null,
+              tag: element.tagName ? element.tagName.toLowerCase() : '',
+              role: null,
+              name: content,
+              test_id: null,
+              sibling_index: pseudo === '::before' ? -1 : 1,
+              ancestors: ancestors || null,
+              pseudo: pseudo,
+              // Pseudo content has no box of its own through the public API. Its parent's box is
+              // the honest answer: it says where to look, and it does not invent a rectangle.
+              x: rect.left + offsetX,
+              y: rect.top + offsetY,
+              width: rect.width,
+              height: rect.height,
+              styles: styleOf(element, pseudo)
+            });
+          }
+          return id;
+        };
+
+        const walk = (element, parentID, depth, offsetX, offsetY) => {
+          if (nodes.length >= nodeCap) { truncated = true; return; }
+          visited += 1;
+          if (visited > elementCap) { truncated = true; return; }
+
+          const computed = getComputedStyle(element);
+          if (computed.display === 'none' || computed.visibility === 'hidden') return;
+          const rect = element.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            // No pixels of its own, but its children may have some.
+            for (const child of Array.from(element.children || [])) {
+              walk(child, parentID, depth, offsetX, offsetY);
+            }
+            return;
+          }
+
+          const id = emit(element, parentID, depth, offsetX, offsetY);
+
+          if (element.shadowRoot) {
+            for (const child of Array.from(element.shadowRoot.children || [])) {
+              walk(child, id, depth + 1, offsetX, offsetY);
+            }
+          }
+          if (element.tagName?.toLowerCase() === 'iframe') {
+            try {
+              const inner = element.contentDocument;
+              if (inner?.documentElement) {
+                const frame = element.getBoundingClientRect();
+                const childOffsetX = offsetX + frame.left + Number(element.clientLeft || 0);
+                const childOffsetY = offsetY + frame.top + Number(element.clientTop || 0);
+                walk(inner.documentElement, id, depth + 1, childOffsetX, childOffsetY);
+              }
+            } catch (_) {}
+            return;
+          }
+          for (const child of Array.from(element.children || [])) {
+            walk(child, id, depth + 1, offsetX, offsetY);
+          }
+        };
+
+        if (document.documentElement) walk(document.documentElement, null, 0, 0, 0);
+
+        return JSON.stringify({
+          schema_version: 1,
+          scroll_x: Math.round(globalThis.scrollX || 0),
+          scroll_y: Math.round(globalThis.scrollY || 0),
+          nodes,
+          truncated,
+          visited_elements: visited
+        });
+        """#
+
     static let performanceReport = #"""
         const finite = value => {
           const number = Number(value);
@@ -3617,6 +3923,15 @@ enum BrowserAgentDefaults {
     static let defaultAccessibilityAuditIssues = 25
     static let maximumAccessibilityAuditIssues = 50
     static let maximumAccessibilityAuditElements = 5_000
+
+    /// How many nodes one visual-attribution capture may carry, and how many elements it may walk
+    /// to find them. Both bound work on a page whose size nobody here chose.
+    static let maximumAttributionNodes = 400
+    static let maximumAttributionElements = 20_000
+
+    /// What a comparison may return: rectangles after coalescing, and structural findings.
+    static let maximumChangedRegions = 24
+    static let maximumStructuralFindings = 24
     static let maximumWaitSeconds: Double = 15
     static let waitPollNanoseconds: UInt64 = 200_000_000
     /// How many main-actor turns a password takeover waits for the sidebar to finish selecting

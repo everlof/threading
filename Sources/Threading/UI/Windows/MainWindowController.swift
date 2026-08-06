@@ -2063,6 +2063,31 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         setDisplayPaneVisible(true)
     }
 
+    /// Save as Baseline, from the View menu or whatever chord the user bound to it.
+    ///
+    /// It captures the browser the user is *looking at*, not the one an agent last drove: this is
+    /// the user's judgment about a page, and the page they mean is the one on screen. A session
+    /// whose visible tab is not a browser gets a beep rather than a surprising capture of a browser
+    /// hidden behind an image tab.
+    func saveVisibleBrowserBaseline() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID,
+              let browser = visibleBrowser(for: sessionID) else {
+            NSSound.beep()
+            return
+        }
+        BrowserBaselineUI.captureBaseline(from: browser, sessionID: sessionID)
+    }
+
+    /// The panel's own visible browser first, then whichever browser the session has.
+    ///
+    /// The visible one answers first because a browser on screen is the one the user means by
+    /// "this page"; the session's own is the fallback for a command sent while another tab is up.
+    private func visibleBrowser(for sessionID: SessionID) -> BrowserViewController? {
+        displayPaneController.currentBrowser ?? displayPaneController.browser(for: sessionID)
+    }
+
     func showAttachments() {
         window?.makeKeyAndOrderFront(nil)
 
@@ -2440,6 +2465,12 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
         AgentRuntime.shared.retainOnly(sessionIDs: liveSessionIDs)
+        // Visual baselines are the project's, not the session's, so this sweep is by project: a
+        // deleted chat leaves the library alone, and a removed project takes its own with it. The
+        // removal confirmation says so.
+        BrowserBaselineStore.shared.retainOnly(
+            projectIDs: Set(ProjectStore.shared.projects.map(\.id))
+        )
 
         // Nor stay reachable through Back: a retraced page must exist to be presented.
         history.prune { page in

@@ -1722,6 +1722,44 @@ value is unavailable to the agent, snapshots, waits, traces, and diagnostic logs
 WebAuthentication prompts remain WebKit/macOS system UI. Filling a password does not approve
 submission — the usual confirmation still applies.
 
+### Visual baselines
+
+A baseline is a picture of a page you have decided is correct. **Browser Options ▸ Save as
+Baseline…** keeps the visible page under a name you choose, and the agent can compare the page
+against it later without you handing over a file path. The command is also in **View ▸ Save as
+Baseline…** with no shortcut assigned; give it one in **Settings ▸ Keyboard** if you use it often.
+
+Deciding what correct looks like is yours, not the agent's. It can capture and compare, and it can
+remove baselines it captured itself, but it can never replace, approve or delete one of yours. Some
+pages are only yours to capture at all: an agent cannot type in a password field, so anything behind
+a sign-in, a passkey or a two-factor prompt is a page only you can put a baseline on.
+
+**Browser Options ▸ Visual Baselines…** lists the project's baselines with a thumbnail, the page they
+came from, the conditions they were captured under, when, and who captured them. Rename, delete or
+reveal one in Finder from there. **Agent can read this** is a per-baseline switch: anything captured
+in a private tab starts off, because a private tab holds signed-in pixels and who captured them is a
+different question from who may read them back.
+
+Baselines belong to the **project**, not to one chat, so they outlive the session that made them.
+Closing or deleting a chat leaves them alone. Removing the project deletes them, and the removal
+confirmation says so.
+
+When the agent compares the page against a baseline, the result opens as a **Visual diff** tab: the
+baseline and the current page on the same wipe, crossfade, difference and side-by-side surface the
+Compare tab uses, with the computed difference map as a second view. If the change is one you wanted,
+**Accept New Revision** records the current capture as the baseline's new approved picture. The
+picture it replaces is kept, so an approval is never the thing that destroys the last copy of what
+you decided was right. The comparison tab itself is not restored after a relaunch — the page has
+moved on by then, and the agent can run the comparison again in one call.
+
+**Browser Options ▸ Hold a Baseline Over This Page…** draws a baseline over the live page with a
+draggable seam. The page stays live underneath: every click but the one on the handle reaches the
+page, so you and the agent can keep working while you watch it. Arrow keys move the seam. A
+full-page baseline follows the page as you scroll; a baseline of a viewport is only true where it was
+taken, so scrolling away says so in the badge rather than pretending the missing pixels are there.
+Nothing about the overlay reaches the page, so a screenshot taken while it is up is of the page and
+not of the overlay.
+
 ### Execution audit
 
 Open **Execution Audit** from the display panel's **+** menu to review what an agent actually asked
@@ -2803,6 +2841,7 @@ sharing control.
 | Browser | Cmd+Shift+B |
 | Files (display panel tab) | Cmd+P |
 | Git Review | Cmd+Shift+R |
+| Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
 | Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
 | Status Card (the session pane's floating corner card) | unbound by default — assign one in Settings ▸ Keyboard |
