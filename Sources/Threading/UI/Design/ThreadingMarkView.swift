@@ -448,6 +448,16 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             options: .alignAllEdgesInward
         )
 
+        // A view with no area yet — a gallery story laid out once before its constraints give it
+        // a size — asks `backingAlignedRect` to align a zero-sized rect inward, and gets
+        // `CGRect.null` back. Its origin is infinite, so every particle position computed from it
+        // is infinite, and AppKit *raises* on a NaN `CALayer.position` rather than ignoring it:
+        // seven component-gallery tests died taking the whole test host with them, with no failed
+        // assertion to say why. Nothing can be drawn in zero area, so there is nothing to skip.
+        guard side > 0,
+              box.width > 0, box.height > 0,
+              box.origin.x.isFinite, box.origin.y.isFinite else { return }
+
         outline.frame = bounds
         outline.path = ThreadingMarkGeometry.outlinePath(in: box)
         outline.lineWidth = snapped(side * ThreadingMarkGeometry.outlineStrokeRatio, to: scale)
