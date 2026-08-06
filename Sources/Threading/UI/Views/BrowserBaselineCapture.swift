@@ -195,14 +195,16 @@ extension BrowserViewController {
         name: String,
         captureKind: BrowserBaselineCaptureKind,
         capturedScroll: CGPoint,
-        captureSize: CGSize
+        captureSize: CGSize,
+        scale: CGFloat = 1
     ) {
         baselineOverlayView.content = BrowserBaselineOverlayContent(
             image: image,
             name: name,
             captureKind: captureKind,
             capturedScroll: capturedScroll,
-            captureSize: captureSize
+            captureSize: captureSize,
+            scale: scale
         )
         baselineOverlayView.isHidden = false
         baselineOverlayView.needsDisplay = true

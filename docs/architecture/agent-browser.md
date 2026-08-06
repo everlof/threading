@@ -690,6 +690,26 @@ a bounded tree of visible nodes with a curated, fixed list of visual computed pr
 against. Coordinate space is explicit per capture kind and lives in `BrowserCaptureSpace`; getting it
 wrong does not fail, it silently attributes every region to whatever is near the top of the page.
 
+### What a captured pixel is
+
+Two contracts the whole attribution stack rests on. Both were assumed, both were wrong, and neither
+shows up at scroll 0 and zoom 1 — which is the state anybody testing by hand is in.
+`BrowserCaptureGeometryTests` asks WebKit rather than reasoning about it, and is in the fast plan's
+skip list with the other live-WebKit suites.
+
+- **A full-page capture starts at the document origin.** `WKSnapshotConfiguration.rect` is in the
+  *view's* coordinates, where (0, 0) is the current scroll position, so a capture taken at scroll
+  1000 covered document 1000–4000: the wrong band, running past the end of the document, while three
+  consumers read it as starting at the top — the attribution space adds the scroll back, the overlay
+  anchors at `-scroll`, and `clipped` compares against the document height. `screenshot(fullPage:)`
+  now scrolls to the top and restores afterwards, because a capture is not a navigation and the
+  reader was looking at something.
+- **One captured pixel is `pageZoom` CSS pixels.** The capture is sized from `webView.bounds`, which
+  is points, while every box, offset and scroll attribution reads is CSS pixels. At 200% the two
+  disagree by exactly two, so `BrowserCaptureSpace.scale` is the zoom the capture was taken at and
+  not 1. The overlay carries the same number rather than reading today's zoom: a baseline is a
+  picture of a past moment, so the zoom that matters is the one it was taken at.
+
 ### The two surfaces
 
 `BrowserComparisonViewController` shows baseline against current on `ImageCompareView`, with the diff

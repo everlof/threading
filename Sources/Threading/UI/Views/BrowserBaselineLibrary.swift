@@ -201,7 +201,10 @@ enum BrowserBaselineUI {
                         captureSize: CGSize(
                             width: revision.conditions.pixelWidth,
                             height: revision.conditions.pixelHeight
-                        )
+                        ),
+                        scale: revision.conditions.pageZoom > 0
+                            ? revision.conditions.pageZoom
+                            : 1
                     )
                 }
             )))

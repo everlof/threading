@@ -2203,6 +2203,33 @@ final class BrowserViewController: NSViewController {
     func screenshot(fullPage: Bool = false) async -> BrowserScreenshotCapture? {
         var rect: CGRect?
         var captureSize = webView.bounds.size
+        // `WKSnapshotConfiguration.rect` is in the *view's* coordinates, where (0, 0) is the current
+        // scroll position rather than the document's top. A full-page capture taken while scrolled
+        // therefore covered `scrollY … scrollY + documentHeight` — the wrong band, running past the
+        // end of the document — while everything downstream read it as starting at the document
+        // origin. Measured, not assumed: `BrowserCaptureGeometryTests` bands a page and asks.
+        var restoreScroll: CGPoint?
+        if fullPage {
+            if let scroll = try? await captureContext(),
+               scroll.scrollX > 0 || scroll.scrollY > 0 {
+                restoreScroll = CGPoint(x: scroll.scrollX, y: scroll.scrollY)
+                _ = try? await evaluate("window.scrollTo(0, 0)")
+                try? await Task.sleep(
+                    nanoseconds: BrowserBaselineCaptureDefaults.viewportSettleNanoseconds
+                )
+            }
+        }
+        // Restored after the snapshot, not before it: a capture is not a navigation, and whoever is
+        // looking at the page was looking at a particular part of it.
+        defer {
+            if let restoreScroll {
+                Task { @MainActor [weak self] in
+                    _ = try? await self?.evaluate(
+                        "window.scrollTo(\(restoreScroll.x), \(restoreScroll.y))"
+                    )
+                }
+            }
+        }
         if fullPage, let dimensions = try? await pageDimensions() {
             let captureRect = CGRect(
                 x: 0,
@@ -2698,7 +2725,9 @@ final class BrowserViewController: NSViewController {
         setPageZoom(browserPageZoom + delta)
     }
 
-    private func setPageZoom(_ zoom: Double) {
+    /// Internal rather than private because the capture pipeline's coordinate contract depends on
+    /// it: `BrowserCaptureGeometryTests` sets a zoom and asks WebKit what a captured pixel then is.
+    func setPageZoom(_ zoom: Double) {
         browserPageZoom = min(
             BrowserDefaults.maximumPageZoom,
             max(BrowserDefaults.minimumPageZoom, zoom)

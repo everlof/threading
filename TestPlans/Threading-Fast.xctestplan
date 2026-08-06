@@ -19,6 +19,7 @@
     {
       "skippedTests" : [
         "BrowserAgentBridgeIntegrationTests",
+        "BrowserCaptureGeometryTests",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()"
       ],

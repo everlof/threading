@@ -11,8 +11,15 @@ struct BrowserBaselineOverlayContent: Equatable {
     let captureKind: BrowserBaselineCaptureKind
     /// The document scroll offset the capture was taken at, in CSS pixels.
     let capturedScroll: CGPoint
-    /// The capture's own size in CSS pixels.
+    /// The capture's own size, in the view's points.
     let captureSize: CGSize
+
+    /// Captured pixels per CSS pixel — the page zoom the capture was taken at.
+    ///
+    /// The overlay draws in points and the scroll offset arrives in CSS pixels, so at any zoom but
+    /// 1 the two disagree by exactly this. Carried rather than read from the browser because a
+    /// baseline is a picture of a past moment: the zoom that matters is the one it was taken at.
+    var scale: CGFloat = 1
 
     static func == (
         lhs: BrowserBaselineOverlayContent,
@@ -234,10 +241,18 @@ final class BrowserBaselineOverlay: NSView {
         guard let content else { return (.zero, false) }
         switch content.captureKind {
         case .fullPage:
-            let origin = CGPoint(x: -documentScroll.x, y: -documentScroll.y)
+            let origin = CGPoint(
+                x: -documentScroll.x * content.scale,
+                y: -documentScroll.y * content.scale
+            )
             // Aligned as long as the visible band is inside what the capture actually covers.
+            // The *visible band* must be inside the capture, not merely its top edge: a document
+            // clipped at the 16000 cap runs out under the reader, and claiming alignment there
+            // would present missing pixels as page content that had not changed.
+            let visibleBottom = documentScroll.y * content.scale + bounds.height
             let withinCapture = documentScroll.y >= -Layout.scrollTolerance
-                && documentScroll.y <= content.captureSize.height + Layout.scrollTolerance
+                && visibleBottom <= content.captureSize.height + Layout.scrollTolerance
+                && abs(documentScroll.x) <= Layout.scrollTolerance
             return (origin, withinCapture)
         case .viewport, .element:
             let dx = documentScroll.x - content.capturedScroll.x

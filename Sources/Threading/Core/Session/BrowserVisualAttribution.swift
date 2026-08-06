@@ -265,8 +265,13 @@ struct BrowserCaptureSpace: Equatable, Sendable {
     let offsetX: Double
     let offsetY: Double
 
-    /// Capture pixels per CSS pixel. One today for every capture Threading takes; named so that a
-    /// future device-pixel-ratio capture cannot be introduced by accident.
+    /// Capture pixels per CSS pixel.
+    ///
+    /// This is the page zoom, and it was hardcoded to 1 until a live probe asked WebKit: the capture
+    /// is sized from the web view's **points**, while every box, offset and scroll attribution reads
+    /// is in **CSS pixels**, and page zoom is exactly what separates the two. At 200% one captured
+    /// pixel is two CSS pixels, so a scale of 1 mis-placed every attributed region by the zoom
+    /// factor — silently, and only for users who had zoomed.
     let scale: Double
 
     static func forCapture(
@@ -274,24 +279,25 @@ struct BrowserCaptureSpace: Equatable, Sendable {
         attributionScrollX: Double,
         attributionScrollY: Double
     ) -> BrowserCaptureSpace {
+        let scale = conditions.pageZoom > 0 ? conditions.pageZoom : 1
         switch conditions.captureKind {
         case .viewport:
             // Node boxes are already viewport-relative, which is exactly the capture's own space.
-            return BrowserCaptureSpace(offsetX: 0, offsetY: 0, scale: 1)
+            return BrowserCaptureSpace(offsetX: 0, offsetY: 0, scale: scale)
         case .fullPage:
-            // The capture starts at the document origin, so a viewport-relative box has to travel
-            // back down by the page's scroll.
+            // The capture starts at the document origin — `screenshot(fullPage:)` scrolls there and
+            // back to make that true — so a viewport-relative box travels back down by the scroll.
             return BrowserCaptureSpace(
                 offsetX: attributionScrollX,
                 offsetY: attributionScrollY,
-                scale: 1
+                scale: scale
             )
         case .element:
             let scope = conditions.elementScope
             return BrowserCaptureSpace(
                 offsetX: -(scope?.x ?? 0),
                 offsetY: -(scope?.y ?? 0),
-                scale: 1
+                scale: scale
             )
         }
     }
