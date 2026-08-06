@@ -705,6 +705,9 @@ struct BrowserBaselinesArguments: Decodable, Sendable {
     self.selector = selector
     self.note = note
     self.urlContains = urlContains
+    self.viewportWidth = viewportWidth
+    self.viewportHeight = viewportHeight
+    self.commit = commit
     self.locator = locator
   }
 }

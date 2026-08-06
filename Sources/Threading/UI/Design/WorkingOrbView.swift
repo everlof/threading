@@ -128,7 +128,10 @@ extension OrbState {
         case .searching: L10n.string("Searching…")
         case .solving: L10n.string("Solving…")
         case .listening: L10n.string("Listening…")
+        case .connecting: L10n.string("Connecting…")
+        case .weaving: L10n.string("Weaving…")
         case .composing: L10n.string("Composing…")
+        case .breathing: L10n.string("Breathing…")
         case .shaping: L10n.string("Shaping…")
         }
     }

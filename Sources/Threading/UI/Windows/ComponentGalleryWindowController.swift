@@ -82,6 +82,8 @@ final class ComponentGalleryViewController: NSViewController {
         "BackdropOverlay",
         "BackdropThemedControl",
         "BrowserAnnotationOverlay",
+        "BrowserBaselineOverlay",
+        "BrowserBaselineOverlayHandle",
         "BrowserDeviceToolbar",
         "BrowserFindBar",
         "ChipView",

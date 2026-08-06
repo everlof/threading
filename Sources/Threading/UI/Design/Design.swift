@@ -1196,6 +1196,18 @@ enum Design {
         /// outline's own draw.
         static var brandStrandStagger: TimeInterval { reducesMotion ? 0 : 0.06 }
         static var brandCorePop: TimeInterval { reducesMotion ? 0 : 0.18 }
+
+        /// Hover turns the mark from continuous ink into particles travelling on the same
+        /// canonical paths. These are cadences rather than transition durations: they repeat
+        /// only while the pointer is over the brand row, and no animation is constructed at
+        /// rest or under Reduce Motion.
+        static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
+        static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
+        /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
+        /// six-fold silhouette at the end is the silhouette it had at the beginning.
+        static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
+        /// The outer dots answer a press first; this is the whole outer-to-core cascade.
+        static var brandParticlePressCascade: TimeInterval { reducesMotion ? 0 : 0.1 }
     }
 
     // MARK: - Opacity
