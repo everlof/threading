@@ -257,6 +257,11 @@ struct BrowserBaselineRevision: Codable, Equatable, Sendable, Identifiable {
     let sourceTabID: UUID?
     let note: String?
 
+    /// Whether `diagnostics.json` sits beside the PNG: the page's own report of itself at capture
+    /// time. Separate from the visual state because it answers a different question and is read on
+    /// a different request.
+    let hasDiagnostics: Bool
+
     /// Whether `state.json` sits beside the PNG.
     ///
     /// A flag rather than an optional payload: the state is the largest thing in the bundle and is
@@ -273,6 +278,7 @@ struct BrowserBaselineRevision: Codable, Equatable, Sendable, Identifiable {
         case sourceSessionID = "source_session_id"
         case sourceTabID = "source_tab_id"
         case hasAttribution = "has_attribution"
+        case hasDiagnostics = "has_diagnostics"
     }
 
     init(
@@ -285,7 +291,8 @@ struct BrowserBaselineRevision: Codable, Equatable, Sendable, Identifiable {
         sourceSessionID: SessionID?,
         sourceTabID: UUID?,
         note: String?,
-        hasAttribution: Bool = false
+        hasAttribution: Bool = false,
+        hasDiagnostics: Bool = false
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -297,6 +304,7 @@ struct BrowserBaselineRevision: Codable, Equatable, Sendable, Identifiable {
         self.sourceTabID = sourceTabID
         self.note = note
         self.hasAttribution = hasAttribution
+        self.hasDiagnostics = hasDiagnostics
     }
 
     init(from decoder: Decoder) throws {
@@ -311,6 +319,7 @@ struct BrowserBaselineRevision: Codable, Equatable, Sendable, Identifiable {
         sourceTabID = try container.decodeIfPresent(UUID.self, forKey: .sourceTabID)
         note = try container.decodeIfPresent(String.self, forKey: .note)
         hasAttribution = try container.decodeIfPresent(Bool.self, forKey: .hasAttribution) ?? false
+        hasDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .hasDiagnostics) ?? false
     }
 }
 
@@ -358,6 +367,9 @@ struct BrowserBaselineCaptureRequest {
     /// The bounded visual-attribution state captured beside the pixels, already encoded. Absent is
     /// ordinary: only a caller that asked for structure pays for it.
     var attributionJSON: Data?
+    /// The page's own report of itself — timings, console, network, accessibility — already
+    /// encoded. Absent is ordinary for the same reason.
+    var diagnosticsJSON: Data?
 
     init(
         name: String,
@@ -368,7 +380,8 @@ struct BrowserBaselineCaptureRequest {
         sourceSessionID: SessionID? = nil,
         sourceTabID: UUID? = nil,
         note: String? = nil,
-        attributionJSON: Data? = nil
+        attributionJSON: Data? = nil,
+        diagnosticsJSON: Data? = nil
     ) {
         self.name = name
         self.pngData = pngData
@@ -379,6 +392,7 @@ struct BrowserBaselineCaptureRequest {
         self.sourceTabID = sourceTabID
         self.note = note
         self.attributionJSON = attributionJSON
+        self.diagnosticsJSON = diagnosticsJSON
     }
 }
 
@@ -621,6 +635,19 @@ final class BrowserBaselineStore {
         try? Data(
             contentsOf: revisionDirectory(revisionID, of: baselineID, in: projectID)
                 .appendingPathComponent(BrowserBaselineDefaults.stateFileName),
+            options: .mappedIfSafe
+        )
+    }
+
+    /// The page's own report stored beside one revision's pixels, when it has one.
+    func diagnosticsJSON(
+        forRevision revisionID: BrowserBaselineRevisionID,
+        of baselineID: BrowserBaselineID,
+        in projectID: ProjectID
+    ) -> Data? {
+        try? Data(
+            contentsOf: revisionDirectory(revisionID, of: baselineID, in: projectID)
+                .appendingPathComponent(BrowserBaselineDefaults.diagnosticsFileName),
             options: .mappedIfSafe
         )
     }
@@ -956,17 +983,22 @@ final class BrowserBaselineStore {
         let attribution = request.attributionJSON.flatMap {
             $0.count <= BrowserBaselineDefaults.maximumAttributionBytes ? $0 : nil
         }
+        let diagnostics = request.diagnosticsJSON.flatMap {
+            $0.count <= BrowserDiagnosticsDefaults.maximumBytes ? $0 : nil
+        }
         let revision = BrowserBaselineRevision(
             id: BrowserBaselineRevisionID(),
             capturedAt: now(),
             provenance: request.provenance,
             conditions: conditions,
             contentHash: BrowserBaselineImage.hash(request.pngData),
-            byteCount: request.pngData.count + (attribution?.count ?? 0),
+            byteCount: request.pngData.count + (attribution?.count ?? 0)
+                + (diagnostics?.count ?? 0),
             sourceSessionID: request.sourceSessionID,
             sourceTabID: request.sourceTabID,
             note: request.note.map { String($0.prefix(BrowserBaselineDefaults.maximumNoteLength)) },
-            hasAttribution: attribution != nil
+            hasAttribution: attribution != nil,
+            hasDiagnostics: diagnostics != nil
         )
 
         let baselineDirectory = baselineDirectory(baselineID, in: projectID)
@@ -988,6 +1020,12 @@ final class BrowserBaselineStore {
             if let attribution {
                 try attribution.write(
                     to: staging.appendingPathComponent(BrowserBaselineDefaults.stateFileName),
+                    options: .atomic
+                )
+            }
+            if let diagnostics {
+                try diagnostics.write(
+                    to: staging.appendingPathComponent(BrowserBaselineDefaults.diagnosticsFileName),
                     options: .atomic
                 )
             }
@@ -1014,13 +1052,22 @@ final class BrowserBaselineStore {
         let imageURL = staging.appendingPathComponent(BrowserBaselineDefaults.imageFileName)
         let stateURL = staging.appendingPathComponent(BrowserBaselineDefaults.stateFileName)
         let stateBytes = (try? Data(contentsOf: stateURL))?.count ?? 0
+        let diagnosticsURL = staging.appendingPathComponent(
+            BrowserBaselineDefaults.diagnosticsFileName
+        )
+        let diagnosticsBytes = (try? Data(contentsOf: diagnosticsURL))?.count ?? 0
+        guard revision.hasDiagnostics == (diagnosticsBytes > 0) else {
+            throw BrowserBaselineStoreError.persistenceFailed(
+                L10n.string("the captured page state was not stored beside its image")
+            )
+        }
         guard revision.hasAttribution == (stateBytes > 0) else {
             throw BrowserBaselineStoreError.persistenceFailed(
                 L10n.string("the captured page state was not stored beside its image")
             )
         }
         guard let written = try? Data(contentsOf: imageURL),
-              written.count + stateBytes == revision.byteCount,
+              written.count + stateBytes + diagnosticsBytes == revision.byteCount,
               BrowserBaselineImage.hash(written) == revision.contentHash,
               let size = BrowserBaselineImage.pixelSize(of: written),
               size.width == revision.conditions.pixelWidth,
@@ -1411,6 +1458,7 @@ enum BrowserBaselineDefaults {
     static let manifestFileName = "manifest.json"
     static let imageFileName = "baseline.png"
     static let stateFileName = "state.json"
+    static let diagnosticsFileName = "diagnostics.json"
     /// A directory being assembled. Prefixed rather than hidden so a reader can see what a failed
     /// write left behind, and skipped by the loader for the same reason it is not yet a revision.
     static let stagingPrefix = "staging-"

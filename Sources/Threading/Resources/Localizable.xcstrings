@@ -1,6 +1,27 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Hide Layout Shifts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dölj layoutförskjutningar" } } }
+    },
+    "Show Layout Shifts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visa layoutförskjutningar" } } }
+    },
+    "Layout shift · %@ · %lld places": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Layoutförskjutning · %@ · %lld ställen" } } }
+    },
+    "No Layout-Shift Data": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen data om layoutförskjutning" } } }
+    },
+    "Outline where this page moved while it loaded": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rita var sidan flyttade sig medan den laddades" } } }
+    },
+    "This page reported no layout-shift measurements. WebKit does not record them for every document, so this is not the same as the page having stayed still.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sidan rapporterade inga mätningar av layoutförskjutning. WebKit registrerar dem inte för varje dokument, så det är inte samma sak som att sidan stått stilla." } } }
+    },
+    "the two capture windows are %lld and %lld seconds long, so counts are not comparable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "de två fönstren är %lld och %lld sekunder långa, så antalen går inte att jämföra" } } }
+    },
     "Keep the page as it was before each agent action": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behåll sidan som den var före varje agentåtgärd" } } }
     },

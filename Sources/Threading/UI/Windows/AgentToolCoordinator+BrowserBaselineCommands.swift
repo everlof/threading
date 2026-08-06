@@ -267,7 +267,13 @@ extension AgentToolCoordinator {
                     sourceTabID: self.displayPaneController.tabs(for: sessionID)
                         .first { $0.browser === browser }?.id,
                     note: arguments.note,
-                    attributionJSON: capture.attribution.flatMap(Self.encodeAttribution)
+                    attributionJSON: capture.attribution.flatMap(Self.encodeAttribution),
+                    // Recorded by default: it is small beside the pixels, and a baseline that
+                    // cannot answer "did this page get slower" later is a baseline somebody has to
+                    // retake to find out.
+                    diagnosticsJSON: Self.encodeDiagnostics(
+                        await browser.captureDiagnostics()
+                    )
                 )
 
                 do {
@@ -450,6 +456,7 @@ extension AgentToolCoordinator {
                     show: arguments.show,
                     includeImage: arguments.includeImage ?? true,
                     matchesBaselineViewport: arguments.matchBaselineViewport ?? false,
+                    comparesDiagnostics: arguments.diagnostics == true,
                     ref: arguments.ref,
                     selector: arguments.selector,
                     locator: arguments.locator,
@@ -625,6 +632,7 @@ extension AgentToolCoordinator {
         show: Bool?,
         includeImage: Bool,
         matchesBaselineViewport: Bool,
+        comparesDiagnostics: Bool,
         ref: String?,
         selector: String?,
         locator: BrowserSemanticLocator?,
@@ -776,8 +784,25 @@ extension AgentToolCoordinator {
             dependencies.displayStore.cacheBrowserVisualArtifact($0, kind: "diff", for: sessionID)
         }
 
+        var diagnosticsLines: [String] = []
+        if comparesDiagnostics {
+            if let stored = storedDiagnostics(for: source) {
+                let now = await browser.captureDiagnostics()
+                diagnosticsLines = BrowserDiagnosticsReport.lines(
+                    for: BrowserDiagnosticsComparator.compare(baseline: stored, actual: now),
+                    baseline: stored,
+                    actual: now
+                )
+            } else {
+                diagnosticsLines = [
+                    "Diagnostics: the baseline has none stored, so there is nothing to compare "
+                        + "against. Capture a new revision to record them."
+                ]
+            }
+        }
+
         let evidence = comparison.diffPNG ?? capture.pngData
-        var lines = report.lines
+        var lines = report.lines + diagnosticsLines
         if let actualURL { lines.append("Actual PNG: \(actualURL.path)") }
         if let diffURL { lines.append("Diff PNG: \(diffURL.path)") }
         if shouldShow {
@@ -803,6 +828,21 @@ extension AgentToolCoordinator {
             return nil
         }
         return CGSize(width: conditions.viewportWidth, height: conditions.viewportHeight)
+    }
+
+    /// The page's own report as the baseline recorded it. Only a stored revision has one: a live
+    /// tab and a before-shot are pixels taken in a moment, with no diagnostics behind them.
+    private func storedDiagnostics(for source: BaselineSource) -> BrowserDiagnosticsSnapshot? {
+        guard case .stored(let projectID, let baseline, let revision) = source,
+              revision.hasDiagnostics,
+              let data = dependencies.baselines.diagnosticsJSON(
+                forRevision: revision.id,
+                of: baseline.id,
+                in: projectID
+              ) else {
+            return nil
+        }
+        return Self.decodeDiagnostics(data)
     }
 
     private func baselineAttribution(for source: BaselineSource) -> BrowserAttributionState? {
@@ -893,6 +933,19 @@ extension AgentToolCoordinator {
     }
 
     // MARK: Helpers
+
+    static func encodeDiagnostics(_ snapshot: BrowserDiagnosticsSnapshot) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try? encoder.encode(snapshot)
+    }
+
+    static func decodeDiagnostics(_ data: Data) -> BrowserDiagnosticsSnapshot? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(BrowserDiagnosticsSnapshot.self, from: data)
+    }
 
     static func encodeAttribution(_ state: BrowserAttributionState) -> Data? {
         let encoder = JSONEncoder()

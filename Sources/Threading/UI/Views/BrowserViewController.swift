@@ -576,6 +576,11 @@ final class BrowserViewController: NSViewController {
     private var observations: [NSKeyValueObservation] = []
     private var consoleMessages: [BrowserConsoleMessage] = []
     private var networkEntries: [BrowserNetworkEntry] = []
+
+    /// The buffers as a diagnostics capture reads them. Internal rather than private because the
+    /// snapshot is assembled in `BrowserDiagnosticsCapture`, beside the comparison it feeds.
+    var capturedConsoleMessages: [BrowserConsoleMessage] { consoleMessages }
+    var capturedNetworkEntries: [BrowserNetworkEntry] { networkEntries }
     private var scriptMessageProxy: WeakBrowserScriptMessageHandler?
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
     private var recentDownloads: [URL] = []
@@ -2013,6 +2018,16 @@ final class BrowserViewController: NSViewController {
     /// Deliberately not part of `snapshot`: that answers "what can I act on", is capped at 180
     /// nodes, and mints refs as it goes. This answers "what is drawn where, and why", keeps its own
     /// caps, and mints nothing — a capture must not renumber the page the agent is working against.
+    /// The layout shifts this document already recorded, as rectangles in viewport CSS pixels.
+    func layoutShiftReport(
+        maximumRects: Int = BrowserAgentDefaults.maximumLayoutShiftRects
+    ) async throws -> BrowserLayoutShiftReport {
+        try await callAgentScript(
+            BrowserAgentScripts.layoutShiftRects,
+            arguments: ["maximumRects": maximumRects]
+        )
+    }
+
     func attributionState(maximumNodes: Int) async throws -> BrowserAttributionState {
         // The script shares the target prelude for `roleOf`/`nameOf`/`clean`, so it takes the same
         // argument shape even though it resolves no target of its own.
@@ -2747,6 +2762,19 @@ final class BrowserViewController: NSViewController {
         }
     }
 
+    /// WebKit not implementing layout-shift entries is a different answer from a steady page, and
+    /// silently drawing nothing would present the first as the second.
+    private func showLayoutShiftUnavailable() {
+        let alert = ThemedAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.string("No Layout-Shift Data")
+        alert.informativeText = L10n.string(
+            "This page reported no layout-shift measurements. WebKit does not record them for "
+                + "every document, so this is not the same as the page having stayed still."
+        )
+        alert.runModal()
+    }
+
     private func showScreenshotFailure(_ detail: String?) {
         let alert = ThemedAlert()
         alert.alertStyle = .warning
@@ -2973,6 +3001,28 @@ final class BrowserViewController: NSViewController {
                         anchor: self.chromeBar.overflowButton,
                         sessionID: baselineSessionID
                     )
+                }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: isShowingLayoutShiftOverlay
+                    ? L10n.string("Hide Layout Shifts")
+                    : L10n.string("Show Layout Shifts"),
+                subtitle: L10n.string("Outline where this page moved while it loaded"),
+                image: BrowserChromeBar.image(
+                    "arrow.up.and.down.and.arrow.left.and.right",
+                    accessibility: L10n.string("Show Layout Shifts")
+                ),
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    if self.isShowingLayoutShiftOverlay {
+                        self.hideLayoutShiftOverlay()
+                        return
+                    }
+                    Task { @MainActor in
+                        if await self.showLayoutShiftOverlay() == nil {
+                            self.showLayoutShiftUnavailable()
+                        }
+                    }
                 }
             )))
             entries.append(.item(ThemedMenuItem(

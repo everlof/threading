@@ -169,6 +169,26 @@ struct BrowserTargetStateObservation: Decodable, Equatable {
     let actual: String
 }
 
+/// Where the page moved under the reader during this document's load.
+struct BrowserLayoutShiftReport: Decodable, Equatable {
+    struct Shift: Decodable, Equatable {
+        let x: Double
+        let y: Double
+        let width: Double
+        let height: Double
+        /// The shift score this rectangle belonged to, so the loudest movement can be drawn
+        /// loudest rather than every rectangle looking equally important.
+        let value: Double
+    }
+
+    /// False where WebKit does not implement the layout-shift entry type. Reported rather than
+    /// treated as "no shifts", because the two are not the same answer.
+    let supported: Bool
+    let total: Double
+    let rects: [Shift]
+    let truncated: Bool?
+}
+
 struct BrowserPageDimensions: Decodable, Equatable {
     let width: Int
     let height: Int
@@ -3322,6 +3342,53 @@ enum BrowserAgentScripts {
         });
         """#
 
+    /// Where the page moved under the reader, as rectangles.
+    ///
+    /// `PerformanceObserver` with `buffered: true` replays the layout shifts already recorded for
+    /// this document, so this answers about the load that happened rather than installing a watcher
+    /// and waiting for another one. Each shift names its sources; the *previous* rect is the one
+    /// worth drawing, because that is where the content was when the reader was looking at it.
+    ///
+    /// Shifts with `hadRecentInput` are excluded, as the metric itself does: content moving because
+    /// somebody just typed is not the failure this measures.
+    static let layoutShiftRects = #"""
+        const maximum = Math.max(1, Math.min(Number(maximumRects) || 0, 200));
+        let entries = [];
+        try {
+          const observer = new PerformanceObserver(() => {});
+          observer.observe({ type: 'layout-shift', buffered: true });
+          entries = observer.takeRecords ? observer.takeRecords() : [];
+          observer.disconnect();
+        } catch (_) {
+          return JSON.stringify({ supported: false, total: 0, rects: [] });
+        }
+
+        const rects = [];
+        let total = 0;
+        for (const entry of entries) {
+          if (entry.hadRecentInput) continue;
+          total += Number(entry.value) || 0;
+          for (const source of (entry.sources || [])) {
+            if (rects.length >= maximum) break;
+            const box = source.previousRect || source.currentRect;
+            if (!box || box.width <= 0 || box.height <= 0) continue;
+            rects.push({
+              x: Number(box.x) || 0,
+              y: Number(box.y) || 0,
+              width: Number(box.width) || 0,
+              height: Number(box.height) || 0,
+              value: Number(entry.value) || 0
+            });
+          }
+        }
+        return JSON.stringify({
+          supported: true,
+          total,
+          rects,
+          truncated: rects.length >= maximum
+        });
+        """#
+
     static let performanceReport = #"""
         const finite = value => {
           const number = Number(value);
@@ -3930,6 +3997,10 @@ enum BrowserAgentDefaults {
     static let maximumAttributionElements = 20_000
 
     /// What a comparison may return: rectangles after coalescing, and structural findings.
+    /// Layout-shift rectangles one overlay may draw. A page that reflowed continuously would
+    /// otherwise hand back a rectangle per source per shift and paint the viewport solid.
+    static let maximumLayoutShiftRects = 60
+
     static let maximumChangedRegions = 24
     static let maximumStructuralFindings = 24
     static let maximumWaitSeconds: Double = 15

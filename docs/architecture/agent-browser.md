@@ -721,6 +721,39 @@ recorded viewport before capturing. So N presets means N baselines, each compare
 One viewport's baseline is never scaled to stand in for another — that is the same rule the
 dimension handling already enforces, reached from the other direction.
 
+### Diffs that are not pixels
+
+The same product shape pointed at what the page says about itself. None of it was free once images
+worked: each needed its own bounded, versioned snapshot, and each has one rule that keeps it honest.
+
+`BrowserDiagnosticsSnapshot` records timings, console, network and accessibility findings, stored as
+`diagnostics.json` in the revision bundle beside `baseline.png` and `state.json`, and compared when
+`browser_visual_compare` is asked for `diagnostics`.
+
+- **Timings are measured against a noise floor and never called a regression on one run.** Two runs
+  of an unchanged page differ anyway; a report that presents a three-millisecond move as a
+  regression teaches everybody to ignore it. Layout shift gets its own floor because it is unitless
+  rather than milliseconds, and long-task counts get theirs because they are integers.
+- **Console and network carry the window they were collected over.** The live buffers clear on their
+  own schedule, so "this 404 is new" is meaningless without an interval. Two windows more than three
+  times apart in length are declared not comparable rather than normalised into a rate the page
+  never reported.
+- **Everything is fingerprinted, and identity excludes the count.** A line carrying a timestamp or a
+  request id is otherwise new on every capture, and a URL carrying a record id makes one resource
+  look like a hundred. Digits are masked and identifier-shaped path segments collapse to `*`. The
+  count is shown but is deliberately *not* part of identity: a warning that happened forty times
+  instead of once is the same warning, and folding the count in would report it as added and
+  removed at once. That bug existed until the test for it was written.
+- **Accessibility findings drop their refs.** Keeping one would invite matching on it, which is the
+  mistake the structural diff already refuses.
+
+The layout-shift overlay draws where the page moved under the reader, on the same surface as a held
+baseline and under the same two contracts: it passes clicks through, and it never reaches the DOM.
+It draws each shift's **previous** rectangle, because that is where the reader was looking when the
+page pulled it away, and it weights opacity by the shift's own score so a jolt and a hairline do not
+shout equally. A page WebKit records no layout-shift entries for is reported as unavailable, which
+is a different answer from a page that stayed still.
+
 ### Deliberately not built
 
 CPU and network throttling stay unsupported in `WKWebView` and `browser_capabilities` keeps saying so;

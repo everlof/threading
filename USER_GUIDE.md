@@ -1771,6 +1771,15 @@ how staging is held against production. Both sites need your permission, because
 looked at. And a baseline can be captured at an exact device size and compared at that size later,
 so a phone layout is checked against a phone baseline rather than being stretched into one.
 
+A comparison can also cover what the page says about itself rather than only how it looks: load and
+paint timings, console lines, requests, and accessibility findings, all recorded with the baseline.
+Timings are held to a noise floor, so a few milliseconds either way is reported as nothing rather
+than as a regression, and a warning that simply happened more often is not called new.
+
+**Browser Options ▸ Show Layout Shifts** outlines where the page moved while it was loading, drawing
+each box where the content *was* when you were looking at it. Pages WebKit records no shift data for
+say so rather than appearing to have stayed still.
+
 ### Execution audit
 
 Open **Execution Audit** from the display panel's **+** menu to review what an agent actually asked

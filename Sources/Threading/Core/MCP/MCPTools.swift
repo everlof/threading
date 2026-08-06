@@ -569,12 +569,14 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
   let ignoreRects: [BrowserIgnoreRectArguments]?
   /// `summary`, `regions`, or `structure`.
   let detail: String?
+  /// Also compare what the page reports about itself: timings, console, network, accessibility.
+  let diagnostics: Bool?
   let show: Bool?
   let includeImage: Bool?
   var locator: BrowserSemanticLocator? = nil
 
   private enum CodingKeys: String, CodingKey {
-    case ref, selector, locator, show, threshold, detail
+    case ref, selector, locator, show, threshold, detail, diagnostics
     case baselineID = "baseline_id"
     case baselineName = "baseline_name"
     case baselinePath = "baseline_path"
@@ -607,6 +609,7 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
     ignoreAntiAliasing: Bool? = nil,
     ignoreRects: [BrowserIgnoreRectArguments]? = nil,
     detail: String? = nil,
+    diagnostics: Bool? = nil,
     show: Bool? = nil,
     includeImage: Bool? = nil,
     locator: BrowserSemanticLocator? = nil
@@ -626,6 +629,7 @@ struct BrowserVisualCompareArguments: Decodable, Sendable {
     self.ignoreAntiAliasing = ignoreAntiAliasing
     self.ignoreRects = ignoreRects
     self.detail = detail
+    self.diagnostics = diagnostics
     self.show = show
     self.includeImage = includeImage
     self.locator = locator
@@ -3921,6 +3925,17 @@ enum MCPTools {
             description: """
               summary (default), regions, or structure. Higher levels cost a second bounded \
               page read and are worth it once you know something changed.
+              """
+          ),
+          "diagnostics": MCPPropertySchema(
+            type: .boolean,
+            description: """
+              Also compare what the page reports about itself: navigation and paint timings, \
+              console lines, requests, and accessibility findings. Needs the baseline to have \
+              recorded them, which captures do by default. Timing changes are reported against a \
+              noise floor and never called a regression on one run; console and network entries \
+              are matched on a fingerprint with digits masked, so an id or a timestamp in a \
+              message does not make it new every time.
               """
           ),
           "full_page": MCPPropertySchema(

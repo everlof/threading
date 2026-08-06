@@ -127,6 +127,21 @@ final class BrowserBaselineOverlay: NSView {
         }
     }
 
+    /// Where the page moved under the reader, in viewport CSS pixels.
+    ///
+    /// Drawn by the same surface as a held baseline because it answers the same shape of question —
+    /// "what is not where it should be" — and because it must obey the same two contracts: it
+    /// passes clicks through, and it never reaches the DOM, so a screenshot taken with it up is of
+    /// the page rather than of the annotation.
+    var layoutShifts: [BrowserLayoutShiftRegion] = [] {
+        didSet {
+            guard layoutShifts != oldValue else { return }
+            handle.isHidden = content == nil
+            updateAccessibility()
+            needsDisplay = true
+        }
+    }
+
     /// Raised when the user dismisses the overlay from its own surface.
     var onDismiss: (() -> Void)?
 
@@ -163,7 +178,7 @@ final class BrowserBaselineOverlay: NSView {
     /// real subview rather than something drawn: a drawn control would need this method to answer
     /// "yes" over a region, which is one refactor away from swallowing a click on a link.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard content != nil, !handle.isHidden else { return nil }
+        guard content != nil || !layoutShifts.isEmpty, !handle.isHidden else { return nil }
         // `hitTest` takes the point in the *superview's* space, and `handle.hitTest` wants it in
         // the handle's superview — which is this view. Converting a second time, into the handle's
         // own coordinates, is the mistake that made the handle unclickable while every test that
@@ -238,7 +253,14 @@ final class BrowserBaselineOverlay: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let content else { return }
+        guard let content else {
+            if !layoutShifts.isEmpty {
+                drawModeFrame()
+                drawLayoutShifts()
+                drawShiftBadge()
+            }
+            return
+        }
 
         let placement = alignment
         let imageRect = CGRect(
@@ -273,7 +295,46 @@ final class BrowserBaselineOverlay: NSView {
 
         drawModeFrame()
         if mode == .wipe { drawSeam() }
+        drawLayoutShifts()
         drawBadge(for: content, isAligned: placement.isAligned)
+    }
+
+    /// Outlines where content used to be before it moved.
+    ///
+    /// The *previous* rectangle, not the current one, because that is where the reader was looking
+    /// when the page pulled it away. Opacity follows the shift's own score, so a comparison between
+    /// a jolt and a hairline is visible rather than every rectangle shouting equally.
+    private func drawLayoutShifts() {
+        guard !layoutShifts.isEmpty else { return }
+        let loudest = layoutShifts.map(\.value).max() ?? 0
+        for shift in layoutShifts {
+            let rect = CGRect(x: shift.x, y: shift.y, width: shift.width, height: shift.height)
+                .intersection(bounds)
+            guard !rect.isNull, rect.width > 1, rect.height > 1 else { continue }
+
+            let weight = loudest > 0 ? max(0.25, min(1, shift.value / loudest)) : 1
+            let shape = ThemedSurface.Shape(
+                rect: rect,
+                radius: Design.Radius.control(fitting: rect.size)
+            ).inset(by: Layout.frameWidth / 2)
+            Design.Status.warning.withAlphaComponent(0.18 * weight).setFill()
+            shape.path.fill()
+            Design.Status.warning.withAlphaComponent(0.7 + 0.3 * weight).setStroke()
+            let path = shape.path
+            path.lineWidth = Layout.frameWidth
+            path.stroke()
+        }
+    }
+
+    /// Names what the rectangles are, when they are the only thing on the surface.
+    private func drawShiftBadge() {
+        let total = layoutShifts.reduce(0) { $0 + $1.value }
+        let title = L10n.format(
+            "Layout shift · %@ · %lld places",
+            String(format: "%.3f", total),
+            Int64(layoutShifts.count)
+        )
+        drawBadge(titled: title)
     }
 
     /// The same frame annotation mode draws, for the same reason: the surface is in a mode, and
@@ -311,6 +372,10 @@ final class BrowserBaselineOverlay: NSView {
         if !isAligned {
             title += " · " + L10n.string("scrolled away from where this was captured")
         }
+        drawBadge(titled: title)
+    }
+
+    private func drawBadge(titled title: String) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.detail(weight: .semibold),
             .foregroundColor: Design.Text.selected
@@ -451,4 +516,19 @@ final class BrowserBaselineOverlayHandle: ThemedControl {
         path.stroke()
         drawKeyboardFocus(around: shape)
     }
+}
+
+// MARK: - Layout Shift
+
+/// One place the page moved under the reader, in the overlay's own coordinates.
+///
+/// A plain value rather than the bridge's decoded report, because the overlay is a Design component
+/// and must not know the shape of a browser bridge payload. The browser converts.
+struct BrowserLayoutShiftRegion: Equatable, Sendable {
+    let x: CGFloat
+    let y: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    /// The shift score this rectangle belonged to; drives how loudly it is drawn.
+    let value: Double
 }

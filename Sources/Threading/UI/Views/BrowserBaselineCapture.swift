@@ -208,10 +208,44 @@ extension BrowserViewController {
         baselineOverlayView.needsDisplay = true
     }
 
+    /// Draws where the page moved during this document's load, and answers how much moved.
+    ///
+    /// Nil means WebKit did not implement the entry type for this document, which is a different
+    /// answer from "nothing moved" and is passed back as one.
+    @MainActor
+    @discardableResult
+    func showLayoutShiftOverlay() async -> Double? {
+        guard let report = try? await layoutShiftReport(), report.supported else {
+            return nil
+        }
+        baselineOverlayView.layoutShifts = report.rects.map {
+            BrowserLayoutShiftRegion(
+                x: $0.x,
+                y: $0.y,
+                width: $0.width,
+                height: $0.height,
+                value: $0.value
+            )
+        }
+        baselineOverlayView.isHidden = report.rects.isEmpty
+        return report.total
+    }
+
+    @MainActor
+    func hideLayoutShiftOverlay() {
+        baselineOverlayView.layoutShifts = []
+        if baselineOverlayView.content == nil { baselineOverlayView.isHidden = true }
+    }
+
+    @MainActor
+    var isShowingLayoutShiftOverlay: Bool {
+        !baselineOverlayView.isHidden && !baselineOverlayView.layoutShifts.isEmpty
+    }
+
     @MainActor
     func hideBaselineOverlay() {
-        baselineOverlayView.isHidden = true
         baselineOverlayView.content = nil
+        if baselineOverlayView.layoutShifts.isEmpty { baselineOverlayView.isHidden = true }
     }
 
     @MainActor
