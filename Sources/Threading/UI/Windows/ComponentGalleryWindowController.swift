@@ -173,6 +173,7 @@ final class ComponentGalleryViewController: NSViewController {
     private let themePopUp = ThemedPopUp()
     /// The mark stories' views, retained so the replay control can reach them.
     private var markSamples: [ThreadingMarkView] = []
+    private var particleMarkSamples: [ThreadingMarkView] = []
     private let appearanceToggle = ThemedToggle()
     private let receiptLabel = NSTextField(
         labelWithString: L10n.string("Ready — interact with any story.")
@@ -1197,9 +1198,15 @@ final class ComponentGalleryViewController: NSViewController {
         }
         let orbButton = button("Hide orbs", action: #selector(toggleWorkingOrb))
         orbButton.setAccessibilityIdentifier("gallery.working-orb.toggle")
-        let orbVariants = row(workingOrbs.map { orb in
-            labelledControl(orb.state.localizedLabel, control: orb)
-        })
+        let orbVariantRows = stride(from: 0, to: workingOrbs.count, by: 3).map { start in
+            row(workingOrbs[start..<min(start + 3, workingOrbs.count)].map { orb in
+                labelledControl(orb.state.localizedLabel, control: orb)
+            })
+        }
+        let orbVariants = NSStackView(views: orbVariantRows)
+        orbVariants.orientation = .vertical
+        orbVariants.alignment = .leading
+        orbVariants.spacing = Design.Spacing.medium
 
         morphingTitle.applyFont(.emphasizedBody)
         morphingTitle.setStringValue("Rename this conversation", animated: false)
@@ -1243,7 +1250,7 @@ final class ComponentGalleryViewController: NSViewController {
                 ),
                 story(
                     "WorkingOrbView",
-                    "All six theme-accented variants. A conversation chooses one per turn; "
+                    "All nine theme-accented variants. A conversation chooses one per turn; "
                         + "visibility starts and idles its animation.",
                     row([orbVariants, orbButton])
                 ),
@@ -1547,7 +1554,8 @@ final class ComponentGalleryViewController: NSViewController {
                 story(
                     "ThreadingMarkView",
                     "The Threading mark drawn live: brand threads under System, the theme's "
-                        + "accent under a style. Click it to replay the launch stitch.",
+                        + "accent under a style. Rest, then Weave, Breathe and Orbit from left "
+                        + "to right; preview the hover motion or replay the launch stitch.",
                     makeThreadingMarkSample()
                 ),
                 story(
@@ -1897,18 +1905,24 @@ final class ComponentGalleryViewController: NSViewController {
         return backdrop
     }
 
-    /// The mark at several sizes, so the stroke ratios can be judged where they will be used
-    /// (the 20pt brand slot) and where they can be inspected (64pt).
+    /// The mark at rest and in all three particle treatments. They are deliberately shown at
+    /// inspection size here; the real sidebar exercises Weave at 24pt.
     private func makeThreadingMarkSample() -> NSView {
         let small = ThreadingMarkView()
-        let large = ThreadingMarkView()
+        let particleMarks = ThreadingMarkParticleMotion.allCases.map(ThreadingMarkView.init)
 
-        NSLayoutConstraint.activate([
+        var constraints = [
             small.widthAnchor.constraint(equalToConstant: 20),
-            small.heightAnchor.constraint(equalToConstant: 20),
-            large.widthAnchor.constraint(equalToConstant: 64),
-            large.heightAnchor.constraint(equalToConstant: 64)
-        ])
+            small.heightAnchor.constraint(equalToConstant: 20)
+        ]
+        for mark in particleMarks {
+            constraints += [
+                mark.widthAnchor.constraint(equalToConstant: 44),
+                mark.heightAnchor.constraint(equalToConstant: 44)
+            ]
+            mark.setParticlePresentation(phase: 0.34)
+        }
+        NSLayoutConstraint.activate(constraints)
 
         let replay = ThemedButton()
         replay.title = L10n.string("Replay")
@@ -1916,9 +1930,18 @@ final class ComponentGalleryViewController: NSViewController {
         replay.applyFont(.controlRegular)
         replay.target = self
         replay.action = #selector(replayMarkDrawIn(_:))
-        markSamples = [small, large]
 
-        let row = NSStackView(views: [small, large, replay])
+        let preview = ThemedButton()
+        preview.title = L10n.string("Preview")
+        preview.isBordered = false
+        preview.applyFont(.controlRegular)
+        preview.target = self
+        preview.action = #selector(previewMarkParticles(_:))
+
+        markSamples = [small] + particleMarks
+        particleMarkSamples = particleMarks
+
+        let row = NSStackView(views: [small] + particleMarks + [preview, replay])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.medium
@@ -1926,8 +1949,22 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     @objc private func replayMarkDrawIn(_ sender: Any?) {
+        particleMarkSamples.forEach { $0.setParticlePresentation(phase: nil) }
         markSamples.forEach { $0.playDrawIn() }
         showReceipt(L10n.string("Mark draw-in replayed."))
+    }
+
+    @objc private func previewMarkParticles(_ sender: Any?) {
+        particleMarkSamples.forEach {
+            $0.setParticlePresentation(phase: nil)
+            $0.setHovered(true)
+        }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Design.Motion.brandParticleOrbitCycle
+        ) { [weak self] in
+            self?.particleMarkSamples.forEach { $0.setHovered(false) }
+        }
+        showReceipt(L10n.string("Particle marks previewed."))
     }
 
     private func makeSidebarBrandSample() -> NSView {

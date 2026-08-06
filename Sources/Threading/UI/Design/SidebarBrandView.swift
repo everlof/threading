@@ -30,7 +30,9 @@ final class SidebarBrandView: NSView, ThemedComponent {
         static let logoSide: CGFloat = 24
     }
 
-    private let mark = ThreadingMarkView()
+    /// Weave is the compact treatment: its dots stay on the actual shield and thread paths,
+    /// so the 24pt mark remains recognisable while the whole row is under the pointer.
+    private let mark = ThreadingMarkView(particleMotion: .weave)
     /// A theme-supplied logo. Frameless and content-only — structural AppKit.
     private let customLogo = NSImageView()
     private let wordmark = MorphingTitleLabel()

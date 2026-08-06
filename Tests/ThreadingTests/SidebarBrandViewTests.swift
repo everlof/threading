@@ -41,6 +41,101 @@ final class SidebarBrandViewTests: XCTestCase {
         }
     }
 
+    func testParticleGeometrySamplesTheShieldThreadsAndCoreIndividually() {
+        let seeds = ThreadingMarkGeometry.particleSeeds(outlineCount: 18, strandCount: 4)
+
+        XCTAssertEqual(seeds.filter { $0.role == .outline }.count, 18)
+        XCTAssertEqual(seeds.filter { $0.role == .core }.count, 7)
+        for index in 0..<ThreadingMarkGeometry.strandCount {
+            XCTAssertEqual(seeds.filter { $0.role == .strand(index) }.count, 4)
+        }
+        XCTAssertEqual(seeds.count, 49)
+        for seed in seeds {
+            XCTAssertTrue((0...1).contains(seed.point.x))
+            XCTAssertTrue((0...1).contains(seed.point.y))
+        }
+    }
+
+    /// Dots are separate layers rather than one dashed stroke. That is what lets outline,
+    /// thread, core, strand and path position each carry their own tint and phase.
+    @MainActor
+    func testParticleMarkBuildsAddressableTintedDots() throws {
+        let mark = ThreadingMarkView(particleMotion: .weave)
+        mark.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        mark.layoutSubtreeIfNeeded()
+
+        let container = try XCTUnwrap(
+            mark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
+        )
+        let dots = try XCTUnwrap(container.sublayers)
+        XCTAssertEqual(dots.count, 49, "the compact mark should keep its measured density")
+        XCTAssertTrue(dots.allSatisfy { $0 is CAShapeLayer && ($0 as? CAShapeLayer)?.fillColor != nil })
+
+        let inks = Set(dots.compactMap { layer -> String? in
+            guard let components = (layer as? CAShapeLayer)?.fillColor?.components else { return nil }
+            return components.map { String(format: "%.4f", $0) }.joined(separator: ",")
+        })
+        XCTAssertGreaterThan(inks.count, 2, "individual points collapsed to one frozen tint")
+    }
+
+    @MainActor
+    func testHoverCrossfadesIntoParticlesAndStopsThemOnExit() throws {
+        let mark = ThreadingMarkView(particleMotion: .weave)
+        mark.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        Design.Motion.reduceMotionOverrideForTesting = false
+        mark.layoutSubtreeIfNeeded()
+
+        let container = try XCTUnwrap(
+            mark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
+        )
+        let dots = try XCTUnwrap(container.sublayers)
+        mark.setHovered(true)
+        XCTAssertEqual(container.opacity, 1)
+        XCTAssertTrue(
+            dots.contains { $0.animation(forKey: "particle.position") != nil },
+            "weave never sent a dot down the shield or a strand"
+        )
+        mark.playPress()
+        XCTAssertNotNil(container.animation(forKey: "press"))
+        XCTAssertEqual(
+            dots.filter { $0.animation(forKey: "pressPulse") != nil }.count,
+            dots.count,
+            "the click did not cascade through every addressable point"
+        )
+
+        mark.setHovered(false)
+        XCTAssertEqual(container.opacity, 0)
+        XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
+    }
+
+    @MainActor
+    func testEveryParticleTreatmentRendersADistinctFrame() throws {
+        var frames: [Data] = []
+        let renderDirectory = ProcessInfo.processInfo.environment["THREADING_MARK_RENDER_DIR"]
+
+        for motion in ThreadingMarkParticleMotion.allCases {
+            let mark = ThreadingMarkView(particleMotion: motion)
+            mark.frame = NSRect(x: 0, y: 0, width: 64, height: 64)
+            mark.layoutSubtreeIfNeeded()
+            mark.setParticlePresentation(phase: 0.34)
+
+            let frame = try XCTUnwrap(png(of: mark))
+            XCTAssertGreaterThan(frame.count, 500)
+            frames.append(frame)
+
+            if let renderDirectory {
+                let directory = URL(fileURLWithPath: renderDirectory, isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                try frame.write(to: directory.appendingPathComponent("\(motion.rawValue).png"))
+            }
+        }
+
+        XCTAssertEqual(Set(frames).count, ThreadingMarkParticleMotion.allCases.count)
+    }
+
     /// Under Reduce Motion the launch is the finished mark simply being there — no animation
     /// is even constructed, which is what the theme-boundary exception for this view promises.
     @MainActor
@@ -62,6 +157,39 @@ final class SidebarBrandViewTests: XCTestCase {
 
     private func animatedLayers(of view: NSView, key: String = "drawIn") -> [CALayer] {
         (view.layer?.sublayers ?? []).filter { $0.animation(forKey: key) != nil }
+    }
+
+    @MainActor
+    private func png(of mark: ThreadingMarkView) -> Data? {
+        let canvasSide: CGFloat = 88
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(canvasSide * 2),
+            pixelsHigh: Int(canvasSide * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = NSSize(width: canvasSide, height: canvasSide)
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+
+        mark.displayIfNeeded()
+        CATransaction.flush()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.setFillColor(NSColor(
+            srgbRed: 0.055, green: 0.059, blue: 0.067, alpha: 1
+        ).cgColor)
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: canvasSide, height: canvasSide))
+        context.cgContext.translateBy(x: 12, y: 12)
+        mark.layer?.displayIfNeeded()
+        mark.layer?.render(in: context.cgContext)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])
     }
 
     /// The blur. A shape layer added by hand keeps `contentsScale` 1 — only the backing layer
@@ -125,13 +253,24 @@ final class SidebarBrandViewTests: XCTestCase {
     @MainActor
     func testHoverConstructsNothingUnderReduceMotion() throws {
         let mark = ThreadingMarkView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
+        let particleMark = ThreadingMarkView(particleMotion: .weave)
+        particleMark.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        particleMark.layoutSubtreeIfNeeded()
         Design.Motion.reduceMotionOverrideForTesting = true
 
         mark.setHovered(true)
+        particleMark.setHovered(true)
         XCTAssertTrue(animatedLayers(of: mark, key: "hover").isEmpty)
         for layer in try XCTUnwrap(mark.layer?.sublayers) {
             XCTAssertEqual(layer.transform.m11, 1, accuracy: 0.001)
         }
+        let container = try XCTUnwrap(
+            particleMark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
+        )
+        XCTAssertEqual(container.opacity, 0)
+        XCTAssertTrue((container.sublayers ?? []).allSatisfy {
+            ($0.animationKeys() ?? []).isEmpty
+        })
     }
 
     /// The whole row is the pointer target, not the 24pt logo alone.
