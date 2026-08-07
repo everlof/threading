@@ -15,6 +15,20 @@ by one, where the takeover is worn. See [The takeover](#the-takeover-a-theme-tha
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+The visual source of truth for each takeover is its manifest in
+[`docs/references/chrome/`](../references/chrome/README.md). In particular, `aqua-cheetah` and
+`aqua-tiger` are not aliases: Cheetah owns the four-row `aqua_pinstripes` glass rib while Tiger
+adds the `brushed_metal` band texture, and each keeps its own component coverage so later evidence
+about menus, fields, scrollbars, or alerts cannot silently rewrite the other target.
+
+That archive is also the chrome conformance harness. Manifest-declared reproductions are rendered
+by focused XCTest fixtures through the production `WindowChromeButton`, `ThemedScrollView`, and
+other design-system components, then displayed beside the native-scale historical crops. A broad
+`component_fixture` is deliberately review-only; only an `exact_reconstruction` with recorded
+tolerance, method, and review date can advance a component to `verified`. The first shared sweep
+covers caption controls and two-axis scrollbars across every historical takeover, and later
+component families use the same contract rather than adding one-off screenshots.
+
 The window uses `.fullSizeContentView` with a transparent, hidden title bar, so the sidebar
 runs the full height and the traffic lights float over it. The window title stays `Threading`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
@@ -489,13 +503,16 @@ regional block after `SidebarStyle`, following all of its rules) opts the main w
 native frame. `WindowChromeCoordinator`, owned by `MainWindowController` and observing
 `AppThemeDidChange`, performs the exchange in both directions, live. **Windows 98**
 (`retro-98`) was the first user; **Mac OS 9 Platinum** (`platinum-9`) adds split window boxes,
-a hidden application icon, and striped centred-title texture; **BeOS R5** (`beos-r5`) adds a
+a hidden application icon, and striped centred-title texture; **Mac OS X 10.0 Aqua**
+(`aqua-cheetah`) branches from that classic lineage with a four-row silver glass rib, leading
+traffic-light gems, and a separate gel control language; **BeOS R5** (`beos-r5`) adds a
 partial-width leading title tab and the period's Close/Zoom-only window furniture through the
 same regional model; **OPENSTEP 4.2** (`openstep-42`) adds ordered bookends so Miniaturize can
 lead while Close trails, plus its own one-bit control figures; **IRIX Indigo Magic**
 (`irix-indigo-magic`) combines a dithered italic title with a leading Window-menu operation and
 trailing Minimize/Maximize boxes; **Amiga Workbench 3.1** (`amiga-workbench-31`) adds the
-Intuition gadget alphabet and the real Depth operation beside Zoom.
+Intuition gadget alphabet and the real Depth operation beside Zoom; **TUI** (`tui`) is the
+first takeover that reproduces *nothing* — see [An authored takeover](#an-authored-takeover).
 The mechanism and its authorable vocabulary are the feature; stock themes are worked examples.
 
 **The masks.** Native is what `createWindow` always made:
@@ -526,12 +543,17 @@ dims through its inactive gradient when the window resigns key, and the title fo
 `window.title` by observation. The band also interprets theme-stated button placement,
 application-icon visibility, title slant, and active/inactive texture; it contains no stock-theme ID
 branches. It also interprets a full-width or leading-tab shape, authored tab width, and the
-ordered visible-button set. `split` gives Close its classic-Mac leading exception; `bookends`
+ordered visible-button set. `leading` keeps Aqua's complete traffic-light cluster at the start;
+`split` gives Close its classic-Mac leading exception; `bookends`
 instead preserves authored order by leading with the first visible operation and trailing the
 rest. A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.
+The same transparent-backing path is used when `chrome.frame.corner_radius` is nonzero: the
+permanent content root receives the radius and clips the workspace, while `WindowChromeFrameView`
+clears and strokes the matching rounded outline. A zero radius remains the backwards-compatible
+square default for existing theme documents.
 `WindowChromeButton` (window menu/close/minimize/zoom/depth) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, `orderBack(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
@@ -618,7 +640,112 @@ conflicting with the caption row's compact height. The controller's weak referen
 `updateToolbarControlStates()` never learns which dress is worn. `PaneBandMargin.paneEdge`'s
 corner-adapted clearance is left alone in v1: harmless over-inset under square corners.
 
-**Scope.** Main window only. The Component Gallery and Onboarding windows keep native chrome
-under every theme; `ThemedAlertPanel`/`ThemedPopover` were already frameless and app-drawn.
+**Scope.** Main window only. The Component Gallery, Onboarding and detached browser windows keep
+native chrome under every theme — the last for the same reason as the first two, and because a
+takeover there would need its own `TitlebarActionWindow` plus a full app-drawn content root
+(band, drag handle, close button, overlay hosting) rather than a flag; `ThemedAlertPanel`/`ThemedPopover` were already frameless and app-drawn.
 Fullscreen under takeover keeps the band visible (it lives in the content tree; auto-reveal is
 titlebar machinery a frameless window does not have).
+
+### An authored takeover
+
+**TUI (`tui`) reproduces no system, and that is the point of it.** Every other takeover here is
+a reconstruction: there is a release, a screenshot, a measured band height, and a manifest in
+`docs/references/chrome/` saying how close we are. This one is drawn in the idiom the
+full-screen terminal programs share — a box in rule characters, a header row closed by a seam,
+one accent, a grid nothing sits off — and it belongs to none of them. Which makes it the
+honest test of the claim this file has been making since the takeover shipped: that the
+vocabulary is the feature and the period themes are worked examples. It cost **two** new
+values and no new branch.
+
+- **`Texture.Kind.rule`** draws one point along the band's *bottom* edge and ignores `spacing`.
+  It is the odd one out of the texture family — the other four fill the band, and this one
+  ends it — but it belongs there rather than in `Shape`, because it is ink over the fill and it
+  answers the key state like every other texture. Ending the band is what a flat chrome needs
+  and no gradient family ever did: with the band and the panes the same colour, the seam *is*
+  the header row's silhouette. It is also this family's only inactive cue, so the theme states
+  both textures and dims the seam with the title.
+- **`Plate.reverseVideo`** is nothing at rest and the cell inverted under the pointer. It is
+  the one plate that decides its own *figure* colour: `GlyphInk` names a colour to paint with,
+  and an inverted cell's figure is the band's ground coming through the ink, which is not a
+  colour anyone can name in advance. So `WindowChromeButton` reads it off the plate after the
+  ink switch rather than adding a `GlyphInk` case that only one plate could ever use.
+
+The caption alphabet is hairline throughout, and that is the whole visual difference from the
+desktop-era families above it. Those drew their marks with a two-pixel pen because the figures
+sat on raised hardware and a thin line vanished into the bevel. A terminal has one pen. The
+first pass borrowed Marlett's stems and produced a cluster visibly heavier than the title
+beside it — correct shapes, wrong voice.
+
+`bevel: nil` is load-bearing rather than an omission: it is what routes `WindowChromeFrameView`
+to its single one-point seat instead of the raised two-ring edge, which is the entire
+difference between a drawn box and a moulded one. The frame keeps a small corner radius, the
+one concession to the platform — a hard rectangle is right on a text console and wrong floating
+over a desktop where every neighbour is rounded.
+
+**Its archive entry records every component as `not_applicable`, not `missing`.** The ledger's
+job is to say what evidence exists, and "none, by construction" has to be an answer it can
+give, or the honest case starts looking like the neglected one. An authored chrome may never
+carry `measured` or `verified` coverage — both mean "compared against a preserved original" —
+so what holds it instead is the shared catalogue sweeps and the whole-window render, plus two
+focused tests: that the band draws its seam on the bottom edge (pixels, not the resolved
+style — "the theme states a rule" and "the band draws one, there" are different claims), and
+that the caption cell actually swaps its two colours under the pointer.
+
+## 2026-08-05 — caption anatomy is one table, and the takeover catalogue is one list
+
+**`WindowChromeCaptionAnatomy` (`UI/Design/WindowChromeAnatomy.swift`).** `WindowChromeButton`
+had grown a per-family switch for each thing a caption family could vary — slot size, plate
+recipe, antialiasing, glyph ink, press behaviour, alphabet, cluster spacing — six switches over
+the same enum, so a new family cost an edit in every one of them (plus the two wire-vocabulary
+listings) and a fix to one switch was invisible to its siblings. Every per-family decision is
+now a row in one table read by one interpreter: the button's `draw` no longer knows which
+family it is drawing, and the band reads its button-cluster spacing from the same row, so
+"Aqua's gems keep the period gap" stopped being an `== .aqua` inside the band.
+
+The consolidation immediately caught the bug class it exists to prevent. The old glyph dispatch
+was an else-chain, and an *unhovered* Aqua button fell off its end into the generic vector
+alphabet: resting Cheetah gems wore dark generic figures — the green one a square "zoom frame" —
+that 10.0 never had, while the comment beside the chain said hover-only. `glyphsRequireHover`
+is now a stated fact on the row, checked wherever the row is drawn.
+
+The native 10.0 crop also fixes what “Cheetah glass” means at 1x: a neutral charcoal rim and
+two-row lower shadow, a narrow upper reflection, a lower-centre radial bloom, and no figure in
+the resting state. Its title material is not Platinum's hard gray line every other pixel;
+`aqua_pinstripes` is a distinct, serializable texture recipe over a vertical silver gradient.
+Keeping both facts in production vocabulary prevents the conformance fixture from becoming a
+one-off painted screenshot.
+
+**Artwork is data, for every family.** Windows 98's Marlett reconstruction proved the shape —
+readable one-bit bitmaps the component tests pin exactly — while Platinum, BeOS, OPENSTEP, IRIX
+and Amiga each kept a private `dot()`/`frame()` painter whose figures existed only as
+arithmetic, plus five separate copies of the "two offset windows" Restore figure.
+`WindowChromeCaptionArtwork` states every family over one legend (`#` ink, `o` white, `+`
+control face, `.` clear — the multi-ink cells are Intuition's alone), rendered by one
+rasteriser with the Win98 origin math. The two local `ring()` copies the frame and the BeOS
+tab each carried became `WindowChromeBevelEdge`, the window-edge sibling of
+`ThemedSurface.drawBevelled`. The whole refactor was held to **byte-identical caption renders**
+for every family except the two Aqua materials, whose only change is the fall-through fix
+above.
+
+**The takeover catalogue is derived, never restated.** `AppThemeStyles.takeovers` is
+`all.filter(takesOverWindowChrome)` and is the only registry: the Component Gallery's chrome
+story and the `WindowChromeComponentTests` sweeps iterate it. The gallery had already drifted —
+Aqua and Tiger were missing from its hand-built band list — in the short life of the third
+hand-maintained copy. A new takeover theme now appears in the gallery, the caption and
+whole-window render sweeps, and the catalogue assertions by being added to
+`AppThemeStyles.all`.
+
+**What the sweeps now hold every family to**, where before it was Win98-only or nothing: the
+caption slot seats inside the authored band height; the band changes pixels when its window
+resigns key; a family whose plates are cut from the band dims them with it; a family stating a
+pressed offset visibly moves its figure. Each is driven by the anatomy table, so a claim a row
+makes is a claim the sweep checks — and a new family is swept by existing.
+
+**Recorded follow-ups.** The slot size and Aqua's gel tints are the two measured values in the
+table a custom theme cannot yet author; promoting them to `WindowChromeStyle` fields is the
+next vocabulary step, alongside a `glyph_artwork` block that would let a custom family state
+bitmaps over the same legend instead of borrowing a shipped alphabet. The scroller and chooser
+anatomies deserve the same table treatment (`ThemedScroller` still switches per period in
+several places); that work is in flight separately and should take this file's shape when it
+lands.

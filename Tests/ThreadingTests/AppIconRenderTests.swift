@@ -283,11 +283,14 @@ final class AppIconRenderTests: XCTestCase {
             "botanical": "Botanical",
             "industrial": "Industrial",
             "platinum-9": "Platinum",
+            "aqua-cheetah": "Aqua",
+            "aqua-tiger": "Tiger",
             "beos-r5": "BeOS",
             "openstep-42": "OpenStep",
             "irix-indigo-magic": "IRIX",
             "amiga-workbench-31": "Amiga",
             "retro-98": "Windows98",
+            "tui": "TUI",
             "christmas": "Christmas",
         ]
         let stockIDs = Set(

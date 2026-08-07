@@ -72,6 +72,7 @@ final class WindowChromeStyleTests: XCTestCase {
                 inactiveInk: NSColor(hex: "#F0F0F0")!,
                 titleAlignment: .center,
                 titleFontStyle: .italic,
+                titleFontSize: 13,
                 height: 30,
                 buttonGlyphStyle: .platinum,
                 buttonPlacement: .split,
@@ -86,12 +87,42 @@ final class WindowChromeStyleTests: XCTestCase {
                 tabWidth: 210,
                 visibleButtons: [.close, .zoom, .depth]
             ),
-            frame: .init(width: 4)
+            frame: .init(width: 4, cornerRadius: 6)
         )
 
         let data = try JSONEncoder().encode(style)
         let decoded = try JSONDecoder().decode(WindowChromeStyle.self, from: data)
         XCTAssertEqual(decoded, style)
+    }
+
+    func testTigerBrushedMetalTextureRoundTripsByItsStableWireName() throws {
+        let texture = WindowChromeStyle.TitleBar.Texture(
+            kind: .brushedMetal,
+            color: NSColor(hex: "#79797957"),
+            spacing: 2
+        )
+        let data = try JSONEncoder().encode(texture)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("brushed_metal"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(WindowChromeStyle.TitleBar.Texture.self, from: data),
+            texture
+        )
+    }
+
+    func testCheetahGlassRibRoundTripsAsAnAuthorableTexture() throws {
+        let texture = WindowChromeStyle.TitleBar.Texture(
+            kind: .aquaPinstripes,
+            // Theme colours are persisted as eight-bit sRGB hex; use that wire-exact form so
+            // this test checks the texture vocabulary rather than color-space object identity.
+            color: NSColor(hex: "#00000007"),
+            spacing: 4
+        )
+        let data = try JSONEncoder().encode(texture)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("aqua_pinstripes"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(WindowChromeStyle.TitleBar.Texture.self, from: data),
+            texture
+        )
     }
 
     /// A document written before the block existed decodes to a variant without one — the
@@ -130,6 +161,7 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertNil(style.titleBar.height)
         XCTAssertEqual(style.titleBar.titleAlignment, .leading)
         XCTAssertEqual(style.titleBar.titleFontStyle, .upright)
+        XCTAssertNil(style.titleBar.titleFontSize)
         XCTAssertEqual(style.titleBar.buttonGlyphStyle, .plain)
         XCTAssertEqual(style.titleBar.buttonPlacement, .trailing)
         XCTAssertTrue(style.titleBar.showsAppIcon)
@@ -180,6 +212,59 @@ final class WindowChromeStyleTests: XCTestCase {
             named: "C", from: carrier, kind: kind, chrome: .set(replacement)
         )
         XCTAssertEqual(replaced.chrome, replacement)
+    }
+
+    /// The Current Theme page's edit shape: change one role, rebuild the variant, assemble.
+    /// This exact path once constructed a fresh `Variant(...)` and left `chrome:` off the
+    /// call, so recolouring a custom takeover theme silently handed the window frame back to
+    /// AppKit. Edits rebuild through `Variant.replacing`, which cannot drop a block.
+    @MainActor
+    func testEditingOneRoleThroughReplacingKeepsEveryRegionalBlock() throws {
+        let stated = WindowChromeStyle(titleBar: navyTitleBar(), frame: .init(width: 2))
+        let carrier = try themed(stated)
+        let kind = carrier.availableVariants[0]
+        let source = try XCTUnwrap(carrier.variant(kind))
+
+        var roles = source.roles
+        roles[.accent] = NSColor(hex: "#FF6600")!
+
+        var variants = carrier.variants
+        variants[kind] = source.replacing(roles: roles)
+        let updated = try AppThemeEditing.assemble(
+            id: carrier.id,
+            name: carrier.name,
+            mode: carrier.mode,
+            summary: carrier.summary,
+            variants: variants
+        )
+
+        XCTAssertEqual(updated.variant(kind)?.roles[.accent], NSColor(hex: "#FF6600")!)
+        XCTAssertEqual(updated.variant(kind)?.chrome, stated, "one colour cost the window frame")
+        XCTAssertEqual(updated.variant(kind)?.sidebar, source.sidebar)
+        XCTAssertTrue(updated.takesOverWindowChrome)
+    }
+
+    /// `replacing()` with nothing stated is the identity, swept across every stock variant.
+    /// This is the guard with a future: a stored property added to `Variant` and adopted by
+    /// any stock theme fails here the moment `replacing` forgets to carry it, which is the
+    /// bug class the memberwise initializer cannot surface.
+    func testAVariantCopyWithNothingReplacedIsTheVariant() {
+        for theme in AppThemeStyles.all {
+            for (kind, variant) in theme.variants {
+                XCTAssertEqual(
+                    variant.replacing(), variant,
+                    "\(theme.name) \(kind) loses something in an untouched copy"
+                )
+                XCTAssertEqual(
+                    variant.replacingSidebar(variant.sidebar), variant,
+                    "\(theme.name) \(kind) loses something replacing the sidebar with itself"
+                )
+                XCTAssertEqual(
+                    variant.replacingChrome(variant.chrome), variant,
+                    "\(theme.name) \(kind) loses something replacing the chrome with itself"
+                )
+            }
+        }
     }
 
     // MARK: - Validation
@@ -244,6 +329,10 @@ final class WindowChromeStyleTests: XCTestCase {
         XCTAssertThrowsError(try themed(WindowChromeStyle(
             titleBar: navyTitleBar(), frame: .init(width: 12)
         )), "a frame past the resize edges should be refused")
+
+        XCTAssertThrowsError(try themed(WindowChromeStyle(
+            titleBar: navyTitleBar(), frame: .init(width: 2, cornerRadius: 20)
+        )), "a corner that consumes title furniture should be refused")
 
         var packedTexture = navyTitleBar()
         packedTexture.activeTexture = .init(kind: .pinstripes, spacing: 1)

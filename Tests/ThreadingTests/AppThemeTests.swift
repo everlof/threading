@@ -572,9 +572,12 @@ final class AppThemeTests: XCTestCase {
         XCTAssertNil(material.controlBorderWidth)
         XCTAssertEqual(material.resolvedControlBorderWidth, material.borderWidth)
         XCTAssertEqual(material.textScale, 1)
+        XCTAssertEqual(material.choiceHeight, 26)
         XCTAssertEqual(material.buttonStyle, .system)
         XCTAssertNil(material.headingStyle)
         XCTAssertEqual(material.popoverStyle, .system)
+        XCTAssertEqual(material.menuAppearance, .automatic)
+        XCTAssertEqual(material.checkboxStyle, .automatic)
 
         let named = AppTheme.Material(
             textScale: 0.8,
@@ -618,29 +621,85 @@ final class AppThemeTests: XCTestCase {
 
     func testRetroThemesKeepExactFontsAheadOfSafeInstalledSubstitutes() throws {
         let win98 = try XCTUnwrap(AppThemeStyles.win98.variant(.light)?.material)
-        XCTAssertEqual(Array(win98.fontFamilies.prefix(3)), [
-            "MS Sans Serif", "Microsoft Sans Serif", "Tahoma"
+        XCTAssertEqual(Array(win98.fontFamilies.prefix(5)), [
+            "MS Sans Serif", "Microsoft Sans Serif", "W95FA", "Tahoma", "Geneva"
         ])
         XCTAssertEqual(win98.progressStyle, .segmented)
         XCTAssertEqual(win98.choiceStyle, .dropdown)
+        XCTAssertEqual(win98.menuAppearance, .windows98)
+        XCTAssertEqual(win98.choiceHeight, 21)
         XCTAssertEqual(win98.buttonStyle.primaryTreatment, .raised)
         XCTAssertEqual(win98.buttonStyle.fontWeight, .regular)
+        XCTAssertEqual(win98.checkboxStyle, .windows98Tick)
+        // COLOR_WINDOWFRAME, this theme's black `.label` — not `.border`, which is COLOR_BTNSHADOW
+        // gray and is already drawing the bevel. `ThemedControlTests` samples the pixel this
+        // decides: in shadow gray the default button's extra frame reads as one more bevel edge,
+        // and the dialog stops saying which action Return takes.
+        XCTAssertEqual(win98.buttonStyle.primaryRole, .label)
+        XCTAssertEqual(win98.textScale, 0.80)
         XCTAssertEqual(AppThemeStyles.win98.resolved(.fieldSurface).hexString, "#FFFFFF")
 
         let platinum = try XCTUnwrap(AppThemeStyles.platinum.variant(.light)?.material)
         XCTAssertEqual(platinum.fontFamilies, ["Charcoal", "Geneva"])
+        XCTAssertEqual(platinum.choiceStyle, .doubleArrowPopup)
+        XCTAssertEqual(platinum.menuAppearance, .platinum)
+        XCTAssertEqual(platinum.choiceHeight, 16)
+        XCTAssertEqual(AppThemeStyles.platinum.resolved(.floatingSurface).hexString, "#DDDDDD")
+        XCTAssertNotEqual(
+            AppThemeStyles.platinum.resolved(.floatingSurface).hexString,
+            AppThemeStyles.platinum.resolved(.fieldSurface).hexString,
+            "Platinum floating chrome became the white/value-well surface again"
+        )
+
+        let tiger = try XCTUnwrap(AppThemeStyles.aquaTiger.variant(.light)?.material)
+        XCTAssertEqual(tiger.fontFamilies, ["Lucida Grande", "Helvetica Neue"])
+        XCTAssertEqual(tiger.choiceStyle, .aquaPopup)
+        XCTAssertEqual(tiger.choiceHeight, 22)
+        XCTAssertEqual(tiger.scrollerAppearance, .aquaTiger)
+        XCTAssertEqual(tiger.menuAppearance, .aquaTiger)
+        XCTAssertTrue(tiger.scrollerAppearance.groupsArrowsAtTrailingEnd)
 
         let beOS = try XCTUnwrap(AppThemeStyles.beOS.variant(.light)?.material)
         XCTAssertEqual(beOS.fontFamilies, ["Swis721 BT", "Swiss 721", "Helvetica"])
+        XCTAssertEqual(beOS.choiceStyle, .popup)
+        XCTAssertEqual(beOS.menuAppearance, .beOS)
+        XCTAssertEqual(beOS.choiceHeight, 18)
+        XCTAssertEqual(beOS.checkboxStyle, .beOSCross)
+        XCTAssertEqual(AppThemeStyles.beOS.resolved(.fieldSurface).hexString, "#FFFFFF")
 
         let amiga = try XCTUnwrap(AppThemeStyles.amiga.variant(.light)?.material)
         XCTAssertEqual(amiga.fontFamilies, [
             "Topaz",
+            "Topaz a600a1200a400",
             "Topaz a600a1200a4000",
             "TopazPlus a600a1200a4000",
             "TopazPlus",
             "Monaco"
         ])
+        XCTAssertEqual(amiga.choiceStyle, .cycle)
+        XCTAssertEqual(amiga.menuAppearance, .amiga)
+        XCTAssertEqual(amiga.choiceHeight, 18)
+        XCTAssertEqual(amiga.checkboxStyle, .recessedTick)
+        XCTAssertEqual(
+            AppThemeStyles.amiga.resolved(.panel).hexString,
+            "#AAAAAA",
+            "Workbench panels must stay inside the stock four-colour palette"
+        )
+
+        let openStep = try XCTUnwrap(AppThemeStyles.openStep.variant(.light)?.material)
+        XCTAssertEqual(openStep.choiceStyle, .popup)
+        XCTAssertEqual(openStep.menuAppearance, .openStep)
+        XCTAssertEqual(openStep.choiceHeight, 18)
+        let irix = try XCTUnwrap(AppThemeStyles.irix.variant(.light)?.material)
+        XCTAssertEqual(irix.choiceStyle, .popup)
+        XCTAssertEqual(irix.menuAppearance, .irix)
+        XCTAssertEqual(irix.choiceHeight, 20)
+
+        for material in [platinum, beOS, openStep, irix, amiga] {
+            XCTAssertEqual(material.buttonStyle.primaryTreatment, .raised)
+            XCTAssertEqual(material.buttonStyle.fontWeight, .regular)
+            XCTAssertEqual(material.buttonStyle.primaryRole, .border)
+        }
     }
 
     func testControlGlowRoundTripsWithoutChangingOlderMaterials() throws {
@@ -820,6 +879,9 @@ final class AppThemeTests: XCTestCase {
                 tracking: 0.75,
                 primaryTreatment: .outlined,
                 primaryRole: .syntaxType,
+                secondaryRole: .elevated,
+                secondaryHoverRole: .panel,
+                secondaryShadow: .panel,
                 primaryBorderRole: .label,
                 hoverOffsetX: 4,
                 hoverOffsetY: 4,
@@ -844,20 +906,25 @@ final class AppThemeTests: XCTestCase {
         XCTAssertNil(decoded.buttonStyle.fontFamily)
         XCTAssertEqual(decoded.buttonStyle.primaryTreatment, .filled)
         XCTAssertEqual(decoded.buttonStyle.primaryRole, .accent)
+        XCTAssertEqual(decoded.buttonStyle.secondaryRole, .controlResting)
+        XCTAssertEqual(decoded.buttonStyle.secondaryHoverRole, .controlHover)
+        XCTAssertEqual(decoded.buttonStyle.secondaryShadow, .control)
         XCTAssertEqual(decoded.buttonStyle.tracking, 0)
         XCTAssertEqual(decoded.buttonStyle.hoverOffsetX, 0)
         XCTAssertFalse(decoded.buttonStyle.collapseShadowOnHover)
 
         let classic = AppTheme.Material(
+            choiceHeight: 16,
             buttonStyle: .init(primaryTreatment: .raised),
-            choiceStyle: .dropdown
+            choiceStyle: .doubleArrowPopup
         )
         let classicRoundTrip = try JSONDecoder().decode(
             AppTheme.Material.self,
             from: JSONEncoder().encode(classic)
         )
         XCTAssertEqual(classicRoundTrip.buttonStyle.primaryTreatment, .raised)
-        XCTAssertEqual(classicRoundTrip.choiceStyle, .dropdown)
+        XCTAssertEqual(classicRoundTrip.choiceHeight, 16)
+        XCTAssertEqual(classicRoundTrip.choiceStyle, .doubleArrowPopup)
     }
 
     func testDesignPromptsThemesAuthorTheirMeasuredActionLanguage() {
@@ -890,9 +957,13 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(AppThemeStyles.newsprint.material.buttonStyle.primaryRole, .label)
         XCTAssertEqual(AppThemeStyles.botanical.material.buttonStyle.primaryRole, .label)
         XCTAssertEqual(AppThemeStyles.vaporwave.material.buttonStyle.primaryRole, .syntaxType)
+        XCTAssertEqual(AppThemeStyles.claymorphism.material.buttonStyle.secondaryRole, .elevated)
+        XCTAssertEqual(AppThemeStyles.claymorphism.material.buttonStyle.secondaryHoverRole, .elevated)
+        XCTAssertEqual(AppThemeStyles.claymorphism.material.buttonStyle.hoverOffsetY, -2)
         XCTAssertEqual(AppThemeStyles.neoBrutalism.material.buttonStyle.hoverOffsetX, 4)
         XCTAssertTrue(AppThemeStyles.neoBrutalism.material.buttonStyle.collapseShadowOnHover)
         XCTAssertEqual(AppThemeStyles.industrial.material.buttonStyle.pressedOffsetY, 2)
+        XCTAssertEqual(AppThemeStyles.industrial.material.buttonStyle.secondaryShadow, .panel)
         XCTAssertEqual(AppThemeStyles.artDeco.material.buttonStyle.fontFamily, "Avenir Next")
         XCTAssertEqual(AppThemeStyles.newsprint.material.buttonStyle.fontFamily, "Baskerville")
 
@@ -970,8 +1041,12 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.typeface, .standard)
         XCTAssertEqual(material.scrollerPlacement, .trailing)
         XCTAssertEqual(material.scrollerTrackStyle, .solid)
+        XCTAssertEqual(material.scrollerAppearance, .automatic)
+        XCTAssertEqual(material.menuAppearance, .automatic)
         XCTAssertEqual(material.progressStyle, .continuous)
         XCTAssertEqual(material.choiceStyle, .chip)
+        XCTAssertEqual(material.checkboxStyle, .automatic)
+        XCTAssertEqual(material.choiceHeight, 26)
 
         let sparse = Data(#"{}"#.utf8)
         XCTAssertEqual(
@@ -987,15 +1062,21 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(round.typeface, .serif)
         XCTAssertEqual(round.scrollerPlacement, .trailing)
         XCTAssertEqual(round.scrollerTrackStyle, .solid)
+        XCTAssertEqual(round.scrollerAppearance, .automatic)
+        XCTAssertEqual(round.menuAppearance, .automatic)
         XCTAssertEqual(round.progressStyle, .continuous)
         XCTAssertEqual(round.choiceStyle, .chip)
+        XCTAssertEqual(round.checkboxStyle, .automatic)
     }
 
     func testScrollerMaterialRoundTrips() throws {
         let authored = AppTheme.Material(
             scrollerPlacement: .leading,
             scrollerTrackStyle: .stippled,
-            progressStyle: .segmented
+            scrollerAppearance: .openStep,
+            menuAppearance: .openStep,
+            progressStyle: .segmented,
+            checkboxStyle: .beOSCross
         )
         let roundTrip = try JSONDecoder().decode(
             AppTheme.Material.self,
@@ -1004,7 +1085,10 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(roundTrip.scrollerPlacement, .leading)
         XCTAssertEqual(roundTrip.scrollerTrackStyle, .stippled)
+        XCTAssertEqual(roundTrip.scrollerAppearance, .openStep)
+        XCTAssertEqual(roundTrip.menuAppearance, .openStep)
         XCTAssertEqual(roundTrip.progressStyle, .segmented)
+        XCTAssertEqual(roundTrip.checkboxStyle, .beOSCross)
     }
 
     /// The paired terminal's cursor is the palette's own ink, never its accent.
@@ -1868,7 +1952,41 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        XCTAssertEqual(ids.count, 19, "the curated stock catalogue unexpectedly changed size")
+        // 22 = System + eleven design movements + Christmas + the nine takeover chromes
+        // (the Aqua lineage brought Cheetah and Tiger; TUI is the first takeover that
+        // reproduces no system, acknowledged here).
+        XCTAssertEqual(ids.count, 22, "the curated stock catalogue unexpectedly changed size")
+    }
+
+    /// A takeover chrome is not complete merely because its Swift document exists. Every stock
+    /// frame must have the same component-by-component evidence ledger, and a deleted chrome must
+    /// not leave a stale historical identity behind. This closes both directions of that drift.
+    func testEveryTakeoverChromeHasExactlyOneReferenceManifest() throws {
+        let authoredChromeIDs = Set(AppThemeStyles.all.compactMap { theme in
+            theme.variants.values.contains(where: { $0.chrome != nil })
+                ? theme.id.rawValue
+                : nil
+        })
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let referenceRoot = repository
+            .appendingPathComponent("docs/references/chrome", isDirectory: true)
+        let referenceChromeIDs = Set(try FileManager.default.contentsOfDirectory(
+            at: referenceRoot,
+            includingPropertiesForKeys: nil
+        ).compactMap { candidate in
+            FileManager.default.fileExists(
+                atPath: candidate.appendingPathComponent("reference.json").path
+            ) ? candidate.lastPathComponent : nil
+        })
+
+        XCTAssertEqual(
+            referenceChromeIDs,
+            authoredChromeIDs,
+            "takeover themes and their component evidence ledgers drifted apart"
+        )
     }
 
     func testEveryStockStylePassesTheSameValidationAsAgentCreatedThemes() throws {

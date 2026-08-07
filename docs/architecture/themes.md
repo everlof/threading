@@ -4,6 +4,22 @@ Terminal themes, app themes, and the three scopes both resolve through.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+Historical frame takeovers additionally carry a component-by-component evidence ledger under
+[`docs/references/chrome/`](../references/chrome/README.md). A chrome is not considered
+reference-complete merely because its title band exists: every manifest must account for the
+window frame, window buttons, toolbar, form controls, menus, popovers, scrollbars, lists,
+progress, transients, typography, and icons. Third-party screenshots remain at their recorded
+origin; checksums and top-left pixel crop recipes make their exact extractions reproducible in a
+gitignored local cache. `scripts/check_theme_boundaries.sh` validates the ledger on every build.
+
+**Cheetah and Tiger are separate Aqua materials.** Cheetah keeps the first public release's
+pinstriped title band, saturated ribbed scroller family, and bookended arrow layout. Tiger
+(`aqua-tiger`) uses Finder's brushed-metal title surface, a slimmer blue gel thumb, neutral
+silver line buttons grouped at the trailing end, and a rounded pop-up with a blue up/down
+segment. Those differences are authorable enum values (`brushed_metal`, `aqua_tiger`, and
+`aqua_popup`), never checks against a stock theme ID, so a custom theme can reuse the same
+historical parts.
+
 A terminal theme is chosen at one of three scopes — the selected chat or standalone terminal,
 its project, or the app default — and `ThemeResolution.resolve` picks the narrowest one that
 names a theme that exists.
@@ -260,9 +276,15 @@ than a class: "Newsprint, set in Baskerville" is not one of four. `fontFallbacks
 chain behind it. The first installed family wins, then the recipe degrades to `typeface`; this
 lets a retro theme preserve Charcoal, MS Sans Serif, Swis721 BT, or Topaz as its real answer
 without redistributing a proprietary face or pretending a modern substitute is historically
-exact. Installing the preferred face later promotes it automatically. Custom-theme tools expose
-the same chain as `font_family` and `font_fallbacks`, and require at least one authored family to
-resolve on the machine doing the authoring so a misspelled chain cannot silently ship.
+exact. Installing the preferred face later promotes it automatically. The narrow open
+exceptions are scoped to the historical chrome that needs their raster rules: Windows 98 ships
+the OFL W95FA recreation behind the two real Microsoft family names; Platinum's title and menu
+painter ports Systemless 0.2.1's independently hand-drawn OFL Jarrah 12 bitmap artwork; and
+Workbench ships dMG's GPL-FE Topaz 2.x recreation as a separate font resource behind the real
+Topaz family. Each includes its complete notice and provenance. A legitimately installed
+preferred face remains first in the ordinary family chain. Custom-theme tools expose that chain
+as `font_family` and `font_fallbacks`, and require at least one authored family to resolve on the
+machine doing the authoring so a misspelled chain cannot silently ship.
 
 `Material.headingStyle` is the semantic exception inside that prose answer. The source styles
 often pair faces rather than choosing one globally: Botanical's display type is serif over a
@@ -339,12 +361,16 @@ Legacy custom documents with top-level `roles`/`material`/`terminalPalette` deco
 equivalent variant, while new documents write a `variants` map.
 
 Scrollbars follow that same identity rule without taking over scrolling. `ThemedScroller`
-subclasses AppKit's control so geometry, hit testing, dragging, fades and the user's
-overlay/legacy preference remain the platform's; under System its thumb and track draw methods
-call AppKit unchanged. An authored theme draws only those two parts: secondary ink for the thumb
-and a quiet surface role for the track, with the theme's radius. Ordinary scroll views resolve
-against chrome ink. SwiftTerm keeps its legacy column but installs the same component with
-backdrop ink, because the terminal palette — not the app theme — owns the ground beneath it.
+subclasses AppKit's control, and under System its geometry and drawing go straight back to
+AppKit. `scroller_appearance: automatic` retains the modern proportional thumb, the user's
+overlay/legacy preference, and the ink-source split: ordinary scroll views resolve against
+chrome while SwiftTerm resolves against its terminal backdrop. A named period appearance is a
+different contract because the control's anatomy is the style: `windows_98`, `platinum`, `beos`,
+`openstep`, `irix`, `amiga`, and `aqua` each supply square track space, line-arrow hit regions,
+era-specific thumb relief and grip, and the correct bookended or paired arrow placement. Those
+controls force persistent legacy-width space; an overlay pill cannot truthfully contain end
+arrows. AppKit still owns the value and invokes the control's normal tracking machinery, while
+the subclass's `rect(for:)` and `testPart` give that machinery the authored geometry.
 
 **A scroller standing outside a scroll view fades itself.** "Fades remain the platform's" holds
 only where a scroll view owns the scroller: it animates its scrollers, and while they are faded
@@ -440,14 +466,20 @@ block round-trips through `popover_style`/`remove_popover_style` in the app-them
 and sparse documents keep their previous surface exactly; a theme can state it independently when
 the period component genuinely differs. Windows 98 does: its compact, square, stemless,
 shadowless infotip uses pale information yellow (`#FFFFE1`) behind a thin dark rule and classic
-folder/branch/status marks. Platinum, BeOS, OPENSTEP, IRIX, and Amiga use the same stemless compact
-language but consume their hard material bevels. Claymorphism and Neo Brutalism use stemless
-material edges and their authored shadow construction instead of the unconditional macOS one.
+folder/branch/status marks. Platinum does too: its floating surface is the gray button face
+(`#DDDDDD`), not the white that the period reserved for writable and list wells. That distinction
+is invisible over the theme's ordinary gray chrome but load-bearing over its white terminal,
+where a white status card became a border around apparent empty space. Platinum, BeOS, OPENSTEP,
+IRIX, and Amiga use the same stemless compact language and consume their hard material bevels.
+Claymorphism and Neo Brutalism use stemless material edges and their authored shadow construction
+instead of the unconditional macOS one.
 
 `material.buttonStyle` carries the action language that palette and geometry cannot express:
 title transform, weight, a button-only typeface class or installed family, and tracking; filled
-versus outlined primary actions; the semantic roles for their fill and optional border; and the
-small hover/press translation used by hard-shadow styles. The face is sparse: nil inherits prose,
+versus outlined primary actions; the semantic roles for their fill and optional border; ordinary
+button resting/hover surface roles; and the small hover/press translation used by hard-shadow
+styles. Separate ordinary-button roles let tactile themes put raised white actions beside
+recessed coloured inputs without changing the global control palette. The face is sparse: nil inherits prose,
 a missing named family falls through to its class and then prose, and the user's chrome-family
 override still wins. This is what lets Art Deco and Newsprint pair their action labels with their
 display face without refonting every field and toggle. `ThemedButton` is the sole interpreter, so
@@ -845,11 +877,12 @@ NeXT frame instead of inheriting the classic Mac meaning of `split`. Its `openst
 draws the nested miniaturize window and diagonal close mark on hard gray plates. The material
 now also states `scroller_placement` (`trailing` or `leading`) and `scroller_track_style`
 (`solid` or `stippled`). `ThemedScrollView` mirrors AppKit's already-sized legacy reservation
-to the leading edge, while an overlay scroller merely floats there; repeated layout begins
-from `super.tile()` so it cannot drift. `ThemedScroller` owns only the stipple pixels, leaving
-geometry, tracking, dragging and fade policy with AppKit. Both material fields round-trip
-through create/update/get and decode old documents to trailing/solid. They are macOS chrome and
-are deliberately not projected by `RemoteThemeBridge`.
+to the leading edge; repeated layout begins from `super.tile()` so it cannot drift. The later
+scrollbar audit expanded that first texture field into authored period anatomy: OPENSTEP now
+owns the left-side arrows, slider grip, stippled trough, and hit regions while AppKit remains
+responsible for the live value. Both original material fields round-trip through
+create/update/get and decode old documents to trailing/solid. They are macOS chrome and are
+deliberately not projected by `RemoteThemeBridge`.
 
 **Determinate progress is its own material decision.** A hard bevel is not synonymous with
 Windows: BeOS, Platinum, and several workstation themes use hard relief with different progress
@@ -859,15 +892,40 @@ progress indicators, usage meters, and the toast dwell clock; old documents deco
 round-trips through create/update/get so a custom nineties theme can opt in without a stock-theme
 identity check.
 
-**Compact controls carry period anatomy, not only period colours.** `fieldSurface` is an optional
-semantic role that derives from `panel` for every older theme, while Windows 98 states the white
-edit/value well used on its `#C0C0C0` button face. `choice_style` defaults to `chip`; `dropdown`
-turns `ChipView` into a square sunken value well with a separately raised, filled-triangle arrow
-and removes SF-symbol ornament from the closed control. `button_style.primary_treatment` adds
+**Compact controls carry period anatomy and measure, not only period colours.** `fieldSurface` is
+an optional semantic role that derives from `panel` for every older theme, while Windows 98 states
+the white edit/value well used on its `#C0C0C0` button face. `choice_height` is the closed
+chooser's authored height (14–44 points, 26 by default): Platinum states the sixteen-pixel
+specimen in Apple's HIG, BeOS and OPENSTEP state eighteen, IRIX twenty, Win98 twenty-one, and
+Amiga eighteen. This is separate from `text_scale`; putting a smaller face in a modern 26-point
+box was the exact mismatch the metric fixes.
+
+`choice_style` defaults to `chip`. `dropdown` is the Win32 anatomy: a square sunken value well
+with a separately raised filled-triangle arrow. `popup` is a unified raised face with a down-arrow
+segment, `double_arrow_popup` is Platinum's paired up/down indicator, `aqua_popup` is Tiger's
+rounded silver well with a blue gel up/down segment, and `cycle` is Amiga's
+cycling mark. Every classic value removes SF-symbol ornament from the composer's closed control
+and gives the shared popup menu the matching period grammar: compact regular-text rows, an
+edge-attached panel, flat selection ink, etched separators, filled submenu arrows, and no
+floating-card glow. `ChipView` and `ThemedPopUp` consume the same material pair, so extension and
+settings choices cannot disagree with the composer. Both fields are authorable rather than stock
+theme identity checks, so a contributed retro theme can opt into the complete chooser.
+Checkboxes have their own axis because the source implementations disagree even when their
+chooser is also classic: Win98's 98.css field is white while enabled and changes to button-face
+gray when disabled, so `checkbox_style: windows_98_tick` preserves that state instead of letting
+the generic recessed field stay white. Workbench and BeOS state their separate recipes above.
+`ThemedRadioButton` shares that material family for its surrounding field colours but keeps its
+own native metric: Win98's radio well is the pinned 98.css twelve-by-twelve indexed sprite with a
+four-pixel dot, rather than the
+checkbox's thirteen-pixel square and tick. This is why a radio is not inferred by changing a
+checkbox's mark after layout — the source control has a different silhouette and hit target.
+`button_style.primary_treatment` adds
 `raised`: the primary keeps the ordinary gray face, gains the default-action outer frame, and
-uses the inset dotted focus indicator instead of a modern accent ring. The prompt, chooser, and
-button consume these roles and recipes without identifying Windows 98, and create/update/get
-round-trip both enum choices so a contributed retro theme can use the same control grammar.
+uses the inset dotted focus indicator instead of a modern accent ring. The period recipes source
+that outer frame from `border`, not `accent`; period captures consistently use the window's dark
+structural ink there. The prompt, chooser, and button consume these roles and recipes without
+identifying Windows 98, and create/update/get round-trip both enum choices so a contributed retro
+theme can use the same control grammar.
 
 Hard bevels are drawn at the destination size rather than stretching a nine-patch. The sampled
 cap had expanded its fixed one-pixel edge into broad gray side bands across large wells, creating
@@ -891,12 +949,109 @@ the stock theme id.
 **Amiga Workbench 3.1** (`amiga-workbench-31`) is based on the unmodified Workbench 3.1
 palette, not the more colourful MagicWB setup commonly shown in retrospectives. The frame uses
 the screenshot's exact `#6688BB` active title, `#AAAAAA` application gray, black rules and
-white highlights. Topaz is the preferred UI face; the installable multi-platform recreation's
-actual `Topaz a600a1200a4000` family name and its TopazPlus counterpart precede Monaco in the
-fallback chain. A stippled legacy scroller carries the pixel-era rhythm through the application
-panes. Glyph family `amiga` renders the original
+white highlights. Topaz is the preferred UI face. The pinned GPL-FE multi-platform recreation
+of the Kickstart 2.x/3.1 face is bundled with its source location and full notices; CoreText
+reports its actual family as `Topaz a600a1200a400` (despite the upstream prose's A4000 spelling),
+so that embedded spelling precedes common installed-port names and Monaco in the fallback chain.
+Workbench captions retain the face's native regular weight rather than synthesising bold. A
+stippled legacy scroller carries the pixel-era rhythm through the application panes. Its
+proportional gadget follows the active title blue (`#6688BB` in stock Workbench), while the
+general action accent stays darker for modern app actions. Its paired arrows resolve against the
+scroller's coordinate orientation: AppKit's
+standalone scrollers are unflipped while the instances hosted by `NSScrollView` are flipped, but
+both must place Up/Down at the visual bottom and value zero at the visual top. Workbench menus
+use `ThemedMenuItem.keyEquivalent` for a shared trailing shortcut column; the surface draws the
+Amiga-key cap from indexed geometry and the following key in Topaz, rather than embedding spaces
+and a platform-specific modifier in the title; menu titles and key equivalents keep the same
+unsmoothed historical raster path. Requester controls stay inside the same stock
+four-colour construction: string gadgets use the application gray (`#AAAAAA`) between black and
+white recessed rules, and the hard-material checkbox is a compact thirteen-pixel recessed field
+with a one-bit ink mark. It therefore never acquires the current accent fill, hover-row wash, or
+an SF-symbol checkmark. Text fields and title captions use the material's unsmoothed rasterization
+as well as its font family, so Topaz does not turn into antialiased modern text as soon as it
+enters a well or the title strip. The shared alert surface consumes the same period popover
+grammar: Workbench requesters use the floating application gray, hard relief, compact Topaz
+copy, the source title strip with its depth gadget, and no modern status symbol. Their action row
+keeps Continue leading and Cancel trailing, as in the manual figure. The manual describes the
+progress gauge but does not preserve its native pixels, so determinate progress remains explicitly
+source-inferred rather than pretending to be a measured bar. Glyph
+family `amiga` renders the original
 Intuition Close, Zoom, and overlapping-window Depth figures; semantic operation `depth`
 orders the window behind its peers. `[close, zoom, depth]` plus `split` reproduces the
 historical left/right gadget order without teaching the stock theme a private code path. Both
 additions are accepted and returned by the public theme tools, so a custom prompt can build
 the same chrome from data.
+
+## 2026-08-05 — period scrollbars and Cheetah Aqua
+
+The first scrollbar theming pass recoloured a current macOS pill; reference captures showed why
+that cannot represent a desktop era. The seven period families now state `scroller_appearance`
+independently of palette and track texture. Windows 98 has a dithered COLOR_SCROLLBAR trough and
+bookended bevel buttons; Platinum has its blue proportional box and paired lower arrows; BeOS,
+OPENSTEP, and IRIX have distinct raised grips and bookended arrows; Workbench combines a one-bit
+track with blue Intuition furniture and paired lower arrows. The geometry is authorable rather
+than selected by stock-theme id, so an imported prompt can reuse any of those anatomies.
+
+**Mac OS X 10.0 Cheetah** (`aqua-cheetah`) is its own chrome, not an update to Mac OS 9. Aqua
+keeps arrows at the two ends and uses a ribbed translucent blue gel for both arrows and the
+proportional thumb over a pale recessed trough. Its frame adds a centred pinstriped silver band,
+Lucida Grande, and leading red/yellow/green glass controls. The chrome vocabulary therefore gains
+`button_glyph_style: aqua`, `button_placement: leading`, and `chrome.frame.corner_radius`;
+custom themes can reproduce the same lineage or recolour its gel through semantic accent roles.
+Old theme documents decode to
+`scroller_appearance: automatic`, so adding the family does not silently turn an existing custom
+theme into a persistent legacy scrollbar.
+
+Menus are a separate material axis for the same reason. A popup field can share a downward
+arrow across several systems while the panel it opens differs in frame construction, row
+rhythm, separators, selection, submenu overlap, shadow, and glyph placement. The authorable
+`menu_appearance` values are `automatic`, `windows_98`, `platinum`, `beos`, `openstep`, `irix`,
+`amiga`, `aqua`, and `aqua_tiger`; old theme documents decode to `automatic`. The historical
+values remove the modern floating-card gap and diffuse shadow. Platinum additionally uses the
+measured black/white/#999/#222 menu frame and two-pixel etched separators from Apple's Help-menu
+reference. Production-reference fixtures enter through `ThemedMenuReferenceFixture`, which
+instantiates the same private surface used by `ThemedMenuPresenter`; the archive never compares
+a separately painted HTML imitation to the historical crop.
+
+## 2026-08-05 — a variant is rebuilt by copying, never by construction
+
+`AppTheme.Variant(...)` at an edit site is the trap `assemble`'s comment warned about, and it
+shipped once more before the rule became structural: the Current Theme page rebuilt a variant to
+change one colour and left `chrome:` off the call — the memberwise initializer defaults every
+regional block to nil, so the call kept compiling — and recolouring a custom takeover theme
+silently handed the window frame back to AppKit. Every rebuild now goes through
+`Variant.replacing` (roles, palette, material) or `replacingSidebar`/`replacingChrome` (the
+regional blocks, whose "set it to nil" must stay sayable — the `SidebarChange` distinction): a
+copy carries every stored field by construction, so a future regional block rides through edit
+sites that have never heard of it. `assemble`'s rename pass takes the same copy, which retires
+its hand-carry list. `WindowChromeStyleTests` holds `replacing()` to the identity across every
+stock variant — the guard with a future: a stored property added to `Variant` and adopted by
+any stock theme fails that sweep the moment `replacing` forgets to carry it.
+
+The same pass gave BeOS, OPENSTEP, IRIX and Workbench the `floatingSurface` Platinum documents:
+the fix had reached only half the period family, which is what a rule stated in one theme file
+invites. Each now states its period face gray — a white floating card over OPENSTEP's white
+period terminal was the Platinum failure verbatim, waiting to be reported.
+
+## 2026-08-07 — a theme that reproduces nothing
+
+**TUI** (`tui`) is the tenth stock style and the ninth to take over the window frame, and it is
+the first to do either without a system to point at. Everything else in the takeover family is a
+reconstruction; this one is drawn in the idiom the full-screen terminal programs share. It cost
+one texture kind (`rule`, one point along the band's bottom edge, spacing ignored) and one glyph
+family (`tui`, hairline one-bit cells that invert under the pointer) — see
+[`window-chrome.md`](window-chrome.md), *An authored takeover*, for both and for why its archive
+entry is `not_applicable` throughout.
+
+What it changes about *this* file's subject is smaller and worth stating: it is the first stock
+theme whose terminal background is its own `ground` rather than a darker rectangle inside the
+application. Every other theme here draws a terminal that is visibly a pane; this one is
+pretending to be the terminal, so a darker pane would draw exactly the seam the design spends
+its effort hiding. `TerminalBackgroundHarmony` has nothing to reconcile as a result, which is
+the degenerate case of what it exists for rather than a special case in it.
+
+It is also the first `typeface: .monospaced` theme to also state `textScale` below 1. The two
+travel together: monospaced glyphs are wider than the proportional ones every measurement in
+`Design` was chosen against, so the same words need more room, and 0.94 buys that width back
+inside the panes. Widening the panes would have been the wrong lever — pane widths are the
+window's, not a theme's, which is the line `AppThemeStyles` draws in its own header.
