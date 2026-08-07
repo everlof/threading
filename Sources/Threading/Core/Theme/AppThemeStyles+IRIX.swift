@@ -17,6 +17,10 @@ extension AppThemeStyles {
                 .surface: hex("#BDBDBD"),
                 .panel: hex("#C8C8C8"),
                 .elevated: hex("#DEDEDE"),
+                // 4Dwm's transient panels wear the same neutral gray as its frames; the
+                // stemless period card takes the face gray rather than `elevated`'s pale
+                // paper — the Platinum `floatingSurface` rule, applied across the family.
+                .floatingSurface: hex("#BDBDBD"),
                 .border: hex("#181818"),
                 .divider: hex("#686868"),
                 .label: hex("#101010"),
@@ -66,11 +70,20 @@ extension AppThemeStyles {
                 controlRadius: 0,
                 borderWidth: 1,
                 textScale: 0.84,
+                choiceHeight: 20,
                 glow: nil,
                 popoverStyle: periodPopoverStyle,
+                buttonStyle: AppTheme.Material.ButtonStyle(
+                    fontWeight: .regular,
+                    primaryTreatment: .raised,
+                    primaryRole: .border
+                ),
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
-                fontFamily: "Helvetica"
+                fontFamily: "Helvetica",
+                scrollerAppearance: .irix,
+                menuAppearance: .irix,
+                choiceStyle: .popup
             ),
             sidebar: SidebarStyle(
                 // SGI applications use this cool work-area colour inside otherwise neutral
@@ -91,7 +104,10 @@ extension AppThemeStyles {
                     inactiveInk: hex("#303030"),
                     titleAlignment: .leading,
                     titleFontStyle: .italic,
-                    height: 24,
+                    titleFontSize: 13,
+                    // Showcase's complete 4Dwm key-title construction is 32 native pixels:
+                    // seven rows of outer stepped frame above a 25px title/control band.
+                    height: 32,
                     buttonGlyphStyle: .irix,
                     buttonPlacement: .bookends,
                     showsAppIcon: false,
@@ -107,7 +123,9 @@ extension AppThemeStyles {
                     ),
                     visibleButtons: [.windowMenu, .minimize, .zoom]
                 ),
-                frame: .init(width: 2)
+                // 4Dwm's resize frame is a substantial stepped rail. At two points it read as
+                // the same generic hairline construction as the other retro families.
+                frame: .init(width: 4)
             )
         )]
     )

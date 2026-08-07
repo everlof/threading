@@ -16,10 +16,19 @@ extension AppThemeStyles {
             roles: [
                 .ground: hex("#AAAAAA"),
                 .surface: hex("#AAAAAA"),
-                .panel: hex("#B8B8B8"),
+                // Workbench windows and requesters share the application gray; a lighter
+                // panel would invent a fifth palette colour absent from the source capture.
+                .panel: hex("#AAAAAA"),
+                // Intuition string and check gadgets keep the same stock gray inside their
+                // recessed rules.
+                .fieldSurface: hex("#AAAAAA"),
                 .elevated: hex("#FFFFFF"),
+                // A Workbench requester is gray under black rules — one of the four stock
+                // colours — never a white modern card. Derived from `elevated` the floating
+                // surface broke the four-colour vocabulary this theme exists to keep.
+                .floatingSurface: hex("#AAAAAA"),
                 .border: hex("#000000"),
-                .divider: hex("#3A3A3A"),
+                .divider: hex("#000000"),
                 .label: hex("#000000"),
                 // The frame keeps Workbench's exact #6688BB. Interactive accents are a
                 // darker relative so they still clear the theme contract on gray surfaces.
@@ -36,7 +45,7 @@ extension AppThemeStyles {
                 .syntaxString: hex("#6E381E"),
                 .syntaxNumber: hex("#31577F"),
                 .bevelHighlight: hex("#FFFFFF"),
-                .bevelShadow: hex("#3A3A3A")
+                .bevelShadow: hex("#000000")
             ],
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-amiga-workbench-31-terminal"),
@@ -67,22 +76,38 @@ extension AppThemeStyles {
                 controlRadius: 0,
                 borderWidth: 1,
                 textScale: 0.92,
+                choiceHeight: 18,
                 glow: nil,
                 popoverStyle: periodPopoverStyle,
+                buttonStyle: AppTheme.Material.ButtonStyle(
+                    fontWeight: .regular,
+                    // Workbench's Topaz control labels are a one-bit bitmap strike. The open
+                    // fallback must keep the same hard raster contract when it substitutes.
+                    antialiasesTitle: false,
+                    primaryTreatment: .raised,
+                    primaryRole: .border
+                ),
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .monospaced,
-                // Workbench 3.1's ROM face is Topaz 8. The maintained multi-platform port names
-                // its 2.x face for the A600/A1200/A4000 family; keep the shorter names too for
-                // other ports, then Monaco as the safe installed monospaced fallback.
+                // Workbench 3.1's ROM face is Topaz 8. The bundled GPL-FE recreation names its
+                // 2.x face `Topaz a600a1200a400` in the font's actual CoreText name table (the
+                // upstream prose says A4000, but resolving that spelling silently falls through).
+                // Keep common installed-port spellings behind it, then Monaco as the safe last
+                // resort for characters the historical face cannot supply.
                 fontFamily: "Topaz",
                 fontFallbacks: [
+                    "Topaz a600a1200a400",
                     "Topaz a600a1200a4000",
                     "TopazPlus a600a1200a4000",
                     "TopazPlus",
                     "Monaco"
                 ],
                 scrollerPlacement: .trailing,
-                scrollerTrackStyle: .stippled
+                scrollerTrackStyle: .stippled,
+                scrollerAppearance: .amiga,
+                menuAppearance: .amiga,
+                choiceStyle: .cycle,
+                checkboxStyle: .recessedTick
             ),
             sidebar: SidebarStyle(
                 navigatorWell: .init(fill: hex("#AAAAAA"), bevel: .sunken)
@@ -100,7 +125,11 @@ extension AppThemeStyles {
                     ink: hex("#000000"),
                     inactiveInk: hex("#000000"),
                     titleAlignment: .leading,
-                    height: 26,
+                    // The Workbench title strip is the compact 18px Intuition band, not the
+                    // 26px modern-caption default. Keeping this explicit also leaves room for
+                    // the full close/zoom/depth gadget faces without stretching them.
+                    titleFontSize: 12,
+                    height: 18,
                     buttonGlyphStyle: .amiga,
                     buttonPlacement: .split,
                     showsAppIcon: false,

@@ -313,6 +313,16 @@ extension AppThemeStyles {
                     offsetY: 4
                 )
             ),
+            buttonStyle: AppTheme.Material.ButtonStyle(
+                fontWeight: .bold,
+                // The live reference's secondary button is an opaque white clay object. The
+                // lavender control role is its recessed input recipe; sharing it made compact
+                // buttons disappear until only their purple shadow remained.
+                secondaryRole: .elevated,
+                secondaryHoverRole: .elevated,
+                hoverOffsetY: -2,
+                pressedOffsetY: 1
+            ),
             bevel: AppTheme.Bevel(width: 3, style: .soft),
             typeface: .rounded
         )
@@ -648,6 +658,7 @@ extension AppThemeStyles {
                 textTransform: .uppercase,
                 fontWeight: .bold,
                 tracking: 0.6,
+                secondaryShadow: .panel,
                 primaryBorderRole: .border,
                 pressedOffsetY: 2
             ),

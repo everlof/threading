@@ -28,13 +28,27 @@ enum AppThemeStyles {
         botanical,
         industrial,
         platinum,
+        aqua,
+        aquaTiger,
         beOS,
         openStep,
         irix,
         amiga,
         win98,
+        tui,
         christmas
     ]
+
+    /// The stock themes that draw the window frame themselves, derived from the one fact
+    /// that defines them (`takesOverWindowChrome`) rather than listed again by hand.
+    ///
+    /// This is the only takeover registry. The Component Gallery's chrome story and the
+    /// window-chrome test sweeps iterate this list, so a new takeover theme appears in both
+    /// by being added to `all` — the gallery had already drifted once (Aqua and Tiger were
+    /// missing) in the short life of the third hand-maintained copy.
+    static var takeovers: [AppTheme] {
+        all.filter(\.takesOverWindowChrome)
+    }
 
     /// Shared period transient chrome: a stemless compact card, raised by the material's own
     /// edge and never by a modern ambient window shadow. Individual systems may refine it —

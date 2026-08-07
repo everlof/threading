@@ -148,18 +148,13 @@ enum AppThemeEditing {
         guard !cleanName.isEmpty else {
             throw AppThemeEditingError.invalid("Provide a name for the app theme.")
         }
-        // Every optional block must ride through this rebuild by hand. The rename pass
-        // reconstructs each variant, and a field left off the call vanishes from every theme
-        // assemble touches while looking untouched in the caller's patch — the trap
-        // `SidebarStyleTests` and `WindowChromeStyleTests` each pin for their block.
+        // The rename pass rebuilds each variant through `replacing`, which carries every
+        // stored field by construction — the hand-written rebuild here was the trap
+        // `SidebarStyleTests` and `WindowChromeStyleTests` each pin for their block: a field
+        // left off the call vanished from every theme assemble touched while looking
+        // untouched in the caller's patch.
         let renamed = variants.mapValues { variant in
-            AppTheme.Variant(
-                roles: variant.roles,
-                terminalPalette: variant.terminalPalette.renamed(cleanName),
-                material: variant.material,
-                sidebar: variant.sidebar,
-                chrome: variant.chrome
-            )
+            variant.replacing(terminalPalette: variant.terminalPalette.renamed(cleanName))
         }
         let theme = AppTheme(
             id: id,
@@ -382,6 +377,9 @@ enum AppThemeEditing {
         guard (0.65...1.5).contains(material.textScale) else {
             throw AppThemeEditingError.invalid("text_scale must be between 0.65 and 1.5.")
         }
+        guard (14...44).contains(material.choiceHeight) else {
+            throw AppThemeEditingError.invalid("choice_height must be between 14 and 44.")
+        }
 
         let popover = material.popoverStyle
         guard popover.edge != .material || popover.arrow == .none else {
@@ -439,6 +437,21 @@ enum AppThemeEditing {
         guard (-1...4).contains(button.tracking) else {
             throw AppThemeEditingError.invalid(
                 "button_style.tracking must be between -1 and 4 points."
+            )
+        }
+        guard (0.5...2).contains(button.fontScale) else {
+            throw AppThemeEditingError.invalid(
+                "button_style.font_scale must be between 0.5 and 2."
+            )
+        }
+        if let width = button.minimumWidth, !(20...240).contains(width) {
+            throw AppThemeEditingError.invalid(
+                "button_style.minimum_width must be between 20 and 240 points."
+            )
+        }
+        if let height = button.minimumHeight, !(14...60).contains(height) {
+            throw AppThemeEditingError.invalid(
+                "button_style.minimum_height must be between 14 and 60 points."
             )
         }
         for (field, value) in [
@@ -613,6 +626,16 @@ enum AppThemeEditing {
             }
         }
 
+        if let fontSize = titleBar.titleFontSize {
+            guard WindowChromeStyleLimits.titleFontSizeRange.contains(fontSize) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.title_bar.title_font_size must be between "
+                        + "\(Int(WindowChromeStyleLimits.titleFontSizeRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.titleFontSizeRange.upperBound)) points."
+                )
+            }
+        }
+
         if let tabWidth = titleBar.tabWidth {
             guard WindowChromeStyleLimits.tabWidthRange.contains(tabWidth) else {
                 throw AppThemeEditingError.invalid(
@@ -655,6 +678,15 @@ enum AppThemeEditing {
                     "chrome.frame.width must be between "
                         + "\(Int(WindowChromeStyleLimits.frameWidthRange.lowerBound)) and "
                         + "\(Int(WindowChromeStyleLimits.frameWidthRange.upperBound)) points."
+                )
+            }
+            guard WindowChromeStyleLimits.frameCornerRadiusRange.contains(
+                frame.cornerRadius
+            ) else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.frame.corner_radius must be between "
+                        + "\(Int(WindowChromeStyleLimits.frameCornerRadiusRange.lowerBound)) and "
+                        + "\(Int(WindowChromeStyleLimits.frameCornerRadiusRange.upperBound)) points."
                 )
             }
         }

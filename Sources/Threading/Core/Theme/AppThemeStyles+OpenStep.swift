@@ -13,19 +13,28 @@ extension AppThemeStyles {
         summary: "Black NeXT title bands, left stippled scrollers, and square workstation depth.",
         variants: [.light: AppTheme.Variant(
             roles: [
-                .ground: hex("#BEBEBE"),
-                .surface: hex("#BEBEBE"),
-                .panel: hex("#D6D6D6"),
-                .elevated: hex("#EAEAEA"),
-                .border: hex("#111111"),
-                .divider: hex("#686868"),
-                .label: hex("#111111"),
+                // OPENSTEP's native four-step neutral palette is literal: application gray
+                // is #AAAAAA, shadow is #555555, and the remaining rails are black/white.
+                // The previous #BEBEBE approximation made every control visibly washed out
+                // beside the preserved Workspace Manager and Display Preferences pixels.
+                .ground: hex("#AAAAAA"),
+                .surface: hex("#AAAAAA"),
+                .panel: hex("#AAAAAA"),
+                .elevated: hex("#AAAAAA"),
+                // NeXT's floating panels are the workstation gray. Derived from `elevated`
+                // the card trended white — and this theme's terminal is the period's
+                // black-on-white shell, which is the Platinum white-card-over-white-terminal
+                // failure verbatim.
+                .floatingSurface: hex("#AAAAAA"),
+                .border: hex("#000000"),
+                .divider: hex("#555555"),
+                .label: hex("#000000"),
                 // OPENSTEP's restrained indigo selection colour keeps interaction tellable
                 // without competing with the black window band.
                 .accent: hex("#45457A"),
                 .accentMuted: hex("#45457A").withAlphaComponent(0.18),
-                .controlResting: hex("#BEBEBE"),
-                .controlHover: hex("#D8D8D8"),
+                .controlResting: hex("#AAAAAA"),
+                .controlHover: hex("#AAAAAA"),
                 .selection: hex("#7979A6").withAlphaComponent(0.82),
                 .statusPositive: hex("#286B3C"),
                 .statusWarning: hex("#765500"),
@@ -35,7 +44,7 @@ extension AppThemeStyles {
                 .syntaxString: hex("#7A3030"),
                 .syntaxNumber: hex("#5D4375"),
                 .bevelHighlight: hex("#FFFFFF"),
-                .bevelShadow: hex("#5F5F5F")
+                .bevelShadow: hex("#555555")
             ],
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-openstep-42-terminal"),
@@ -66,13 +75,22 @@ extension AppThemeStyles {
                 controlRadius: 0,
                 borderWidth: 1,
                 textScale: 0.86,
+                choiceHeight: 18,
                 glow: nil,
                 popoverStyle: periodPopoverStyle,
+                buttonStyle: AppTheme.Material.ButtonStyle(
+                    fontWeight: .regular,
+                    primaryTreatment: .raised,
+                    primaryRole: .border
+                ),
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
                 fontFamily: "Helvetica",
                 scrollerPlacement: .leading,
-                scrollerTrackStyle: .stippled
+                scrollerTrackStyle: .stippled,
+                scrollerAppearance: .openStep,
+                menuAppearance: .openStep,
+                choiceStyle: .popup
             ),
             sidebar: SidebarStyle(
                 navigatorWell: .init(fill: hex("#FFFFFF"), bevel: .sunken)
@@ -80,8 +98,8 @@ extension AppThemeStyles {
             chrome: WindowChromeStyle(
                 titleBar: .init(
                     activeGradient: .init(stops: [
-                        .init(color: hex("#111111"), position: 0),
-                        .init(color: hex("#111111"), position: 1)
+                        .init(color: hex("#000000"), position: 0),
+                        .init(color: hex("#000000"), position: 1)
                     ]),
                     inactiveGradient: .init(stops: [
                         .init(color: hex("#A2A2A2"), position: 0),
@@ -90,11 +108,18 @@ extension AppThemeStyles {
                     ink: hex("#FFFFFF"),
                     inactiveInk: hex("#111111"),
                     titleAlignment: .center,
-                    height: 24,
+                    titleFontSize: 12,
+                    // The complete native Workspace Manager caption is 23px including its
+                    // asymmetric outer rails; 20px clipped both the bottom edge and the
+                    // title's one-bit baseline.
+                    height: 23,
                     buttonGlyphStyle: .openStep,
-                    buttonPlacement: .bookends,
+                    buttonPlacement: .trailing,
                     showsAppIcon: false,
-                    visibleButtons: [.minimize, .close]
+                    // OPENSTEP panels carry the single close plate at the trailing edge.
+                    // Miniaturisation is represented by the app icon in the dock, not a
+                    // second title-band box.
+                    visibleButtons: [.close]
                 ),
                 frame: .init(width: 1)
             )

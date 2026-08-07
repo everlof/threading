@@ -182,13 +182,7 @@ enum AppThemeLibrary {
                 sidebar.brand?.logo = .asset(stored)
             }
 
-            variants[kind] = AppTheme.Variant(
-                roles: variant.roles,
-                terminalPalette: variant.terminalPalette,
-                material: variant.material,
-                sidebar: sidebar,
-                chrome: variant.chrome
-            )
+            variants[kind] = variant.replacingSidebar(sidebar)
         }
         return AppTheme(
             id: copy.id,

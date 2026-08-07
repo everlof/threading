@@ -15,7 +15,15 @@ extension AppThemeStyles {
                 .ground: hex("#D8D8D8"),
                 .surface: hex("#D8D8D8"),
                 .panel: hex("#E2E2E2"),
+                // R5 checkboxes and editable/value wells are white inside their nested dark
+                // seating. Haiku's pinned BeControlLook calls this `lightenMax` from the panel.
+                .fieldSurface: hex("#FFFFFF"),
                 .elevated: hex("#FFFFFF"),
+                // The floating card is the period's warm application gray, not paper.
+                // Deriving it from `elevated` made it white — invisible over the theme's
+                // own white wells, the exact failure Platinum documents on its
+                // `floatingSurface`; the fix had reached only half the period family.
+                .floatingSurface: hex("#D8D8D8"),
                 .border: hex("#303030"),
                 .divider: hex("#888888"),
                 .label: hex("#101010"),
@@ -65,14 +73,24 @@ extension AppThemeStyles {
                 controlRadius: 0,
                 borderWidth: 1,
                 textScale: 0.84,
+                choiceHeight: 18,
                 glow: nil,
                 popoverStyle: periodPopoverStyle,
+                buttonStyle: AppTheme.Material.ButtonStyle(
+                    fontWeight: .regular,
+                    primaryTreatment: .raised,
+                    primaryRole: .border
+                ),
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
                 // BeOS exposed this family as Swis721 BT. Keep the common expanded spelling in
                 // the chain for third-party ports, then fall to its closest installed relative.
                 fontFamily: "Swis721 BT",
-                fontFallbacks: ["Swiss 721", "Helvetica"]
+                fontFallbacks: ["Swiss 721", "Helvetica"],
+                scrollerAppearance: .beOS,
+                menuAppearance: .beOS,
+                choiceStyle: .popup,
+                checkboxStyle: .beOSCross
             ),
             sidebar: SidebarStyle(
                 navigatorWell: .init(fill: hex("#FFFFFF"), bevel: .sunken)
@@ -81,8 +99,8 @@ extension AppThemeStyles {
                 titleBar: .init(
                     activeGradient: .init(
                         stops: [
-                            .init(color: hex("#FFE77A"), position: 0),
-                            .init(color: hex("#F2C400"), position: 1)
+                            .init(color: hex("#FFCB00"), position: 0),
+                            .init(color: hex("#FFCB00"), position: 1)
                         ],
                         angleDegrees: 180
                     ),
@@ -93,12 +111,17 @@ extension AppThemeStyles {
                     ink: hex("#101010"),
                     inactiveInk: hex("#4B4B4B"),
                     titleAlignment: .center,
-                    height: 28,
+                    titleFontSize: 12,
+                    // R5 tabs sit only a few pixels above their 16px caption boxes. The former
+                    // 28pt tab read like a modern toolbar when placed beside a period capture.
+                    height: 19,
                     buttonGlyphStyle: .beOS,
                     buttonPlacement: .split,
                     showsAppIcon: false,
                     shape: .leadingTab,
-                    tabWidth: 210,
+                    // BeOS sized tabs to their short title and two boxes. The main-window title
+                    // fits the period minimum; 210pt left an implausible yellow shelf beside it.
+                    tabWidth: 120,
                     visibleButtons: [.close, .zoom]
                 ),
                 frame: .init(width: 2)

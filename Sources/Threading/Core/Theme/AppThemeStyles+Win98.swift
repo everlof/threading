@@ -36,7 +36,9 @@ extension AppThemeStyles {
                 // the pressed bevel. Keeping the same face also prevents classic dropdowns from
                 // acquiring a modern rollover wash.
                 .controlHover: hex("#C0C0C0"),
-                .selection: hex("#000080").withAlphaComponent(0.9),
+                // COLOR_HIGHLIGHT was an opaque navy. Letting the button face bleed through
+                // lifts it to #131381, visibly lighter and more violet than the Win98 menu band.
+                .selection: hex("#000080"),
                 .statusPositive: hex("#008000"),
                 .statusWarning: hex("#808000"),
                 .statusNegative: hex("#B00000"),
@@ -80,20 +82,44 @@ extension AppThemeStyles {
             // rules, no halo (light came from the top-left in 1998, not from behind), and
             // Windows 98's English shell used 8-point MS Sans Serif. The original bitmap face is
             // rarely installed on a current Mac; Microsoft Sans Serif is its metric-compatible
-            // TrueType successor, then Tahoma is the last Windows-era substitute. Nothing is
-            // bundled — installing the original automatically moves it to the front.
+            // TrueType successor. W95FA is the explicitly OFL-licensed scalable recreation the
+            // app may redistribute; installing the original still moves it to the front.
             material: AppTheme.Material(
                 panelRadius: 0,
                 controlRadius: 0,
                 borderWidth: 1,
-                // Win98 shell UI was set around eight points. Scaling semantic roles keeps
-                // that density throughout the chrome instead of shrinking one title label.
-                textScale: 0.72,
+                // Win98 shell UI was set around eight points, but reproducing that literal
+                // density across a modern high-resolution application made the project tree
+                // and secondary copy needlessly small. This keeps the compact period hierarchy
+                // while letting ordinary application content sit one optical step above it.
+                textScale: 0.80,
+                choiceHeight: 21,
                 glow: nil,
                 popoverStyle: windowsInfotipStyle,
                 buttonStyle: AppTheme.Material.ButtonStyle(
                     fontWeight: .regular,
+                    // Ported from the pinned MIT 98.css implementation: Win32 pushbuttons use
+                    // a 75×23 minimum face with twelve pixels of horizontal title padding.
+                    // The inset is already the design system's ordinary 12pt button inset;
+                    // these two floors were the missing part of that native geometry.
+                    // CSS and AppKit both address logical screen pixels here; physical-inch
+                    // conversion was the wrong model. At the theme's 0.8 text scale the 12pt
+                    // semantic control face is 9.6pt, so 55/48 lands the imported 11px strike
+                    // exactly on an 11pt device-grid size.
+                    fontScale: 55 / 48,
+                    minimumWidth: 75,
+                    minimumHeight: 23,
+                    embossesDisabledTitle: true,
+                    // GDI selected an 8pt bitmap strike and painted its small UI labels on the
+                    // device grid. W95FA is an outline recreation, so allowing CoreText to
+                    // smooth it produces the gray fringe that makes the face look modern.
+                    antialiasesTitle: false,
                     primaryTreatment: .raised,
+                    // COLOR_WINDOWFRAME, which Win32 painted black — not COLOR_BTNSHADOW, which
+                    // is this theme's `.border` gray and is already carrying the bevel. The
+                    // default button's extra outer frame is the one mark separating it from its
+                    // siblings; in shadow gray it reads as another bevel edge and the dialog
+                    // stops saying which action Return takes.
                     primaryRole: .label,
                     pressedOffsetX: 1,
                     pressedOffsetY: 1
@@ -101,9 +127,20 @@ extension AppThemeStyles {
                 bevel: AppTheme.Bevel(width: 2),
                 typeface: .standard,
                 fontFamily: "MS Sans Serif",
-                fontFallbacks: ["Microsoft Sans Serif", "Tahoma"],
+                // W95FA is the OFL-licensed scalable recreation of MS Sans Serif. It stays a
+                // fallback rather than replacing the real family, and is not downloaded by the
+                // app; an installed copy is used automatically. Geneva is the last built-in,
+                // period-safe stop before the modern system face.
+                fontFallbacks: ["Microsoft Sans Serif", "W95FA", "Tahoma", "Geneva"],
+                // COLOR_SCROLLBAR was the familiar white/button-face dither, not another
+                // uninterrupted #C0C0C0 plate. It is what keeps the movable thumb legible
+                // even before its raised edges are noticed.
+                scrollerTrackStyle: .stippled,
+                scrollerAppearance: .windows98,
+                menuAppearance: .windows98,
                 progressStyle: .segmented,
-                choiceStyle: .dropdown
+                choiceStyle: .dropdown,
+                checkboxStyle: .windows98Tick
             ),
             sidebar: SidebarStyle(
                 // Explorer separates its white work area from the surrounding button-face
@@ -122,11 +159,18 @@ extension AppThemeStyles {
                     // where the authentic `#D4D0C8` ink would vanish entirely.
                     inactiveGradient: SidebarStyle.Gradient(stops: [
                         .init(color: hex("#808080"), position: 0),
-                        .init(color: hex("#A8A8A8"), position: 1)
+                        // This endpoint produces the preserved #B5 sample at the caption button
+                        // cluster's measured x-position. The earlier #A8 made every inactive
+                        // window much darker than the native right edge; #B8 overshot the other
+                        // way, landing white ink at 1.98:1 — under the inactive floor by a
+                        // hundredth. #B7 is the lightest endpoint the contrast rule allows, and
+                        // one step of 255 is not a colour anybody can see.
+                        .init(color: hex("#B7B7B7"), position: 1)
                     ], angleDegrees: 90),
                     ink: hex("#FFFFFF"),
                     inactiveInk: hex("#FFFFFF"),
                     titleAlignment: .leading,
+                    titleFontSize: 11,
                     // Default classic non-client metrics: an 18px caption band holding
                     // 16×14 caption buttons. Keeping the actual relationship matters as much
                     // as the colours — the former 20/18×16 pair looked inflated beside Win98.

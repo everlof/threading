@@ -414,6 +414,14 @@ struct AppTheme: Codable, Equatable {
         /// raised arrow button used by desktop-era systems.
         var choiceStyle: ChoiceStyle = .chip
 
+        /// The anatomy of a binary check gadget, independent of popup/chooser anatomy.
+        ///
+        /// A square hard bevel is not enough to identify the period control: Intuition uses a
+        /// gray recessed field and tick, while BeOS uses a white nested well and an X in the
+        /// system mark colour. `automatic` preserves the pre-field inference for old theme
+        /// documents; authored themes can state the exact family without a stock-theme branch.
+        var checkboxStyle: CheckboxStyle = .automatic
+
         enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
             case standard = "default"
@@ -503,6 +511,15 @@ struct AppTheme: Codable, Equatable {
             case cycle
 
             var isClassic: Bool { self != .chip }
+        }
+
+        enum CheckboxStyle: String, Codable, CaseIterable {
+            /// Modern for ordinary materials; old square-bevel documents retain the historical
+            /// recessed-tick inference in `ThemedCheckbox`.
+            case automatic
+            case recessedTick = "recessed_tick"
+            case windows98Tick = "windows_98_tick"
+            case beOSCross = "beos_cross"
         }
 
         struct BackdropPattern: Codable, Equatable {
@@ -915,7 +932,8 @@ struct AppTheme: Codable, Equatable {
             scrollerAppearance: ScrollerAppearance = .automatic,
             menuAppearance: MenuAppearance = .automatic,
             progressStyle: ProgressStyle = .continuous,
-            choiceStyle: ChoiceStyle = .chip
+            choiceStyle: ChoiceStyle = .chip,
+            checkboxStyle: CheckboxStyle = .automatic
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -939,6 +957,7 @@ struct AppTheme: Codable, Equatable {
             self.menuAppearance = menuAppearance
             self.progressStyle = progressStyle
             self.choiceStyle = choiceStyle
+            self.checkboxStyle = checkboxStyle
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -947,7 +966,7 @@ struct AppTheme: Codable, Equatable {
             case glow, popoverStyle, controlGlow, buttonStyle, headingStyle, bevel, typeface, fontFamily
             case fontFallbacks
             case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
-            case progressStyle, choiceStyle
+            case progressStyle, choiceStyle, checkboxStyle
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -1009,6 +1028,10 @@ struct AppTheme: Codable, Equatable {
                 ChoiceStyle.self,
                 forKey: .choiceStyle
             ) ?? .chip
+            checkboxStyle = try container.decodeIfPresent(
+                CheckboxStyle.self,
+                forKey: .checkboxStyle
+            ) ?? .automatic
         }
     }
 
