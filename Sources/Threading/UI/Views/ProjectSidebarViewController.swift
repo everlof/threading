@@ -9,7 +9,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     // MARK: - Properties
 
-    private lazy var outlineView: NSOutlineView = {
+    private lazy var outlineView: ThemedOutlineView = {
         let outline = ThemedOutlineView()
         outline.style = .inset
         outline.headerView = nil
@@ -129,6 +129,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// The launch flourish plays once per app run, not once per window or per settings
     /// round-trip.
     private static var hasPlayedLaunchAnimation = false
+
+    /// The density the outline is currently *drawn* at — not the setting's live value, which
+    /// is what lets `applyTreeDensity` answer only the changes that move a frame. See
+    /// `AppSettings.compactsSidebarTree` for what the compact tree is.
+    private var presentedTreeIsCompact = false
 
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
@@ -307,6 +312,10 @@ private extension ProjectSidebarViewController {
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
         ])
+
+        // Before the first `reload()`, so the first tree is drawn at the chosen density
+        // rather than arriving indented and snapping flat.
+        applyTreeDensity(initial: true)
     }
 
     /// Shown centred in the list area while no project has been added, pointing at the two
@@ -391,6 +400,14 @@ private extension ProjectSidebarViewController {
         }
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.extensionSettingsDidChange()
+        }
+        // The one settings observer this list carries, and it is value-guarded inside: the
+        // event fires for every setting, and every other sidebar-shaping setting rebuilds the
+        // *tree* and so arrives as `ProjectsDidChange`. Density changes no node — `reload()`
+        // would compare shapes, find them equal, and refresh contents without moving a frame —
+        // so it takes its own route to a wholesale re-layout.
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            self?.applyTreeDensity()
         }
     }
 
@@ -593,6 +610,11 @@ extension ProjectSidebarViewController {
 
             expandStandingRows(animated: animated)
         }
+
+        // A move can change which root stands first, and a moved row keeps its view — so the
+        // compact tree's rules are re-stamped after every structural pass rather than only
+        // where a row view is born (`didAdd`).
+        refreshGroupRules()
     }
 
     /// Opens the rows that are meant to be open. Idempotent — `expandItem` on a row that is
@@ -625,6 +647,53 @@ extension ProjectSidebarViewController {
                 && !collapsedSideChatParents.contains(sessionNode.sessionID) {
                 outline.expandItem(sessionNode)
             }
+        }
+    }
+
+    /// Draws the outline at the density the setting asks for: the ordinary indented tree, or
+    /// the compact one — every row starting at `SidebarDefaults.compactCellLeading`, groups
+    /// told apart by vertical spacing and a rule instead of depth.
+    ///
+    /// Density is presentation, not shape: `SidebarTreeBuilder` never reads it and the nodes
+    /// are untouched, which is why this cannot ride `reload()` — the shapes would compare
+    /// equal and the refresh would move no frame. The wholesale pass re-lays out every row at
+    /// its new frame and height and reopens what should be open; `initial` skips it, because
+    /// at setup the first `reload()` has not drawn anything to re-lay out.
+    func applyTreeDensity(initial: Bool = false) {
+        let compact = AppSettings.shared.compactsSidebarTree
+        guard initial || compact != presentedTreeIsCompact else { return }
+
+        presentedTreeIsCompact = compact
+        outlineView.flattenedIndentation = compact
+            ? .init(
+                cellLeading: SidebarDefaults.compactCellLeading,
+                markerLeading: SidebarDefaults.compactMarkerLeading
+            )
+            : nil
+
+        guard !initial else { return }
+        applyStructure(steps: [], wholesale: true)
+    }
+
+    /// Whether the compact tree draws its rule above this row: a top-level group opening
+    /// while another stands above it. The first root has the header band's own hairline
+    /// above it, and a second line under that one would read as a mistake.
+    private func showsGroupRule(forRow row: Int) -> Bool {
+        guard presentedTreeIsCompact,
+              let item = outlineView.item(atRow: row) as? NSObject,
+              outlineView.parent(forItem: item) == nil
+        else { return false }
+        return rootNodes.first !== item
+    }
+
+    /// Re-answers `showsGroupRule` for every row view the outline has built. Cheap enough to
+    /// run after any structural pass: it walks built views only and stamping is a no-op where
+    /// the answer stands.
+    private func refreshGroupRules() {
+        for row in 0..<outlineView.numberOfRows {
+            guard let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false)
+                as? SidebarHoverRowView else { continue }
+            rowView.showsGroupRule = showsGroupRule(forRow: row)
         }
     }
 
@@ -1595,6 +1664,17 @@ private extension ProjectSidebarViewController {
         ))
     }
 
+    /// The compact tree, in the menu that owns how the list presents itself. Grouped with the
+    /// grouping toggles rather than the orders: all three say what the tree *is*, where an
+    /// order says what comes first.
+    private func compactTreeEntry() -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: L10n.string("Compact Tree"),
+            isSelected: AppSettings.shared.compactsSidebarTree,
+            onChoose: { [weak self] in self?.toggleCompactTreeClicked() }
+        ))
+    }
+
     /// One order as a checkable row; the chosen one carries the check.
     private func orderEntry(_ order: SidebarSessionOrder) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
@@ -1613,6 +1693,13 @@ private extension ProjectSidebarViewController {
     @objc private func toggleLoneBranchHeadingsClicked() {
         AppSettings.shared.groupsLoneBranches.toggle()
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func toggleCompactTreeClicked() {
+        // No `ProjectsDidChange`: the tree's shape is unchanged, so that route would answer
+        // with a content refresh that moves no frame. The setter's own settings event reaches
+        // `applyTreeDensity`, here and in every other window.
+        AppSettings.shared.compactsSidebarTree.toggle()
     }
 
     private func sessionOrderChosen(_ order: SidebarSessionOrder) {
@@ -1807,20 +1894,45 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// Clickable rows highlight under the pointer; group headings do not, since they only
     /// respond at their disclosure triangle.
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        guard item is ProjectNode || item is SessionNode || item is TerminalNode else { return nil }
-        return SidebarHoverRowView()
+        if item is ProjectNode || item is SessionNode || item is TerminalNode {
+            return SidebarHoverRowView()
+        }
+
+        // In the compact tree a repository heading can open a group, and the rule above a
+        // group is the row's to draw — so the heading takes the same row class with the
+        // hover wash off, keeping the promise above.
+        if presentedTreeIsCompact, item is RepoGroupNode {
+            let rowView = SidebarHoverRowView()
+            rowView.isHoverEnabled = false
+            return rowView
+        }
+
+        return nil
+    }
+
+    /// The compact tree's rule rides the row view, so it is stamped where the view is born;
+    /// `refreshGroupRules()` re-stamps the survivors after each structural pass.
+    func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        guard let rowView = rowView as? SidebarHoverRowView else { return }
+        rowView.showsGroupRule = showsGroupRule(forRow: row)
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        // In the compact tree, the space indentation used to put *beside* a group goes above
+        // it instead: every top-level row adds the group gap. Uniformly — first root included —
+        // so a root moving to or from the top never changes a height mid-diff.
+        let groupSpacing = presentedTreeIsCompact ? SidebarDefaults.compactGroupSpacing : 0
+
         // Project rows are a single line — the branch that used to add a second one now lives
         // in the hover popover — so they take the compact height.
         if item is ProjectNode {
-            return SidebarDefaults.projectCompactRowHeight
+            let isRoot = outlineView.parent(forItem: item) == nil
+            return SidebarDefaults.projectCompactRowHeight + (isRoot ? groupSpacing : 0)
         }
 
         // Headings get extra height, which reads as space between groups.
         if item is RepoGroupNode {
-            return SidebarDefaults.headingRowHeight
+            return SidebarDefaults.headingRowHeight + groupSpacing
         }
 
         // A branch heading sits inside a project, so it takes the compact height rather
@@ -2339,6 +2451,7 @@ extension ProjectSidebarViewController {
         var entries: [ThemedMenuEntry] = [
             branchGroupingEntry(),
             loneBranchHeadingsEntry(),
+            compactTreeEntry(),
             .separator
         ]
         for order in SidebarSessionOrder.allCases {

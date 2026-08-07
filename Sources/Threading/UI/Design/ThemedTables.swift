@@ -342,6 +342,52 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
     /// an `NSMenu`, so the outline's part shrinks to resolving the row under the gesture.
     var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
 
+    /// Starts every row's content at one leading edge, whatever its depth.
+    ///
+    /// `indentationPerLevel` stays untouched — zeroing it is the obvious route, and it leaves
+    /// AppKit computing marker and cell frames from degenerate geometry nobody documents.
+    /// Instead the normal indented frames are asked for and re-placed: the cell keeps its
+    /// right edge and takes `cellLeading` as its left one, and the disclosure chevron drops
+    /// into a fixed gutter at `markerLeading`. Depth is then the host's to say some other way
+    /// — the sidebar says it with type and vertical rhythm.
+    ///
+    /// The host owns relayout: rows already built keep their old frames until the next
+    /// `reloadData()`, so flipping this mid-list without one shows both geometries at once.
+    struct FlattenedIndentation {
+        let cellLeading: CGFloat
+        let markerLeading: CGFloat
+
+        init(cellLeading: CGFloat, markerLeading: CGFloat) {
+            self.cellLeading = cellLeading
+            self.markerLeading = markerLeading
+        }
+    }
+
+    /// Nil draws the ordinary indented tree.
+    var flattenedIndentation: FlattenedIndentation?
+
+    /// Only the outline column indents, and this list has only that column — so the override
+    /// applies wherever the frame came back indented rather than guessing at column indexes.
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        guard let flattened = flattenedIndentation, tableColumns.indices.contains(column),
+              tableColumns[column] === outlineTableColumn, !frame.isEmpty else { return frame }
+
+        let trailingEdge = frame.maxX
+        frame.origin.x = flattened.cellLeading
+        frame.size.width = max(0, trailingEdge - flattened.cellLeading)
+        return frame
+    }
+
+    /// AppKit answers `.zero` for a row with nothing to disclose; that answer stands.
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        var frame = super.frameOfOutlineCell(atRow: row)
+        guard let flattened = flattenedIndentation, !frame.isEmpty else { return frame }
+
+        frame.origin.x = flattened.markerLeading
+        return frame
+    }
+
     private lazy var selectionStrength = ListSelectionStrength(self)
 
     /// See `ListSelectionStrength.fixtureIsKey`.

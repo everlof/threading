@@ -26,7 +26,7 @@ final class SidebarArrangementMenuTests: XCTestCase {
         let titles = entries.map { $0.item?.title ?? "—" }
         XCTAssertEqual(
             titles,
-            ["Group Sessions by Branch", "Headings for Lone Branches", "—"]
+            ["Group Sessions by Branch", "Headings for Lone Branches", "Compact Tree", "—"]
                 + SidebarSessionOrder.allCases.map(\.menuTitle)
         )
     }
@@ -37,6 +37,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
 
         XCTAssertEqual(item(in: entries, titled: "Group Sessions by Branch")?.isSelected, true)
         XCTAssertEqual(item(in: entries, titled: "Headings for Lone Branches")?.isSelected, true)
+        // Opt-in: the compact tree ships off.
+        XCTAssertEqual(item(in: entries, titled: "Compact Tree")?.isSelected, false)
 
         let orderTitles = Set(SidebarSessionOrder.allCases.map(\.menuTitle))
         let checkedOrders = entries.compactMap(\.item)

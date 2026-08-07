@@ -170,8 +170,8 @@ own wordmark, even a gradient or image behind the list — see [Themes](#themes)
 
 ### Arranging the sidebar
 The arrangement control at the sidebar's top opens the sidebar's view
-options in one menu: how sessions group (**Group Sessions by Branch**, **Headings for Lone
-Branches** — disabled while grouping is off), then how they sort:
+options in one menu: how the tree presents (**Group Sessions by Branch**, **Headings for Lone
+Branches** — disabled while grouping is off — and **Compact Tree**), then how sessions sort:
 
 - **Sort by Order Added** — the order sessions were created in; the default
 - **Sort by Recent Activity** — the most recently active session first
@@ -179,6 +179,15 @@ Branches** — disabled while grouping is off), then how they sort:
 
 A pinned session leads the list under every order — pinning is a stronger statement than
 any sort. Sorting rearranges branch groups too: a group sits where its first session would.
+
+**Compact Tree** (off by default) trades indentation for a narrower list: every row —
+project, branch heading, session, side chat — starts at the same left edge, with the
+disclosure triangles in a slim gutter before it. Where one project ends and the next
+begins is said vertically instead: extra air above each project and a subtle rule between
+them, while the type keeps carrying the levels the way it already does. Nothing else
+changes — grouping, sorting, expansion and every row action work the same. Toggle it from
+the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyboard), or
+**Settings > General > Compact tree**.
 
 Rows move rather than blink. A session that starts fades in while the rows below it slide down,
 one that is archived or deleted takes the gap with it, and a row that changes place — a session

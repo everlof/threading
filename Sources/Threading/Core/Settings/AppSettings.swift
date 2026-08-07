@@ -366,6 +366,20 @@ final class AppSettings {
         }
     }
 
+    /// Whether the sidebar's tree drops horizontal indentation and starts every row at one
+    /// shared edge, saying where a group begins with vertical spacing and a rule instead.
+    ///
+    /// Opt-in, so it defaults to `false` and needs no seed. Read only where the outline draws,
+    /// which is main-actor code throughout — `SidebarTreeBuilder` never consults it, because
+    /// the compact tree is the same tree presented differently.
+    var compactsSidebarTree: Bool {
+        get { defaults.bool(forKey: Keys.compactsSidebarTree) }
+        set {
+            defaults.set(newValue, forKey: Keys.compactsSidebarTree)
+            notifyChanged()
+        }
+    }
+
     /// Whether a session's recorded branch follows its checkout while the session is not
     /// running.
     ///
@@ -999,6 +1013,7 @@ final class AppSettings {
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
         static let groupsSessionsByBranch = "groupsSessionsByBranch"
         static let groupsLoneBranches = "groupsLoneBranches"
+        static let compactsSidebarTree = "compactsSidebarTree"
         static let followsCheckoutBranch = "followsCheckoutBranch"
         static let sidebarSessionOrder = "sidebarSessionOrder"
         static let promptReturnKey = "promptReturnKey"

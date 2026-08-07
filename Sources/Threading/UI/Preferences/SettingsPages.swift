@@ -155,7 +155,8 @@ enum SettingsPages {
             group: appGroup,
             searchTerms: terms(
                 "sessions", "agent", "attachments", "startup", "closing", "shell",
-                "branch", "project icons", "account avatars", "Codex hooks",
+                "branch", "compact tree", "indentation", "sidebar density",
+                "project icons", "account avatars", "Codex hooks",
                 "Claude Remote Control", "notifications", "mute", "sound", "alerts",
                 "confirmations", "don't ask again", "ask before", "opening message",
                 "first message", "instructions"

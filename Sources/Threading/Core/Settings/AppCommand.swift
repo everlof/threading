@@ -113,6 +113,7 @@ enum AppCommands {
         static let toggleSidebar = "view.sidebar"
         static let groupByBranch = "view.groupByBranch"
         static let loneBranchHeadings = "view.loneBranchHeadings"
+        static let compactTree = "view.compactTree"
         static let newTerminalTab = "view.terminal"
         static let browser = "view.browser"
         static let files = "view.files"
@@ -187,6 +188,12 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .control]), isEditable: true),
         AppCommand(id: ID.loneBranchHeadings, group: .view, title: "Headings for Lone Branches",
                    defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .option]), isEditable: true),
+        // No default chord: density is set once and lived in, not toggled mid-thought the way
+        // grouping is. Rebindable for anyone who disagrees.
+        AppCommand(id: ID.compactTree, group: .view, title: "Compact Tree",
+                   detail: "Starts every sidebar row at the same edge, separating projects "
+                       + "with spacing and a rule instead of indentation.",
+                   defaultShortcut: nil, isEditable: true),
         // ⌘T for the terminal, which is what T means everywhere else. The browser keeps ⇧⌘B
         // rather than taking ⌘T from it.
         AppCommand(id: ID.newTerminalTab, group: .view, title: "Terminal",

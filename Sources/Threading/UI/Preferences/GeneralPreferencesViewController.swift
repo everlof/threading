@@ -8,6 +8,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let defaultAgentPopUp = ThemedPopUp()
     private let terminalTitleToggle = ThemedToggle()
     private let branchGroupingToggle = ThemedToggle()
+    private let compactTreeToggle = ThemedToggle()
     private let branchFollowToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
@@ -80,6 +81,9 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(branchGroupingToggle,
                   isOn: AppSettings.shared.groupsSessionsByBranch,
                   action: #selector(branchGroupingChanged))
+        configure(compactTreeToggle,
+                  isOn: AppSettings.shared.compactsSidebarTree,
+                  action: #selector(compactTreeChanged))
         configure(branchFollowToggle,
                   isOn: AppSettings.shared.followsCheckoutBranch,
                   action: #selector(branchFollowChanged))
@@ -221,6 +225,12 @@ final class GeneralPreferencesViewController: NSViewController {
                 subtitle: "Sessions that ran on the same branch gather under it, "
                     + "when a branch has more than one.",
                 control: branchGroupingToggle
+            ),
+            SettingsUI.row(
+                title: "Compact tree",
+                subtitle: "Every sidebar row starts at the same edge. Projects separate "
+                    + "with spacing and a rule instead of indentation.",
+                control: compactTreeToggle
             ),
             SettingsUI.row(
                 title: "Follow the checkout's branch",
@@ -650,6 +660,12 @@ final class GeneralPreferencesViewController: NSViewController {
         AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func compactTreeChanged() {
+        // No extra post: density changes no node, and the setter's own settings event is what
+        // the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
+        AppSettings.shared.compactsSidebarTree = compactTreeToggle.state == .on
     }
 
     @objc private func branchFollowChanged() {

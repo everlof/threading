@@ -16,6 +16,22 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
 
     // MARK: - Properties
 
+    /// A heading keeps the class for the rule below without inheriting the wash: it only
+    /// expands from its disclosure, and a highlight would promise more. Set at creation,
+    /// before any tracking area exists, so there is no lit state to unwind.
+    var isHoverEnabled = true
+
+    /// Draws the compact tree's rule across the row's top — the line that says a new group
+    /// begins here, standing in for the indentation the compact tree gave up. Stamped by the
+    /// controller, which is the only thing that knows whether this row opens a group and
+    /// whether another group stands above it.
+    var showsGroupRule = false {
+        didSet {
+            guard showsGroupRule != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     private var trackingArea: NSTrackingArea?
 
     private var isMouseInside = false {
@@ -41,7 +57,7 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isMouseInside = true
+        isMouseInside = isHoverEnabled
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -78,12 +94,33 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
 
+        drawGroupRuleIfNeeded()
+
         guard isMouseInside, !isSelected else { return }
 
         Design.Text.label
             .withAlphaComponent(SidebarRowDefaults.hoverHighlightAlpha)
             .setFill()
         highlightPath.fill()
+    }
+
+    /// The rule takes the selection capsule's own horizontal silhouette, so the line above a
+    /// group and the fill behind its selected row agree about where the list's ink begins.
+    /// See `SidebarDefaults.compactGroupRuleHeight` for why it is thinner than the theme's rule.
+    private func drawGroupRuleIfNeeded() {
+        guard showsGroupRule else { return }
+
+        let ruleY = isFlipped
+            ? bounds.minY + SidebarDefaults.compactGroupRuleOffset
+            : bounds.maxY - SidebarDefaults.compactGroupRuleOffset
+                - SidebarDefaults.compactGroupRuleHeight
+        Design.Surface.divider.setFill()
+        NSRect(
+            x: bounds.minX + SidebarRowDefaults.hoverHighlightInsetX,
+            y: ruleY,
+            width: bounds.width - SidebarRowDefaults.hoverHighlightInsetX * 2,
+            height: SidebarDefaults.compactGroupRuleHeight
+        ).fill()
     }
 
     /// The one silhouette hover and selection are both painted into.

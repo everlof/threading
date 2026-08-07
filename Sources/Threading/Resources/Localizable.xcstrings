@@ -24925,7 +24925,14 @@
     "Selecting with the mouse copies, the way it does in a Linux terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a separate selection, so this replaces what you copied last, which is why it is off until you ask for it. Selecting nothing changes nothing, and programs that track the mouse themselves keep taking the drag.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Att markera med musen kopierar, precis som i en Linux-terminal – inget ⌘C efteråt. macOS har ett enda urklipp i stället för en separat markering, så det här ersätter det du kopierade senast, och därför är det avstängt tills du ber om det. Att markera ingenting ändrar ingenting, och program som själva följer musen fortsätter att ta dragningen."}}}},
     "terminal selection": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalmarkering"}}}},
     "copy on select": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "kopiera vid markering"}}}},
-    "clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "urklipp"}}}}
+    "clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "urklipp"}}}},
+    "Compact Tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kompakt träd"}}}},
+    "Starts every sidebar row at the same edge, separating projects with spacing and a rule instead of indentation.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låter varje rad i sidofältet börja vid samma kant och skiljer projekt åt med luft och en linje i stället för indrag."}}}},
+    "Compact tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kompakt träd"}}}},
+    "Every sidebar row starts at the same edge. Projects separate with spacing and a rule instead of indentation.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Varje rad i sidofältet börjar vid samma kant. Projekt skiljs åt med luft och en linje i stället för indrag."}}}},
+    "compact tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "kompakt träd"}}}},
+    "indentation": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "indrag"}}}},
+    "sidebar density": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "sidofältets täthet"}}}}
   },
   "version": "1.0"
 }

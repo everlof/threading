@@ -442,6 +442,46 @@ A session row's trailing edge is one fixed-size slot holding the status indicato
 a stack view detaches hidden arranged views, so toggling visibility would re-lay out the row
 under the pointer.
 
+### The compact tree
+
+**An opt-in trade: the indentation for a narrower column** (`AppSettings.compactsSidebarTree`,
+off by default). Every row starts at `SidebarDefaults.compactCellLeading`, the disclosure
+chevrons drop into a fixed gutter before that edge, and where one top-level group ends and the
+next begins is said vertically — each root row adds `compactGroupSpacing` above itself, and a
+1pt rule (`SidebarHoverRowView.showsGroupRule`, in the selection capsule's own horizontal
+silhouette) marks every group but the first, whose upstairs neighbour is the header band's own
+hairline. Type keeps carrying the levels the way it already does — emphasized projects,
+caption headings, regular sessions. The rule is deliberately only between *top-level* groups:
+one line weight, one meaning, and lines inside a project would turn the column into graph
+paper.
+
+Three decisions worth knowing before touching it:
+
+- **The flattening re-places frames rather than zeroing `indentationPerLevel`.**
+  `ThemedOutlineView.flattenedIndentation` asks `super` for the normal indented cell and
+  marker frames and moves them — cell to the shared edge keeping its right side, marker to
+  the gutter. Zeroing the indentation is the obvious route, and it leaves AppKit computing
+  both frames from degenerate geometry nobody documents; the override keeps every input
+  AppKit computes from exactly as it was. Deep rows also win back the trailing width their
+  indentation used to spend.
+- **Density is presentation, not shape, so it cannot ride `reload()`.** The tree builder
+  never reads the setting and the nodes are untouched, which means the shape signature
+  compares equal and `reload()` answers with a content refresh that moves no frame.
+  `applyTreeDensity` takes its own route — the wholesale `applyStructure` pass — and the
+  sidebar carries its one `AppSettingsDidChange` observer for it, value-guarded, where every
+  tree-*shaping* setting still arrives as `ProjectsDidChange`.
+- **Every root takes the group spacing, first included.** The first root needs none — nothing
+  stands above it — but heights here may depend only on node kind, never on position: a root
+  moving to or from the top during a diffed update must not change height mid-move. The rule
+  is the one position-dependent bit, and it rides the row *view*, stamped at `didAdd` and
+  re-stamped by `refreshGroupRules()` after every structural pass, because a moved row keeps
+  its view.
+
+`SidebarCompactTreeTests` holds all of it against the built row views — the shared edge, the
+gutter, the heights, the rules, the live flip in both directions — plus light/dark renders
+of the whole column at both densities, which is where the spacing and the rule are actually
+reviewed, and the record of the trade the option makes.
+
 ## The takeover: a theme that draws the frame
 
 A theme stating a `WindowChromeStyle` (a `chrome:` block on its variant — the second and last

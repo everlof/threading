@@ -567,6 +567,32 @@ enum SidebarDefaults {
     static let headingRowHeight: CGFloat = 32
     static let indentationPerLevel: CGFloat = 14
 
+    /// The compact tree's one content edge, measured from the column's leading side.
+    ///
+    /// Wide enough that the disclosure chevron — kept, because collapsing a project is the
+    /// affordance the indentation was paying for — fits in a fixed gutter before it, and equal
+    /// to `SidebarRowDefaults.iconSlotWidth` so the gutter reads as the same column the row
+    /// icons align down.
+    static let compactCellLeading: CGFloat = SidebarRowDefaults.iconSlotWidth
+
+    /// Where the compact tree's disclosure chevrons sit, all depths alike.
+    static let compactMarkerLeading: CGFloat = Design.Spacing.hairline
+
+    /// The extra height a group-opening row takes in the compact tree, standing in for the
+    /// indentation that no longer says where one project ends and the next begins. Centred
+    /// content splits it above and below, the same way `headingRowHeight` already reads as
+    /// space between groups.
+    static let compactGroupSpacing: CGFloat = Design.Spacing.inset
+
+    /// How far below a compact group row's top edge its rule is drawn — inside the added
+    /// spacing, nearer the group it closes than the title it introduces.
+    static let compactGroupRuleOffset: CGFloat = Design.Spacing.tight
+
+    /// 1pt rather than the theme's rule weight, the same choice `Design.Chat.turnDividerHeight`
+    /// makes for the same reason: this separates rows inside one pane, and a border's weight
+    /// would read as a box around the group rather than a fold between two.
+    static let compactGroupRuleHeight: CGFloat = 1
+
     /// Breathing room between the header band's hairline and the first row.
     static let contentTopInset: CGFloat = 4
 

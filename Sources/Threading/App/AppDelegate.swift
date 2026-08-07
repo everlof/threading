@@ -873,6 +873,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Their checkmarks are stamped in `validateMenuItem`, which AppKit asks on every open.
         menu.addItem(commandItem(AppCommands.ID.groupByBranch, action: #selector(toggleBranchGrouping)))
         menu.addItem(commandItem(AppCommands.ID.loneBranchHeadings, action: #selector(toggleLoneBranchHeadings)))
+        menu.addItem(commandItem(AppCommands.ID.compactTree, action: #selector(toggleCompactTree)))
 
         menu.addItem(.separator())
 
@@ -1102,6 +1103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             menuItem.state = AppSettings.shared.groupsLoneBranches ? .on : .off
             // The refinement has nothing to refine while grouping is off.
             return AppSettings.shared.groupsSessionsByBranch
+        }
+        if menuItem.action == #selector(toggleCompactTree) {
+            menuItem.state = AppSettings.shared.compactsSidebarTree ? .on : .off
+            return true
         }
         // Settings and an empty window carry no checkout, so the item reads as unavailable
         // rather than beeping at a chord the menu said would work.
@@ -1348,6 +1353,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @MainActor @objc private func toggleLoneBranchHeadings() {
         AppSettings.shared.groupsLoneBranches.toggle()
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    // Density changes no node, so it posts nothing extra: the setter's own settings event is
+    // what the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
+    @MainActor @objc private func toggleCompactTree() {
+        AppSettings.shared.compactsSidebarTree.toggle()
     }
 
     @objc private func showFind() {
