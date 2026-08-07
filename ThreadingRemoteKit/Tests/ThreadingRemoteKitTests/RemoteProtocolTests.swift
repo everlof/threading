@@ -174,6 +174,21 @@ final class RemoteProtocolTests: XCTestCase {
         )
     }
 
+    /// The pin that makes a version bump a decision rather than a side effect: raising
+    /// `minimumSupported` cuts off every installed iOS build that App Review has not yet let
+    /// update. Move these expected values only through the checklist in
+    /// `docs/architecture/releasing.md` ("Releasing beside the iOS companion"), in a commit
+    /// that is about nothing else.
+    func testProtocolVersionsChangeOnlyThroughTheReleasingChecklist() {
+        XCTAssertEqual(RemoteProtocol.current, 1)
+        XCTAssertEqual(RemoteProtocol.minimumSupported, 1)
+        XCTAssertLessThanOrEqual(
+            RemoteProtocol.minimumSupported,
+            RemoteProtocol.current,
+            "a build that cannot speak to itself is no protocol at all"
+        )
+    }
+
     func testAMatchingPeerIsCompatible() {
         XCTAssertEqual(
             RemoteProtocolCompatibility.evaluate(

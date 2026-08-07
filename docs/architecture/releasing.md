@@ -382,8 +382,48 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
   claudex's `publish-homebrew-cask.sh` is the template if the answer is public.
 - The repository itself has no `origin` remote yet; the workflows and `publish_release.sh` are
   dormant until it does, and each fails with a sentence saying so rather than half-working.
+- The iOS companion's pipeline (TestFlight first, the App Store later) is not built, and its
+  first submission needs an answer to the review-context problem: App Review runs the app with
+  no Mac host reachable, so something must be demonstrable standalone.
 
 Two questions this section used to carry are settled: the claudex key sharing is ended (see
 [Keys](#keys--threadings-own-one-manual-step-from-real) — one manual `generate_keys` run
 remains), and a dev build no longer schedules checks against the stable feed
 (`UpdateFeedPolicy.allowsScheduledChecks`, tested in `UpdateFlowTests`).
+
+## Releasing beside the iOS companion
+
+The Mac app and the iOS companion release on different clocks — Sparkle is self-controlled and
+fast, the App Store adds review latency measured in days — and the trap is coupling them.
+Lockstep version numbers, or any rule of the form "1.4 talks to 1.4", would mean a Mac release
+can break installed iOS apps until Apple approves the matching update, which is precisely the
+outage a versioning scheme exists to prevent. So the apps' marketing versions stay independent
+(the iOS app already keeps its own numbering, and does not ship through Sparkle), and
+compatibility hangs on one number pair instead:
+`RemoteProtocol.current` / `RemoteProtocol.minimumSupported`
+(`ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteProtocol.swift`). Both ends carry the
+pair compiled in, exchange it at the handshake, and a mismatch produces a directional "update
+the Mac app" / "update this app" sentence (`RemoteUpdateTarget`), never a decode failure three
+frames later. The protocol integer is the semver *major* of this relationship; nothing else is.
+
+Three rules, in the order they get used:
+
+1. **Additive changes are free.** A new message or field an old peer ignores bumps nothing.
+   The Mac can ship any day; installed iOS apps keep working. This is the default shape of a
+   protocol change, and the DTO tests in `RemoteProtocolTests` pin the tolerant-decoding side
+   of it (older payloads keep decoding, new fields stay optional).
+2. **A breaking change ships as an overlap, never a replacement.** Bump `current`, keep
+   speaking the old version too, leave `minimumSupported` alone. Both apps can then release in
+   any order, any time apart, and nothing installed breaks — the review-latency race is
+   impossible by construction rather than unlikely. When a feature needs both sides, the Mac
+   ships first: it is the server, Sparkle delivers it in days, and the iOS build that needs
+   the new capability arrives to hosts that already have it.
+3. **`minimumSupported` rises last, in its own release, with nothing else riding along** —
+   and only after the App Store has delivered the iOS build that speaks the newer version,
+   adoption has actually happened, and the Mac side's phased Sparkle rollout (a day per
+   phase) has completed. Dropping an old path is never urgent, so this step never has a
+   deadline; if it feels urgent, something upstream skipped rule 2.
+
+`RemoteProtocolTests.testProtocolVersionsChangeOnlyThroughTheReleasingChecklist` pins both
+numbers, so any change fails a test once, deliberately, and the failure message points back
+here. The constants carry the same pointer.

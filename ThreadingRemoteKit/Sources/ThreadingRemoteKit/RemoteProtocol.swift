@@ -9,6 +9,13 @@ import Foundation
 ///
 /// Bump `current` on any breaking wire change; raise `minimumSupported` only when support for an
 /// old peer is actually dropped.
+///
+/// **Neither number moves outside the checklist** in `docs/architecture/releasing.md`
+/// ("Releasing beside the iOS companion"): additive changes bump nothing, a breaking change
+/// bumps `current` while still speaking the old version, and `minimumSupported` rises only in
+/// its own release after the App Store has delivered and the Sparkle rollout has completed —
+/// raising it early cuts off every installed iOS build that review has not yet let update.
+/// `RemoteProtocolTests` pins both values so a bump fails a test once, deliberately.
 public enum RemoteProtocol {
     /// The wire version this build speaks.
     public static let current = 1
