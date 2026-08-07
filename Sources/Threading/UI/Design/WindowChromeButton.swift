@@ -13,6 +13,13 @@ import AppKit
 /// and accessibility activation, which `ThemedControl` routes through the same press.
 final class WindowChromeButton: ThemedControl {
 
+    /// Caption hardware is allowed to cast its period shadow into the otherwise unused part of
+    /// its title-band slot. Cheetah's 13px glass face has a measured 17px shadow envelope; the
+    /// default view clipping reduced that to a hard 14px silhouette and no amount of colour
+    /// tuning could reconstruct the native edge. Other families remain inside their slots, so
+    /// opting this shared caption surface out of default clipping does not alter their pixels.
+    override var wantsDefaultClipping: Bool { false }
+
     enum Role: Equatable {
         case windowMenu
         case close
@@ -82,23 +89,16 @@ final class WindowChromeButton: ThemedControl {
         windowStateObservations.forEach(NotificationCenter.default.removeObserver)
     }
 
+    /// The family's measured period slot, from the one anatomy table. The rationale for
+    /// each measurement lives on its row in `WindowChromeCaptionAnatomy`.
     override var intrinsicContentSize: NSSize {
-        switch (fixtureStyle ?? WindowChromeAppearance.resolve())?.glyphStyle {
-        case .squares:
-            // The default Win95/98 non-client metrics are not the generic takeover slot:
-            // a caption button is 16×14 inside an 18px title bar. The former 18×16 plates
-            // were visibly too broad beside the original even before comparing the marks.
-            return NSSize(width: 16, height: 14)
-        case .amiga:
-            // Intuition gadgets consume almost the full 26px title strip. The generic 18×16
-            // caption slot made the same figures float in the blue rather than partition it.
-            return NSSize(width: 24, height: 22)
-        default:
-            return NSSize(
-                width: Design.Size.windowButtonWidth,
-                height: Design.Size.windowButtonHeight
-            )
-        }
+        let anatomy = WindowChromeCaptionAnatomy.of(
+            (fixtureStyle ?? WindowChromeAppearance.resolve())?.glyphStyle
+        )
+        return anatomy.slotSize ?? NSSize(
+            width: Design.Size.windowButtonWidth,
+            height: Design.Size.windowButtonHeight
+        )
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -176,109 +176,30 @@ final class WindowChromeButton: ThemedControl {
 
     // MARK: - Drawing
 
+    /// One interpreter over the family's anatomy row. Nothing here knows which family it is
+    /// drawing — every per-family decision (plate recipe, rendering, ink source, press
+    /// behaviour, alphabet) is a value on `WindowChromeCaptionAnatomy`, so a fix landing in
+    /// this method lands for every family at once.
     override func draw(_ dirtyRect: NSRect) {
         let resolved = fixtureStyle ?? WindowChromeAppearance.resolve()
-        let style = resolved?.glyphStyle ?? .plain
+        let anatomy = WindowChromeCaptionAnatomy.of(resolved?.glyphStyle)
 
-        // The squares style *is* pixel art — its plates and glyphs were bitmaps, and every
-        // edge in them is one hard pixel. Antialiasing turns those into gray halos, which
-        // reads as a soft, faded imitation however correct the colours are. Compared
-        // against a real screenshot side by side, this is the single largest difference.
+        // A keyed 4Dwm title is one continuous indexed-palette frame: the button bevels
+        // share dither phase and rails with the surrounding band. The parent paints that
+        // resting construction in one pass while these controls retain their semantic hit
+        // regions. A pressed button still falls through to the live sunken treatment.
+        if resolved?.glyphStyle == .irix, isKeyOrHasNoWindow, !isPressed {
+            return
+        }
+
         NSGraphicsContext.current?.saveGraphicsState()
         defer { NSGraphicsContext.current?.restoreGraphicsState() }
-        if style != .plain {
+        if anatomy.rendering == .pixel {
             NSGraphicsContext.current?.shouldAntialias = false
         }
 
-        let ink: NSColor
-        switch style {
-        case .squares:
-            // A plate in the theme's own control vocabulary, so its glyph reads on the plate
-            // rather than on the band. Pressed, the plate darkens the way every themed
-            // control's does.
-            let fill = isPressed
-                ? Design.Surface.controlHover
-                : (isHovered ? Design.Surface.elevated : Design.Surface.controlResting)
-            ThemedSurface.draw(
-                bounds,
-                fill: fill,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            ink = Design.Text.label
-        case .platinum:
-            // Platinum's boxes are the same silver as the band and are separated by their
-            // inset edge, not by a coloured fill. Press reverses the edge through the ordinary
-            // surface interpreter, preserving the one lighting model used everywhere else.
-            ThemedSurface.draw(
-                bounds,
-                fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            ink = Design.Text.label
-        case .beOS:
-            // BeOS caption boxes are cut from the tab itself, not from the gray application
-            // surface. That shared yellow is what makes them read as part of the tab while the
-            // raised edge keeps each operation independently pressable.
-            let gradient = isKeyOrHasNoWindow
-                ? resolved?.activeGradient
-                : resolved?.inactiveGradient
-            ThemedSurface.draw(
-                bounds,
-                fill: gradient?.colors.first ?? Design.Surface.controlResting,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            ink = isKeyOrHasNoWindow
-                ? (resolved?.ink ?? Design.Text.label)
-                : (resolved?.inactiveInk ?? Design.Text.secondary)
-        case .openStep:
-            // OPENSTEP's title controls are gray hardware seated in a black title band.
-            // They keep the application material's hard directional light in both key states;
-            // only the surrounding band changes when the window resigns key.
-            ThemedSurface.draw(
-                bounds,
-                fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            ink = Design.Text.label
-        case .irix:
-            // 4Dwm seats its caption figures in a gray button with a black outer rule and a
-            // softer lit inner edge. A two-point bevel supplies the inner construction; the
-            // explicit rule is the workstation outline, not an extra theme-specific surface.
-            let fill = isPressed
-                ? Design.Surface.controlHover
-                : (resolved?.activeGradient.colors.first ?? Design.Surface.controlResting)
-            ThemedSurface.draw(
-                bounds,
-                fill: fill,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            Design.Surface.border.setStroke()
-            let outline = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-            outline.lineWidth = 1
-            outline.stroke()
-            ink = Design.Text.label
-        case .amiga:
-            // Intuition's gadgets are cut from the title strip itself. The active blue is
-            // therefore both the band and each control's plate; inactive gadgets fall back
-            // to the Workbench gray with the rest of the title. Hard black/white bevel edges
-            // and one-bit figures do all the separation.
-            let gradient = isKeyOrHasNoWindow
-                ? resolved?.activeGradient
-                : resolved?.inactiveGradient
-            ThemedSurface.draw(
-                bounds,
-                fill: gradient?.colors.first ?? Design.Surface.controlResting,
-                border: Design.Surface.border,
-                bevel: isPressed ? .sunken : .automatic
-            )
-            ink = Design.Text.label
-        case .plain:
-            // Bare glyphs in the band's own ink, lifted on hover the way a toolbar button is.
+        switch anatomy.plate {
+        case .none:
             if isHovered || isPressed {
                 let bandInk = InkSource.titleBand.ink
                 ThemedSurface.draw(
@@ -286,34 +207,108 @@ final class WindowChromeButton: ThemedControl {
                     fill: isPressed ? bandInk.surfaceHover : bandInk.surface
                 )
             }
-            // With no style at all — a fixture under a theme that states no chrome — the
-            // glyph takes the label's ink so the component stays visible for review.
-            ink = isKeyOrHasNoWindow
-                ? (resolved?.ink ?? Design.Text.label)
-                : (resolved?.inactiveInk ?? Design.Text.secondary)
+        case .control(let hoverLifts):
+            if resolved?.glyphStyle == .platinum, !isPressed {
+                drawPlatinumPlate(in: bounds)
+            } else if resolved?.glyphStyle == .openStep,
+                      role == .close,
+                      isKeyOrHasNoWindow,
+                      !isPressed {
+                drawOpenStepClosePlate(in: bounds)
+            } else {
+                let fill = isPressed
+                    ? Design.Surface.controlHover
+                    : (hoverLifts && isHovered
+                        ? Design.Surface.elevated
+                        : Design.Surface.controlResting)
+                ThemedSurface.draw(
+                    bounds,
+                    fill: fill,
+                    border: Design.Surface.border,
+                    bevel: isPressed ? .sunken : .automatic
+                )
+            }
+        case .band(let dimsWithWindow, let pressedUsesControlHover):
+            if resolved?.glyphStyle == .beOS, isKeyOrHasNoWindow, !isPressed {
+                drawBeOSPlate(in: bounds)
+            } else {
+                let gradient = dimsWithWindow && !isKeyOrHasNoWindow
+                    ? resolved?.inactiveGradient
+                    : resolved?.activeGradient
+                let base = gradient?.colors.first ?? Design.Surface.controlResting
+                ThemedSurface.draw(
+                    bounds,
+                    fill: pressedUsesControlHover && isPressed
+                        ? Design.Surface.controlHover
+                        : base,
+                    border: Design.Surface.border,
+                    bevel: isPressed ? .sunken : .automatic
+                )
+            }
+        case .gel(let recipe):
+            drawAquaPlate(in: bounds, recipe: recipe)
+        case .reverseVideo:
+            if isHovered || isPressed {
+                let cell = bandInk(of: resolved)
+                (isPressed ? cell.withAlphaComponent(0.72) : cell).setFill()
+                bounds.fill()
+            }
+        }
+        if anatomy.outlinedInBorder {
+            Design.Surface.border.setStroke()
+            let outline = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = 1
+            outline.stroke()
         }
 
-        // Raised bitmap-era controls move their figure with the pressed face. This is one
-        // physical-button rule shared by the hard retro families; leaving the glyph behind
-        // made the bevel invert while its contents appeared painted on the window.
-        let glyphBounds = style != .plain && isPressed
-            ? bounds.offsetBy(dx: 1, dy: -1)
-            : bounds
+        var ink: NSColor
+        switch anatomy.glyphInk {
+        case .label:
+            ink = Design.Text.label
+        case .band:
+            // With no style at all — a fixture under a theme that states no chrome — the
+            // glyph takes the label's ink so the component stays visible for review.
+            ink = bandInk(of: resolved)
+        case .fixed(let stated):
+            ink = stated
+        }
+        // An inverted cell shows its figure as the ground coming *through* the ink, which is
+        // the one thing `glyphInk` cannot say: every other value names a colour to paint
+        // with, and this one is decided by whichever plate is under the pointer.
+        if case .reverseVideo = anatomy.plate, isHovered || isPressed {
+            ink = bandGround(of: resolved)
+        }
 
-        if style == .platinum {
-            drawPlatinumGlyph(in: glyphBounds, ink: ink)
-        } else if style == .beOS {
-            drawBeOSGlyph(in: glyphBounds, ink: ink)
-        } else if style == .openStep {
-            drawOpenStepGlyph(in: glyphBounds, ink: ink)
-        } else if style == .irix {
-            drawIRIXGlyph(in: glyphBounds, ink: ink)
-        } else if style == .amiga {
-            drawAmigaGlyph(in: glyphBounds, ink: ink)
-        } else if style == .squares {
-            drawWindows98Glyph(in: glyphBounds, ink: ink)
-        } else {
-            drawGlyph(in: glyphBounds, ink: ink)
+        let opticalGlyphBounds = bounds.offsetBy(
+            dx: anatomy.glyphOpticalOffset.x,
+            dy: anatomy.glyphOpticalOffset.y
+        )
+        let glyphBounds = isPressed
+            ? opticalGlyphBounds.offsetBy(
+                dx: anatomy.pressedGlyphOffset.x,
+                dy: anatomy.pressedGlyphOffset.y
+            )
+            : opticalGlyphBounds
+        let plateContainsRestingArtwork = resolved?.glyphStyle == .platinum
+            || (resolved?.glyphStyle == .beOS && isKeyOrHasNoWindow && !isPressed)
+            || (resolved?.glyphStyle == .openStep
+                && role == .close
+                && isKeyOrHasNoWindow
+                && !isPressed)
+        if !plateContainsRestingArtwork,
+           !anatomy.glyphsRequireHover || isHovered || isPressed {
+            switch anatomy.alphabet {
+            case .vector:
+                drawGlyph(in: glyphBounds, ink: ink)
+            case .aquaGel:
+                drawAquaGlyph(in: glyphBounds, ink: ink)
+            case .bitmap(let artwork):
+                WindowChromeCaptionArtwork.draw(
+                    artwork(role, displaysRestore),
+                    in: glyphBounds,
+                    ink: ink
+                )
+            }
         }
         drawKeyboardFocus(around: ThemedSurface.Shape(
             rect: bounds,
@@ -321,9 +316,471 @@ final class WindowChromeButton: ThemedControl {
         ))
     }
 
+    /// Mac OS 9's resting caption boxes are thirteen-pixel indexed-palette plates inside a
+    /// fourteen-pixel hit slot. Their diagonal silver fill is the close affordance; Zoom adds
+    /// two dark rails to that same plate. A generic bevel plus a modern square glyph loses both
+    /// facts, which is why the old reproduction looked like an outlined checkbox.
+    private func drawPlatinumPlate(in slot: NSRect) {
+        var rows = [
+            "HHHHHHHHHHHHA",
+            "HGGGGGGGGGGGB",
+            "HGBAAAAAAAAGB",
+            "HGAEEJJIIAHGB",
+            "HGAEJJIIAAHGB",
+            "HGAJJIIAAFHGB",
+            "HGAJIIAAFFHGB",
+            "HGAIIAAFFQHGB",
+            "HGAIAAFFQQHGB",
+            "HGAAAFFQQBHGB",
+            "HGAHHHHHHHHGB",
+            "HGGGGGGGGGGGB",
+            "ABBBBBBBBBBBB"
+        ]
+        if role == .zoom {
+            rows[5] = "HGGGGGGGGGGGB"
+            rows[7] = "HGGGGGGGGGGGB"
+        }
+
+        let palette: [Character: NSColor] = [
+            "A": NSColor(srgbRed: 204 / 255, green: 204 / 255, blue: 204 / 255, alpha: 1),
+            "B": .white,
+            "E": NSColor(srgbRed: 153 / 255, green: 153 / 255, blue: 153 / 255, alpha: 1),
+            "F": NSColor(srgbRed: 221 / 255, green: 221 / 255, blue: 221 / 255, alpha: 1),
+            "G": NSColor(srgbRed: 34 / 255, green: 34 / 255, blue: 34 / 255, alpha: 1),
+            "H": NSColor(srgbRed: 136 / 255, green: 136 / 255, blue: 136 / 255, alpha: 1),
+            "I": NSColor(srgbRed: 187 / 255, green: 187 / 255, blue: 187 / 255, alpha: 1),
+            "J": NSColor(srgbRed: 170 / 255, green: 170 / 255, blue: 170 / 255, alpha: 1),
+            "Q": NSColor(srgbRed: 238 / 255, green: 238 / 255, blue: 238 / 255, alpha: 1)
+        ]
+        let plate = NSRect(x: slot.minX + 1, y: slot.minY, width: 13, height: 13)
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        for (rowIndex, row) in rows.enumerated() {
+            let y = isFlipped
+                ? plate.minY + CGFloat(rowIndex)
+                : plate.maxY - CGFloat(rowIndex + 1)
+            for (column, sample) in row.enumerated() {
+                (palette[sample] ?? .black).setFill()
+                NSRect(x: plate.minX + CGFloat(column), y: y, width: 1, height: 1).fill()
+            }
+        }
+    }
+
+    /// BeOS R5's tab gadgets are indexed-palette artwork, not a generic bevel with a symbol
+    /// painted on top. Close and Zoom even use different ochre ramps where their figures meet
+    /// the yellow tab. These rows are the native 14×14 pixels from the Charts title-tab crop;
+    /// the surrounding 16×14 slot remains the hit target and cluster-spacing mechanism.
+    private func drawBeOSPlate(in slot: NSRect) {
+        let rows: [String]
+        let palette: [Character: NSColor]
+        if role == .zoom {
+            rows = [
+                "BBBBBBBBCCCCCC",
+                "BAAAAAAAACCCCC",
+                "BAADDCCBACCCCC",
+                "BADDCDCBABBBBB",
+                "BADCDCCBAAAAAA",
+                "BACDCCEBADDDBA",
+                "BACCEEEBADDEBA",
+                "BABBBBBBADCEBA",
+                "CAAAAAAAACDEBA",
+                "CCCBADDDCDCEBA",
+                "CCCBADDCDCCEBA",
+                "CCCBADEEEEEEBA",
+                "CCCBABBBBBBBBA",
+                "CCCBAAAAAAAAAA"
+            ]
+            palette = [
+                "A": NSColor(srgbRed: 1, green: 1, blue: 63 / 255, alpha: 1),
+                "B": NSColor(srgbRed: 210 / 255, green: 157 / 255, blue: 0, alpha: 1),
+                "C": NSColor(srgbRed: 1, green: 203 / 255, blue: 0, alpha: 1),
+                "D": NSColor(srgbRed: 1, green: 236 / 255, blue: 33 / 255, alpha: 1),
+                "E": NSColor(srgbRed: 234 / 255, green: 181 / 255, blue: 0, alpha: 1)
+            ]
+        } else {
+            rows = [
+                "BBBBBBBBBBBBBB",
+                "BAAAAAAAAAAAAA",
+                "BAACACCCCCCDBA",
+                "BACACCCCDCDCBA",
+                "BAACCCCDCDCDBA",
+                "BACCCCDCDDDDBA",
+                "BACCCDCDDDDEBA",
+                "BACCDCDDDEEEBA",
+                "BACDCDDDEDEEBA",
+                "BACCDDDEDEEEBA",
+                "BACDCDDEEEEEBA",
+                "BADCDDEEEEEEBA",
+                "BABBBBBBBBBBBA",
+                "BAAAAAAAAAAAAA"
+            ]
+            palette = [
+                "A": NSColor(srgbRed: 1, green: 1, blue: 63 / 255, alpha: 1),
+                "B": NSColor(srgbRed: 183 / 255, green: 130 / 255, blue: 0, alpha: 1),
+                "C": NSColor(srgbRed: 1, green: 236 / 255, blue: 33 / 255, alpha: 1),
+                "D": NSColor(srgbRed: 1, green: 203 / 255, blue: 0, alpha: 1),
+                "E": NSColor(srgbRed: 234 / 255, green: 181 / 255, blue: 0, alpha: 1)
+            ]
+        }
+
+        let plate = NSRect(x: slot.minX + 1, y: slot.minY, width: 14, height: 14)
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        for (rowIndex, row) in rows.enumerated() {
+            let y = isFlipped
+                ? plate.minY + CGFloat(rowIndex)
+                : plate.maxY - CGFloat(rowIndex + 1)
+            for (column, sample) in row.enumerated() {
+                (palette[sample] ?? .black).setFill()
+                NSRect(x: plate.minX + CGFloat(column), y: y, width: 1, height: 1).fill()
+            }
+        }
+    }
+
+    /// The OPENSTEP close plate is a 14×14 indexed-palette inset inside its 18×16 title
+    /// slot. The two-pixel horizontal gutter belongs to the title band, while the plate owns
+    /// the exact white/#AAA/#555/black diagonal figure. Drawing a generic two-point bevel and
+    /// a separate X made the box four pixels too large and changed its four-tone raster into
+    /// dozens of antialiased grays.
+    private func drawOpenStepClosePlate(in slot: NSRect) {
+        let rows = [
+            "WWWWWWWWWWWWWW",
+            "WGGGGGGGGGGGGD",
+            "WGKDGGGGGGDKGD",
+            "WGDKDGGGGDKDGD",
+            "WGGDKDGGDKDGGD",
+            "WGGGDKDDKDGGGD",
+            "WGGGGDKKDGGGGD",
+            "WGGGGDKKDGGGGD",
+            "WGGGDKDDKDGGGD",
+            "WGGDKDGGDKDGGD",
+            "WGDKDGGGGDKDGD",
+            "WGKDGGGGGGDKGD",
+            "WGGGGGGGGGGGGD",
+            "WDDDDDDDDDDDDD"
+        ]
+        let palette: [Character: NSColor] = [
+            "K": .black,
+            "D": NSColor(srgbRed: 85 / 255, green: 85 / 255, blue: 85 / 255, alpha: 1),
+            "G": NSColor(srgbRed: 170 / 255, green: 170 / 255, blue: 170 / 255, alpha: 1),
+            "W": .white
+        ]
+        let plate = NSRect(x: slot.minX + 2, y: slot.minY + 1, width: 14, height: 14)
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        for (rowIndex, row) in rows.enumerated() {
+            let y = isFlipped
+                ? plate.minY + CGFloat(rowIndex)
+                : plate.maxY - CGFloat(rowIndex + 1)
+            for (column, sample) in row.enumerated() {
+                (palette[sample] ?? .black).setFill()
+                NSRect(
+                    x: plate.minX + CGFloat(column),
+                    y: y,
+                    width: 1,
+                    height: 1
+                ).fill()
+            }
+        }
+    }
+
+    /// The first Aqua traffic lights were coloured glass rather than flat semantic dots: a
+    /// charcoal rim and shadow, a narrow white reflection, and colour that becomes lighter
+    /// toward the lower face. Tiger later reversed that balance into a tighter lens-like cap.
+    private func drawAquaPlate(
+        in rect: NSRect,
+        recipe: WindowChromeCaptionAnatomy.Plate.GelRecipe
+    ) {
+        // The native 1x Cheetah asset is centred on an integer x coordinate inside its even
+        // slot (one fully covered top-rim pixel, not two half-covered pixels). Its optical
+        // centre therefore sits half a point toward the trailing edge.
+        let circle = rect.insetBy(dx: recipe == .cheetah ? 1.0 : 0.75,
+                                  dy: recipe == .cheetah ? 0.5 : 0.75)
+            .offsetBy(
+                dx: recipe == .cheetah ? 0.5 : 0,
+                dy: recipe == .tiger ? -1 : 0
+            )
+        let path = NSBezierPath(ovalIn: circle)
+        let base: NSColor
+        switch role {
+        case .close: base = NSColor(hex: "#F45B4F") ?? Design.Status.negative
+        case .minimize: base = NSColor(hex: "#F5BD3B") ?? Design.Status.warning
+        case .zoom: base = NSColor(hex: "#52B849") ?? Design.Status.positive
+        case .windowMenu, .depth: base = NSColor(hex: "#B8B8B8") ?? Design.Text.secondary
+        }
+        let pressedBase = isPressed
+            ? (base.blended(withFraction: 0.24, of: .black) ?? base)
+            : base
+        switch recipe {
+        case .cheetah:
+            // The archived 1x control carries a soft neutral shadow two pixels beyond its
+            // charcoal rim. A displaced solid oval produced a clipped, hard-bottomed badge;
+            // AppKit's shadow rasteriser gives the period control its measured 17px envelope.
+            NSColor.black.withAlphaComponent(0.08).setFill()
+            NSBezierPath(ovalIn: circle.insetBy(dx: -2, dy: 0)).fill()
+            NSColor.black.withAlphaComponent(0.08).setFill()
+            NSBezierPath(ovalIn: circle.insetBy(dx: -1.5, dy: 0)).fill()
+            NSGraphicsContext.saveGraphicsState()
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.58)
+            shadow.shadowBlurRadius = 2.0
+            shadow.shadowOffset = NSSize(width: 0, height: -2)
+            shadow.set()
+            NSColor.black.withAlphaComponent(0.82).setFill()
+            path.fill()
+            NSGraphicsContext.restoreGraphicsState()
+
+            // Sampled from the native 10.0 crop at the upper saturated row, equator, and
+            // lower bloom. A single semantic base cannot produce these hue shifts: notably,
+            // the red face loses red while gaining green in its upper third.
+            let measured: (
+                top: String,
+                upper: String,
+                middle: String,
+                lower: String,
+                lowerRim: String,
+                sideWall: String
+            )
+            switch role {
+            case .close:
+                measured = (
+                    "#C6BABA", "#D05449", "#FF877C", "#FFBDB0", "#E9836F", "#C01810"
+                )
+            case .minimize:
+                measured = (
+                    "#D5BABA", "#EDA833", "#FFD565", "#FFFF96", "#E9E94D", "#C08000"
+                )
+            case .zoom:
+                measured = (
+                    "#BABABA", "#70B83A", "#A6E968", "#D8FF9B", "#AAE955", "#50B010"
+                )
+            case .windowMenu, .depth:
+                measured = (
+                    "#C4C4C4", "#868686", "#B8B8B8", "#E0E0E0", "#A0A0A0", "#606060"
+                )
+            }
+            let resolvedTone: (String) -> NSColor = { value in
+                let tone = NSColor(hex: value) ?? pressedBase
+                return self.isPressed
+                    ? (tone.blended(withFraction: 0.24, of: .black) ?? tone)
+                    : tone
+            }
+            NSGradient(colorsAndLocations:
+                (resolvedTone(measured.top), 0),
+                (resolvedTone(measured.upper), 0.32),
+                (resolvedTone(measured.middle), 0.56),
+                (resolvedTone(measured.lower), 0.82),
+                (resolvedTone(measured.lowerRim), 1)
+            )?.draw(in: path, angle: -90)
+            // Preserve the sampled centre column while rolling the same tones into the dark
+            // side wall visible in the source. This is the spherical half of the gel; the
+            // narrow white ellipse below is its separate reflected light.
+            let sideWall = resolvedTone(measured.sideWall).withAlphaComponent(
+                isPressed ? 0.68 : 0.55
+            )
+            let leftWall = NSRect(
+                x: circle.minX,
+                y: circle.minY,
+                width: circle.width / 2,
+                height: circle.height
+            )
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            NSBezierPath(rect: leftWall).addClip()
+            NSGradient(starting: sideWall, ending: .clear)?.draw(in: leftWall, angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+
+            let rightWall = NSRect(
+                x: circle.midX,
+                y: circle.minY,
+                width: circle.width / 2,
+                height: circle.height
+            )
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            NSBezierPath(rect: rightWall).addClip()
+            NSGradient(starting: .clear, ending: sideWall)?.draw(in: rightWall, angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+            // The native face is not a stack of flat horizontal bands: its lower half blooms
+            // around the centre while retaining the darker side wall. Keep this deliberately
+            // subtle so the sampled centre-column tones remain the dominant construction.
+            NSGradient(
+                starting: NSColor.white.withAlphaComponent(isPressed ? 0.05 : 0.08),
+                ending: .clear
+            )?.draw(
+                in: path,
+                relativeCenterPosition: NSPoint(x: 0, y: -0.55)
+            )
+        case .tiger:
+            let measured: (rows: [String], sideWall: String)
+            switch role {
+            case .close:
+                measured = ([
+                    "#C8C0C0", "#E6E0E0", "#DEB4B5", "#C5635D",
+                    "#C44A43", "#D66056", "#EB7971", "#F88D84",
+                    "#FA9E94", "#FAABA1", "#F9B6AC", "#E2A49A"
+                ], "#410D10")
+            case .minimize:
+                measured = ([
+                    "#D8C0C0", "#E7DEDE", "#EAD2B7", "#E1A74E",
+                    "#E7A028", "#F6B23F", "#FCC757", "#FDDA6B",
+                    "#FFEF7A", "#FFFD85", "#FDFC92", "#E7E381"
+                ], "#641911")
+            case .zoom:
+                measured = ([
+                    "#C0C2C0", "#DEE1DE", "#C3D8B8", "#86B652",
+                    "#74B02C", "#89C342", "#A0D85C", "#B5EB70",
+                    "#C5FB7F", "#D3FF8B", "#DBFD96", "#C6E486"
+                ], "#172D10")
+            case .windowMenu, .depth:
+                measured = ([
+                    "#969696", "#E2E2E2", "#D2D2D2", "#A6A6A6",
+                    "#9C9C9C", "#AAAAAA", "#BABABA", "#C8C8C8",
+                    "#D2D2D2", "#DADADA", "#DEDEDE", "#C8C8C8"
+                ], "#303030")
+            }
+            let resolvedRows = measured.rows.map { value -> NSColor in
+                let tone = NSColor(hex: value) ?? pressedBase
+                return isPressed
+                    ? (tone.blended(withFraction: 0.24, of: .black) ?? tone)
+                    : tone
+            }
+            let locations = resolvedRows.indices.map {
+                CGFloat($0) / CGFloat(max(1, resolvedRows.count - 1))
+            }
+            NSGradient(
+                colors: resolvedRows,
+                atLocations: locations,
+                colorSpace: .sRGB
+            )?.draw(in: path, angle: -90)
+
+            let sideWallTone = NSColor(hex: measured.sideWall) ?? .black
+            let sideWall = (isPressed
+                ? (sideWallTone.blended(withFraction: 0.20, of: .black) ?? sideWallTone)
+                : sideWallTone).withAlphaComponent(isPressed ? 0.42 : 0.32)
+            let leftWall = NSRect(
+                x: circle.minX,
+                y: circle.minY,
+                width: circle.width / 2,
+                height: circle.height
+            )
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            NSBezierPath(rect: leftWall).addClip()
+            NSGradient(starting: sideWall, ending: .clear)?.draw(in: leftWall, angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+
+            let rightWall = NSRect(
+                x: circle.midX,
+                y: circle.minY,
+                width: circle.width / 2,
+                height: circle.height
+            )
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            NSBezierPath(rect: rightWall).addClip()
+            NSGradient(starting: .clear, ending: sideWall)?.draw(in: rightWall, angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        NSColor.black.withAlphaComponent(recipe == .cheetah ? 0.88 : 0.64).setStroke()
+        path.lineWidth = recipe == .cheetah ? 1.0 : 0.9
+        path.stroke()
+
+        if recipe == .tiger {
+            // Tiger's upper arc is almost black while its lower arc retains the role colour.
+            // A single uniform outline either washed out the top or crushed the bottom.
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: NSRect(
+                x: circle.minX,
+                y: circle.maxY - 0.75,
+                width: circle.width,
+                height: 0.75
+            )).addClip()
+            NSColor.black.withAlphaComponent(isPressed ? 1 : 0.98).setStroke()
+            path.lineWidth = 2
+            path.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        path.addClip()
+        NSColor.white.withAlphaComponent(
+            isPressed ? 0.18 : (recipe == .cheetah ? 0.88 : 0.42)
+        ).setFill()
+        switch recipe {
+        case .cheetah:
+            // The source's white band occupies only two-to-three native rows. The older broad
+            // cap made the controls look like later glossy badges and erased their dark rim.
+            NSBezierPath(ovalIn: NSRect(
+                x: circle.minX + 2,
+                y: circle.midY + 4.0,
+                width: max(0, circle.width - 4),
+                height: max(0, circle.height * 0.14)
+            )).fill()
+        case .tiger:
+            break
+        }
+    }
+
+    private func drawAquaGlyph(in rect: NSRect, ink: NSColor) {
+        let glyph = rect.insetBy(dx: 4.25, dy: 4.25)
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        path.lineCapStyle = .round
+        switch role {
+        case .close:
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.minY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.maxY))
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.maxY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.minY))
+        case .minimize:
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.midY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.midY))
+        case .zoom:
+            path.move(to: NSPoint(x: glyph.midX, y: glyph.minY))
+            path.line(to: NSPoint(x: glyph.midX, y: glyph.maxY))
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.midY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.midY))
+        case .windowMenu:
+            path.move(to: NSPoint(x: glyph.minX, y: glyph.midY))
+            path.line(to: NSPoint(x: glyph.maxX, y: glyph.midY))
+        case .depth:
+            path.appendRect(glyph)
+        }
+        ink.setStroke()
+        path.stroke()
+    }
+
     /// A fixture with no window draws its key form; a real band dims with its window.
     private var isKeyOrHasNoWindow: Bool {
         fixtureIsKey ?? (window == nil || window?.isKeyWindow == true)
+    }
+
+    /// The band's stated ink for the current key state. Read from the *resolved* style handed
+    /// in rather than from `WindowChromeAppearance`'s global answer, so a fixture previewing
+    /// one theme inside another is drawn in the style it was given.
+    private func bandInk(of resolved: WindowChromeAppearance.Resolved?) -> NSColor {
+        isKeyOrHasNoWindow
+            ? (resolved?.ink ?? Design.Text.label)
+            : (resolved?.inactiveInk ?? Design.Text.secondary)
+    }
+
+    /// What the band is painted with under this button — the first stop of the gradient it
+    /// sits on, which is what an inverted cell's figure shows through to.
+    private func bandGround(of resolved: WindowChromeAppearance.Resolved?) -> NSColor {
+        let gradient = isKeyOrHasNoWindow
+            ? resolved?.activeGradient
+            : resolved?.inactiveGradient
+        return gradient?.colors.first ?? Design.Surface.ground
     }
 
     /// The three glyphs, drawn as shapes rather than set as symbols: the close cross, the
@@ -389,342 +846,6 @@ final class WindowChromeButton: ThemedControl {
 
         ink.setStroke()
         path.stroke()
-    }
-
-    /// Win95/98 caption marks reconstructed from the Marlett figures Windows used for its
-    /// non-client buttons. This is deliberately *not* the generic vector alphabet above:
-    /// Marlett's `r` close mark has two-pixel stair steps, `1` is a nine-pixel window with a
-    /// two-pixel title rail, and `0` is a six-by-two sill. The previous seven-point canvas and
-    /// single-pixel diagonals were crisp but visibly too small and too light.
-    private func drawWindows98Glyph(in rect: NSRect, ink: NSColor) {
-        let bitmap = Windows98GlyphArtwork.bitmap(for: role, restored: displaysRestore)
-        let width = CGFloat(bitmap.width)
-        let height = CGFloat(bitmap.rowsTopToBottom.count)
-        // An odd bitmap cannot have equal whole-pixel margins in an even-width button. The
-        // originals made the same one-pixel choice; bias top/leading and keep every cell whole.
-        let originX = floor(rect.midX - width / 2)
-        // Minimize is a short figure inside the same nine-pixel Marlett em as Maximize. Its
-        // two rows sit on that cell's floor; centering those two ink rows made it resemble a
-        // generic dash instead of the Windows caption sill.
-        let originY = floor(rect.midY - CGFloat(bitmap.canvasHeight) / 2)
-        ink.setFill()
-
-        for (rowIndex, row) in bitmap.rowsTopToBottom.enumerated() {
-            let y = originY + height - 1 - CGFloat(rowIndex)
-            var runStart: Int?
-            for column in 0...bitmap.width {
-                let filled = column < bitmap.width
-                    && row[row.index(row.startIndex, offsetBy: column)] == "#"
-                if filled, runStart == nil {
-                    runStart = column
-                } else if !filled, let start = runStart {
-                    NSRect(
-                        x: originX + CGFloat(start),
-                        y: y,
-                        width: CGFloat(column - start),
-                        height: 1
-                    ).fill()
-                    runStart = nil
-                }
-            }
-        }
-    }
-
-    /// Readable one-bit source artwork, kept internal so component tests can pin the exact
-    /// figure rather than merely asserting that some black pixels appeared in the button.
-    enum Windows98GlyphArtwork {
-        struct Bitmap: Equatable {
-            let rowsTopToBottom: [String]
-            let canvasHeight: Int
-
-            init(rowsTopToBottom: [String], canvasHeight: Int? = nil) {
-                self.rowsTopToBottom = rowsTopToBottom
-                self.canvasHeight = canvasHeight ?? rowsTopToBottom.count
-            }
-
-            var width: Int { rowsTopToBottom.first?.count ?? 0 }
-        }
-
-        static func bitmap(for role: Role, restored: Bool) -> Bitmap {
-            switch role {
-            case .windowMenu:
-                return Bitmap(rowsTopToBottom: ["#######", "#######"])
-            case .minimize:
-                return Bitmap(
-                    rowsTopToBottom: ["######", "######"],
-                    canvasHeight: 9
-                )
-            case .close:
-                return Bitmap(rowsTopToBottom: [
-                    "##.....##",
-                    ".##...##.",
-                    "..##.##..",
-                    "...###...",
-                    "...###...",
-                    "..##.##..",
-                    ".##...##.",
-                    "##.....##"
-                ])
-            case .zoom where restored:
-                return Bitmap(rowsTopToBottom: [
-                    "..########",
-                    "..########",
-                    "..#......#",
-                    "########.#",
-                    "########.#",
-                    "#......#.#",
-                    "#......#.#",
-                    "#......#..",
-                    "########.."
-                ])
-            case .zoom:
-                return Bitmap(rowsTopToBottom: [
-                    "#########",
-                    "#########",
-                    "#.......#",
-                    "#.......#",
-                    "#.......#",
-                    "#.......#",
-                    "#.......#",
-                    "#.......#",
-                    "#########"
-                ])
-            case .depth:
-                return Bitmap(rowsTopToBottom: [
-                    "..########",
-                    "..#......#",
-                    "..#......#",
-                    "########.#",
-                    "#......#.#",
-                    "#......#.#",
-                    "#......#..",
-                    "########.."
-                ])
-            }
-        }
-    }
-
-    /// The three figures from the Platinum window frame. They are deliberately not the
-    /// Windows caption glyphs recoloured: Close is a small inset box, WindowShade is a pair of
-    /// rules, and Zoom is the offset-window figure. Whole-point rectangles keep the figures
-    /// crisp on the 1× displays the originals targeted.
-    private func drawPlatinumGlyph(in rect: NSRect, ink: NSColor) {
-        let size: CGFloat = 8
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
-        ink.setFill()
-
-        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
-        }
-
-        func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
-            dot(x, y, side, 1)
-            dot(x, y + side - 1, side, 1)
-            dot(x, y, 1, side)
-            dot(x + side - 1, y, 1, side)
-        }
-
-        switch role {
-        case .windowMenu:
-            dot(1, 3, 6, 2)
-        case .close:
-            frame(1, 1, side: 6)
-        case .minimize:
-            dot(1, 5, 6, 1)
-            dot(1, 7, 6, 1)
-        case .zoom:
-            if displaysRestore {
-                frame(2, 2, side: 5)
-                frame(0, 0, side: 5)
-            } else {
-                frame(0, 0, side: 8)
-                dot(1, 6, 6, 1)
-            }
-        case .depth:
-            frame(2, 2, side: 5)
-            frame(0, 0, side: 5)
-        }
-    }
-
-    /// BeOS's caption figures are tiny bitmap marks inside a raised yellow plate. Close is a
-    /// solid stop box; Zoom is the two-level window figure shown at the other end of the tab.
-    /// They intentionally do not borrow the Windows cross/maximize alphabet.
-    private func drawBeOSGlyph(in rect: NSRect, ink: NSColor) {
-        let size: CGFloat = 8
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
-        ink.setFill()
-
-        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
-        }
-        func frame(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
-            dot(x, y, width, 1)
-            dot(x, y + height - 1, width, 1)
-            dot(x, y, 1, height)
-            dot(x + width - 1, y, 1, height)
-        }
-
-        switch role {
-        case .windowMenu:
-            dot(1, 3, 6, 2)
-        case .close:
-            dot(2, 2, 4, 4)
-        case .minimize:
-            dot(1, 1, 6, 2)
-        case .zoom:
-            if displaysRestore {
-                frame(2, 2, 5, 5)
-                frame(0, 0, 5, 5)
-            } else {
-                frame(1, 1, 6, 6)
-                dot(2, 5, 4, 1)
-            }
-        case .depth:
-            frame(2, 2, 5, 5)
-            frame(0, 0, 5, 5)
-        }
-    }
-
-    /// OPENSTEP 4.2's two title figures. Miniaturize is a small window nested inside the
-    /// control; Close is the sharply aliased diagonal figure from the opposite bookend.
-    /// Whole-point rectangles preserve the one-bit workstation drawing instead of turning it
-    /// into a modern SF Symbol.
-    private func drawOpenStepGlyph(in rect: NSRect, ink: NSColor) {
-        let size: CGFloat = 8
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
-        ink.setFill()
-
-        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
-        }
-
-        switch role {
-        case .windowMenu:
-            dot(1, 3, 6, 2)
-        case .minimize:
-            // A six-point outer window with a second inset outline.
-            dot(1, 1, 6, 1)
-            dot(1, 6, 6, 1)
-            dot(1, 1, 1, 6)
-            dot(6, 1, 1, 6)
-            dot(3, 3, 3, 1)
-            dot(3, 3, 1, 3)
-            dot(3, 5, 3, 1)
-            dot(5, 3, 1, 3)
-        case .close:
-            for step in 0..<6 {
-                let point = CGFloat(step + 1)
-                dot(point, point)
-                dot(7 - point, point)
-            }
-            // The center of the original mark is heavier than the diagonal tips.
-            dot(3, 3, 2, 2)
-        case .zoom:
-            // OPENSTEP does not normally expose Zoom, but an authored theme may choose to.
-            // Use the same nested-window alphabet as its Miniaturize control.
-            dot(1, 1, 6, 1)
-            dot(1, 6, 6, 1)
-            dot(1, 1, 1, 6)
-            dot(6, 1, 1, 6)
-            dot(2, 5, 4, 1)
-        case .depth:
-            dot(2, 2, 5, 1)
-            dot(2, 6, 5, 1)
-            dot(2, 2, 1, 5)
-            dot(6, 2, 1, 5)
-            dot(0, 0, 5, 1)
-            dot(0, 4, 2, 1)
-            dot(0, 0, 1, 5)
-        }
-    }
-
-    /// The deliberately tiny 4Dwm figures visible in original IRIX 6.5 captures: a broad
-    /// dash for the Window menu, a two-pixel minimization mark, and an outlined maximize box.
-    private func drawIRIXGlyph(in rect: NSRect, ink: NSColor) {
-        let size: CGFloat = 8
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
-        ink.setFill()
-
-        func dot(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
-        }
-        func frame(_ x: CGFloat, _ y: CGFloat, side: CGFloat) {
-            dot(x, y, side, 1)
-            dot(x, y + side - 1, side, 1)
-            dot(x, y, 1, side)
-            dot(x + side - 1, y, 1, side)
-        }
-
-        switch role {
-        case .windowMenu:
-            dot(1, 3, 6, 2)
-        case .minimize:
-            dot(3, 3, 2, 2)
-        case .zoom:
-            if displaysRestore {
-                frame(2, 2, side: 5)
-                frame(0, 0, side: 5)
-            } else {
-                frame(1, 1, side: 6)
-            }
-        case .close:
-            for step in 1..<7 {
-                dot(CGFloat(step), CGFloat(step))
-                dot(CGFloat(7 - step), CGFloat(step))
-            }
-        case .depth:
-            frame(2, 2, side: 5)
-            frame(0, 0, side: 5)
-        }
-    }
-
-    /// Workbench 3.1's Intuition gadget alphabet, reconstructed on its original eight-point
-    /// grid. Close is the small upright inset lozenge; Zoom is the single recessed window;
-    /// Depth is the unmistakable pair of overlapping windows at the far right. The figures
-    /// deliberately use black, white, and Workbench gray rather than a modern monochrome icon.
-    private func drawAmigaGlyph(in rect: NSRect, ink: NSColor) {
-        let size: CGFloat = 10
-        let originX = (rect.midX - size / 2).rounded()
-        let originY = (rect.midY - size / 2).rounded()
-
-        func fill(_ color: NSColor, _ x: CGFloat, _ y: CGFloat,
-                  _ width: CGFloat = 1, _ height: CGFloat = 1) {
-            color.setFill()
-            NSRect(x: originX + x, y: originY + y, width: width, height: height).fill()
-        }
-
-        func window(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
-            fill(ink, x, y, width, height)
-            fill(.white, x + 1, y + 1, width - 2, height - 2)
-            fill(Design.Surface.controlResting, x + 2, y + 2, width - 3, height - 3)
-        }
-
-        switch role {
-        case .windowMenu:
-            fill(ink, 2, 4, 6, 2)
-        case .close:
-            // The original is a narrow upright recess, not a cross or a filled stop box.
-            fill(ink, 3, 1, 5, 8)
-            fill(.white, 4, 2, 3, 6)
-            fill(Design.Surface.controlResting, 5, 3, 2, 5)
-        case .minimize:
-            // Workbench has no standard minimize gadget, but authored mixtures still need a
-            // coherent member of this family.
-            fill(ink, 2, 2, 6, 6)
-            fill(.white, 3, 3, 4, 4)
-            fill(ink, 4, 4, 2, 2)
-        case .zoom:
-            window(1, 1, 8, 8)
-            fill(ink, 5, 5, 3, 3)
-            fill(.white, 5, 6, 2, 1)
-        case .depth:
-            window(1, 3, 7, 6)
-            window(3, 1, 7, 6)
-        }
     }
 
     // MARK: - Window menu

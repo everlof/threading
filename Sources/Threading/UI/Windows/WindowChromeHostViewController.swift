@@ -170,6 +170,11 @@ final class WindowChromeHostViewController: NSViewController {
     private func applyMeasures() {
         let resolved = isTakeoverActive ? WindowChromeAppearance.resolve() : nil
 
+        let cornerRadius = resolved?.frameCornerRadius ?? 0
+        if cornerRadius > 0 { view.wantsLayer = true }
+        view.layer?.cornerRadius = cornerRadius
+        view.layer?.masksToBounds = cornerRadius > 0
+
         let inset = resolved?.frameWidth ?? 0
         bandTop?.constant = inset
         bandLeading?.constant = inset

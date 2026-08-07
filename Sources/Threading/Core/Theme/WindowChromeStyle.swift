@@ -57,10 +57,17 @@ struct WindowChromeStyle: Codable, Equatable {
 
         var titleAlignment: Alignment
 
-        /// The title's slant. Weight and size remain semantic design-system choices; this
-        /// one authored distinction is enough for workstation chrome such as IRIX, whose
-        /// bold italic caption is part of the frame rather than the application's typography.
+        /// The title's slant. Weight remains a semantic design-system choice; period chrome
+        /// can state its measured caption size separately below. The slant is enough for
+        /// workstation chrome such as IRIX, whose bold italic caption is part of the frame
+        /// rather than the application's typography.
         var titleFontStyle: TitleFontStyle
+
+        /// Optional point size for the window title itself. A period frame's caption metrics
+        /// are hardware, not ordinary app detail text: 4Dwm and OPENSTEP use visibly larger
+        /// titles even when the rest of the theme scales application copy down. Absent keeps
+        /// the semantic design-system detail size for authored chromes that do not care.
+        var titleFontSize: Double?
 
         /// Points, bounded by `WindowChromeStyleLimits.bandHeightRange`. Absent means
         /// `WindowChromeStyleLimits.defaultBandHeight`.
@@ -105,6 +112,7 @@ struct WindowChromeStyle: Codable, Equatable {
             inactiveInk: NSColor? = nil,
             titleAlignment: Alignment = .leading,
             titleFontStyle: TitleFontStyle = .upright,
+            titleFontSize: Double? = nil,
             height: Double? = nil,
             buttonGlyphStyle: ButtonGlyphStyle = .plain,
             buttonPlacement: ButtonPlacement = .trailing,
@@ -121,6 +129,7 @@ struct WindowChromeStyle: Codable, Equatable {
             self.inactiveInk = inactiveInk
             self.titleAlignment = titleAlignment
             self.titleFontStyle = titleFontStyle
+            self.titleFontSize = titleFontSize
             self.height = height
             self.buttonGlyphStyle = buttonGlyphStyle
             self.buttonPlacement = buttonPlacement
@@ -160,10 +169,22 @@ struct WindowChromeStyle: Codable, Equatable {
             /// Amiga Workbench 3.1's one-bit Intuition gadgets: the inset Close mark at the
             /// leading edge and Zoom/Depth window figures at the trailing edge.
             case amiga
+            /// Mac OS X 10.0 Cheetah's strongly saturated, broad-highlight gel controls.
+            case aqua
+            /// Mac OS X 10.4 Tiger's tighter glass controls with a crisp rim and specular cap.
+            case aquaTiger = "aqua_tiger"
+            /// A text-mode interface's caption cells: hairline one-bit figures on the band's
+            /// own ground, inverted under the pointer the way a terminal marks a focused cell.
+            /// Unlike its siblings this family reproduces no single system — it is the
+            /// box-drawing idiom every full-screen terminal program shares.
+            case tui
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
             case trailing
+            /// Keeps every authored operation together at the leading edge — the Aqua
+            /// traffic-light cluster.
+            case leading
             case split
             /// Places the first authored visible operation at the leading edge and the rest
             /// at the trailing edge. Unlike `split`, this preserves a system's own ordering:
@@ -209,9 +230,21 @@ struct WindowChromeStyle: Codable, Equatable {
                 /// Horizontal one-pixel rules interrupted by the centred title — Platinum's
                 /// active-window signature.
                 case pinstripes
+                /// Cheetah's four-line Aqua rib: a soft dark rule and a white reflection over
+                /// a vertical silver gradient. It is deliberately distinct from Platinum's
+                /// two-line, hard-gray pinstripes.
+                case aquaPinstripes = "aqua_pinstripes"
                 /// A one-bit checker over the title fill. At two-point spacing this is the
                 /// dense stipple used by workstation window managers such as IRIX 4Dwm.
                 case dither
+                /// Fine horizontal grain over a silver gradient — the unified brushed-metal
+                /// window surface used by Finder in Mac OS X 10.3 and 10.4.
+                case brushedMetal = "brushed_metal"
+                /// A single one-point rule along the band's bottom edge: the seam a
+                /// full-screen terminal program draws under its header row. It ignores
+                /// `spacing` — there is one line, not a field of them — and it is the only
+                /// texture whose job is to *end* the band rather than fill it.
+                case rule
             }
         }
     }
@@ -223,18 +256,26 @@ struct WindowChromeStyle: Codable, Equatable {
         /// border role by `WindowChromeFrameView`.
         var width: Double
 
-        init(width: Double) {
+        /// Radius of the outer app-drawn frame. Zero keeps the hard desktop-era rectangle;
+        /// early Aqua opts into the small transparent-corner curve AppKit's untitled mask no
+        /// longer supplies for a takeover window.
+        var cornerRadius: Double
+
+        init(width: Double, cornerRadius: Double = 0) {
             self.width = width
+            self.cornerRadius = cornerRadius
         }
 
         private enum CodingKeys: String, CodingKey {
-            case width
+            case width, cornerRadius
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             width = try container.decodeIfPresent(Double.self, forKey: .width)
                 ?? WindowChromeStyleLimits.defaultFrameWidth
+            cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+                ?? WindowChromeStyleLimits.defaultFrameCornerRadius
         }
     }
 }
@@ -245,7 +286,8 @@ extension WindowChromeStyle.TitleBar: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case activeGradient, inactiveGradient, ink, inactiveInk
-        case titleAlignment, titleFontStyle, height, buttonGlyphStyle, buttonPlacement, showsAppIcon
+        case titleAlignment, titleFontStyle, titleFontSize, height
+        case buttonGlyphStyle, buttonPlacement, showsAppIcon
         case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons
     }
 
@@ -266,6 +308,7 @@ extension WindowChromeStyle.TitleBar: Codable {
             TitleFontStyle.self,
             forKey: .titleFontStyle
         ) ?? .upright
+        titleFontSize = try container.decodeIfPresent(Double.self, forKey: .titleFontSize)
         height = try container.decodeIfPresent(Double.self, forKey: .height)
         buttonGlyphStyle = try container.decodeIfPresent(
             ButtonGlyphStyle.self,
@@ -294,6 +337,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encodeIfPresent(inactiveInk?.hexString, forKey: .inactiveInk)
         try container.encode(titleAlignment, forKey: .titleAlignment)
         try container.encode(titleFontStyle, forKey: .titleFontStyle)
+        try container.encodeIfPresent(titleFontSize, forKey: .titleFontSize)
         try container.encodeIfPresent(height, forKey: .height)
         try container.encode(buttonGlyphStyle, forKey: .buttonGlyphStyle)
         try container.encode(buttonPlacement, forKey: .buttonPlacement)
@@ -360,17 +404,29 @@ extension WindowChromeStyle.TitleBar.Texture: Codable {
 /// The bounds `AppThemeEditing.validate` holds a chrome block to, stated beside the model so
 /// a limit and the field it limits travel together — the `SidebarStyleLimits` rule.
 enum WindowChromeStyleLimits {
-    /// Points. Below 18 the band cannot hold its compact caption buttons; past 44 it
+    /// Points. Below 16 the band cannot hold its compact caption buttons; past 44 it
     /// stops being a title bar and starts being a pane.
-    static let bandHeightRange: ClosedRange<Double> = 18...44
+    ///
+    /// The floor was 18 on the reasoning that nothing smaller holds a caption box, until a
+    /// measured Platinum band came in at 17 carrying 14pt boxes with a point of air either
+    /// side. A limit that a shipped stock theme cannot meet is the limit being wrong, not the
+    /// theme — and stock styles are held to exactly the contract agent-authored ones are.
+    static let bandHeightRange: ClosedRange<Double> = 16...44
     /// What a band measures when the theme does not say — the native pane-tab height's
     /// neighbourhood, so the window's top does not jump between modes more than it must.
     static let defaultBandHeight: Double = 28
+    /// Points. Smaller loses the period bitmap/screen-font shapes; larger no longer fits the
+    /// minimum 18pt caption band with its hardware.
+    static let titleFontSizeRange: ClosedRange<Double> = 8...18
     /// Points. One is a seam; past six the frame reads as a wall, and resize edges live
     /// under it.
     static let frameWidthRange: ClosedRange<Double> = 1...6
     /// What an absent frame block draws: the thinnest visible seat.
     static let defaultFrameWidth: Double = 1
+    /// Points. Early Aqua used a small circular corner; larger values start consuming title
+    /// furniture and no longer read as window chrome.
+    static let frameCornerRadiusRange: ClosedRange<Double> = 0...16
+    static let defaultFrameCornerRadius: Double = 0
     /// The band's gradient carries the same stop budget as the sidebar's.
     static let maximumGradientStops = SidebarStyleLimits.maximumGradientStops
     /// The softer contrast floor inactive ink is held to — the status-hue "tellable from the

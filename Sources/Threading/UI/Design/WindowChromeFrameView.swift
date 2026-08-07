@@ -47,8 +47,22 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
             )
         }
 
+        let cornerRadius = resolved.shape == .fullWidth
+            ? resolved.frameCornerRadius
+            : 0
+        let framePath = NSBezierPath(
+            roundedRect: frameRect,
+            xRadius: cornerRadius,
+            yRadius: cornerRadius
+        )
+        if cornerRadius > 0 {
+            // The untitled window mask is rectangular. Clear the four outer corner pixels so
+            // the nonopaque window and its shadow follow the authored Aqua curve.
+            NSColor.clear.setFill()
+            bounds.fill(using: .copy)
+        }
         Design.Surface.ground.setFill()
-        frameRect.fill()
+        framePath.fill()
 
         // The window's edge wears the raised construction, not a hairline: measured off a
         // real 98 screenshot, a window's bottom-right runs #808080 then pure black to the
@@ -56,36 +70,36 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
         // edge colours draw it; without one the border role seats a plain single ring, so a
         // future takeover theme without bevels still gets an edge.
         guard AppThemePalette.current.material.bevel != nil else {
-            let seat = NSBezierPath(rect: frameRect.insetBy(dx: 0.5, dy: 0.5))
+            let seatRect = frameRect.insetBy(dx: 0.5, dy: 0.5)
+            let seat = NSBezierPath(
+                roundedRect: seatRect,
+                xRadius: max(0, cornerRadius - 0.5),
+                yRadius: max(0, cornerRadius - 0.5)
+            )
             seat.lineWidth = 1
             Design.Surface.border.setStroke()
             seat.stroke()
             return
         }
 
-        let colors = BevelArtwork.edgeColors(
-            highlight: Design.Surface.bevelHighlight,
-            shadow: Design.Surface.bevelShadow,
-            sunken: false
-        )
+        if cornerRadius > 0 {
+            ThemedSurface.draw(
+                frameRect,
+                fill: Design.Surface.ground,
+                border: Design.Surface.border,
+                radius: cornerRadius,
+                bevel: .automatic
+            )
+            return
+        }
 
         // Hard lines, never smoothed — the rule for every bevelled edge; see
-        // `ThemedSurface.drawBevelled`.
+        // `ThemedSurface.drawBevelled`. The construction itself is the shared
+        // `WindowChromeBevelEdge`, the same rings the BeOS tab wears.
         NSGraphicsContext.current?.saveGraphicsState()
         defer { NSGraphicsContext.current?.restoreGraphicsState() }
         NSGraphicsContext.current?.shouldAntialias = false
 
-        func ring(_ rect: NSRect, topLeft: NSColor, bottomRight: NSColor) {
-            bottomRight.setFill()
-            NSRect(x: rect.maxX - 1, y: rect.minY, width: 1, height: rect.height).fill()
-            NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: 1).fill()
-            topLeft.setFill()
-            NSRect(x: rect.minX, y: rect.maxY - 1, width: rect.width - 1, height: 1).fill()
-            NSRect(x: rect.minX, y: rect.minY + 1, width: 1, height: rect.height - 1).fill()
-        }
-
-        ring(frameRect, topLeft: colors.topLeftOuter, bottomRight: colors.bottomRightOuter)
-        ring(frameRect.insetBy(dx: 1, dy: 1),
-             topLeft: colors.topLeftInner, bottomRight: colors.bottomRightInner)
+        WindowChromeBevelEdge.drawRaisedRings(around: frameRect)
     }
 }

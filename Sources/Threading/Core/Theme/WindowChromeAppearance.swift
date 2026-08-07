@@ -36,6 +36,7 @@ enum WindowChromeAppearance {
         let bandHeight: CGFloat
         let titleAlignment: WindowChromeStyle.TitleBar.Alignment
         let titleFontStyle: WindowChromeStyle.TitleBar.TitleFontStyle
+        let titleFontSize: CGFloat?
         let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
         let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
         let showsAppIcon: Bool
@@ -45,6 +46,7 @@ enum WindowChromeAppearance {
         let tabWidth: CGFloat
         let visibleButtons: [WindowChromeStyle.TitleBar.ButtonRole]
         let frameWidth: CGFloat
+        let frameCornerRadius: CGFloat
     }
 
     /// What the current theme asks the frame to draw, or nil while the window is native —
@@ -78,6 +80,7 @@ enum WindowChromeAppearance {
             ),
             titleAlignment: titleBar.titleAlignment,
             titleFontStyle: titleBar.titleFontStyle,
+            titleFontSize: titleBar.titleFontSize.map { CGFloat($0) },
             glyphStyle: titleBar.buttonGlyphStyle,
             buttonPlacement: titleBar.buttonPlacement,
             showsAppIcon: titleBar.showsAppIcon,
@@ -91,6 +94,10 @@ enum WindowChromeAppearance {
             visibleButtons: titleBar.visibleButtons,
             frameWidth: CGFloat(
                 chrome.frame?.width ?? WindowChromeStyleLimits.defaultFrameWidth
+            ),
+            frameCornerRadius: CGFloat(
+                chrome.frame?.cornerRadius
+                    ?? WindowChromeStyleLimits.defaultFrameCornerRadius
             )
         )
     }

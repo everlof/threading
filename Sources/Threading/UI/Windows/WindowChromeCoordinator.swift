@@ -196,10 +196,12 @@ final class WindowChromeCoordinator {
         }
     }
 
-    /// A shaped title tab needs transparent shoulders so the window shadow follows the actual
-    /// BeOS outline. Full-width takeover themes retain the window's original opaque backing.
+    /// A shaped title tab or rounded app-drawn frame needs a transparent backing so the window
+    /// shadow follows the actual outline. Square full-width takeovers retain the original one.
     private func applyTakeoverSurface(to window: TitlebarActionWindow) {
-        let isShaped = WindowChromeAppearance.resolve()?.shape == .leadingTab
+        let appearance = WindowChromeAppearance.resolve()
+        let isShaped = appearance?.shape == .leadingTab
+            || (appearance?.frameCornerRadius ?? 0) > 0
         if isShaped {
             window.isOpaque = false
             window.backgroundColor = .clear
