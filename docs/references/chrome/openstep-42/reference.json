@@ -1,0 +1,138 @@
+{
+  "schema_version": 2,
+  "chrome_id": "openstep-42",
+  "target": { "platform": "OPENSTEP", "release": "OPENSTEP", "version": "4.2" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/nextstep/openstep4", "owner": "NeXT screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "guidebook-components", "page_url": "https://guidebookgallery.org/screenshots/openstep42", "owner": "NeXT screenshots preserved by GUIdebook", "storage": "remote_only" },
+    {
+      "id": "full-desktop",
+      "page_url": "https://guidebookgallery.org/screenshots/openstep42#full",
+      "asset_url": "https://guidebookgallery.org/pics/gui/desktop/full/openstep42.png",
+      "filename": "openstep42-full.png",
+      "owner": "NeXT screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "b52e4383952192810879d6f4c2e0e1688bd260fcd4ed6a7782b26562734126de",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "display-preferences",
+      "page_url": "https://guidebookgallery.org/screenshots/openstep42#appearance",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/appearance/openstep42-1-1.png",
+      "filename": "openstep42-display-preferences.png",
+      "owner": "NeXT screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "2e279cdab8f7b9e97390ad8e802d4c73b8b77a50cf5bbdb944d4ab6bd458504e",
+      "pixel_width": 394,
+      "pixel_height": 319
+    },
+    {
+      "id": "installer-copying",
+      "page_url": "https://guidebookgallery.org/screenshots/openstep42#copying",
+      "asset_url": "https://guidebookgallery.org/pics/gui/installation/copying/openstep42.png",
+      "filename": "openstep42-installer-copying.png",
+      "owner": "NeXT screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "d3bc4ff0375a0db579873bd522fd73d3be1a5aed50d13d92e1fcf9a71f743673",
+      "pixel_width": 640,
+      "pixel_height": 480
+    },
+    {
+      "id": "logout-panel",
+      "page_url": "https://guidebookgallery.org/screenshots/openstep42#logout",
+      "asset_url": "https://guidebookgallery.org/pics/gui/startupshutdown/logout/openstep42.png",
+      "filename": "openstep42-logout-panel.png",
+      "owner": "NeXT screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "6fdaf1414acbd0942db4beea76cbc48cf53c1bf8be5e8696c35e24abb25f395a",
+      "pixel_width": 364,
+      "pixel_height": 185
+    },
+    {
+      "id": "workspace-help-panel",
+      "page_url": "https://guidebookgallery.org/screenshots/openstep42#help",
+      "asset_url": "https://guidebookgallery.org/pics/gui/system/features/help/openstep42.png",
+      "filename": "openstep42-workspace-help-panel.png",
+      "owner": "NeXT screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "4eac41a23d78c712d90961804bb1cefe64d1a62b577bda07d4ebb3381d68f82e",
+      "pixel_width": 436,
+      "pixel_height": 676
+    },
+    {
+      "id": "appkit-tooltip-release-note",
+      "page_url": "https://savagetaylor.com/til/KB072500.html",
+      "owner": "Apple OPENSTEP 4.2 Application Kit release notes preserved by SavageTaylor",
+      "storage": "remote_only"
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Display Preferences and Workspace Manager preserve black-edged gray frames, hard shadow, bottom rail, and resize construction." },
+    "title_bar": { "status": "measured", "note": "Display Preferences preserves the 22px black key title band, centered white title, and gray inactive vocabulary." },
+    "window_buttons": { "status": "verified", "note": "The Workspace Manager Info panel's complete 380×23 key title band is reconstructed pixel-for-pixel, including its single trailing 18×16 close slot and 14×14 one-bit plate. Other native window roles remain measured context rather than inferred button states." },
+    "toolbar": { "status": "measured", "note": "Display Preferences preserves the icon shelf, segmented panels, rules, and mechanical relief used by tool rows." },
+    "buttons": { "status": "measured", "note": "Display Preferences preserves gray raised buttons, small utility plates, and a bordered Colors action." },
+    "choice_controls": { "status": "measured", "note": "Display Preferences preserves slider wells, steppers, colour controls, and button-like selectors." },
+    "fields": { "status": "measured", "note": "Display Preferences preserves inset numeric and colour value fields with deep NeXT relief." },
+    "menus": { "status": "measured", "note": "The full desktop preserves OPENSTEP's detached main menu and adjacent submenu with selection, shortcuts, and hard shadow." },
+    "popovers": { "status": "source_found", "note": "The OPENSTEP 4.2 AppKit release notes add NSView setToolTip: and describe tooltips as short help messages that pop up while the cursor rests on an item, so the surface is real for this release; no screenshot or Apple/NeXT figure of one has been found, and the release notes describe no geometry. The Workspace Help Panel shipped in 4.2 documents the older idiom beside it, F1 then click for a quick description, which is a panel rather than a hover tip. Do not infer a modern speech bubble." },
+    "scrollbars": { "status": "verified", "note": "Workspace Manager's complete 18×244 vertical scroller is reconstructed pixel-for-pixel: 163px thumb, 47px stippled page region, paired 17px arrow cells, rails, grip, and indexed relief." },
+    "lists_tables": { "status": "measured", "note": "Workspace Manager preserves shelves, dense icon rows, column boundaries, selection, and scroller adjacency." },
+    "progress": { "status": "measured", "note": "The NEXTSTEP installer preserves the OPENSTEP-era progress well: black rule, square gray track, proportional dark fill, tick marks, and centered status label." },
+    "alerts_toasts": { "status": "measured", "note": "The logout panel preserves the black header, NeXT cube icon, centered question, hard separators, and three compact command buttons including the return-key marker." },
+    "typography": { "status": "measured", "note": "The native 1024x768 desktop and preference panel preserve compact Helvetica-family workstation typography." },
+    "icons": { "status": "measured", "note": "Workspace Manager, Dock, Recycler, preference shelf, and application artwork are preserved at native scale." }
+  },
+  "reproductions": [
+    {
+      "id": "caption-button-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-openstep-42.png",
+      "reference_crop_ids": ["workspace-caption-buttons"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 380×23 size validation. All 8,740 pixels are identical: the asymmetric four-tone key-window rails, single trailing close plate, and centred one-bit Info caption rendered from X.Org's openly licensed Adobe 75dpi Helvetica Bold screen glyphs.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production WindowTitleBandView renders the corrected tight 380×23 Workspace Manager Info caption pixel-for-pixel. The former 381px target included one changing column from the neighboring window; the exact reconstruction now preserves only the native window, its four-tone black band, caption bitmap, and single trailing close plate."
+    },
+    {
+      "id": "scrollbar-family",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "retro-scrollbars-openstep-42.png",
+      "reference_crop_ids": ["workspace-scroller-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 18×244 size validation, plus native-pixel review of the 163px thumb, 47px stippled page region, paired 17px arrow cells, grip, rails, and four-colour indexed relief.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the corrected tight 18×244 Workspace Manager control extraction pixel-for-pixel. Four rows of unrelated client gray above the thumb and one continuation row below the arrow pair were removed from the former 18×249 target; all 4,392 control pixels are identical."
+    }
+  ],
+  "crops": [
+    { "id": "display-preferences-frame", "component": "window_frame", "source_id": "display-preferences", "rect": { "x": 0, "y": 0, "width": 394, "height": 319 } },
+    { "id": "black-title-band", "component": "title_bar", "source_id": "display-preferences", "rect": { "x": 0, "y": 0, "width": 394, "height": 23 } },
+    { "id": "workspace-caption-buttons", "component": "window_buttons", "source_id": "full-desktop", "rect": { "x": 296, "y": 45, "width": 380, "height": 23 } },
+    { "id": "display-icon-shelf", "component": "toolbar", "source_id": "display-preferences", "rect": { "x": 9, "y": 32, "width": 375, "height": 91 } },
+    { "id": "display-buttons", "component": "buttons", "source_id": "display-preferences", "rect": { "x": 293, "y": 202, "width": 81, "height": 91 } },
+    { "id": "display-choice-controls", "component": "choice_controls", "source_id": "display-preferences", "rect": { "x": 9, "y": 168, "width": 263, "height": 123 } },
+    { "id": "display-fields", "component": "fields", "source_id": "display-preferences", "rect": { "x": 226, "y": 183, "width": 33, "height": 31 } },
+    { "id": "workspace-menus", "component": "menus", "source_id": "full-desktop", "rect": { "x": 0, "y": 0, "width": 179, "height": 225 } },
+    { "id": "workspace-scroller", "component": "scrollbars", "source_id": "full-desktop", "role": "supporting_context", "rect": { "x": 226, "y": 181, "width": 34, "height": 463 } },
+    { "id": "workspace-scroller-control", "component": "scrollbars", "source_id": "full-desktop", "rect": { "x": 236, "y": 394, "width": 18, "height": 244 } },
+    { "id": "workspace-content", "component": "lists_tables", "source_id": "full-desktop", "rect": { "x": 226, "y": 181, "width": 606, "height": 464 } },
+    { "id": "installer-progress", "component": "progress", "source_id": "installer-copying", "rect": { "x": 144, "y": 343, "width": 351, "height": 51 } },
+    { "id": "logout-panel", "component": "alerts_toasts", "source_id": "logout-panel", "rect": { "x": 0, "y": 0, "width": 364, "height": 185 } },
+    { "id": "display-type", "component": "typography", "source_id": "display-preferences", "rect": { "x": 9, "y": 133, "width": 375, "height": 161 } },
+    { "id": "workspace-icons", "component": "icons", "source_id": "full-desktop", "rect": { "x": 226, "y": 306, "width": 606, "height": 339 } }
+  ]
+}

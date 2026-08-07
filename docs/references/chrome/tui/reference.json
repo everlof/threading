@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "chrome_id": "tui",
+  "target": {
+    "platform": "Text-mode interfaces",
+    "release": "Authored, not a reproduction"
+  },
+  "sources": [],
+  "coverage": {
+    "window_frame": {
+      "status": "not_applicable",
+      "note": "Authored chrome. There is no original release to measure: the frame is a one-point box in the theme's border role with a small platform-facing corner radius, and its correctness is judged against the theme's own drawing rather than against a screenshot. Threading holds it with WindowChromeComponentTests' catalogue sweeps and its whole-window render."
+    },
+    "title_bar": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The header row is flat ground closed by a one-point seam (the `rule` texture), which is a shared text-mode idiom rather than any one program's title bar."
+    },
+    "window_buttons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The `tui` caption family is hairline one-bit artwork in WindowChromeCaptionArtwork, inverted under the pointer. No historical system drew these; the bitmaps are the specification and the component tests pin them."
+    },
+    "toolbar": {
+      "status": "not_applicable",
+      "note": "Authored chrome, and the same answer every takeover gives: an app-drawn frame has no NSToolbar. The window's own controls live in WindowCommandBandView below the header row."
+    },
+    "buttons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Actions take the material's outlined primary treatment on square corners, which is the bracketed default action a text-mode program draws."
+    },
+    "choice_controls": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Choosers stay the app's own chip at zero radius rather than borrowing a period well, because this theme states no bevel to seat one in."
+    },
+    "fields": {
+      "status": "not_applicable",
+      "note": "Authored chrome. A value well is stated darker than its panel (`fieldSurface`) rather than sunken by an edge, since depth here is carried by colour."
+    },
+    "menus": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Menus keep the app's own grammar at zero radius; no historical menu family applies."
+    },
+    "popovers": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Transient surfaces are stemless, flat-edged and shadowless (`textModePopoverStyle`): a box and its rule."
+    },
+    "scrollbars": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The scroller stays `automatic`, which at zero radius is already a square track and thumb; none of the historical families are right for a drawn box."
+    },
+    "lists_tables": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Rows use the app's own selection at zero radius, filled with the theme's single accent."
+    },
+    "progress": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Progress stays continuous; the segmented Win32 block control belongs to that lineage, not to this idiom."
+    },
+    "alerts_toasts": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Alerts take the same flat box as every other surface."
+    },
+    "typography": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The face is the platform's own monospaced design (`typeface: .monospaced`) held slightly down in scale, not a period screen font that would need provenance."
+    },
+    "icons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The header row carries no application icon, and marks elsewhere stay the app's own symbols."
+    }
+  },
+  "crops": [],
+  "reproductions": []
+}

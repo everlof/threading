@@ -1,0 +1,189 @@
+{
+  "schema_version": 2,
+  "chrome_id": "aqua-tiger",
+  "target": {
+    "platform": "Mac OS X",
+    "release": "Tiger",
+    "version": "10.4.x"
+  },
+  "sources": [
+    {
+      "id": "finder-home",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-Finder-Home.png",
+      "filename": "10-4-Tiger-Finder-Home.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "122210f6a34980ed36233b725a5000c9a622771359e243a70537c468a3705ae6",
+      "pixel_width": 744,
+      "pixel_height": 457
+    },
+    {
+      "id": "appearance",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-System-Preferences-Appearance.png",
+      "filename": "10-4-Tiger-System-Preferences-Appearance.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "32f14a3c7a3aaed5e8efd4150cfd461229de82fdb670625285346d636bcf21e1",
+      "pixel_width": 595,
+      "pixel_height": 548
+    },
+    {
+      "id": "system-profiler",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-System-Profiler.png",
+      "filename": "10-4-Tiger-System-Profiler.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "13e4358bff1a9361c50d500ddb7d96fd8efa878310615bcc364f750761e80177",
+      "pixel_width": 750,
+      "pixel_height": 522
+    },
+    {
+      "id": "apple-menu",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-Apple-Menu.png",
+      "filename": "10-4-Tiger-Apple-Menu.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "731f808df1c3fd4c0b22ca5500e87a7c505d281d9862b7296ab7a5a65222c342",
+      "pixel_width": 1280,
+      "pixel_height": 1024
+    },
+    {
+      "id": "applications",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-Applications.png",
+      "filename": "10-4-Tiger-Applications.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "43506ba90a3e9cd791f98c6f234ec95826112e2d5c26758be968bcf4e3193224",
+      "pixel_width": 945,
+      "pixel_height": 889
+    },
+    {
+      "id": "software-update",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-System-Preferences-Software-Update.png",
+      "filename": "10-4-Tiger-System-Preferences-Software-Update.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "ec0148d20e002eee24577f582e01c604cb327c89cc1669116e36ce5421b7a0ba",
+      "pixel_width": 595,
+      "pixel_height": 394
+    },
+    {
+      "id": "eject-warning",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-Finder-Eject-Warning.png",
+      "filename": "10-4-Tiger-Finder-Eject-Warning.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "89f71cec3e7c8477240b81ba6d7aee0cc5f5a413d15d20766b5d04b43d156b98",
+      "pixel_width": 420,
+      "pixel_height": 175
+    },
+    {
+      "id": "finder-copy",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-4-tiger/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-4/10-4-Tiger-Finder-Copy.png",
+      "filename": "10-4-Tiger-Finder-Copy.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "e823e9bdec92be847429ead7ee357d01ad534e752306c12c0326278c448f8708",
+      "pixel_width": 399,
+      "pixel_height": 90
+    },
+    {
+      "id": "tiger-help-tags",
+      "page_url": "https://flylib.com/books/en/2.585.1.269/1/",
+      "owner": "Mac OS X Tiger help-tag documentation preserved by Flylib",
+      "storage": "remote_only"
+    },
+    {
+      "id": "apple-hig-september-2005",
+      "page_url": "https://archive.org/details/apple-hig",
+      "asset_url": "https://archive.org/download/apple-hig/MacOSX_HIG_2005_09_08.pdf",
+      "filename": "apple-hig-2005-09-08.pdf",
+      "owner": "Apple Human Interface Guidelines, Apple Computer, Inc., 8 September 2005",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "sha256": "6c2db0f045f2a0d5dfc0391d093b8d64dde738e0d4dbe3c49371910fb79f445e",
+      "pdf_page": 75,
+      "render_dpi": 120,
+      "pixel_width": 1020,
+      "pixel_height": 1320
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Finder Home records the 1px silver edge, seven-ish pixel top corner, bottom status band, and resize ridges." },
+    "title_bar": { "status": "measured", "note": "Finder Home records a 22px title row unified with a brushed-metal toolbar; the full combined top is 54px." },
+    "window_buttons": { "status": "verified", "note": "Finder verifies the leading 14px red/yellow/green glass controls at 21px centre spacing, glyphless at rest, seated one pixel below the brushed-metal highlight; the production crop is held to the native 1x reference by an enforced RGB tolerance." },
+    "toolbar": { "status": "measured", "note": "The 54px top crop preserves the unified title/toolbar material, segmented view control, search field, and disclosure capsule." },
+    "buttons": { "status": "measured", "note": "Appearance preserves the rounded glass Show All button and small help button at native 1x." },
+    "choice_controls": { "status": "measured", "note": "Appearance preserves rounded silver value wells with a narrow blue gel up/down segment." },
+    "fields": { "status": "measured", "note": "Finder Home and Appearance preserve white inset search/value fields and blue focus halo." },
+    "menus": { "status": "measured", "note": "Apple Menu preserves pinstriped white rows, blue selection, rules, submenu arrows, shortcuts, and hard lower shadow." },
+    "popovers": { "status": "measured", "note": "Apple's own Tiger-period HIG (8 September 2005) prints Figure 5-11, a help tag under the pointer in iTunes: a 125x18 pale-yellow plate with a one-pixel warm-gray edge, a soft dark shadow below and right, near-square corners, and dark Lucida Grande text one line high. Placement below and right of the pointer is part of the figure." },
+    "scrollbars": { "status": "measured", "note": "System Profiler records a 15px track, 387px blue gel thumb, silver arrow plates grouped at the trailing end, and bottom resize corner. The native vertical resting state is verified below; horizontal and pressed-state evidence is still required before the whole component family can be called verified." },
+    "lists_tables": { "status": "measured", "note": "System Profiler and Finder preserve white rows, blue opaque selection, disclosure triangles, separators, and sidebar widths." },
+    "progress": { "status": "measured", "note": "Finder Copy preserves Tiger's thin determinate blue gel fill, pale rounded track, file label, remaining-size line, document icon, and circular stop plate." },
+    "alerts_toasts": { "status": "measured", "note": "Finder's Eject Warning preserves the light-gray rounded sheet, red octagonal stop icon, compact title/body stack, and blue default OK capsule." },
+    "typography": { "status": "measured", "note": "Lucida Grande is visible across Finder, System Preferences, menus, and System Profiler at original 1x." },
+    "icons": { "status": "measured", "note": "Applications preserves Finder sidebar and application artwork; app semantics should use period-shaped originals only where licensing permits." }
+  },
+  "reproductions": [
+    {
+      "id": "traffic-light-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-aqua-tiger.png",
+      "reference_crop_ids": ["finder-window-buttons"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 61×23 size validation, plus native-pixel review of the 14px lenses, 21px centre spacing, glyphless resting state, dark upper arcs, lower-face bloom, and brushed-metal seating. RGB comparison intentionally ignores the historical screenshot's partially transparent rounded window-corner pixel.",
+        "max_normalized_rgb_rmse": 0.085
+      },
+      "note": "Production WindowTitleBandView rendered at the crop's native 61×23 pixels with the active leading traffic-light cluster. The authored Tiger lens keeps its measured upper-third dip, lower bloom, spherical side walls, asymmetric rim, compact spacing, and restrained brushed-metal background."
+    },
+    {
+      "id": "reference-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-aqua-tiger.png",
+      "reference_crop_ids": ["profiler-scrollbar-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 15×479 size validation, plus native-pixel review of the asymmetric trough, 387px thumb, twelve-column recolorable gel shaft, seven-row end-cap ramps, and paired 15×15 arrow plates. The crop retains a few adjacent System Profiler list-edge pixels that production intentionally does not reproduce.",
+        "max_normalized_rgb_rmse": 0.065
+      },
+      "note": "Production ThemedScroller rendered against the tight 15×479 control extraction. Its trough and flat shaft match the measured pixels, the thumb length is exact, and both trailing arrow plates are pixel-identical; the wider crop remains above as list-edge and resize-corner context."
+    }
+  ],
+  "crops": [
+    { "id": "finder-unified-top", "component": "toolbar", "source_id": "finder-home", "rect": { "x": 0, "y": 0, "width": 744, "height": 54 } },
+    { "id": "finder-title-band", "component": "title_bar", "source_id": "finder-home", "rect": { "x": 0, "y": 0, "width": 744, "height": 22 } },
+    { "id": "finder-window-buttons", "component": "window_buttons", "source_id": "finder-home", "rect": { "x": 4, "y": 0, "width": 61, "height": 23 } },
+    { "id": "finder-frame-corners", "component": "window_frame", "source_id": "finder-home", "rect": { "x": 0, "y": 0, "width": 744, "height": 457 } },
+    { "id": "appearance-controls", "component": "choice_controls", "source_id": "appearance", "rect": { "x": 220, "y": 75, "width": 278, "height": 91 } },
+    { "id": "appearance-buttons", "component": "buttons", "source_id": "appearance", "rect": { "x": 5, "y": 22, "width": 153, "height": 28 } },
+    { "id": "appearance-search-field", "component": "fields", "source_id": "appearance", "rect": { "x": 432, "y": 20, "width": 158, "height": 31 } },
+    { "id": "apple-menu-open", "component": "menus", "source_id": "apple-menu", "rect": { "x": 9, "y": 21, "width": 225, "height": 298 } },
+    { "id": "profiler-scrollbar", "component": "scrollbars", "source_id": "system-profiler", "rect": { "x": 149, "y": 43, "width": 20, "height": 479 } },
+    { "id": "profiler-scrollbar-control", "component": "scrollbars", "source_id": "system-profiler", "rect": { "x": 149, "y": 43, "width": 15, "height": 479 } },
+    { "id": "profiler-list", "component": "lists_tables", "source_id": "system-profiler", "rect": { "x": 0, "y": 43, "width": 170, "height": 479 } },
+    { "id": "finder-copy-progress", "component": "progress", "source_id": "finder-copy", "rect": { "x": 0, "y": 0, "width": 399, "height": 90 } },
+    { "id": "eject-warning-sheet", "component": "alerts_toasts", "source_id": "eject-warning", "rect": { "x": 0, "y": 0, "width": 420, "height": 175 } },
+    { "id": "applications-sidebar-icons", "component": "icons", "source_id": "applications", "rect": { "x": 4, "y": 52, "width": 138, "height": 381 } },
+    { "id": "appearance-type-sample", "component": "typography", "source_id": "appearance", "rect": { "x": 18, "y": 55, "width": 558, "height": 405 } },
+    { "id": "help-tag-in-place", "component": "popovers", "source_id": "apple-hig-september-2005", "rect": { "x": 183, "y": 278, "width": 247, "height": 89 } },
+    { "id": "help-tag-plate", "component": "popovers", "source_id": "apple-hig-september-2005", "rect": { "x": 209, "y": 333, "width": 130, "height": 23 } }
+  ]
+}

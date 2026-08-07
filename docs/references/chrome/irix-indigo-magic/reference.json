@@ -1,0 +1,161 @@
+{
+  "schema_version": 2,
+  "chrome_id": "irix-indigo-magic",
+  "target": { "platform": "IRIX", "release": "Indigo Magic", "version": "5.3" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/irix/irix5", "owner": "Silicon Graphics screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "guidebook-components", "page_url": "https://guidebookgallery.org/screenshots/irix53", "owner": "Silicon Graphics screenshots preserved by GUIdebook", "storage": "remote_only" },
+    {
+      "id": "full-desktop",
+      "page_url": "https://guidebookgallery.org/screenshots/irix53#full",
+      "asset_url": "https://guidebookgallery.org/pics/gui/desktop/full/irix53-1-1.png",
+      "filename": "irix53-full.png",
+      "owner": "Silicon Graphics screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "cd0c1a730962d07811d528b05912dc98685ff3d7f91be576e21591644f210d9e",
+      "pixel_width": 1280,
+      "pixel_height": 1024
+    },
+    {
+      "id": "background-setting",
+      "page_url": "https://guidebookgallery.org/screenshots/irix53#appearance",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/appearance/irix53-1-1.png",
+      "filename": "irix53-background-setting.png",
+      "owner": "Silicon Graphics screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "19d391c06a6c0db78f0b6532d17ea008b002ff47c9affdee0eaf34fc2c24085c",
+      "pixel_width": 339,
+      "pixel_height": 324
+    },
+    {
+      "id": "icon-catalog",
+      "page_url": "https://guidebookgallery.org/screenshots/irix53#menu",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/menu/irix53.png",
+      "filename": "irix53-icon-catalog.png",
+      "owner": "Silicon Graphics screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "357ee2fb8f90f588062493222085703497699c99591d1c73b89e06a14c563045",
+      "pixel_width": 734,
+      "pixel_height": 415
+    },
+    {
+      "id": "showcase-open-file",
+      "page_url": "https://guidebookgallery.org/screenshots/irix53#openfile",
+      "asset_url": "https://guidebookgallery.org/pics/gui/interface/dialogs/openfile/irix53.png",
+      "filename": "irix53-open-file.png",
+      "owner": "Silicon Graphics screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "03e729152ebc81e372b1180c2da658f1dd5da9273b5bf5c2a0f3385988518f89",
+      "pixel_width": 399,
+      "pixel_height": 487
+    },
+    {
+      "id": "logout-confirmation",
+      "page_url": "https://guidebookgallery.org/screenshots/irix53#logout",
+      "asset_url": "https://guidebookgallery.org/pics/gui/startupshutdown/logout/irix53.png",
+      "filename": "irix53-logout-confirmation.png",
+      "owner": "Silicon Graphics screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "4a98f634556df3ed42faec38da98846933c426704a9faf21ca6e617b6d9acdd3",
+      "pixel_width": 280,
+      "pixel_height": 139
+    },
+    {
+      "id": "uig-working-dialog",
+      "page_url": "https://irix7.com/techpubs/007-2167-001.pdf",
+      "asset_url": "https://irix7.com/techpubs/007-2167-001.pdf",
+      "filename": "sgi-indigo-magic-uig-007-2167-001.pdf",
+      "owner": "Indigo Magic User Interface Guidelines, document 007-2167-001, copyright 1994 Silicon Graphics, Inc.",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "sha256": "0f42773350409db6ede3e07e6d497e6b185008f6cdf59d2371098f8d375ca5ff",
+      "pdf_page": 244,
+      "render_dpi": 120,
+      "pixel_width": 1020,
+      "pixel_height": 1320
+    },
+    {
+      "id": "uig-indigo-magic-scale",
+      "page_url": "https://irix7.com/techpubs/007-2167-001.pdf",
+      "asset_url": "https://irix7.com/techpubs/007-2167-001.pdf",
+      "filename": "sgi-indigo-magic-uig-007-2167-001.pdf",
+      "owner": "Indigo Magic User Interface Guidelines, document 007-2167-001, copyright 1994 Silicon Graphics, Inc.",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "sha256": "0f42773350409db6ede3e07e6d497e6b185008f6cdf59d2371098f8d375ca5ff",
+      "pdf_page": 223,
+      "render_dpi": 120,
+      "pixel_width": 1020,
+      "pixel_height": 1320
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Background Setting and Showcase preserve layered black/gray 4Dwm frames, double bevel, corners, and directional relief." },
+    "title_bar": { "status": "measured", "note": "Showcase preserves the compact gray key band, italic title, left window-menu plate, and right caption plates." },
+    "window_buttons": { "status": "verified", "note": "Showcase's complete 690×32 key-title construction is reconstructed pixel-for-pixel, including the shared 4Dwm dither phase, leading window-menu plate, trailing minimize/maximize plates, stepped frame, and native one-bit caption face." },
+    "toolbar": { "status": "measured", "note": "Showcase preserves dense SGI menu/tool rows, rulers, small arrow plates, and hard separators." },
+    "buttons": { "status": "measured", "note": "Background Setting preserves the Motif-like raised command row with crisp highlight/shadow construction." },
+    "choice_controls": { "status": "measured", "note": "Background Setting preserves a selected list, colour well, thumb, and arrow controls in one native panel." },
+    "fields": { "status": "measured", "note": "The Showcase file browser preserves a focused pink text well with black inner rule, deep gray/white relief, insertion caret, and adjacent action buttons." },
+    "menus": { "status": "measured", "note": "The full desktop preserves Toolchest as a persistent compact menu palette with row rules and hard relief." },
+    "popovers": { "status": "not_applicable", "note": "SGI's own Indigo Magic User Interface Guidelines (007-2167-001, 1994) define six kinds of online help and no hover surface at all: context-sensitive help is entered through a Help menu's Click for Help item or Shift-F1, the pointer becomes a question mark, and the answer opens in a separate SGI Help Viewer window (printed page 79, Figure 4-3). Threading should answer 'what is this' in a panel, not a floating tip." },
+    "scrollbars": { "status": "verified", "note": "Background Setting's complete 16×172 vertical scroller is reconstructed pixel-for-pixel: asymmetric 20/18px arrows, 90px page region, 44px gripped thumb, rails, seams, and seven-tone indexed relief." },
+    "lists_tables": { "status": "measured", "note": "Background Setting and Icon Catalog preserve dense rows, icon grids, hierarchy, selection, and scroller seating." },
+    "progress": { "status": "measured", "note": "SGI's own guidelines prescribe the Indigo Magic scale as the percent-done indicator and print it twice: Figure 10-6 gives a whole Working dialog (frame, italic Progress caption, framed message well, value label, inset trough with the scale's slanted leading edge, and a ringed default Cancel), Figure 9-7 gives the bare scale. Both figures are printed in grayscale, so construction and proportion are measurable from them but colour is not; take colour from the native Background Setting crops." },
+    "alerts_toasts": { "status": "measured", "note": "The native logout confirmation preserves the compact framed panel, bright green question icon, message well, button spacing, and return-key marker." },
+    "typography": { "status": "measured", "note": "The 1280x1024 desktop and focused panels preserve SGI screen fonts, italic caption text, and compact Motif metrics." },
+    "icons": { "status": "measured", "note": "Icon Catalog and Showcase preserve the SGI desktop/tool icon family at native scale." }
+  },
+  "reproductions": [
+    {
+      "id": "caption-plate-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-irix-indigo-magic.png",
+      "reference_crop_ids": ["showcase-caption-plates"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 690×32 size validation. All 22,080 pixels are identical: the shared four-colour 4Dwm frame/dither construction, three caption plates, all rails and joins, and the native one-bit Showcase title rendered from the openly licensed X.Org Adobe Helvetica Bold Oblique screen face with six measured IRIX glyph deltas.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production WindowTitleBandView reconstructs the corrected tight 690×32 Showcase title assembly pixel-for-pixel. The former 691px crop included one blue desktop column beyond the native window; the exact target preserves only the stepped frame, shared dither, three live semantic button regions, and period bitmap caption."
+    },
+    {
+      "id": "reference-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-irix-indigo-magic.png",
+      "reference_crop_ids": ["background-scroller-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 16×172 size validation, plus native-pixel review of the asymmetric 20px and 18px line buttons, 90px page region, 44px thumb with three grip seams, rails, and seven-colour indexed relief.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the tight 16×172 Background Setting control extraction pixel-for-pixel. Every one of its 2,752 pixels is identical; the wider crop remains supporting context for panel seating."
+    }
+  ],
+  "crops": [
+    { "id": "background-frame", "component": "window_frame", "source_id": "background-setting", "rect": { "x": 0, "y": 0, "width": 339, "height": 324 } },
+    { "id": "showcase-title", "component": "title_bar", "source_id": "full-desktop", "rect": { "x": 564, "y": 50, "width": 690, "height": 32 } },
+    { "id": "showcase-caption-plates", "component": "window_buttons", "source_id": "full-desktop", "rect": { "x": 564, "y": 50, "width": 690, "height": 32 } },
+    { "id": "showcase-tool-rows", "component": "toolbar", "source_id": "full-desktop", "rect": { "x": 576, "y": 82, "width": 650, "height": 68 } },
+    { "id": "background-buttons", "component": "buttons", "source_id": "background-setting", "rect": { "x": 24, "y": 275, "width": 301, "height": 39 } },
+    { "id": "background-choices", "component": "choice_controls", "source_id": "background-setting", "rect": { "x": 14, "y": 99, "width": 312, "height": 174 } },
+    { "id": "focused-file-field", "component": "fields", "source_id": "showcase-open-file", "rect": { "x": 176, "y": 410, "width": 218, "height": 69 } },
+    { "id": "toolchest-menu", "component": "menus", "source_id": "full-desktop", "rect": { "x": 9, "y": 9, "width": 106, "height": 160 } },
+    { "id": "background-scroller", "component": "scrollbars", "source_id": "background-setting", "role": "supporting_context", "rect": { "x": 139, "y": 98, "width": 25, "height": 198 } },
+    { "id": "background-scroller-control", "component": "scrollbars", "source_id": "background-setting", "rect": { "x": 142, "y": 98, "width": 16, "height": 172 } },
+    { "id": "icon-catalog-grid", "component": "lists_tables", "source_id": "icon-catalog", "rect": { "x": 28, "y": 60, "width": 692, "height": 316 } },
+    { "id": "logout-confirmation", "component": "alerts_toasts", "source_id": "logout-confirmation", "rect": { "x": 0, "y": 0, "width": 280, "height": 139 } },
+    { "id": "background-type", "component": "typography", "source_id": "background-setting", "rect": { "x": 14, "y": 29, "width": 312, "height": 285 } },
+    { "id": "icon-catalog-icons", "component": "icons", "source_id": "icon-catalog", "rect": { "x": 43, "y": 78, "width": 632, "height": 201 } },
+    { "id": "uig-working-dialog-figure", "component": "progress", "source_id": "uig-working-dialog", "rect": { "x": 360, "y": 403, "width": 203, "height": 187 } },
+    { "id": "uig-indigo-magic-scale-figure", "component": "progress", "source_id": "uig-indigo-magic-scale", "rect": { "x": 629, "y": 639, "width": 155, "height": 37 } }
+  ]
+}

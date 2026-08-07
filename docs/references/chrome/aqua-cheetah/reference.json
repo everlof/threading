@@ -1,0 +1,170 @@
+{
+  "schema_version": 2,
+  "chrome_id": "aqua-cheetah",
+  "target": { "platform": "Mac OS X", "release": "Cheetah", "version": "10.0.4" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/macos/macosx", "owner": "Apple screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "screenshot-library", "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/", "owner": "Apple screenshots preserved by 512 Pixels", "storage": "remote_only" },
+    {
+      "id": "finder-home",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-Finder-Home.png",
+      "filename": "10-0-Cheetah-Finder-Home.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "2dda52db1ffbe555e56af08bf513c1ef39091e40d93107c1b514f69cd6c8ea08",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "general-preferences",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-System-Preferences-General.png",
+      "filename": "10-0-Cheetah-System-Preferences-General.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "e08e25f024c42f225f33cfdb7cddb62160c34f5a7d64dab9a6f978c185b1fefa",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "apple-menu",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-Apple-Menu.png",
+      "filename": "10-0-Cheetah-Apple-Menu.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "773a6a3599abc8675b0b717b693bf87ce3520a8ede8447f1ec0a92a201e1e0a4",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "finder-copy",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-Finder-Copy.png",
+      "filename": "10-0-Cheetah-Finder-Copy.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "655222efa1d871ff531bdf5ac7988bc3246518b490e2aba3b177af29e8c01001",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "textedit-open",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-Text-Edit-File-Open.png",
+      "filename": "10-0-Cheetah-Text-Edit-File-Open.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "2cee750f5b057966760fa9392fc7a8a60c66c9e3905b7d748e8dc08f498a7f5b",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "empty-trash-alert",
+      "page_url": "https://512pixels.net/projects/aqua-screenshot-library/mac-os-x-10-0-cheetah/",
+      "asset_url": "https://media.512pixels.net/downloads/macos-screenshots/10-0/10-0-Cheetah-Finder-Empty-Trash.png",
+      "filename": "10-0-Cheetah-Finder-Empty-Trash.png",
+      "owner": "Apple screenshot preserved by 512 Pixels",
+      "storage": "remote_only",
+      "sha256": "db0d8a2ea3b81dcce67c16e8bb09b928c2a97fd209d6a3a6c40b6b8baaf51983",
+      "pixel_width": 1024,
+      "pixel_height": 768
+    },
+    {
+      "id": "apple-hig-preliminary-macworld-draft",
+      "page_url": "https://archive.org/details/apple-hig",
+      "asset_url": "https://archive.org/download/apple-hig/MacOSX_HIG_2001_10_01_Preliminary.pdf",
+      "filename": "apple-hig-preliminary-macworld-draft.pdf",
+      "owner": "Inside Mac OS X: Aqua Human Interface Guidelines, preliminary Macworld draft footered 01/10/01, copyright 2000 Apple Computer, Inc.",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "sha256": "9c09173cdadecef2e666de6da0f29387f47226cff2c1f1859afb18f81731da95"
+    },
+    {
+      "id": "apple-hig-october-2001",
+      "page_url": "https://archive.org/details/apple-hig",
+      "asset_url": "https://archive.org/download/apple-hig/MacOSX_HIG_2001_10_01.pdf",
+      "filename": "apple-hig-2001-10.pdf",
+      "owner": "Inside Mac OS X: Aqua Human Interface Guidelines, Apple Computer, Inc., October 2001, which postdates 10.0.x",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "sha256": "55c38830c695cb3266961b3f81735cf451e65ce9f81d8308851930fa54a4aead",
+      "pdf_page": 223,
+      "render_dpi": 111,
+      "pixel_width": 944,
+      "pixel_height": 1221
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Finder and Copy preserve the small rounded frame, pinstriped fill, resize ridges, and pronounced hard-bottomed shadow." },
+    "title_bar": { "status": "measured", "note": "Finder preserves Cheetah's pale 22px pinstripe title band and centered Lucida Grande title." },
+    "window_buttons": { "status": "verified", "note": "Finder preserves the 13px glass traffic lights, 17px optical shadow envelope, 22px centre spacing, inactive form, and hover-only-glyph anatomy; the production component is held to the native 1x crop by the verified reproduction tolerance." },
+    "toolbar": { "status": "measured", "note": "Finder preserves the strongly striped toolbar, segmented view control, separator rule, and large icon commands." },
+    "buttons": { "status": "measured", "note": "The Copy window preserves a compact pill-shaped Stop button beside the progress track." },
+    "choice_controls": { "status": "measured", "note": "General Preferences preserves silver Aqua pop-ups with a saturated blue paired-arrow segment and native radio states." },
+    "fields": { "status": "measured", "note": "TextEdit Open preserves inset location/value fields and their exact relationship to Aqua pop-up segments." },
+    "menus": { "status": "measured", "note": "The Apple Menu preserves pinstriped rows, blue selection, rules, disabled text, arrows, shortcuts, and hard lower shadow." },
+    "popovers": { "status": "source_found", "note": "Apple's preliminary Aqua HIG, footered as a Macworld draft on 01/10/01 and copyright 2000, states that Help Tags replace Balloon Help as Mac OS X's answer to what's-that questions, so the surface existed in the 10.0 timeframe; its Help Tag Examples section carries no figure. The only Apple figure found, Figure 13-1, is in the October 2001 HIG, which postdates every 10.0.x release, so its crops are kept as the nearest evidence and must not be measured as 10.0 geometry. No 10.0.x screenshot showing a help tag has been found." },
+    "scrollbars": { "status": "measured", "note": "TextEdit Open preserves the first Aqua scroller's saturated ribbed blue gel thumb and bookended line buttons. The native horizontal resting state is verified below; vertical and pressed-state evidence is still required before the whole component family can be called verified." },
+    "lists_tables": { "status": "measured", "note": "Finder preserves icon-grid spacing, toolbar/client boundary, labels, and selection-free row geometry." },
+    "progress": { "status": "measured", "note": "Finder Copy preserves the striped progress capsule, its inset track, label stack, and adjacent Stop button." },
+    "alerts_toasts": { "status": "measured", "note": "Finder's native Empty Trash alert preserves the pinstriped rounded sheet, large Finder icon, bold question, secondary line, gray Cancel pill, and blue default OK pill." },
+    "typography": { "status": "measured", "note": "Finder, General Preferences, menu, and Copy preserve Lucida Grande at original 1x." },
+    "icons": { "status": "measured", "note": "Finder preserves early Aqua toolbar, home-folder, content, disk, and Dock artwork at period scale." }
+  },
+  "reproductions": [
+    {
+      "id": "traffic-light-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-aqua-cheetah.png",
+      "reference_crop_ids": ["finder-traffic-lights"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 64×20 size validation, plus native-pixel review of the 13px rim, 17px shadow envelope, 22px centre spacing, and glyphless resting state.",
+        "max_normalized_rgb_rmse": 0.08
+      },
+      "note": "Production WindowTitleBandView rendered at the crop's native 64×20 pixels in the resting, non-hover state. The three Cheetah gems intentionally carry no glyphs until hovered; their measured glass centreline, saturated side walls, two-stage neutral shadow, compact spacing, and four-row pinstripe phase are verified against Finder at 1x."
+    },
+    {
+      "id": "reference-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-aqua-cheetah.png",
+      "reference_crop_ids": ["open-panel-scroller-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 633×16 size validation, plus native-pixel review of the two 17×16 end caps, asymmetric trough scanlines, periodic gel ribs, rounded thumb ends, and opaque output. The preserved screenshot contains a faint yellow trough artifact that production intentionally does not reproduce.",
+        "max_normalized_rgb_rmse": 0.04
+      },
+      "note": "Production ThemedScroller rendered against the tight 633×16 control extraction with the same horizontal axis, 16px trough, long recolorable gel thumb, and distinct measured bookends. The left end cap is pixel-identical; the right differs only in a few source color-fringe pixels. The wider crop remains above as frame and resize-corner context."
+    }
+  ],
+  "crops": [
+    { "id": "finder-window", "component": "window_frame", "source_id": "finder-home", "rect": { "x": 222, "y": 100, "width": 546, "height": 434 } },
+    { "id": "finder-title", "component": "title_bar", "source_id": "finder-home", "rect": { "x": 222, "y": 100, "width": 546, "height": 23 } },
+    { "id": "finder-traffic-lights", "component": "window_buttons", "source_id": "finder-home", "rect": { "x": 227, "y": 102, "width": 64, "height": 20 } },
+    { "id": "finder-toolbar", "component": "toolbar", "source_id": "finder-home", "rect": { "x": 222, "y": 122, "width": 546, "height": 59 } },
+    { "id": "copy-stop-button", "component": "buttons", "source_id": "finder-copy", "rect": { "x": 619, "y": 256, "width": 66, "height": 23 } },
+    { "id": "general-popup-and-radios", "component": "choice_controls", "source_id": "general-preferences", "rect": { "x": 347, "y": 177, "width": 319, "height": 177 } },
+    { "id": "open-panel-fields", "component": "fields", "source_id": "textedit-open", "rect": { "x": 189, "y": 108, "width": 610, "height": 335 } },
+    { "id": "apple-menu-open", "component": "menus", "source_id": "apple-menu", "rect": { "x": 9, "y": 20, "width": 223, "height": 280 } },
+    { "id": "open-panel-scroller", "component": "scrollbars", "source_id": "textedit-open", "rect": { "x": 171, "y": 394, "width": 654, "height": 20 } },
+    { "id": "open-panel-scroller-control", "component": "scrollbars", "source_id": "textedit-open", "rect": { "x": 173, "y": 395, "width": 633, "height": 16 } },
+    { "id": "finder-icon-client", "component": "lists_tables", "source_id": "finder-home", "rect": { "x": 222, "y": 179, "width": 546, "height": 354 } },
+    { "id": "copy-progress", "component": "progress", "source_id": "finder-copy", "rect": { "x": 400, "y": 197, "width": 316, "height": 149 } },
+    { "id": "empty-trash-sheet", "component": "alerts_toasts", "source_id": "empty-trash-alert", "rect": { "x": 280, "y": 130, "width": 464, "height": 145 } },
+    { "id": "finder-type", "component": "typography", "source_id": "finder-home", "rect": { "x": 222, "y": 100, "width": 546, "height": 235 } },
+    { "id": "finder-icons", "component": "icons", "source_id": "finder-home", "rect": { "x": 240, "y": 125, "width": 460, "height": 215 } },
+    { "id": "help-tag-october-2001-figure", "component": "popovers", "source_id": "apple-hig-october-2001", "rect": { "x": 144, "y": 665, "width": 591, "height": 67 } },
+    { "id": "help-tag-october-2001-plate", "component": "popovers", "source_id": "apple-hig-october-2001", "rect": { "x": 157, "y": 693, "width": 102, "height": 22 } },
+    { "id": "help-tag-october-2001-expanded", "component": "popovers", "source_id": "apple-hig-october-2001", "rect": { "x": 379, "y": 692, "width": 324, "height": 23 } }
+  ]
+}

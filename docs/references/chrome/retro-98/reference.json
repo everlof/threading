@@ -1,0 +1,228 @@
+{
+  "schema_version": 2,
+  "chrome_id": "retro-98",
+  "target": { "platform": "Microsoft Windows", "release": "Windows 98", "version": "4.10" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/windows/win98", "owner": "Microsoft screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "guidebook-components", "page_url": "https://guidebookgallery.org/screenshots/win98", "owner": "Microsoft screenshots preserved by GUIdebook", "storage": "remote_only" },
+    {
+      "id": "full-desktop",
+      "page_url": "https://guidebookgallery.org/screenshots/win98",
+      "asset_url": "https://guidebookgallery.org/pics/gui/desktop/full/win98.png",
+      "filename": "win98-full.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "4a922c060f4635deae1cb1ed588f86dd14932077e6954f6f3643557a5d317aca",
+      "pixel_width": 640,
+      "pixel_height": 480
+    },
+    {
+      "id": "password-alert",
+      "page_url": "https://guidebookgallery.org/screenshots/win98#wrongpassword",
+      "asset_url": "https://guidebookgallery.org/pics/gui/interface/misc/wrongpassword/win98.png",
+      "filename": "win98-wrong-password.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "e308d645047efad2e397ccb8189649889fb569d888b4047bc47a06381e3426bd",
+      "pixel_width": 296,
+      "pixel_height": 119
+    },
+    {
+      "id": "wordpad",
+      "page_url": "https://guidebookgallery.org/screenshots/win98#texteditor",
+      "asset_url": "https://guidebookgallery.org/pics/gui/applications/office/texteditor/win98.png",
+      "filename": "win98-wordpad.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "eafa85b797a581aee7f637ef30b8dfd4a5266aee7676ba1edfaa3489bdd490fd",
+      "pixel_width": 480,
+      "pixel_height": 321
+    },
+    {
+      "id": "font-dialog",
+      "page_url": "https://guidebookgallery.org/screenshots/win98#font",
+      "asset_url": "https://guidebookgallery.org/pics/gui/interface/dialogs/font/win98.png",
+      "filename": "win98-font-dialog.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "69ea3bceedc41f9044e299d7ce3444e6b5955b05d10106f84e7cd12a0b4757ed",
+      "pixel_width": 405,
+      "pixel_height": 344
+    },
+    {
+      "id": "my-computer",
+      "page_url": "https://guidebookgallery.org/screenshots/win98#filemanager",
+      "asset_url": "https://guidebookgallery.org/pics/gui/system/managers/filemanager/win98.png",
+      "filename": "win98-my-computer.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "43e1a68cfc9341c9747b630d65e641b4a826910efb5e6d0fe3ad27dfd64582a6",
+      "pixel_width": 508,
+      "pixel_height": 410
+    },
+    {
+      "id": "setup-copying-45",
+      "page_url": "https://guidebookgallery.org/screenshots/win98#copying",
+      "asset_url": "https://guidebookgallery.org/pics/gui/installation/copying/win98-1-10.png",
+      "filename": "win98-setup-copying-45.png",
+      "owner": "Microsoft screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "b9b37cb6e0f90b325257e89e05150ca960053bf59a296f7b8fc5bca132be8235",
+      "pixel_width": 640,
+      "pixel_height": 480
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "The full desktop crop preserves an active Explorer frame from every outer bevel through its sizing corner." },
+    "title_bar": { "status": "measured", "note": "The full desktop preserves a native 18px active caption plus its one-pixel frame seating and title spacing." },
+    "window_buttons": { "status": "verified", "note": "The production cluster is held against the native 50x14 crop: adjacent 16x14 Minimize/Maximize plates, a 2px group break, Close, and the measured Marlett glyph pixels." },
+    "toolbar": { "status": "measured", "note": "The Scheduled Tasks crop preserves menu, large command buttons, hard separators, address field, and rebar rows." },
+    "buttons": { "status": "verified", "note": "Production is held to the native wizard action row at 1x: disabled, default-focus, and ordinary 75×23 pushbuttons, all four frame rails, #DF inner light, one-pixel mnemonic underlines, and embossed disabled ink are reconstructed and regression reviewed." },
+    "choice_controls": { "status": "measured", "note": "The native Font dialog preserves selected list rows, checkboxes, combo wells, arrows, and adjacent type metrics at 1x." },
+    "fields": { "status": "measured", "note": "The Explorer address/value rows preserve white sunken wells, square dropdown plates, and single-pixel edges." },
+    "menus": { "status": "verified", "note": "Production is held to the tight native Start-menu cascade at 1x: the 130×67 parent crop, 21px row rhythm, shared icon/check gutter, four indexed frame rails, five-pixel submenu overlap, flat navy selection, 43×9 unsmoothed menu face, and square six-pixel arrows are all reconstructed and regression reviewed." },
+    "popovers": { "status": "measured", "note": "The Scheduled Tasks screenshot contains a native pale-yellow infotip with hard black edge and no modern radius or shadow." },
+    "scrollbars": { "status": "verified", "note": "Production is held to WordPad's complete native vertical and horizontal controls at 1x: square arrow plates, stippled page regions, raised thumbs, and their trailing frame rails are enforced by pixel-identical regression gates." },
+    "lists_tables": { "status": "measured", "note": "The Scheduled Tasks client preserves headers, rows, selection, boundaries, and scrollbar adjacency." },
+    "progress": { "status": "source_found", "note": "Only Setup's own custom blue percentage bar is preserved, and it must not stand in for the shell control: all twenty GUIdebook copying views are the same billboard, the Windows 98 SE set adds none, and neither Microsoft's Windows 98 Resource Kit nor the retail Getting Started manual illustrates Disk Defragmenter, ScanDisk or a file-copy dialog. A native 1x msctls_progress32 with visible chunk gaps is still unsourced; do not measure this component from the Setup bar, from a later Windows, or from a clone." },
+    "alerts_toasts": { "status": "measured", "note": "The wrong-password alert is preserved whole at 296x119; Threading's toast should translate its square captioned vocabulary." },
+    "typography": { "status": "measured", "note": "The Font dialog preserves Windows 98's native dialog labels, list text, selected text, and TrueType family names at 1x." },
+    "icons": { "status": "measured", "note": "My Computer preserves floppy, local disk, CD-ROM, Printers, Control Panel, Dial-Up Networking, and Scheduled Tasks icons at period sizes." }
+  },
+  "reproductions": [
+    {
+      "id": "reference-buttons",
+      "component": "buttons",
+      "fixture_id": "retro-button-family",
+      "output": "reference-buttons-retro-98.png",
+      "reference_crop_ids": ["wizard-buttons"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 239×28 size validation, plus native-pixel review of the disabled/default/ordinary 75×23 faces, four frame rails, #DF inner highlight, mnemonic underlines, and embossed disabled pair. Every non-type pixel is identical. The recorded residual is confined to independently authored OFL W95FA glyph shapes versus Microsoft's proprietary MS Sans Serif bitmap strike; both are hard-rasterized to the same five-colour indexed palette.",
+        "max_normalized_rgb_rmse": 0.15
+      },
+      "note": "Production ThemedButton reconstructs the complete wizard action row at source size. Geometry and state behavior are complete; the fixture deliberately uses the open W95FA recreation rather than redistributing or converting Microsoft's original bitmap font."
+    },
+    {
+      "id": "reference-menu",
+      "component": "menus",
+      "fixture_id": "retro-menu-family",
+      "output": "reference-menu-retro-98.png",
+      "reference_crop_ids": ["start-submenu-panel"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 130×67 size validation, plus native-pixel review of all four frame rails, every row and selection boundary, the five-pixel cascade overlap, three arrow figures, the shared icon/check gutter, and the 43×9 text bounds. The recorded residual is confined to caller-owned programmatic folder/update artwork and the installed Microsoft Sans Serif or bundled OFL W95FA TrueType outline raster versus the source shell's original MS Sans Serif bitmap; neither changes menu anatomy.",
+        "max_normalized_rgb_rmse": 0.191
+      },
+      "note": "Production ThemedMenu reconstructs the complete Start-menu cascade component at source size. The menu hardware and typographic seating are complete; the fixture deliberately uses independently reconstructed period content rather than extracting Microsoft's source icons or redistributing its bitmap font."
+    },
+    {
+      "id": "caption-button-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-retro-98.png",
+      "reference_crop_ids": ["caption-buttons"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 50×14 size validation, plus native-pixel review of all three 16×14 plates, the zero/two-pixel grouping, Marlett figures, inactive-caption gap, and hard bevel rings. The only residual is AppKit's one-level #E0 inner-highlight quantization versus the screenshot's #DF and one-level gradient dither in part of the two-pixel gap.",
+        "max_normalized_rgb_rmse": 0.002
+      },
+      "note": "Production WindowTitleBandView renders the tight historical 50×14 operation cluster from the source window's measured 481×18 inactive caption geometry. Plate bounds, grouping, and every black glyph pixel match the preserved crop."
+    },
+    {
+      "id": "reference-vertical-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-vertical-retro-98.png",
+      "reference_crop_ids": ["wordpad-vertical-scrollbar-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 16×150 size validation, plus native-pixel review of both arrow plates, the 8px minimum thumb, the 15px checker page region, and the continuous #DF trailing frame rail.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the tight 16×150 vertical control extraction. Both arrows, the native 8px minimum thumb immediately below Up, every checker pixel, and the trailing frame rail are pixel-identical to WordPad."
+    },
+    {
+      "id": "reference-horizontal-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-horizontal-retro-98.png",
+      "reference_crop_ids": ["wordpad-horizontal-scrollbar-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 453×16 size validation, plus native-pixel review of both arrow plates, the 319px leading thumb, the 101px checker page region, and the continuous #DF trailing frame rail.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the tight 453×16 horizontal control extraction. Both arrows, the measured 319px leading thumb, every checker pixel, and the trailing frame rail are pixel-identical to WordPad."
+    },
+    {
+      "id": "checkbox-family",
+      "component": "choice_controls",
+      "fixture_id": "retro-choice-control-family",
+      "output": "reference-checkboxes-retro-98.png",
+      "reference_crop_ids": ["font-dialog-controls"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production ThemedCheckbox family based on 98.css's 13px field border: white enabled wells, Win98 gray disabled wells, one-bit check marks, and unsmoothed W95FA labels. The native crop also contains radio, combo, and list controls, so this is a family review rather than an exact reconstruction."
+    },
+    {
+      "id": "field-family",
+      "component": "fields",
+      "fixture_id": "retro-field-family",
+      "output": "reference-fields-retro-98.png",
+      "reference_crop_ids": ["address-and-combo-fields"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production ThemedTextField follows 98.css's white sunken writable field and returns the disabled field to button-face gray, with the same unsmoothed W95FA text treatment."
+    },
+    {
+      "id": "radio-family",
+      "component": "choice_controls",
+      "fixture_id": "retro-choice-control-family",
+      "output": "reference-radios-retro-98.png",
+      "reference_crop_ids": ["font-dialog-controls"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production ThemedRadioButton follows 98.css's pinned twelve-by-twelve indexed radio sprite and four-pixel dot, including the disabled state; the crop contains radio controls beside the checkbox and combo families."
+    }
+  ],
+  "crops": [
+    { "id": "explorer-frame", "component": "window_frame", "source_id": "full-desktop", "rect": { "x": 147, "y": 2, "width": 483, "height": 459 } },
+    { "id": "active-caption", "component": "title_bar", "source_id": "full-desktop", "rect": { "x": 148, "y": 2, "width": 481, "height": 24 } },
+    { "id": "caption-buttons", "component": "window_buttons", "source_id": "full-desktop", "rect": { "x": 575, "y": 10, "width": 50, "height": 14 } },
+    { "id": "explorer-command-rows", "component": "toolbar", "source_id": "full-desktop", "rect": { "x": 168, "y": 26, "width": 458, "height": 96 } },
+    { "id": "wizard-buttons", "component": "buttons", "source_id": "full-desktop", "rect": { "x": 350, "y": 407, "width": 239, "height": 28 } },
+    { "id": "address-and-combo-fields", "component": "fields", "source_id": "full-desktop", "rect": { "x": 168, "y": 94, "width": 458, "height": 53 } },
+    { "id": "start-menu-cascade", "component": "menus", "source_id": "full-desktop", "role": "supporting_context", "rect": { "x": 0, "y": 72, "width": 500, "height": 386 } },
+    { "id": "start-submenu-panel", "component": "menus", "source_id": "full-desktop", "rect": { "x": 165, "y": 153, "width": 130, "height": 67 } },
+    { "id": "native-infotip", "component": "popovers", "source_id": "full-desktop", "rect": { "x": 341, "y": 176, "width": 298, "height": 62 } },
+    { "id": "wordpad-vertical-scrollbar", "component": "scrollbars", "source_id": "wordpad", "role": "supporting_context", "rect": { "x": 458, "y": 129, "width": 19, "height": 170 } },
+    { "id": "wordpad-horizontal-scrollbar", "component": "scrollbars", "source_id": "wordpad", "role": "supporting_context", "rect": { "x": 5, "y": 280, "width": 471, "height": 19 } },
+    { "id": "wordpad-vertical-scrollbar-control", "component": "scrollbars", "source_id": "wordpad", "rect": { "x": 459, "y": 131, "width": 16, "height": 150 } },
+    { "id": "wordpad-horizontal-scrollbar-control", "component": "scrollbars", "source_id": "wordpad", "rect": { "x": 6, "y": 281, "width": 453, "height": 16 } },
+    { "id": "explorer-list", "component": "lists_tables", "source_id": "full-desktop", "rect": { "x": 168, "y": 122, "width": 461, "height": 276 } },
+    { "id": "setup-copy-progress", "component": "progress", "source_id": "setup-copying-45", "rect": { "x": 4, "y": 334, "width": 126, "height": 68 } },
+    { "id": "password-dialog", "component": "alerts_toasts", "source_id": "password-alert", "rect": { "x": 0, "y": 0, "width": 296, "height": 119 } },
+    { "id": "font-dialog-type", "component": "typography", "source_id": "font-dialog", "rect": { "x": 13, "y": 43, "width": 299, "height": 143 } },
+    { "id": "font-dialog-controls", "component": "choice_controls", "source_id": "font-dialog", "rect": { "x": 13, "y": 43, "width": 300, "height": 247 } },
+    { "id": "my-computer-icons", "component": "icons", "source_id": "my-computer", "rect": { "x": 160, "y": 118, "width": 220, "height": 190 } }
+  ]
+}

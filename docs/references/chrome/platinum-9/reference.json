@@ -1,0 +1,184 @@
+{
+  "schema_version": 2,
+  "chrome_id": "platinum-9",
+  "target": { "platform": "Mac OS", "release": "Platinum", "version": "9.0" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/macos/macos90", "owner": "Apple screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "guidebook-components", "page_url": "https://guidebookgallery.org/screenshots/macos90", "owner": "Apple screenshots preserved by GUIdebook", "storage": "remote_only" },
+    {
+      "id": "full-desktop",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#full",
+      "asset_url": "https://guidebookgallery.org/pics/gui/desktop/full/macos90.png",
+      "filename": "macos90-full.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "6eb91e803620cc11a6280abe6729412f3e7e0c0b63e2d78f39972ec855c08e00",
+      "pixel_width": 640,
+      "pixel_height": 480
+    },
+    {
+      "id": "appearance",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#appearance",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/appearance/macos90-1-1.png",
+      "filename": "macos90-appearance.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "abd73b69018e25bc2fa91317a99e037f34cb386a8ef8b24544e2ed958dffd188",
+      "pixel_width": 477,
+      "pixel_height": 339
+    },
+    {
+      "id": "control-panels",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#menu",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/menu/macos90-1-1.png",
+      "filename": "macos90-control-panels.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "81aa3103296f92df611eb70d2e8d28ea928fd39f4f80fa0ace0cdebddb7ef7ae",
+      "pixel_width": 417,
+      "pixel_height": 247
+    },
+    {
+      "id": "help-center",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#help",
+      "asset_url": "https://guidebookgallery.org/pics/gui/system/features/help/macos90-1-1.png",
+      "filename": "macos90-help-center.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "a02092e9c3d1a457711987ba51c12c6cd82eb3a06b8634c39e5d6545effb5c1d",
+      "pixel_width": 393,
+      "pixel_height": 431
+    },
+    {
+      "id": "installer-copying",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#copying",
+      "asset_url": "https://guidebookgallery.org/pics/gui/installation/copying/macos90-1-1.png",
+      "filename": "macos90-installer-copying.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "9694b89475500866bebbcf9af031e6bf15f65aa6fbccfd0978a9616c3d82ee7b",
+      "pixel_width": 519,
+      "pixel_height": 327
+    },
+    {
+      "id": "logout-alert",
+      "page_url": "https://guidebookgallery.org/screenshots/macos90#logout",
+      "asset_url": "https://guidebookgallery.org/pics/gui/startupshutdown/logout/macos90.png",
+      "filename": "macos90-logout-alert.png",
+      "owner": "Apple screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "b6fe79d5617126b7834f022d29d814b2e5cd0edc8fb7107d6881e21ab03506c4",
+      "pixel_width": 373,
+      "pixel_height": 143
+    },
+    {
+      "id": "platinum-help-menu",
+      "page_url": "https://dev.os9.ca/techpubs/mac/HIGOS8Guide/thig-54.html",
+      "asset_url": "https://dev.os9.ca/techpubs/mac/HIGOS8Guide/graphics/HIG_M-003.gif",
+      "filename": "platinum-help-menu.gif",
+      "owner": "Apple Mac OS 8 Human Interface Guidelines figure preserved by Mac OS 9 Lives",
+      "storage": "remote_only",
+      "kind": "documentation_figure",
+      "sha256": "16db1c790c09981c18fc8e2e9ecc057f06c926b3f1c645c9600eba574da7a46e",
+      "pixel_width": 129,
+      "pixel_height": 84
+    },
+    {
+      "id": "balloon-help-figure",
+      "page_url": "https://dev.os9.ca/techpubs/mac/pdf/HIGuidelines.pdf",
+      "asset_url": "https://dev.os9.ca/techpubs/mac/pdf/HIGuidelines.pdf",
+      "filename": "macintosh-human-interface-guidelines.pdf",
+      "owner": "Apple Macintosh Human Interface Guidelines preserved by Mac OS 9 Lives",
+      "storage": "remote_only",
+      "kind": "documentation_figure",
+      "sha256": "35c3777d912618eab308743fb88a6727ce4fbca604aa91ec719118533a6d1362",
+      "pdf_page": 343,
+      "render_dpi": 150,
+      "pixel_width": 1275,
+      "pixel_height": 1650
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Appearance and Keychain Access preserve the two-pixel Platinum frame, black outer rule, bottom edge, and resize box." },
+    "title_bar": { "status": "measured", "note": "The 20px active striped band, interrupted centered title, and inactive plain band are preserved at native scale." },
+    "window_buttons": { "status": "measured", "note": "Appearance's tight native 470×17 title band is reproduced. The imported caption plates and every non-title pixel are now identical; the independently authored open bitmap fallback is intentionally reviewed separately from Apple's unavailable Charcoal strike." },
+    "toolbar": { "status": "measured", "note": "Help Center preserves a clean native toolbar with navigation plates, home icon, focused search field, Search button, title-band junction, and caption gadgets." },
+    "buttons": { "status": "measured", "note": "Appearance preserves the small help plate while the full desktop records raised Select buttons and disabled controls." },
+    "choice_controls": { "status": "measured", "note": "Appearance preserves 16px paired-triangle pop-ups and angled tab wells at original size." },
+    "fields": { "status": "measured", "note": "Help Center preserves the square white text well, black inner edge, gray seating, and blue keyboard-focus outline at native 1x." },
+    "menus": { "status": "measured", "note": "The desktop records the global menu bar, while Apple's Platinum guidelines preserve an open Help menu with hard edge, row height, commands, and shortcut alignment." },
+    "popovers": { "status": "measured", "note": "Apple's official Balloon Help figure preserves the irregular white balloon, black outline, pointed tail, and compact black system text; it is a documentation figure rather than a colour screenshot." },
+    "scrollbars": { "status": "verified", "note": "Production is held to Control Panels' native 14×184 vertical control at 1x: paired trailing arrows, gray track well, lavender thumb, and every hard Platinum seam are enforced by a pixel-identical regression gate." },
+    "lists_tables": { "status": "measured", "note": "Keychain and Control Panels preserve header relief, icon/list rows, selection, and scroller seating." },
+    "progress": { "status": "measured", "note": "The Mac OS 9 installer preserves a determinate blue fill inside the thin white/black Platinum well, with its label and Cancel-button relationship." },
+    "alerts_toasts": { "status": "measured", "note": "The native logout alert preserves the yellow caution icon, two-line message, square gray panel, ordinary No button, and default-ring Yes button." },
+    "typography": { "status": "measured", "note": "Appearance and Control Panels preserve Charcoal metrics at native 1x. Production now ports Systemless 0.2.1's independently hand-drawn OFL 12px classic-Mac UI bitmap as its legal title/menu fallback, retaining one-bit QuickDraw output while explicit user fonts remain authoritative." },
+    "icons": { "status": "measured", "note": "Control Panels preserves compact application icons and label spacing at period pixel sizes." }
+  },
+  "reproductions": [
+    {
+      "id": "caption-gadget-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-platinum-9.png",
+      "reference_crop_ids": ["appearance-title-band-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "mismatch",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 470×17 size validation, plus pixel review of both 13px caption plates, their asymmetric 14px slots, all twelve pinstripe scanlines, the 84px title apron, and the centred caption metrics. The final focused render measured 0.131529 with every non-title pixel identical; the remaining title uses independently authored OFL bitmap artwork rather than Apple's unavailable Charcoal strike.",
+        "max_normalized_rgb_rmse": 0.132
+      },
+      "note": "The open bitmap port and corrected caption-box seating reduce native RGB RMSE from 0.161777 to 0.131529 and confine all 286 differing pixels to the title's independently authored substitute glyphs. Both caption plates, every pinstripe, the apron, and the final one-row baseline correction are verified from a fresh hosted render; this remains mismatch because passing a numeric tolerance does not make the substitute Apple's unavailable Charcoal strike."
+    },
+    {
+      "id": "reference-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-platinum-9.png",
+      "reference_crop_ids": ["control-panels-scroller-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 14×184 size validation, plus native-pixel review of the 37px lavender thumb, 117px gray track well, both 14px arrow plates with their one-pixel seams, and the fixed indexed palette.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the corrected tight 14×184 control extraction. The thumb, track well, paired arrows, hard seams, and all indexed-palette pixels are identical to Control Panels; the wider resize-corner crop remains supporting context."
+    },
+    {
+      "id": "reference-menu",
+      "component": "menus",
+      "fixture_id": "retro-menu-family",
+      "output": "reference-menu-platinum-9.png",
+      "reference_crop_ids": ["open-help-menu-panel"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "mismatch",
+      "scale": 1,
+      "note": "Production ThemedMenu matches the source-sized black/white/#999/#222 frame, hard shadow, two-pixel separators, and 18/20/18px edge-row rhythm. Replacing grayscale Geneva with the independently authored OFL bitmap port reduced native RGB RMSE from 0.270395 to 0.199033; review remains open because that legal substitute deliberately does not copy Apple's Charcoal glyph shapes."
+    }
+  ],
+  "crops": [
+    { "id": "appearance-window", "component": "window_frame", "source_id": "appearance", "rect": { "x": 0, "y": 0, "width": 477, "height": 339 } },
+    { "id": "appearance-title", "component": "title_bar", "source_id": "appearance", "rect": { "x": 1, "y": 1, "width": 474, "height": 23 } },
+    { "id": "appearance-caption-gadgets", "component": "window_buttons", "source_id": "appearance", "role": "supporting_context", "rect": { "x": 1, "y": 1, "width": 474, "height": 23 } },
+    { "id": "appearance-title-band-control", "component": "window_buttons", "source_id": "appearance", "rect": { "x": 3, "y": 3, "width": 470, "height": 17 } },
+    { "id": "appearance-help-button", "component": "buttons", "source_id": "appearance", "rect": { "x": 438, "y": 58, "width": 25, "height": 25 } },
+    { "id": "help-center-toolbar", "component": "toolbar", "source_id": "help-center", "rect": { "x": 1, "y": 1, "width": 391, "height": 58 } },
+    { "id": "appearance-tabs-and-popups", "component": "choice_controls", "source_id": "appearance", "rect": { "x": 6, "y": 30, "width": 451, "height": 154 } },
+    { "id": "help-center-search-field", "component": "fields", "source_id": "help-center", "rect": { "x": 87, "y": 20, "width": 230, "height": 34 } },
+    { "id": "desktop-menu-bar", "component": "menus", "source_id": "full-desktop", "rect": { "x": 0, "y": 0, "width": 640, "height": 21 } },
+    { "id": "open-help-menu", "component": "menus", "source_id": "platinum-help-menu", "role": "supporting_context", "rect": { "x": 0, "y": 0, "width": 129, "height": 84 } },
+    { "id": "open-help-menu-panel", "component": "menus", "source_id": "platinum-help-menu", "rect": { "x": 4, "y": 19, "width": 123, "height": 63 } },
+    { "id": "button-balloon-help", "component": "popovers", "source_id": "balloon-help-figure", "rect": { "x": 180, "y": 1135, "width": 840, "height": 230 } },
+    { "id": "control-panels-scroller", "component": "scrollbars", "source_id": "control-panels", "role": "supporting_context", "rect": { "x": 393, "y": 41, "width": 23, "height": 204 } },
+    { "id": "control-panels-scroller-control", "component": "scrollbars", "source_id": "control-panels", "rect": { "x": 396, "y": 42, "width": 14, "height": 184 } },
+    { "id": "keychain-table", "component": "lists_tables", "source_id": "full-desktop", "rect": { "x": 34, "y": 287, "width": 400, "height": 90 } },
+    { "id": "installer-progress", "component": "progress", "source_id": "installer-copying", "rect": { "x": 57, "y": 120, "width": 405, "height": 86 } },
+    { "id": "logout-warning", "component": "alerts_toasts", "source_id": "logout-alert", "rect": { "x": 0, "y": 0, "width": 373, "height": 143 } },
+    { "id": "appearance-type", "component": "typography", "source_id": "appearance", "rect": { "x": 18, "y": 63, "width": 310, "height": 128 } },
+    { "id": "control-panel-icons", "component": "icons", "source_id": "control-panels", "rect": { "x": 5, "y": 41, "width": 389, "height": 204 } }
+  ]
+}

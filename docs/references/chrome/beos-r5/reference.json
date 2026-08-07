@@ -1,0 +1,142 @@
+{
+  "schema_version": 2,
+  "chrome_id": "beos-r5",
+  "target": { "platform": "BeOS", "release": "R5", "version": "5.0.1 Personal Edition" },
+  "sources": [
+    { "id": "guidebook-overview", "page_url": "https://guidebookgallery.org/guis/beos/beos5", "owner": "Be screenshots preserved by GUIdebook", "storage": "remote_only" },
+    { "id": "guidebook-components", "page_url": "https://guidebookgallery.org/screenshots/beos5", "owner": "Be screenshots preserved by GUIdebook", "storage": "remote_only" },
+    {
+      "id": "full-desktop",
+      "page_url": "https://guidebookgallery.org/screenshots/beos5#full",
+      "asset_url": "https://guidebookgallery.org/pics/gui/desktop/full/beos5.png",
+      "filename": "beos5-full.png",
+      "owner": "Be screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "dcdc7bb72dce2950660e0816b0815faada7df15524ada3da0956594563f5d03f",
+      "pixel_width": 640,
+      "pixel_height": 480
+    },
+    {
+      "id": "appearance",
+      "page_url": "https://guidebookgallery.org/screenshots/beos5#appearance",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/appearance/beos5-1-1.png",
+      "filename": "beos5-appearance.png",
+      "owner": "Be screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "6639927584880ddad798e5f0e3b3977d86511a7b7fed7f00c7e45332ec276040",
+      "pixel_width": 481,
+      "pixel_height": 255
+    },
+    {
+      "id": "preferences",
+      "page_url": "https://guidebookgallery.org/screenshots/beos5#menu",
+      "asset_url": "https://guidebookgallery.org/pics/gui/settings/menu/beos5.png",
+      "filename": "beos5-preferences.png",
+      "owner": "Be screenshot preserved by GUIdebook",
+      "storage": "remote_only",
+      "sha256": "2efcb22200860d9fe5e0790d4b2b3828b13b932203298ea8beba8d88f3116660",
+      "pixel_width": 383,
+      "pixel_height": 449
+    },
+    {
+      "id": "bebook-alert",
+      "page_url": "https://www.haiku-os.org/legacy-docs/bebook/BAlert_Overview.html",
+      "asset_url": "https://www.haiku-os.org/legacy-docs/bebook/images/TheInterfaceKit/alert.png",
+      "filename": "bebook-balert.png",
+      "owner": "The Be Book, Be Inc. Interface Kit documentation, copyright Access Co., preserved by the Haiku Project",
+      "kind": "documentation_figure",
+      "storage": "remote_only",
+      "license": "CC BY-NC-ND 3.0 as published on the Haiku legacy-docs mirror; not redistributed here",
+      "sha256": "7fdd66d9b4cea46d9b2944b4335cf203384b2bbf39d5ae5ebe3a1e60a38f6590",
+      "pixel_width": 350,
+      "pixel_height": 79
+    },
+    {
+      "id": "bebook-class-index",
+      "page_url": "https://www.haiku-os.org/legacy-docs/bebook/ClassIndex.html",
+      "owner": "The Be Book class index, Be Inc. API reference, preserved by the Haiku Project",
+      "kind": "documentation_figure",
+      "storage": "remote_only"
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "measured", "note": "Charts, Browser, Pulse, and Backgrounds preserve the gray two-stage frame, hard edge, corner, and shadow." },
+    "title_bar": { "status": "measured", "note": "The yellow leading title tab is preserved at native scale and intentionally covers only the title width." },
+    "window_buttons": { "status": "measured", "note": "Charts and Preferences preserve compact raised tab-local close/zoom plates and one-bit figures." },
+    "toolbar": { "status": "measured", "note": "The Browser crop preserves a dense menu bar, URL row, icon commands, rules, and scroll adjacency." },
+    "buttons": { "status": "measured", "note": "Backgrounds preserves enabled and disabled raised buttons with hard BeOS relief." },
+    "choice_controls": { "status": "measured", "note": "Backgrounds preserves pop-ups, disabled value wells, a checkbox, and colour sliders at native scale." },
+    "fields": { "status": "measured", "note": "Backgrounds preserves inset numeric fields, value wells, and framed colour-preview fields." },
+    "menus": { "status": "measured", "note": "The native Deskbar crop preserves the open Be menu's header, clock row, icon rows, compact spacing, hard outline, and square panel geometry; selected and cascading states remain unrecorded." },
+    "popovers": { "status": "not_applicable", "note": "The Be Book class index, Be's own complete API reference, lists no tooltip, tip, hint, balloon or transient-help class in any kit, so R5 shipped no standard hover surface; Threading should carry the same information in a BAlert-shaped panel rather than invent a BeOS bubble." },
+    "scrollbars": { "status": "verified", "note": "Browser preserves the exact 12×200 repeated-arrow control: two 15px Up/Down pairs, a 15px gripped thumb, continuous white page rail, #F0 track, and #98 pair divider." },
+    "lists_tables": { "status": "measured", "note": "Preferences preserves icon rows while Browser preserves document/list boundaries and scrollbar seating." },
+    "progress": { "status": "measured", "note": "Pulse preserves the compact segmented status/gauge anatomy used for BeOS progress-like feedback." },
+    "alerts_toasts": { "status": "measured", "note": "The Be Book's own BAlert figure preserves a complete native alert at 350x79: hard two-stage outer frame, the darker left icon band carrying the 3D info glyph, single-line message, and a right-aligned Cancel/Don't Save/Save row whose default button wears an extra outline ring." },
+    "typography": { "status": "measured", "note": "Backgrounds, Browser, and Preferences preserve Swiss/Helvetica-like text at native scale." },
+    "icons": { "status": "measured", "note": "Preferences preserves the colourful 32px device/control-panel icon family and underlined labels." }
+  },
+  "reproductions": [
+    {
+      "id": "title-tab-button-family",
+      "component": "window_buttons",
+      "fixture_id": "retro-caption-glyph-family",
+      "output": "caption-glyphs-beos-r5.png",
+      "reference_crop_ids": ["charts-title-tab-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 111×19 size validation, plus pixel review of the flat #FFCB00 tab, its lemon/ochre/gray edge rails, both 14×14 indexed-palette caption plates, and centred title metrics. Every non-type pixel is identical; the remaining error is limited to current macOS Helvetica rasterization because BeOS's proprietary Swis721 BT face is not installed or redistributed.",
+        "max_normalized_rgb_rmse": 0.116
+      },
+      "note": "Production WindowTitleBandView renders the corrected tight 111×19 title tab. Both yellow caption gadgets and every band/edge pixel are identical; the installed Helvetica fallback is tracked and optically offset to Swis721 BT's native title bounds, with only the documented glyph-raster residual remaining."
+    },
+    {
+      "id": "reference-scrollbar",
+      "component": "scrollbars",
+      "fixture_id": "retro-scrollbar-family",
+      "output": "reference-scrollbar-beos-r5.png",
+      "reference_crop_ids": ["browser-scroller-control"],
+      "comparison_mode": "exact_reconstruction",
+      "review_status": "verified",
+      "scale": 1,
+      "reviewed_on": "2026-08-06",
+      "tolerance": {
+        "method": "Full-crop native-1x RGB RMSE after exact 12×200 size validation, plus native-pixel review of both repeated 15px arrow pairs, the 15px value-zero thumb and inset square, the 124px exposed page region, continuous white leading rail, and #989898 pair divider.",
+        "max_normalized_rgb_rmse": 0.000001
+      },
+      "note": "Production ThemedScroller renders the corrected tight 12×200 control extraction. Both duplicated Up/Down pairs, the minimum proportional gadget, every track and rail pixel, and the pair divider are pixel-identical to Browser; the wider crop remains supporting context for its three-row toolbar seating and seven-row client continuation."
+    },
+    {
+      "id": "checkbox-family",
+      "component": "choice_controls",
+      "fixture_id": "retro-choice-control-family",
+      "output": "reference-checkboxes-beos-r5.png",
+      "reference_crop_ids": ["background-choice-controls"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production ThemedCheckbox family based on Haiku's pinned MIT BeControlLook implementation and the native disabled checked box in Backgrounds: compact white nested wells and a two-pixel system-colour X, kept distinct from Workbench's gray recessed tick gadget. The source crop includes adjacent popup furniture, so this remains a family review rather than an exact reconstruction."
+    }
+  ],
+  "crops": [
+    { "id": "charts-window", "component": "window_frame", "source_id": "full-desktop", "rect": { "x": 8, "y": 272, "width": 329, "height": 203 } },
+    { "id": "charts-title-tab", "component": "title_bar", "source_id": "full-desktop", "rect": { "x": 8, "y": 272, "width": 111, "height": 21 } },
+    { "id": "charts-tab-buttons", "component": "window_buttons", "source_id": "full-desktop", "role": "supporting_context", "rect": { "x": 8, "y": 272, "width": 111, "height": 21 } },
+    { "id": "charts-title-tab-control", "component": "window_buttons", "source_id": "full-desktop", "rect": { "x": 8, "y": 272, "width": 111, "height": 19 } },
+    { "id": "browser-command-rows", "component": "toolbar", "source_id": "full-desktop", "rect": { "x": 225, "y": 68, "width": 392, "height": 76 } },
+    { "id": "background-buttons", "component": "buttons", "source_id": "appearance", "rect": { "x": 14, "y": 211, "width": 454, "height": 32 } },
+    { "id": "background-choice-controls", "component": "choice_controls", "source_id": "appearance", "rect": { "x": 180, "y": 32, "width": 129, "height": 91 } },
+    { "id": "background-fields", "component": "fields", "source_id": "appearance", "rect": { "x": 18, "y": 59, "width": 438, "height": 151 } },
+    { "id": "deskbar-menu", "component": "menus", "source_id": "full-desktop", "rect": { "x": 518, "y": 0, "width": 122, "height": 94 } },
+    { "id": "browser-scroller", "component": "scrollbars", "source_id": "full-desktop", "role": "supporting_context", "rect": { "x": 596, "y": 141, "width": 20, "height": 218 } },
+    { "id": "browser-scroller-control", "component": "scrollbars", "source_id": "full-desktop", "rect": { "x": 599, "y": 144, "width": 12, "height": 200 } },
+    { "id": "preferences-list", "component": "lists_tables", "source_id": "preferences", "rect": { "x": 5, "y": 24, "width": 372, "height": 417 } },
+    { "id": "pulse-gauge", "component": "progress", "source_id": "full-desktop", "rect": { "x": 446, "y": 418, "width": 149, "height": 23 } },
+    { "id": "background-type", "component": "typography", "source_id": "appearance", "rect": { "x": 14, "y": 31, "width": 454, "height": 211 } },
+    { "id": "preferences-icons", "component": "icons", "source_id": "preferences", "rect": { "x": 35, "y": 48, "width": 319, "height": 349 } },
+    { "id": "bebook-save-changes-alert", "component": "alerts_toasts", "source_id": "bebook-alert", "rect": { "x": 0, "y": 0, "width": 350, "height": 79 } }
+  ]
+}

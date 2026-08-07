@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "implementations": [
+    {
+      "id": "linuxjedi-aros-topaz8",
+      "name": "AROS Topaz 8 bitmap conversion source",
+      "chrome_ids": ["amiga-workbench-31"],
+      "repository_url": "https://gist.github.com/LinuxJedi/64d8a6bd6fc9972973d6d3f2ca1f2fb1",
+      "revision": "899ed5ff9e58b9baed28504fb238653f11eae9c0",
+      "license_spdx": "BSD-3-Clause AND LicenseRef-AROS-APL-1.1",
+      "license_url": "https://github.com/aros-development-team/AROS/blob/b6a71292232febd393605a2f0d270264d1d6ecd7/LICENSE",
+      "scope": ["typography"],
+      "note": "A small BSD-licensed converter containing the AROS Topaz 8 bitmap table under the AROS Public License. It remains a useful independent bitmap reference, but its APL-covered table is cataloged only: production now bundles rewtnull's separately licensed GPL-FE Topaz 2.x recreation instead of copying this table into an application source file.",
+      "files": [
+        {
+          "path": "convert_topaz.c",
+          "url": "https://gist.githubusercontent.com/LinuxJedi/64d8a6bd6fc9972973d6d3f2ca1f2fb1/raw/9b296fbf71d096465ab4efb08ee07e1726e075e2/convert_topaz.c",
+          "sha256": "be111486b87eebd7c72511eb77d6898e96840b09dd473efb9d08bda2359b57cd"
+        },
+        {
+          "path": "AROS-LICENSE",
+          "url": "https://raw.githubusercontent.com/aros-development-team/AROS/b6a71292232febd393605a2f0d270264d1d6ecd7/LICENSE",
+          "sha256": "825705f4b1240cf5b88f44ac745dc9d9ebaa71ac087e53bbd69a1c3064ceb9c8"
+        }
+      ]
+    },
+    {
+      "id": "rewtnull-amigafonts-topaz-2x",
+      "name": "Multi Platform Amiga Fonts Topaz 2.x",
+      "chrome_ids": ["amiga-workbench-31"],
+      "repository_url": "https://github.com/rewtnull/amigafonts",
+      "revision": "d42987535d94ebbfb51e64fee76f9974c6ae145a",
+      "license_spdx": "GPL-2.0-or-later WITH Font-exception-2.0",
+      "license_url": "https://github.com/rewtnull/amigafonts/blob/d42987535d94ebbfb51e64fee76f9974c6ae145a/README",
+      "scope": ["title_bar", "buttons", "choice_controls", "fields", "menus", "lists_tables", "typography"],
+      "note": "The upstream archive identifies Topaz_a1200_v1.0 as the faithful original Kickstart 2.x face used through Workbench 3.1 and releases its font conversions under GPL-FE. Production bundles the pinned TTF as a separate resource with the upstream README, GPL v2 text, font-exception notice, checksums, and source URL. CoreText reports the family as `Topaz a600a1200a400`; that exact embedded name is load-bearing because the human-readable upstream description spells the final model A4000.",
+      "files": [
+        {
+          "path": "ttf/Topaz_a1200_v1.0.ttf",
+          "url": "https://raw.githubusercontent.com/rewtnull/amigafonts/d42987535d94ebbfb51e64fee76f9974c6ae145a/ttf/Topaz_a1200_v1.0.ttf",
+          "sha256": "da95bfdd6d16ac3602f64ae01699808efede94665fa2a7ac5f33e61641a67e14"
+        },
+        {
+          "path": "README",
+          "url": "https://raw.githubusercontent.com/rewtnull/amigafonts/d42987535d94ebbfb51e64fee76f9974c6ae145a/README",
+          "sha256": "eb2a92ecf5d371c786a6505aa8f6784b3f55faa2c8d9b323f45ead4124edccae"
+        }
+      ]
+    },
+    {
+      "id": "jdan-98-css",
+      "name": "98.css",
+      "chrome_ids": ["retro-98"],
+      "repository_url": "https://github.com/jdan/98.css",
+      "revision": "b1d7a907371bbe523d6f64e3af97f714fdbd6d6a",
+      "license_spdx": "MIT",
+      "license_url": "https://github.com/jdan/98.css/blob/b1d7a907371bbe523d6f64e3af97f714fdbd6d6a/LICENSE",
+      "scope": ["window_frame", "title_bar", "window_buttons", "buttons", "choice_controls", "fields", "scrollbars", "lists_tables", "typography", "icons"],
+      "note": "A direct Windows 98 control-system recreation. Port geometry and procedural edge construction; do not import its reconstructed Microsoft font files or icons.",
+      "files": [
+        {
+          "path": "style.css",
+          "url": "https://raw.githubusercontent.com/jdan/98.css/b1d7a907371bbe523d6f64e3af97f714fdbd6d6a/style.css",
+          "sha256": "22f66e3d607eb6406b2832ae096716d8c1124d2a8124723adb287402dfdf82fa"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/jdan/98.css/b1d7a907371bbe523d6f64e3af97f714fdbd6d6a/LICENSE",
+          "sha256": "8933005629892c51d896f7591b5e79c39a17617ce678231e4c3aa7d412d2682f"
+        }
+      ]
+    },
+    {
+      "id": "mat-sz-platinum-css",
+      "name": "platinum.css",
+      "chrome_ids": ["platinum-9"],
+      "repository_url": "https://github.com/mat-sz/platinum.css",
+      "revision": "d3f345731f886c7dc767be5877f10db14f11ead4",
+      "license_spdx": "BSD-3-Clause-Clear",
+      "license_url": "https://github.com/mat-sz/platinum.css/blob/d3f345731f886c7dc767be5877f10db14f11ead4/LICENSE",
+      "scope": ["window_frame", "title_bar", "window_buttons", "buttons", "fields", "typography"],
+      "note": "A small direct Platinum implementation. Its authored CSS is useful for pixel rails and control metrics; its bundled Charcoal webfont is deliberately excluded because that font file has no independently established redistribution provenance.",
+      "files": [
+        {
+          "path": "src/index.scss",
+          "url": "https://raw.githubusercontent.com/mat-sz/platinum.css/d3f345731f886c7dc767be5877f10db14f11ead4/src/index.scss",
+          "sha256": "a29103529f40e1a4c98de86d2ac10645c47fb1b74cabe094650a84424ff536d2"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/mat-sz/platinum.css/d3f345731f886c7dc767be5877f10db14f11ead4/LICENSE",
+          "sha256": "0b31c7aa9c3fdff9bab7d80328f5f481e44129785b2a7985809e8e3443c6a1e3"
+        }
+      ]
+    },
+    {
+      "id": "systemless-jarrah-12",
+      "name": "Systemless Jarrah 12 bitmap UI face",
+      "chrome_ids": ["platinum-9"],
+      "repository_url": "https://github.com/benletchford/systemless",
+      "revision": "5d84d1f37a0be9fb35188d3d7f6c6cd61f25d60f",
+      "license_spdx": "OFL-1.1",
+      "license_url": "https://docs.rs/crate/systemless/0.2.1/source/OFL.txt",
+      "scope": ["title_bar", "menus", "typography"],
+      "note": "Systemless supplies independently hand-drawn classic Macintosh bitmap faces. Jarrah 12 has heavy UI letterforms and advances/bearings conformed to the classic 12px system strike. Its readable glyph source was ported to a compact Swift bitmap table as the legal Platinum fallback; the port does not present the reserved Systemless or Jarrah name as its font name and contains no Apple font data.",
+      "files": [
+        {
+          "path": "src/quickdraw/fonts/pixel_font/chicago12.rs",
+          "url": "https://raw.githubusercontent.com/benletchford/systemless/5d84d1f37a0be9fb35188d3d7f6c6cd61f25d60f/src/quickdraw/fonts/pixel_font/chicago12.rs",
+          "sha256": "daa315787f84f7cab3f1c18abd5d38966cfa854f572d402a3e709cb27601aa1b"
+        },
+        {
+          "path": "OFL.txt",
+          "url": "https://raw.githubusercontent.com/benletchford/systemless/5d84d1f37a0be9fb35188d3d7f6c6cd61f25d60f/OFL.txt",
+          "sha256": "132de6f93e9b2d469eac93903be3388ce8599ef1a9911e3d09811a4c30fb6221"
+        }
+      ]
+    },
+    {
+      "id": "haiku-beos-r5",
+      "name": "Haiku BeControlLook and BeDecorator",
+      "chrome_ids": ["beos-r5"],
+      "repository_url": "https://github.com/haiku/haiku",
+      "revision": "432325a816d209965cbc7c7895d0dfac9ac75b30",
+      "license_spdx": "MIT",
+      "license_url": "https://github.com/haiku/haiku/blob/432325a816d209965cbc7c7895d0dfac9ac75b30/License.md",
+      "scope": ["window_frame", "title_bar", "window_buttons", "buttons", "choice_controls", "fields", "scrollbars", "lists_tables"],
+      "note": "Haiku's control look and decorator explicitly recreate BeOS R5. Port their procedural geometry and state rules; do not import repository resource assets, and keep the historical BeOS screenshots as the visual authority.",
+      "files": [
+        {
+          "path": "src/add-ons/control_look/BeControlLook/BeControlLook.cpp",
+          "url": "https://raw.githubusercontent.com/haiku/haiku/432325a816d209965cbc7c7895d0dfac9ac75b30/src/add-ons/control_look/BeControlLook/BeControlLook.cpp",
+          "sha256": "1bd1da4e5f7268d52c69d9ebabca4fef7a7fc431d74f29faf5b9654fe629c36c"
+        },
+        {
+          "path": "src/add-ons/control_look/BeControlLook/BeControlLook.h",
+          "url": "https://raw.githubusercontent.com/haiku/haiku/432325a816d209965cbc7c7895d0dfac9ac75b30/src/add-ons/control_look/BeControlLook/BeControlLook.h",
+          "sha256": "c12fda6b7475b5dc453d1f03f631d67d9dc233339b54e1a918ecf01e701e6d82"
+        },
+        {
+          "path": "src/add-ons/decorators/BeDecorator/BeDecorator.cpp",
+          "url": "https://raw.githubusercontent.com/haiku/haiku/432325a816d209965cbc7c7895d0dfac9ac75b30/src/add-ons/decorators/BeDecorator/BeDecorator.cpp",
+          "sha256": "a45d8de40cad1267c80aff06ffe7ff121dd27a07ad13300200967247072cc467"
+        },
+        {
+          "path": "src/add-ons/decorators/BeDecorator/BeDecorator.h",
+          "url": "https://raw.githubusercontent.com/haiku/haiku/432325a816d209965cbc7c7895d0dfac9ac75b30/src/add-ons/decorators/BeDecorator/BeDecorator.h",
+          "sha256": "fb86e8aa2a95abd5ebbec9de261fe4c0b92e8451663e08150d35e39708c021c9"
+        },
+        {
+          "path": "License.md",
+          "url": "https://raw.githubusercontent.com/haiku/haiku/432325a816d209965cbc7c7895d0dfac9ac75b30/License.md",
+          "sha256": "8dd7908c3fcf600b4d378d5f425eebe45663e0d0d8df1004e1317d4580ce7f10"
+        }
+      ]
+    }
+  ]
+}
