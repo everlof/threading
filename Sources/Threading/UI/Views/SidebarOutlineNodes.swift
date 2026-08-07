@@ -1,11 +1,62 @@
 import Foundation
 
+// MARK: - Node Identity
+
+/// What makes a row *the same row* across two builds of the tree.
+///
+/// `NSOutlineView` identifies rows by object identity and the tree is rebuilt from the store
+/// whenever the shape changes, so identity has to be carried by something a rebuild preserves.
+/// This is that something: equal keys mean the same row, which is what lets a rebuild hand its
+/// content to the node already on screen instead of replacing it — and a replaced node cannot be
+/// animated, only reloaded. See `SidebarTreeShape`.
+enum SidebarNodeKey: Hashable {
+    /// The repository's identity on disk rather than its display name: two unrelated
+    /// repositories can be called the same thing, and a heading whose name changed is still the
+    /// same heading.
+    case repository(String)
+    case project(ProjectID)
+    case branch(ProjectID, String)
+    case session(SessionID)
+    case terminal(TerminalID)
+}
+
+/// Maps a node from a freshly built tree to the node standing for the same row on screen.
+///
+/// Generic over the node type because every key belongs to exactly one type, so a substitution
+/// never changes what a node *is* — which is what lets the nodes' own arrays stay typed.
+struct SidebarNodeSubstitution {
+    private let nodesByRebuilt: [ObjectIdentifier: NSObject]
+
+    init(nodesByRebuilt: [ObjectIdentifier: NSObject]) {
+        self.nodesByRebuilt = nodesByRebuilt
+    }
+
+    func callAsFunction<Node: NSObject>(_ rebuilt: Node) -> Node {
+        nodesByRebuilt[ObjectIdentifier(rebuilt)] as? Node ?? rebuilt
+    }
+}
+
+/// The four node types' shared surface: which row a node stands for, what hangs under it, and
+/// how it takes over from the node a rebuild produced in its place.
+protocol SidebarOutlineNode: NSObject {
+    var sidebarKey: SidebarNodeKey { get }
+
+    /// What the outline shows under this node, in display order.
+    var sidebarChildren: [NSObject] { get }
+
+    /// Takes everything the rebuild produced — its children, and any content the row draws from
+    /// the node rather than from the store — mapping every node it references through
+    /// `substituting`, so the tree ends up made of the objects the outline already knows.
+    func adoptContent(of rebuilt: any SidebarOutlineNode, substituting: SidebarNodeSubstitution)
+}
+
 // MARK: - Outline Nodes
 
 /// Reference-typed wrapper for a project row.
 ///
-/// `NSOutlineView` identifies rows by object identity, which value types cannot provide,
-/// so nodes are rebuilt from `ProjectStore` on every reload.
+/// `NSOutlineView` identifies rows by object identity, which value types cannot provide. The
+/// tree is rebuilt from `ProjectStore` whenever its shape changes, but a node whose identity
+/// survives keeps its object and takes the rebuild's content — see `SidebarOutlineUpdate.adopt`.
 final class ProjectNode: NSObject {
     let projectID: ProjectID
 
@@ -25,6 +76,21 @@ final class ProjectNode: NSObject {
     }
 }
 
+extension ProjectNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .project(projectID) }
+    var sidebarChildren: [NSObject] { childNodes }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? ProjectNode else { return }
+        sessionNodes = rebuilt.sessionNodes.map(substituting.callAsFunction)
+        terminalNodes = rebuilt.terminalNodes.map(substituting.callAsFunction)
+        childNodes = rebuilt.childNodes.map(substituting.callAsFunction)
+    }
+}
+
 /// Reference-typed wrapper for a session row.
 final class SessionNode: NSObject {
     let sessionID: SessionID
@@ -39,6 +105,19 @@ final class SessionNode: NSObject {
     }
 }
 
+extension SessionNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .session(sessionID) }
+    var sidebarChildren: [NSObject] { childNodes }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? SessionNode else { return }
+        childNodes = rebuilt.childNodes.map(substituting.callAsFunction)
+    }
+}
+
 /// Reference-typed wrapper for a standalone terminal row.
 final class TerminalNode: NSObject {
     let terminalID: TerminalID
@@ -47,11 +126,27 @@ final class TerminalNode: NSObject {
     /// row's name is stated relative to it. Placement is resolved once here for the whole tree
     /// and reads git metadata off disk for every project; a row that asked again would repeat
     /// that per row, per reload.
-    let displayProjectFolderPath: String
+    ///
+    /// A `var` because the row it belongs to outlives the rebuild that renamed it: a terminal
+    /// whose cwd moved it under another checkout keeps its row and takes the new folder.
+    private(set) var displayProjectFolderPath: String
 
     init(terminalID: TerminalID, displayProjectFolderPath: String) {
         self.terminalID = terminalID
         self.displayProjectFolderPath = displayProjectFolderPath
+    }
+}
+
+extension TerminalNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .terminal(terminalID) }
+    var sidebarChildren: [NSObject] { [] }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? TerminalNode else { return }
+        displayProjectFolderPath = rebuilt.displayProjectFolderPath
     }
 }
 
@@ -60,11 +155,29 @@ final class TerminalNode: NSObject {
 /// Only created when a repository has more than one checkout added, so a repository with a
 /// single checkout keeps the flatter two-level layout.
 final class RepoGroupNode: NSObject {
-    let name: String
+    /// The repository this heading stands for — its identity on disk, which is what makes the
+    /// heading the same heading across rebuilds. The `name` below is only what it is *called*.
+    let identity: String
+    private(set) var name: String
     var projectNodes: [ProjectNode] = []
 
-    init(name: String) {
+    init(identity: String, name: String) {
+        self.identity = identity
         self.name = name
+    }
+}
+
+extension RepoGroupNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .repository(identity) }
+    var sidebarChildren: [NSObject] { projectNodes }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? RepoGroupNode else { return }
+        name = rebuilt.name
+        projectNodes = rebuilt.projectNodes.map(substituting.callAsFunction)
     }
 }
 
@@ -86,6 +199,20 @@ final class BranchGroupNode: NSObject {
     init(branch: String, projectID: ProjectID) {
         self.branch = branch
         self.projectID = projectID
+    }
+}
+
+extension BranchGroupNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .branch(projectID, branch) }
+    var sidebarChildren: [NSObject] { childNodes }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? BranchGroupNode else { return }
+        sessionNodes = rebuilt.sessionNodes.map(substituting.callAsFunction)
+        terminalNodes = rebuilt.terminalNodes.map(substituting.callAsFunction)
     }
 }
 
@@ -162,7 +289,10 @@ enum SidebarTreeBuilder {
                 continue
             }
 
-            let group = RepoGroupNode(name: GitInfo.repositoryName(forIdentity: identity))
+            let group = RepoGroupNode(
+                identity: identity,
+                name: GitInfo.repositoryName(forIdentity: identity)
+            )
             group.projectNodes.append(node)
             groupsByIdentity[identity] = group
             roots.append(group)
@@ -216,16 +346,10 @@ enum SidebarTreeBuilder {
         return []
     }
 
-    /// What the outline view shows under a node — the one place the four node types' differing
-    /// child properties are reconciled.
-    private static func children(of node: NSObject) -> [NSObject] {
-        switch node {
-        case let repo as RepoGroupNode: return repo.projectNodes
-        case let project as ProjectNode: return project.childNodes
-        case let branch as BranchGroupNode: return branch.childNodes
-        case let session as SessionNode: return session.childNodes
-        default: return []
-        }
+    /// What the outline view shows under a node. The four node types' differing child
+    /// properties are reconciled by `SidebarOutlineNode`; anything else has no children.
+    static func children(of node: NSObject) -> [NSObject] {
+        (node as? any SidebarOutlineNode)?.sidebarChildren ?? []
     }
 
     /// Whether `lhs` sorts ahead of `rhs` under the chosen order.

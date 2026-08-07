@@ -180,6 +180,11 @@ Branches** — disabled while grouping is off), then how they sort:
 A pinned session leads the list under every order — pinning is a stronger statement than
 any sort. Sorting rearranges branch groups too: a group sits where its first session would.
 
+Rows move rather than blink. A session that starts fades in while the rows below it slide down,
+one that is archived or deleted takes the gap with it, and a row that changes place — a session
+hoisted to the top under Recent Activity, or gathered under a branch heading — travels there.
+Under Reduce Motion every row simply arrives in place.
+
 ### Choosing a navigator
 
 An enabled extension can replace the complete list area with another navigator: a project

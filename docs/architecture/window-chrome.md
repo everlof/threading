@@ -241,6 +241,60 @@ the divider's own answer through `applyDisplayPaneWidth` — the only holder tha
 next layout pass — with `isRestoringDisplayPaneWidth` now held for exactly the transition
 instead of a guessed two turns.
 
+### How a sidebar row arrives, leaves and moves
+
+**The list is told what changed, not rebuilt.** Every structural change to the projects and
+sessions used to be `reloadData` plus a pass re-expanding everything: a session started or
+archived, a project added, an agent finishing and reordering the list under Recent Activity —
+all of it a blink, with every row handed back to the reuse pool and re-created in place. That is
+the "jaggy" the sidebar was reported as. `ProjectSidebarViewController.reload` now diffs the
+tree it is showing against the one the store describes and hands `NSOutlineView` the rows that
+arrived, left and moved.
+
+Three pieces make that possible, and the first is the one that is easy to miss:
+
+- **Identity survives the rebuild.** The tree is rebuilt from the store on every structural
+  change, and the outline identifies a row by *the object it was handed* — so a rebuild that
+  replaces every node replaces every row, whatever it is called. `SidebarNodeKey` gives each
+  node an identity the rebuild preserves (a repository by its identity on disk, not its name; a
+  branch heading by project and branch) and `SidebarOutlineUpdate.adopt` hands the rebuild's
+  content to the node already on screen wherever that identity survived. Without it there is
+  nothing to animate, nothing for a name to morph *from*, and no expansion to keep.
+- **The shape is the signature.** `SidebarTreeShape` replaced the structure string that could
+  only answer "did anything move?". Answering *what* moved is the same walk, and a rename still
+  compares equal and still takes the in-place row refresh.
+- **The steps are ordered by phase**: every removal, then every move, then every insertion.
+  Only that ordering makes the one change that names a row twice work — a session leaving a
+  branch heading for the project above it is a removal *there* and an insertion *here*, and the
+  row must not have to exist in both places at once. `SidebarOutlineUpdate.steps` never
+  describes the children of a row it re-inserts: the outline reads that subtree from the data
+  source, which is already showing the new tree.
+
+**`.effectFade`, and nothing else**, measured against this list. `.slideUp`/`.slideDown` park
+the arriving row at the very top of the view for the whole animation and snap it into place at
+the end; `.effectGap` holds it invisible and pops it in. The fade is the only option that moves
+the row it names. The rows *below* slide either way — AppKit animates them as a `position`
+animation on their layers, which is the motion the eye actually follows — and the expansion of a
+row that just arrived runs through `animator().expandItem` so its children come with it.
+
+Unlike [a pane](#how-a-pane-moves), this does **not** stand down for a window nobody can see.
+That rule exists because a pane's completion carries real work and AppKit withholds it
+off-screen; nothing here waits on a completion, row animations were measured running *and
+settling* in an unshown window, and standing down would leave every hosted fixture asserting a
+motion the app does not perform. Reduce Motion still collapses the duration to zero and drops
+the fade — the update stays incremental, because a reduced sidebar should not blink either.
+
+**Animation is testable here, and `SidebarRowAnimationTests` tests it.** A row animation leaves
+two marks: the arriving row's `alphaValue` ramps from zero, and each displaced row keeps a
+`position` animation whose *presentation* is still behind the frame it has already been given.
+Two things the fixture must get right — the outline has to have been **drawn** once or it has no
+row views at all (and, once drawn, the displacement animates on the layer rather than on the
+frame, so `frame` alone reports the destination), and nothing may be drawn **between** the change
+and the assertion, since the change lands in microseconds and the motion lasts a fifth of a
+second. Lag alone is not proof: a layer whose frame was set with no animation also reads as
+behind until the next commit, so the animation object is what separates a row that is moving
+from one that has just been put down.
+
 ### Dragging a pane shut
 
 **The overshoot is the gesture.** Past its floor a pane stops dead under the pointer, which

@@ -145,9 +145,25 @@ final class ProjectSidebarViewController: NSViewController {
     /// a bare `ProjectNode` for everything else.
     private var rootNodes: [NSObject] = []
 
-    /// The shape `rootNodes` was last built from, so a change that leaves it alone can
-    /// refresh the rows rather than rebuild them. See `reload`.
-    private var renderedStructure = ""
+    /// The shape the outline is currently showing, so a change that leaves it alone can refresh
+    /// the rows rather than rebuild them — and one that does not can be told to the outline as
+    /// the rows that arrived, left and moved. See `reload`.
+    private var renderedShape = SidebarTreeShape()
+
+    /// Every presented node by identity, so a step naming a parent can find the object the
+    /// outline was handed. Rebuilt with the other indexes.
+    private var nodesByKey: [SidebarNodeKey: NSObject] = [:]
+
+    /// A reload arriving while one is in flight, held until it is over.
+    ///
+    /// Nothing reaches here today: store events are delivered synchronously, but no path inside
+    /// a reload edits the store. It is guarded anyway, for the reason the tree builder refuses a
+    /// cycle nothing can create (see `attachSideChats`). `reload` now opens an update block and
+    /// hands the outline indexes into the tree it is holding, so a second pass rebuilding that
+    /// tree underneath is not a wrong-looking row but an AppKit exception — and this reload is
+    /// reached from a dozen call sites, including a notification posted from anywhere in the app.
+    private var isReloading = false
+    private var needsReloadAfterCurrent = false
 
     /// Stable indexes over the rendered node objects. Row refresh and navigation are frequent;
     /// neither should allocate a flattened tree or recursively search thousands of unrelated
@@ -423,14 +439,32 @@ extension ProjectSidebarViewController {
         toasts.present(toast)
     }
 
-    /// Rebuilds the outline from the store, preserving expansion and selection.
+    /// Brings the outline up to date with the store, preserving expansion and selection.
     ///
     /// A change that leaves the tree's *shape* alone refreshes the rows in place instead.
     /// `ProjectsDidChange` fires for content edits as well as structural ones — a rename is
     /// the common case — and rebuilding for those is not merely wasteful: it hands every
     /// row back to the reuse pool, and a recycled cell has no memory of the name it is
     /// replacing, which is exactly what the title's morph animates from.
+    ///
+    /// A change that *does* move rows is told to the outline as the rows that arrived, left and
+    /// moved, rather than as `reloadData`. Both end at the same list; only one of them is a
+    /// list that can be watched changing. See `applyStructure`.
     func reload() {
+        // Re-entrancy: see `isReloading`.
+        guard !isReloading else {
+            needsReloadAfterCurrent = true
+            return
+        }
+        isReloading = true
+        defer {
+            isReloading = false
+            if needsReloadAfterCurrent {
+                needsReloadAfterCurrent = false
+                reload()
+            }
+        }
+
         let projects = projectStore.projects
         let reloadSpan = PerformanceRecorder.shared.begin(
             "sidebar.reload",
@@ -455,10 +489,10 @@ extension ProjectSidebarViewController {
         )
         let rebuilt = SidebarTreeBuilder.rootNodes(from: projects)
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
-        let shape = Self.structureSignature(of: rebuilt)
+        let shape = SidebarTreeShape(roots: rebuilt)
 
-        if shape == renderedStructure, !rootNodes.isEmpty {
-            // The existing nodes are kept deliberately: the outline identifies rows by
+        if shape == renderedShape, !rootNodes.isEmpty {
+            // The presented nodes are kept deliberately: the outline identifies rows by
             // object identity, and replacing equivalent nodes would invalidate every row
             // for nothing. Content is read from the store at configure time anyway.
             reloadKind = "content"
@@ -469,8 +503,11 @@ extension ProjectSidebarViewController {
         let selectedSessionID = selectedNode()?.sessionID ?? projectStore.selectedSessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
 
-        rootNodes = rebuilt
-        renderedStructure = shape
+        let previousShape = renderedShape
+        // The rebuild's *content*, on the rows already on screen wherever the identity
+        // survived — see `SidebarOutlineUpdate.adopt`.
+        rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes)
+        renderedShape = shape
         rebuildNodeIndexes()
 
         emptyStateView.isHidden = !rootNodes.isEmpty
@@ -480,22 +517,104 @@ extension ProjectSidebarViewController {
             category: "sidebar",
             metadata: ["roots": String(rootNodes.count)]
         )
-        outlineView.reloadData()
+
+        // A list nobody has seen yet has nothing to animate *from*: the first tree arrives
+        // whole, as does one whose every row was dropped while the outline showed none.
+        //
+        // Deliberately not "no steps means reload": a shape that changed always has steps, and
+        // reloading whenever it does not would turn a diff that missed something into a blink
+        // nobody can see instead of a failing test.
+        let isFirstList = previousShape.isEmpty || outlineView.numberOfRows == 0
+        let steps = isFirstList
+            ? []
+            : SidebarOutlineUpdate.steps(from: previousShape, to: shape)
+        applyStructure(steps: steps, wholesale: isFirstList)
+
+        if let selectedTerminalID {
+            select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedSessionID {
+            select(sessionID: selectedSessionID, notifyDelegate: false)
+        }
+        outlineSpan.end(metadata: [
+            "rows": String(outlineView.numberOfRows),
+            "steps": String(steps.count)
+        ])
+    }
+
+    /// Tells the outline what moved, then opens whatever should be open.
+    ///
+    /// **`.effectFade`, and nothing else.** The slide options were measured against this list:
+    /// they park the arriving row at the very top of the view for the whole animation and snap
+    /// it into place at the end, and `.effectGap` holds it invisible and then pops it in. The
+    /// fade is the only one that moves the row it names; the rows *below* it slide either way,
+    /// animated by AppKit as a `position` animation on their layers, which is the motion the
+    /// eye actually follows.
+    ///
+    /// Unlike `PaneTransition`, this does not stand down for a window nobody can see. That rule
+    /// exists because a pane's completion carries real work and AppKit withholds it off-screen;
+    /// nothing here waits on a completion, row animations were measured running and settling in
+    /// an unshown window, and standing down would make every hosted fixture assert a motion the
+    /// app does not perform.
+    private func applyStructure(steps: [SidebarOutlineStep], wholesale: Bool) {
+        let animated = !Design.Motion.reducesMotion && !wholesale
+        let animation: NSTableView.AnimationOptions = animated ? [.effectFade] : []
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animated ? Design.Motion.standard : Design.Motion.immediate
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+            if wholesale {
+                outlineView.reloadData()
+            } else {
+                outlineView.beginUpdates()
+                for step in steps {
+                    switch step {
+                    case .remove(let parent, let indexes):
+                        outlineView.removeItems(
+                            at: indexes,
+                            inParent: parent.flatMap { nodesByKey[$0] },
+                            withAnimation: animation
+                        )
+
+                    case .move(let parent, let from, let to):
+                        let node = parent.flatMap { nodesByKey[$0] }
+                        outlineView.moveItem(at: from, inParent: node, to: to, inParent: node)
+
+                    case .insert(let parent, let indexes):
+                        outlineView.insertItems(
+                            at: indexes,
+                            inParent: parent.flatMap { nodesByKey[$0] },
+                            withAnimation: animation
+                        )
+                    }
+                }
+                outlineView.endUpdates()
+            }
+
+            expandStandingRows(animated: animated)
+        }
+    }
+
+    /// Opens the rows that are meant to be open. Idempotent — `expandItem` on a row that is
+    /// already open does nothing — so this runs after every structural change and only the rows
+    /// that just arrived actually move.
+    private func expandStandingRows(animated: Bool) {
+        let outline = animated ? outlineView.animator() : outlineView
 
         for node in rootNodes {
-            outlineView.expandItem(node)
+            outline.expandItem(node)
         }
 
         for node in allProjectNodes {
             let project = projectStore.project(withID: node.projectID)
             if project?.isExpanded ?? true {
-                outlineView.expandItem(node)
+                outline.expandItem(node)
             }
 
             // Branch groups open with their project; only ones collapsed by hand stay shut.
             for case let branchNode as BranchGroupNode in node.childNodes
             where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
-                outlineView.expandItem(branchNode)
+                outline.expandItem(branchNode)
             }
 
             // Side chats do the same beneath the session they were forked from. Read from
@@ -504,16 +623,9 @@ extension ProjectSidebarViewController {
             for sessionNode in node.sessionNodes
             where !sessionNode.childNodes.isEmpty
                 && !collapsedSideChatParents.contains(sessionNode.sessionID) {
-                outlineView.expandItem(sessionNode)
+                outline.expandItem(sessionNode)
             }
         }
-
-        if let selectedTerminalID {
-            select(terminalID: selectedTerminalID, notifyDelegate: false)
-        } else if let selectedSessionID {
-            select(sessionID: selectedSessionID, notifyDelegate: false)
-        }
-        outlineSpan.end(metadata: ["rows": String(outlineView.numberOfRows)])
     }
 
     /// Rebuilds all identity and ancestry indexes in one walk whenever the outline's shape
@@ -527,12 +639,17 @@ extension ProjectSidebarViewController {
         terminalNodesByID.removeAll(keepingCapacity: true)
         projectNodesByTerminalID.removeAll(keepingCapacity: true)
         ancestorsByTerminalID.removeAll(keepingCapacity: true)
+        nodesByKey.removeAll(keepingCapacity: true)
 
         func walk(
             _ node: NSObject,
             ancestors: [NSObject],
             projectNode: ProjectNode?
         ) {
+            if let node = node as? any SidebarOutlineNode {
+                nodesByKey[node.sidebarKey] = node
+            }
+
             switch node {
             case let repo as RepoGroupNode:
                 for child in repo.projectNodes {
@@ -580,41 +697,6 @@ extension ProjectSidebarViewController {
 
     private static func branchKey(_ node: BranchGroupNode) -> String {
         "\(node.projectID):\(node.branch)"
-    }
-
-    /// The outline's shape: which rows exist, nested how, in what order.
-    ///
-    /// Deliberately carries identities rather than content — a session's title and a
-    /// project's name are absent, so a rename compares equal and takes the in-place path. A
-    /// heading's *name* is its identity and is included: renaming a branch regroups the
-    /// sessions under it, which is a different tree rather than a differently-labelled one.
-    private static func structureSignature(of nodes: [NSObject]) -> String {
-        var signature = ""
-
-        func walk(_ node: NSObject) {
-            switch node {
-            case let repo as RepoGroupNode:
-                signature += "r:\(repo.name)("
-                repo.projectNodes.forEach(walk)
-            case let project as ProjectNode:
-                signature += "p:\(project.projectID)("
-                project.childNodes.forEach(walk)
-            case let branch as BranchGroupNode:
-                signature += "b:\(branch.projectID)/\(branch.branch)("
-                branch.childNodes.forEach(walk)
-            case let session as SessionNode:
-                signature += "s:\(session.sessionID)("
-                session.childNodes.forEach(walk)
-            case let terminal as TerminalNode:
-                signature += "t:\(terminal.terminalID)("
-            default:
-                signature += "?("
-            }
-            signature += ")"
-        }
-
-        nodes.forEach(walk)
-        return signature
     }
 
     /// Removes a session and its terminal. Shared by the row's context menu and its hover
@@ -808,6 +890,31 @@ extension ProjectSidebarViewController {
                 count += 1
             }
         }
+    }
+
+    /// The rows the outline is presenting, top to bottom.
+    ///
+    /// Beside `outlineRowCount` for the same reason: the outline view stays private, and a test
+    /// asking what the list says goes through the production data source and delegate rather
+    /// than a parallel model of its own.
+    var presentedRowKeys: [SidebarNodeKey] {
+        (0..<outlineView.numberOfRows).compactMap {
+            (outlineView.item(atRow: $0) as? any SidebarOutlineNode)?.sidebarKey
+        }
+    }
+
+    /// Where a row is now, or nil when nothing is showing it.
+    func presentedRow(of key: SidebarNodeKey) -> Int? {
+        guard let node = nodesByKey[key] else { return nil }
+        let row = outlineView.row(forItem: node)
+        return row >= 0 ? row : nil
+    }
+
+    /// The live row view a structural change is happening *to* — where an arriving row's fade
+    /// and a displaced row's slide can be watched. Nil for a row the outline has not built.
+    func presentedRowView(of key: SidebarNodeKey) -> NSTableRowView? {
+        guard let row = presentedRow(of: key) else { return nil }
+        return outlineView.rowView(atRow: row, makeIfNecessary: false)
     }
 
     var selectedSessionID: SessionID? { selectedNode()?.sessionID }
