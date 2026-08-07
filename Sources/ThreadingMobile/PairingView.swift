@@ -27,6 +27,17 @@ struct PairingView: View {
                     }
 
                     pairingHelp
+
+                    Button {
+                        dismiss()
+                        model.startDemo()
+                    } label: {
+                        Text("No Mac nearby? Try the demo.")
+                            .font(.footnote.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: MobileDesign.Size.minimumTapTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.secondaryLabel)
                 }
                 .padding(MobileDesign.Spacing.large)
             }

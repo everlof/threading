@@ -301,19 +301,12 @@ Actions, where the private key is a repository secret — and a shared key would
 Sparkle, so minting a separate key was free; after the first published build it would have
 meant every install reinstalling by hand.
 
-The one manual step, which agents cannot perform (creating a signing key in the login keychain
-is deliberately permission-gated):
-
-```
-generate_keys --account mjukis-threading         # prints the public key
-```
-
-Then put the printed public key into `Sources/Threading/Resources/Info.plist` under
-`SUPublicEDKey` — which today still carries the claudex public key from the earlier draft.
-This cannot be forgotten halfway: `scripts/generate_appcast.sh` compares the signing account's
-public key against the shipped plist and refuses to sign on a mismatch, and `generate_appcast`
-itself leaves the enclosure unsigned when the app's key disagrees, which the script also
-treats as fatal. A half-made swap fails the release rather than stranding installs.
+The key exists (`generate_keys --account mjukis-threading`, run 2026-08-07) and the plist
+carries its public half. Key and plist cannot drift apart unnoticed:
+`scripts/generate_appcast.sh` compares the signing account's public key against the shipped
+plist and refuses to sign on a mismatch, and `generate_appcast` itself leaves the enclosure
+unsigned when the app's key disagrees, which the script also treats as fatal. A half-made
+key rotation fails the release rather than stranding installs.
 
 Every tool needs the account named explicitly, since it is not the default global one; the
 scripts default to it (`THREADING_SPARKLE_ACCOUNT` overrides):
@@ -382,9 +375,16 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
   claudex's `publish-homebrew-cask.sh` is the template if the answer is public.
 - The repository itself has no `origin` remote yet; the workflows and `publish_release.sh` are
   dormant until it does, and each fails with a sentence saying so rather than half-working.
-- The iOS companion's pipeline (TestFlight first, the App Store later) is not built, and its
-  first submission needs an answer to the review-context problem: App Review runs the app with
-  no Mac host reachable, so something must be demonstrable standalone.
+- The iOS companion's pipeline (TestFlight first, the App Store later) is not built. The
+  review-context problem — App Review runs the app with no Mac reachable — is answered: the
+  welcome screen's **Try the demo** enters a canned Mac (`DemoExperience`,
+  `Sources/ThreadingMobile/`) whose script plays the server's half of the session socket
+  through the app's real message handler, so the conversation, streaming, terminal, and
+  composer all demonstrate themselves standalone. The submission checklist that goes with it:
+  state in the App Review notes that no account or hardware is needed because the demo is one
+  tap from the first screen, and attach a short video of real pairing (QR scan against a Mac)
+  for the parts a reviewer cannot reach. `THREADING_MOBILE_RUNTIME_DEMO=1|session|terminal`
+  drives the same runtime demo from the simulator for capturing that material.
 
 Two questions this section used to carry are settled: the claudex key sharing is ended (see
 [Keys](#keys--threadings-own-one-manual-step-from-real) — one manual `generate_keys` run

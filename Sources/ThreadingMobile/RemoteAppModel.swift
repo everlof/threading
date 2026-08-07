@@ -29,7 +29,10 @@ final class RemoteAppModel: ObservableObject {
 
     private let store = RemoteHostStore()
     private let continuity: MobileSessionContinuityStore
-    private let isDemo: Bool
+    /// True while the app is showing the canned Mac — entered from the welcome screen's Try
+    /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
+    /// it, so demo state changes locally and nothing ever reaches a network (`DemoExperience`).
+    @Published private(set) var isDemo = false
     private var themeEventsTask: URLSessionWebSocketTask?
     private var themeEventsReceiveTask: Task<Void, Never>?
     private var themeEventsHostID: String?
@@ -94,7 +97,6 @@ final class RemoteAppModel: ObservableObject {
             return
         }
 #endif
-        isDemo = false
         let loaded: [PairedRemoteHost]
         switch store.load() {
         case .success(let hosts):
@@ -109,6 +111,50 @@ final class RemoteAppModel: ObservableObject {
         }
         activeHostID = restoredHostID ?? loaded.first?.id
         continuity.setActiveHostID(activeHostID)
+    }
+
+    // MARK: - The demo
+
+    /// Enters the canned Mac: fixture sessions through the real pipeline, no network anywhere
+    /// (`DemoExperience`). Reachable from the welcome screen, and built for two audiences —
+    /// App Review, which runs this app with no Mac to pair, and anyone who installed the phone
+    /// app first. Deliberately not persisted: the demo owns no credential, so it never becomes
+    /// a keychain host record, and a relaunch starts clean.
+    func startDemo() {
+        guard !isDemo else { return }
+        isDemo = true
+        isPairing = false
+        navigationPath = []
+        let host = DemoExperience.pairedHost
+        hosts = [host]
+        activeHostID = host.id
+        continuity.setActiveHostID(host.id)
+        me = Self.demoResponse
+        phase = .online
+    }
+
+    /// Leaves the demo and restores whatever was actually paired — for a first-run user,
+    /// nothing, which lands back on the welcome screen.
+    func endDemo() {
+        guard isDemo else { return }
+        isDemo = false
+        navigationPath = []
+        me = nil
+        let loaded: [PairedRemoteHost]
+        switch store.load() {
+        case .success(let hosts):
+            loaded = hosts
+        case .failure(let error):
+            loaded = []
+            storageIssue = error.localizedDescription
+        }
+        hosts = loaded
+        activeHostID = loaded.first?.id
+        continuity.setActiveHostID(activeHostID)
+        phase = .idle
+        if activeHostID != nil {
+            Task { await refresh() }
+        }
     }
 
     var activeHost: PairedRemoteHost? {
@@ -312,6 +358,8 @@ final class RemoteAppModel: ObservableObject {
 
     func makeSessionReady(_ session: RemoteSessionSummaryDTO) async throws {
         guard !session.isAvailable, let host = activeHost else { return }
+        // A demo session has no Mac to resume it; the canned connection opens regardless.
+        if isDemo { return }
         let hostID = host.id
         let link = try await performMutation(for: hostID) { client, requestID in
             try await client.resume(sessionID: session.id, requestID: requestID)
@@ -344,9 +392,7 @@ final class RemoteAppModel: ObservableObject {
         let hostID = host.id
         let previous = current
         me = current.replacing(theme: preview)
-#if DEBUG
         if isDemo { return }
-#endif
         do {
             let response = try await performMutation(for: hostID) { client, requestID in
                 try await client.setAppTheme(themeID: themeID, requestID: requestID)
@@ -380,9 +426,7 @@ final class RemoteAppModel: ObservableObject {
                 assignmentID: themeID
             )
         }
-#if DEBUG
         if isDemo { return }
-#endif
         do {
             let response = try await performMutation(for: hostID) { client, requestID in
                 try await client.setSessionTheme(
@@ -423,11 +467,9 @@ final class RemoteAppModel: ObservableObject {
             surface: surface,
             prompt: prompt
         )
-#if DEBUG
         if isDemo {
             return me?.sessions.first ?? Self.demoResponse.sessions[0]
         }
-#endif
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.createSession(request, requestID: requestID)
         }
@@ -444,9 +486,7 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-#if DEBUG
         if isDemo { return }
-#endif
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.renameSession(
                 sessionID: session.id,
@@ -463,9 +503,7 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-#if DEBUG
         if isDemo { return }
-#endif
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.setSessionPinned(
                 sessionID: session.id,
@@ -482,9 +520,7 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-#if DEBUG
         if isDemo { return }
-#endif
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.setSessionArchived(
                 sessionID: session.id,
@@ -501,12 +537,10 @@ final class RemoteAppModel: ObservableObject {
             throw RemoteClientError.unauthorized
         }
         let hostID = host.id
-#if DEBUG
         if isDemo {
             me = me?.replacingSessionSurface(sessionID: session.id, surface: surface)
             return
         }
-#endif
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.setSessionSurface(
                 sessionID: session.id,
@@ -757,7 +791,6 @@ final class RemoteAppModel: ObservableObject {
         themeEventsHostID = nil
     }
 
-#if DEBUG
     static let demoTheme = RemoteThemeDTO(
         id: "cyberpunk",
         name: "Cyberpunk",
@@ -1015,7 +1048,6 @@ final class RemoteAppModel: ObservableObject {
             )
         )
     }
-#endif
 }
 
 private extension RemoteMeDTO {

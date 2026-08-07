@@ -99,6 +99,10 @@ struct SessionDashboard: View {
     private var dashboardContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
+                if model.isDemo {
+                    demoBanner
+                }
+
                 deviceSection
 
                 HStack {
@@ -159,6 +163,31 @@ struct SessionDashboard: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 36)
+        }
+    }
+
+    /// Demo state must say so on every visit — canned sessions that read as a live Mac would
+    /// be a lie the moment anything "works". The way out sits in the sentence that admits it.
+    private var demoBanner: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(theme.accent)
+            Text("This is the demo. Nothing here is connected.")
+                .font(.footnote)
+                .foregroundStyle(theme.secondaryLabel)
+            Spacer()
+            Button("End Demo") {
+                model.endDemo()
+            }
+            .font(.footnote.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
+        }
+        .padding(MobileDesign.Spacing.inset)
+        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.panelRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
         }
     }
 

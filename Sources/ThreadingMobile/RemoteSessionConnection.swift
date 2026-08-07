@@ -83,6 +83,9 @@ final class RemoteSessionConnection: ObservableObject {
     private var serverFeatures: Set<String> = []
     private var pendingPromptSubmission: PendingRemoteSubmission?
     private var pendingAttentionRequest: PendingAttentionRequest?
+    /// Non-nil only for the demo sentinel link: plays the Mac's half of the socket in-process,
+    /// through the same message handler a real frame reaches (`DemoExperience`).
+    private var demoScript: DemoSessionScript?
     var onTerminalOutput: ((Data) -> Void)? {
         didSet {
             guard let onTerminalOutput, !pendingTerminalOutput.isEmpty else { return }
@@ -139,6 +142,14 @@ final class RemoteSessionConnection: ObservableObject {
         // SwiftTerm first so replay replaces its prior state instead of duplicating scrollback.
         onTerminalOutput?(Data([0x1b, 0x63]))
 
+        // The demo's canned Mac takes the socket's place; everything downstream of the wire —
+        // the hello, snapshots, acknowledgements — still arrives through `handle`.
+        if let script = DemoSessionScript.forDemo(link: client.link, session: session) {
+            demoScript = script
+            script.begin(on: self)
+            return
+        }
+
         do {
             let task = try client.webSocketTask(sessionID: session.id)
             self.task = task
@@ -172,6 +183,8 @@ final class RemoteSessionConnection: ObservableObject {
         }
         connectionGeneration &+= 1
         stopped = true
+        demoScript?.cancel()
+        demoScript = nil
         receiveTask?.cancel()
         receiveTask = nil
         reconnectTask?.cancel()
@@ -430,6 +443,13 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func send(_ message: RemoteClientMessage, generation: Int? = nil) throws {
         let expectedGeneration = generation ?? connectionGeneration
+        if let demoScript {
+            guard expectedGeneration == connectionGeneration, !stopped else {
+                throw RemoteClientError.invalidResponse
+            }
+            demoScript.handleClient(message)
+            return
+        }
         guard expectedGeneration == connectionGeneration, !stopped,
               let task else { throw RemoteClientError.invalidResponse }
         let data = try JSONEncoder().encode(message)
@@ -477,6 +497,31 @@ final class RemoteSessionConnection: ObservableObject {
             phase = .failed(error.localizedDescription)
             recordSocketFailure(error)
             scheduleReconnect(generation: generation)
+        }
+    }
+
+    // MARK: - The demo's wire
+
+    /// A synthesized server frame from `DemoSessionScript`, entering through the same handler
+    /// a real socket frame reaches. Ignored unless the demo script owns this connection, so
+    /// nothing else can inject server state.
+    func receiveDemoServerText(_ text: String) {
+        guard demoScript != nil else { return }
+        handle(text)
+    }
+
+    /// Synthesized terminal bytes, buffered exactly the way `receiveLoop` buffers real ones.
+    func receiveDemoTerminalOutput(_ data: Data) {
+        guard demoScript != nil else { return }
+        if let onTerminalOutput {
+            onTerminalOutput(data)
+        } else {
+            pendingTerminalOutput.append(data)
+            if pendingTerminalOutput.count > pendingTerminalOutputLimit {
+                pendingTerminalOutput.removeFirst(
+                    pendingTerminalOutput.count - pendingTerminalOutputLimit
+                )
+            }
         }
     }
 

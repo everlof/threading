@@ -147,6 +147,26 @@ struct RootView: View {
         .task {
             await openIssueReportDemoIfNeeded()
         }
+        // Screenshot/verification tooling for the *runtime* demo — the same startDemo() the
+        // welcome button calls, unlike THREADING_MOBILE_DEMO's static preview hosts.
+        .task {
+            switch ProcessInfo.processInfo.environment["THREADING_MOBILE_RUNTIME_DEMO"] {
+            case "1":
+                model.startDemo()
+            case "session":
+                model.startDemo()
+                if let first = model.me?.sessions.first {
+                    model.navigationPath = [first.id]
+                }
+            case "terminal":
+                model.startDemo()
+                if let terminal = model.me?.sessions.first(where: { $0.surface == "terminal" }) {
+                    model.navigationPath = [terminal.id]
+                }
+            default:
+                break
+            }
+        }
 #endif
     }
 
@@ -339,6 +359,19 @@ private struct WelcomeView: View {
                             .foregroundStyle(theme.ground)
                     }
                     .buttonStyle(.plain)
+
+                    // The door for someone with no Mac in reach — including App Review, which
+                    // runs this app with nothing to pair (releasing.md, "Releasing beside the
+                    // iOS companion"). Everything inside is canned; the pipeline is real.
+                    Button {
+                        model.startDemo()
+                    } label: {
+                        Label("Try the demo", systemImage: "sparkles")
+                            .font(.subheadline.weight(.medium))
+                            .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.secondaryLabel)
 
                     Button(action: openSettings) {
                         Label("Settings", systemImage: "gearshape")
