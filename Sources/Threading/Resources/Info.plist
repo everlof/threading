@@ -45,13 +45,13 @@
 	<!-- Xcode copies the font folder's files into the Resources root. -->
 	<string>.</string>
 	<!--
-		Sparkle. The decision is that Threading signs with its *own* EdDSA key, keychain
-		account `mjukis-threading`, so a compromised CI secret of one app can never sign an
-		update for the other (docs/architecture/releasing.md, "Keys"). The value below is
-		still the claudex public key from before that decision: replace it with the output of
-		`generate_keys --account mjukis-threading` before anything publishes.
-		scripts/generate_appcast.sh refuses to sign with a key that does not match this value,
-		so the swap cannot be half-made.
+		Sparkle. Threading signs with its *own* EdDSA key — the public half below, whose
+		private half lives in the login keychain under account `mjukis-threading` — so a
+		compromised CI secret of one app can never sign an update for the other
+		(docs/architecture/releasing.md, "Keys"). Losing that key means no installed copy can
+		ever be updated again; back it up with `generate_keys -x <file> --account
+		mjukis-threading`. scripts/generate_appcast.sh refuses to sign with a key that does not
+		match this value, so key and plist cannot drift apart unnoticed.
 
 		SUFeedURL is the stable feed and the single source of truth for it; nightly builds are
 		routed to their own feed at runtime (UpdateFeedPolicy), never through this key.
@@ -62,7 +62,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/everlof/threading/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>1oYHD7FlQLUy7qQc9NISuCUFzscHMjMnk5Sm6d3/noM=</string>
+	<string>18EoXEv3Y17zr3HN/HUNBN7TqSy4RTLYhmNkZkJPon8=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<!--
