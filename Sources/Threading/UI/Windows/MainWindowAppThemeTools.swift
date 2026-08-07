@@ -534,7 +534,7 @@ extension AgentToolCoordinator {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
                             + "\"platinum\", \"beos\", \"openstep\", \"irix\", "
-                            + "\"amiga\", or \"plain\"."
+                            + "\"amiga\", \"aqua\", \"aqua_tiger\", \"tui\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -544,8 +544,8 @@ extension AgentToolCoordinator {
                     rawValue: rawPlacement
                 ) else {
                     throw AppThemeEditingError.invalid(
-                        "chrome.title_bar.button_placement must be \"trailing\", \"split\", "
-                            + "or \"bookends\"."
+                        "chrome.title_bar.button_placement must be \"trailing\", \"leading\", "
+                            + "\"split\", or \"bookends\"."
                     )
                 }
                 style.titleBar.buttonPlacement = parsed
@@ -610,10 +610,13 @@ extension AgentToolCoordinator {
         if patch.removeFrame == true {
             style.frame = nil
         } else if let frame = patch.frame {
-            guard let width = frame.width else {
-                throw AppThemeEditingError.invalid("chrome.frame needs a width in points.")
-            }
-            style.frame = WindowChromeStyle.Frame(width: width)
+            let base = style.frame ?? WindowChromeStyle.Frame(
+                width: WindowChromeStyleLimits.defaultFrameWidth
+            )
+            style.frame = WindowChromeStyle.Frame(
+                width: frame.width ?? base.width,
+                cornerRadius: frame.cornerRadius ?? base.cornerRadius
+            )
         }
 
         return .set(style)
@@ -639,7 +642,8 @@ extension AgentToolCoordinator {
         if let rawKind = cleaned(patch.kind) {
             guard let parsed = WindowChromeStyle.TitleBar.Texture.Kind(rawValue: rawKind) else {
                 throw AppThemeEditingError.invalid(
-                    "\(path).kind must be \"pinstripes\" or \"dither\"."
+                    "\(path).kind must be \"pinstripes\", \"aqua_pinstripes\", \"dither\", "
+                        + "\"brushed_metal\", or \"rule\"."
                 )
             }
             kind = parsed
@@ -1032,6 +1036,7 @@ extension AgentToolCoordinator {
             )
         }
         if let value = patch.textScale { material.textScale = CGFloat(value) }
+        if let value = patch.choiceHeight { material.choiceHeight = CGFloat(value) }
 
         if patch.removePopoverStyle == true {
             material.popoverStyle = .system
@@ -1105,6 +1110,28 @@ extension AgentToolCoordinator {
             }
             material.scrollerTrackStyle = parsed
         }
+        if let rawAppearance = cleaned(patch.scrollerAppearance) {
+            guard let parsed = AppTheme.Material.ScrollerAppearance(
+                rawValue: rawAppearance
+            ) else {
+                throw AppThemeEditingError.invalid(
+                    "material.scroller_appearance must be \"automatic\", \"windows_98\", "
+                        + "\"platinum\", \"beos\", \"openstep\", \"irix\", \"amiga\", "
+                        + "\"aqua\", or \"aqua_tiger\"."
+                )
+            }
+            material.scrollerAppearance = parsed
+        }
+        if let rawAppearance = cleaned(patch.menuAppearance) {
+            guard let parsed = AppTheme.Material.MenuAppearance(rawValue: rawAppearance) else {
+                throw AppThemeEditingError.invalid(
+                    "material.menu_appearance must be \"automatic\", \"windows_98\", "
+                        + "\"platinum\", \"beos\", \"openstep\", \"irix\", \"amiga\", "
+                        + "\"aqua\", or \"aqua_tiger\"."
+                )
+            }
+            material.menuAppearance = parsed
+        }
         if let rawProgress = cleaned(patch.progressStyle) {
             guard let parsed = AppTheme.Material.ProgressStyle(rawValue: rawProgress) else {
                 throw AppThemeEditingError.invalid(
@@ -1116,10 +1143,20 @@ extension AgentToolCoordinator {
         if let rawChoice = cleaned(patch.choiceStyle) {
             guard let parsed = AppTheme.Material.ChoiceStyle(rawValue: rawChoice) else {
                 throw AppThemeEditingError.invalid(
-                    "material.choice_style must be \"chip\" or \"dropdown\"."
+                    "material.choice_style must be \"chip\", \"dropdown\", \"popup\", "
+                        + "\"double_arrow_popup\", \"aqua_popup\", or \"cycle\"."
                 )
             }
             material.choiceStyle = parsed
+        }
+        if let rawCheckbox = cleaned(patch.checkboxStyle) {
+            guard let parsed = AppTheme.Material.CheckboxStyle(rawValue: rawCheckbox) else {
+                throw AppThemeEditingError.invalid(
+                    "material.checkbox_style must be \"automatic\", \"recessed_tick\", "
+                        + "\"windows_98_tick\", or \"beos_cross\"."
+                )
+            }
+            material.checkboxStyle = parsed
         }
 
         if patch.removeButtonStyle == true {
@@ -1171,6 +1208,15 @@ extension AgentToolCoordinator {
                 style.fontFamily = family
             }
             if let value = buttonPatch.tracking { style.tracking = CGFloat(value) }
+            if let value = buttonPatch.fontScale { style.fontScale = CGFloat(value) }
+            if let value = buttonPatch.minimumWidth { style.minimumWidth = CGFloat(value) }
+            if let value = buttonPatch.minimumHeight { style.minimumHeight = CGFloat(value) }
+            if let value = buttonPatch.embossesDisabledTitle {
+                style.embossesDisabledTitle = value
+            }
+            if let value = buttonPatch.antialiasesTitle {
+                style.antialiasesTitle = value
+            }
             if let raw = cleaned(buttonPatch.primaryTreatment) {
                 guard let parsed = AppTheme.Material.ButtonStyle.PrimaryTreatment(rawValue: raw) else {
                     throw AppThemeEditingError.invalid(
@@ -1187,6 +1233,33 @@ extension AgentToolCoordinator {
                     )
                 }
                 style.primaryRole = parsed
+            }
+            if let raw = cleaned(buttonPatch.secondaryRole) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid button_style.secondary_role."
+                    )
+                }
+                style.secondaryRole = parsed
+            }
+            if let raw = cleaned(buttonPatch.secondaryHoverRole) {
+                guard let parsed = AppThemeRole.named(raw) else {
+                    throw AppThemeEditingError.invalid(
+                        "\"\(raw)\" is not a valid button_style.secondary_hover_role."
+                    )
+                }
+                style.secondaryHoverRole = parsed
+            }
+            if let raw = cleaned(buttonPatch.secondaryShadow) {
+                guard let parsed = AppTheme.Material.ButtonStyle.SecondaryShadow(
+                    rawValue: raw
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.button_style.secondary_shadow must be \"control\", "
+                            + "\"panel\", or \"none\"."
+                    )
+                }
+                style.secondaryShadow = parsed
             }
             if buttonPatch.removePrimaryBorder == true {
                 style.primaryBorderRole = nil
@@ -1530,7 +1603,10 @@ extension AgentToolCoordinator {
 
         var document: [String: Any] = ["title_bar": titleBar]
         if let frame = chrome.frame {
-            document["frame"] = ["width": frame.width]
+            document["frame"] = [
+                "width": frame.width,
+                "corner_radius": frame.cornerRadius
+            ]
         }
         return document
     }
@@ -1613,11 +1689,15 @@ extension AgentToolCoordinator {
             "control_radius": Double(material.controlRadius),
             "border_width": Double(material.borderWidth),
             "text_scale": Double(material.textScale),
+            "choice_height": Double(material.choiceHeight),
             "typeface": material.typeface.rawValue,
             "scroller_placement": material.scrollerPlacement.rawValue,
             "scroller_track_style": material.scrollerTrackStyle.rawValue,
+            "scroller_appearance": material.scrollerAppearance.rawValue,
+            "menu_appearance": material.menuAppearance.rawValue,
             "progress_style": material.progressStyle.rawValue,
-            "choice_style": material.choiceStyle.rawValue
+            "choice_style": material.choiceStyle.rawValue,
+            "checkbox_style": material.checkboxStyle.rawValue
         ]
         if let width = material.controlBorderWidth {
             document["control_border_width"] = Double(width)
@@ -1645,14 +1725,26 @@ extension AgentToolCoordinator {
             "text_transform": button.textTransform.rawValue,
             "font_weight": button.fontWeight.rawValue,
             "tracking": Double(button.tracking),
+            "font_scale": Double(button.fontScale),
             "primary_treatment": button.primaryTreatment.rawValue,
             "primary_role": button.primaryRole.wireName,
+            "secondary_role": button.secondaryRole.wireName,
+            "secondary_hover_role": button.secondaryHoverRole.wireName,
+            "secondary_shadow": button.secondaryShadow.rawValue,
             "hover_offset_x": Double(button.hoverOffsetX),
             "hover_offset_y": Double(button.hoverOffsetY),
             "pressed_offset_x": Double(button.pressedOffsetX),
             "pressed_offset_y": Double(button.pressedOffsetY),
             "collapse_shadow_on_hover": button.collapseShadowOnHover
         ]
+        buttonDocument["embosses_disabled_title"] = button.embossesDisabledTitle
+        buttonDocument["antialiases_title"] = button.antialiasesTitle
+        if let width = button.minimumWidth {
+            buttonDocument["minimum_width"] = Double(width)
+        }
+        if let height = button.minimumHeight {
+            buttonDocument["minimum_height"] = Double(height)
+        }
         if let role = button.primaryBorderRole {
             buttonDocument["primary_border_role"] = role.wireName
         }

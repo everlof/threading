@@ -852,8 +852,11 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case removeFontFallbacks = "remove_font_fallbacks"
     case scrollerPlacement = "scroller_placement"
     case scrollerTrackStyle = "scroller_track_style"
+    case scrollerAppearance = "scroller_appearance"
+    case menuAppearance = "menu_appearance"
     case progressStyle = "progress_style"
     case choiceStyle = "choice_style"
+    case checkboxStyle = "checkbox_style"
   }
 }
 
@@ -1169,6 +1172,12 @@ struct AppThemeChromeTextureArguments: Decodable, Sendable {
 
 struct AppThemeChromeFrameArguments: Decodable, Sendable {
   let width: Double?
+  let cornerRadius: Double?
+
+  private enum CodingKeys: String, CodingKey {
+    case width
+    case cornerRadius = "corner_radius"
+  }
 }
 
 /// `"mark"`, `"hidden"`, or `{path|base64}` — mirroring the document's own logo spelling.
@@ -5403,6 +5412,20 @@ enum MCPTools {
         description: "\"solid\" (the default) or \"stippled\" for a crisp workstation-era "
           + "checker track behind the thumb."
       ),
+      "scroller_appearance": MCPPropertySchema(
+        type: .string,
+        description: "Scrollbar anatomy: \"automatic\" (modern proportional thumb), "
+          + "\"windows_98\", \"platinum\", \"beos\", \"openstep\", \"irix\", "
+          + "\"amiga\", \"aqua\", or \"aqua_tiger\". Period appearances include their own arrow layout, "
+          + "track relief, and thumb construction and therefore use persistent legacy space."
+      ),
+      "menu_appearance": MCPPropertySchema(
+        type: .string,
+        description: "App-owned menu anatomy: \"automatic\" (modern), \"windows_98\", "
+          + "\"platinum\", \"beos\", \"openstep\", \"irix\", \"amiga\", \"aqua\", or "
+          + "\"aqua_tiger\". The family controls panel edge and shadow, row rhythm, "
+          + "separators, selection, and submenu marks."
+      ),
       "progress_style": MCPPropertySchema(
         type: .string,
         description: "Determinate progress treatment: \"continuous\" (the default) or "
@@ -5410,8 +5433,18 @@ enum MCPTools {
       ),
       "choice_style": MCPPropertySchema(
         type: .string,
-        description: "Compact chooser anatomy: \"chip\" (the default) or \"dropdown\" for a "
-          + "square sunken value well with a separate raised arrow button."
+        description: "Compact chooser anatomy: \"chip\" (the default), \"dropdown\" for a "
+          + "Win32 sunken well, \"popup\" for a raised down-arrow field, "
+          + "\"double_arrow_popup\" for Platinum, \"aqua_popup\" for Tiger's blue gel "
+          + "segment, or \"cycle\" for an Amiga cycle gadget."
+      ),
+      "checkbox_style": MCPPropertySchema(
+        type: .string,
+        description: "Binary check-gadget anatomy: \"automatic\" (modern, with backwards-compatible "
+          + "classic inference), \"recessed_tick\" for an Intuition-style sunken tick box, "
+          + "\"windows_98_tick\" for Win32's disabled gray field, or \"beos_cross\" for "
+          + "BeOS's white nested box and X mark. The same family colours the separate radio "
+          + "gadget, whose period geometry is a circular well and dot."
       ),
       "bevel": MCPPropertySchema(
         type: .object,
@@ -5479,8 +5512,11 @@ enum MCPTools {
       properties: [
         "kind": MCPPropertySchema(
           type: .string,
-          description: "\"pinstripes\" draws horizontal one-point rules; \"dither\" "
-            + "draws a one-bit checker stipple."
+          description: "\"pinstripes\" draws horizontal one-point rules; "
+            + "\"aqua_pinstripes\" draws Cheetah's four-row glass rib; \"dither\" "
+            + "draws a one-bit checker stipple; \"brushed_metal\" draws Tiger's fine "
+            + "silver horizontal grain; \"rule\" draws one line along the band's bottom "
+            + "edge, the seam a text-mode interface puts under its header row."
         ),
         "color": MCPPropertySchema(
           type: .string,
@@ -5562,12 +5598,15 @@ enum MCPTools {
               + "(raised boxes cut from a yellow title tab), \"openstep\" (gray NeXT "
               + "plates with period bitmap marks), \"irix\" (black-outlined 4Dwm "
               + "caption boxes), \"amiga\" (one-bit Workbench Close, Zoom, and Depth "
-              + "gadgets), or "
+              + "gadgets), \"aqua\" (early Mac OS X traffic-light gems), "
+              + "\"aqua_tiger\" (10.4's tighter glass), \"tui\" (hairline text-mode "
+              + "cells that invert under the pointer), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(
             type: .string,
-            description: "\"trailing\" clusters all buttons at the end; \"split\" puts "
+            description: "\"trailing\" clusters all buttons at the end; \"leading\" keeps "
+              + "the cluster at the start (Aqua traffic lights); \"split\" puts "
               + "Close at the leading edge and minimize/zoom at the trailing edge; "
               + "\"bookends\" puts the first visible operation at the leading edge and "
               + "the remaining operations at the trailing edge."
@@ -5623,6 +5662,10 @@ enum MCPTools {
           "width": MCPPropertySchema(
             type: .number,
             description: "Frame width, 1–6 points."
+          ),
+          "corner_radius": MCPPropertySchema(
+            type: .number,
+            description: "Outer frame corner radius, 0–16 points. Default 0."
           )
         ]
       ),
