@@ -489,4 +489,5 @@ enum DesignSymbols {
     /// pair carries the outcome without relying on the colour they are tinted.
     static let reportFiled = "checkmark.circle"
     static let reportRefused = "exclamationmark.triangle"
+    static let noticeInformational = "info.circle"
 }

@@ -552,6 +552,10 @@
 				ThreadingMobile/ThreadingMobileApp.swift,
 				ThreadingMobile/ThreadingMobile.entitlements,
 				ThreadingMobile/TerminalViewRepresentable.swift,
+				ThreadingMobile/TerminalKeyBar.swift,
+				ThreadingMobile/TerminalKeyboardEditorView.swift,
+				ThreadingMobile/MobileTerminalKeyboardStore.swift,
+				ThreadingMobile/DemoExperience.swift,
 				ThreadingMobile/ThemedDialog.swift,
 			);
 			target = F6000001000000000000001 /* Threading */;
