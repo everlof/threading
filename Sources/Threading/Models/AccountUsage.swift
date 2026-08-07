@@ -140,6 +140,31 @@ struct AccountUsage: Equatable {
         Self.fullest(of: windows, at: now)
     }
 
+    // MARK: - Named Windows
+
+    /// The account's shortest window: the one whose phase is worth owning.
+    ///
+    /// Chosen by length rather than by identifier, which is what keeps `UsageWindowPoke`
+    /// provider-agnostic. A runtime that meters on four hours instead of five, or renames `5h`,
+    /// needs no change here — and neither does the day Codex's window turns out to be anchored,
+    /// which is the whole point of picking the window by what it *is*.
+    ///
+    /// Expired windows are kept, unlike everywhere else in this file: a window whose reset has
+    /// passed is precisely the state the poke exists to notice.
+    var anchoredWindow: Window? {
+        windows
+            .filter { $0.windowDuration != nil }
+            .min { ($0.windowDuration ?? 0) < ($1.windowDuration ?? 0) }
+    }
+
+    /// The account's longest window — the cap a short window is pulled forward *out of*, and so
+    /// the one the poke's pace guard reads.
+    var longestWindow: Window? {
+        windows
+            .filter { $0.windowDuration != nil }
+            .max { ($0.windowDuration ?? 0) < ($1.windowDuration ?? 0) }
+    }
+
     // MARK: - Scoped Windows
 
     /// Which model-scoped windows a written-out reading names.
@@ -192,18 +217,46 @@ struct AccountUsage: Equatable {
             .max { ($0.fraction ?? 0) < ($1.fraction ?? 0) }
     }
 
+    /// One window of a written-out reading: its short name, its value as text, and how close it
+    /// is to its limit.
+    ///
+    /// Structured rather than pre-joined so a surface that can tint per window — the pill, a
+    /// menu row — and one that cannot — a tooltip — derive from the same list, with the
+    /// stale-value and severity rules decided once. An expired window keeps its name, loses its
+    /// number, and reports `.normal`: the percentage describes the window before it, and so
+    /// would any pressure tinted from it.
+    struct Reading {
+        let name: String
+        let value: String
+        let severity: UsageSeverity
+    }
+
+    /// Every window a written-out reading names, in the order the line prints them.
+    ///
+    /// Naming a model adds the windows that meter it, so a surface that knows what the session
+    /// will run on says the number that binds it. A surface where the model is not decided yet
+    /// asks for `.all` instead, and gets every scoped window on the account.
+    func readings(
+        at now: Date = Date(),
+        metering model: String? = nil,
+        scoped: ScopedWindows = .metering
+    ) -> [Reading] {
+        let windows = scoped == .all ? self.windows + modelWindows : self.windows(metering: model)
+        return windows.map { window in
+            Reading(
+                name: window.compactName,
+                value: Self.value(of: window, at: now),
+                severity: UsageSeverity.from(
+                    fraction: window.isExpired(at: now) ? nil : window.fraction
+                )
+            )
+        }
+    }
+
     /// `5h 43% · 7d 73%` as plain text, for the places that cannot tint per window — a menu
-    /// item, a tooltip. The toolbar pill builds its own attributed version, where each value
-    /// carries its window's severity colour.
+    /// item's tooltip, a settings line. Surfaces that can tint read `readings` instead.
     ///
     /// Nil when there is nothing to say, so a caller shows no line rather than an empty one.
-    /// An expired window keeps its name and loses its number, for the same reason
-    /// `peakWindow` skips it: the percentage describes the window before it.
-    ///
-    /// Naming a model adds the windows that meter it — `5h 7% · 7d 56% · 7d Fable 89%` — so a
-    /// surface that knows what the session will run on says the number that binds it. A surface
-    /// where the model is not decided yet asks for `.all` instead, and gets the same line with
-    /// every scoped window on it.
     ///
     /// Each window is named by `compactName`, so a scoped one states its length beside its model
     /// rather than standing in the list as a bare model name.
@@ -212,11 +265,11 @@ struct AccountUsage: Equatable {
         metering model: String? = nil,
         scoped: ScopedWindows = .metering
     ) -> String? {
-        let windows = scoped == .all ? self.windows + modelWindows : self.windows(metering: model)
-        guard !windows.isEmpty else { return nil }
+        let readings = readings(at: now, metering: model, scoped: scoped)
+        guard !readings.isEmpty else { return nil }
 
-        return windows
-            .map { "\($0.compactName) \(Self.value(of: $0, at: now))" }
+        return readings
+            .map { "\($0.name) \($0.value)" }
             .joined(separator: UsageDefaults.segmentSeparator)
     }
 

@@ -218,7 +218,7 @@ final class AccountUsageItemView: BackdropOverlay {
         ringView.tint = severity.glyphColor
 
         summaryLabel.attributedStringValue = Self.summary(
-            windows: usage?.windows(metering: model) ?? [],
+            readings: usage?.readings(metering: model) ?? [],
             ink: ink
         )
     }
@@ -226,7 +226,11 @@ final class AccountUsageItemView: BackdropOverlay {
     /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
     /// that window's own severity. The vocabulary is Claude's own status line, so the short
     /// names read as familiar rather than cryptic.
-    private static func summary(windows: [AccountUsage.Window], ink: Design.Ink) -> NSAttributedString {
+    ///
+    /// Consumes `AccountUsage.Reading` rather than raw windows, so the stale-value and
+    /// severity rules are the model's — decided once for this pill, the account menu's rows
+    /// and every tooltip, which is what keeps two statements of one window from disagreeing.
+    private static func summary(readings: [AccountUsage.Reading], ink: Design.Ink) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
         func append(_ text: String, font: NSFont, color: NSColor) {
@@ -236,7 +240,7 @@ final class AccountUsageItemView: BackdropOverlay {
             ))
         }
 
-        guard !windows.isEmpty else {
+        guard !readings.isEmpty else {
             append(
                 AccountUsageItemDefaults.unknownValue,
                 font: Design.Typography.control(),
@@ -245,7 +249,7 @@ final class AccountUsageItemView: BackdropOverlay {
             return result
         }
 
-        for (index, window) in windows.enumerated() {
+        for (index, reading) in readings.enumerated() {
             if index > 0 {
                 append(
                     AccountUsageItemDefaults.segmentSeparator,
@@ -255,21 +259,14 @@ final class AccountUsageItemView: BackdropOverlay {
             }
 
             append(
-                "\(window.compactName) ",
+                "\(reading.name) ",
                 font: Design.Typography.caption(),
                 color: ink.tertiary
             )
-
-            let expired = window.isExpired()
-            let severity = UsageSeverity.from(fraction: expired ? nil : window.fraction)
-            let value = expired
-                ? AccountUsageItemDefaults.unknownValue
-                : window.percent.map { "\($0)%" } ?? AccountUsageItemDefaults.unknownValue
-
             append(
-                value,
+                reading.value,
                 font: Design.Typography.control(),
-                color: severity == .normal ? ink.secondary : severity.glyphColor
+                color: reading.severity == .normal ? ink.secondary : reading.severity.glyphColor
             )
         }
 

@@ -349,7 +349,7 @@ final class ChipView: ThemedControl {
                 border: focused ? Design.Surface.accent : nil,
                 controlGlow: true
             )
-        case .dropdown:
+        case .dropdown, .popup, .doubleArrowPopup, .aquaPopup, .cycle:
             // The editable/value half of a Win32 combo is a white sunken well. The arrow is a
             // separate raised button drawn below, not a modern glyph floating in a gray pill.
             applySurface(
@@ -378,7 +378,7 @@ final class ChipView: ThemedControl {
             chevronView.isHidden = false
             contentLeadingConstraint?.constant = Design.Spacing.medium
             contentTrailingConstraint?.constant = -Design.Spacing.medium
-        case .dropdown:
+        case .dropdown, .popup, .doubleArrowPopup, .aquaPopup, .cycle:
             titleLabel.applyFont(.controlRegular)
             // SF Symbols are a modern platform vocabulary. The native combo carries only its
             // value and the small filled arrow; the menu rows remain free to carry their marks.

@@ -88,9 +88,11 @@ final class AppThemeRenderTests: XCTestCase {
     }
 
     /// The dropdown at both of its densities — a plain choice list (check column only, with a
-    /// separator and an action) and rows carrying images and subtitles — over light and dark.
-    /// The menu is an overlay drawn entirely by the app, so nothing but a render can say
-    /// whether its spacing reads as a menu or as a smear.
+    /// separator and an action) and the composer's identity menu, whose rows carry the most a
+    /// row can: a brand mark over its meter, a runtime-led subtitle, and values inked by their
+    /// own window's pressure. The menu is an overlay drawn entirely by the app, so nothing but
+    /// a render can say whether its spacing reads as a menu or as a smear — or whether a tinted
+    /// 99% still reads over every stock ground.
     func testRendersTheDropdownMenu() throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -101,25 +103,26 @@ final class AppThemeRenderTests: XCTestCase {
             .separator,
             .item(ThemedMenuItem(title: "New Worktree…"))
         ]
-        let icon = NSImage(
-            systemSymbolName: "person.crop.circle",
-            accessibilityDescription: nil
-        )
-        let detailed: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: "Everlof", subtitle: "5h 30% · 7d 10%", image: icon, isSelected: true
-            )),
-            .item(ThemedMenuItem(title: "Daniel Block", subtitle: "5h — · 7d 25%", image: icon)),
-            .item(ThemedMenuItem(title: "Lundborg Viktor", subtitle: "5h 21% · 7d 31%", image: icon))
-        ]
 
         var written = 0
-        for (name, entries) in [("plain", plain), ("detailed", detailed)] {
-            for (mode, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+        let fixtures: [(String, [ThemedMenuEntry], NSSize)] = [
+            ("plain", plain, NSSize(width: 420, height: 300)),
+            // Tall enough for every row, wide enough that `ThemedMenuLayout.maximumWidth` is
+            // what cuts the deliberately long Codex line — the ellipsis is part of the render.
+            ("detailed", identityMenuEntries(), NSSize(width: 540, height: 470))
+        ]
+        for (name, entries, canvas) in fixtures {
+            let variants: [(String, NSAppearance.Name, AppTheme)] = [
+                ("light", .aqua, .system),
+                ("dark", .darkAqua, .system),
+                ("win98", .aqua, AppThemeStyles.win98)
+            ]
+            for (mode, appearanceName, theme) in variants {
+                AppThemePalette.set(theme)
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
                 var data: Data?
                 appearance.performAsCurrentDrawingAppearance {
-                    data = menuImage(entries: entries, appearance: appearance)
+                    data = menuImage(entries: entries, appearance: appearance, canvas: canvas)
                 }
                 let url = directory.appendingPathComponent("menu-\(name)-\(mode).png")
                 try XCTUnwrap(data, "Failed to render \(name) \(mode)").write(to: url)
@@ -127,14 +130,89 @@ final class AppThemeRenderTests: XCTestCase {
             }
         }
         print("Rendered \(written) menus to \(directory.path)")
-        XCTAssertEqual(written, 4)
+        XCTAssertEqual(written, 6)
+    }
+
+    /// The composer's identity menu as the composer builds it: one flat list spanning every
+    /// runtime, rows assembled through `AccountUsageMenu.identitySegments` rather than a
+    /// hand-copied approximation that drifts the first time the grammar changes. The data is
+    /// chosen to hit every tone — calm values, a warning, a critical 99%, an expired `—`, a
+    /// scoped model window, bare runtime rows — and one line long enough to earn its ellipsis.
+    private func identityMenuEntries() -> [ThemedMenuEntry] {
+        let now = Date()
+
+        func window(_ id: String, _ fraction: Double?, resetsIn: TimeInterval) -> AccountUsage.Window {
+            AccountUsage.Window(
+                id: id, label: id, fraction: fraction,
+                resetsAt: now.addingTimeInterval(resetsIn), windowDuration: nil
+            )
+        }
+        func scoped(_ model: String, _ fraction: Double?, resetsIn: TimeInterval) -> AccountUsage.Window {
+            AccountUsage.Window(
+                id: model, label: model, fraction: fraction,
+                resetsAt: now.addingTimeInterval(resetsIn),
+                windowDuration: UsageDefaults.sevenDaySeconds, scopeName: model
+            )
+        }
+        func usage(
+            _ windows: [AccountUsage.Window],
+            scoped: [AccountUsage.Window] = [],
+            plan: String? = nil
+        ) -> AccountUsage {
+            var usage = AccountUsage(windows: windows, planLabel: plan, observedAt: now, source: .api)
+            usage.modelWindows = scoped
+            return usage
+        }
+        func row(
+            _ title: String, _ kind: AgentKind, _ usage: AccountUsage? = nil,
+            selected: Bool = false
+        ) -> ThemedMenuEntry {
+            var item = ThemedMenuItem(
+                title: title,
+                image: usage.map { AccountMarkImage.make(for: kind, usage: $0, at: now) }
+                    ?? AccountMarkImage.make(for: kind),
+                isSelected: selected
+            )
+            if let usage {
+                item.setSubtitle(AccountUsageMenu.identitySegments(
+                    runtime: kind, for: usage, metering: nil, at: now
+                ))
+            }
+            return .item(item)
+        }
+
+        return [
+            row("Everlof", .claude, usage(
+                [window("5h", 0.22, resetsIn: 16_440), window("7d", 0.15, resetsIn: 345_600)],
+                scoped: [scoped("Fable", 0.4, resetsIn: -60)]
+            )),
+            row("Daniel Block", .claude, usage(
+                [window("5h", 0.01, resetsIn: 16_440), window("7d", 0.37, resetsIn: 356_000)],
+                scoped: [scoped("Fable", 0.38, resetsIn: 356_000)]
+            ), selected: true),
+            row("Lundborg Viktor", .claude, usage(
+                [window("5h", nil, resetsIn: 3_600), window("7d", 0.79, resetsIn: 62_640)],
+                scoped: [scoped("Fable", 0, resetsIn: 62_640)]
+            )),
+            row("Everlof", .codex, usage(
+                [window("7d", 0.99, resetsIn: 442_800)],
+                scoped: [scoped("GPT-5.3-Codex-Spark", 0, resetsIn: 442_800)],
+                plan: "Pro"
+            )),
+            row("David", .codex, usage(
+                [window("7d", 0.55, resetsIn: 442_800)],
+                plan: "Team"
+            )),
+            row("Grok", .grok),
+            row("OpenCode", .openCode)
+        ]
     }
 
     /// The sidebar's arrangement menu — two toggles and a chosen order — under every stock theme.
     ///
     /// This is the shape that showed a checked row must not also be a *filled* row. Three of its
     /// five rows carry a check, and while a check drew the theme's `selection` under it the menu
-    /// opened three-quarters painted: at Win98's near-opaque navy and the System theme's accent
+    /// opened three-quarters painted: at Win98's solid navy and the System theme's accent
     /// it read as three highlighted rows arguing with the one the pointer was on. Only a sweep
     /// says whether the check alone still carries in every palette.
     func testRendersACheckHeavyMenuUnderEveryStockTheme() throws {
@@ -206,7 +284,13 @@ final class AppThemeRenderTests: XCTestCase {
         ]
 
         var written = 0
-        for (mode, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+        let variants: [(String, NSAppearance.Name, AppTheme)] = [
+            ("light", .aqua, .system),
+            ("dark", .darkAqua, .system),
+            ("win98", .aqua, AppThemeStyles.win98)
+        ]
+        for (mode, appearanceName, theme) in variants {
+            AppThemePalette.set(theme)
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             var data: Data?
             appearance.performAsCurrentDrawingAppearance {
@@ -217,7 +301,7 @@ final class AppThemeRenderTests: XCTestCase {
             written += 1
         }
         print("Rendered \(written) submenu pairs to \(directory.path)")
-        XCTAssertEqual(written, 2)
+        XCTAssertEqual(written, 3)
     }
 
     private func submenuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
@@ -289,11 +373,12 @@ final class AppThemeRenderTests: XCTestCase {
     private func menuImage(
         entries: [ThemedMenuEntry],
         appearance: NSAppearance,
-        highlightsTheChecked: Bool = true
+        highlightsTheChecked: Bool = true,
+        canvas: NSSize = NSSize(width: 420, height: 300)
     ) -> Data? {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        let root = NSView(frame: NSRect(origin: .zero, size: canvas))
         root.appearance = appearance
-        let source = NSView(frame: NSRect(x: 24, y: 250, width: 160, height: 26))
+        let source = NSView(frame: NSRect(x: 24, y: canvas.height - 50, width: 160, height: 26))
         root.addSubview(source)
 
         let window = NSWindow(

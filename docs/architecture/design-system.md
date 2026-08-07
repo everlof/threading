@@ -322,6 +322,22 @@ already under the pointer. This is deliberately menu-local: `PointerTracking`'s 
 the pointer keeping its hover invitation is the behaviour the overlay-handoff rule above
 depends on.
 
+**A menu subtitle is one ink until its line is a comparison.** `ThemedMenuSubtitleSegment` lets
+a row's subtitle carry toned runs — standard, muted, warning, critical — resolved to colours in
+`draw(_:)` from `Design` roles, so a live theme switch re-inks the next frame rather than
+honouring colours frozen in at decoration time. It exists for the account rows' usage reading
+(see [`accounts.md`](accounts.md)), where the one number a three-login comparison turns on sat
+in a line of twelve equally grey ones. The tones are semantic and the row owns the palette,
+which is what lets a classic selection band flatten every run to its own authored subtitle ink:
+that pair is the only ink measured against the band's solid fill, and a status hue over Win98
+navy is exactly the unrecorded contrast it exists to prevent. `setSubtitle(_:)` is the one
+entry point — it derives the plain join the tooltip, the type-to-filter and the width
+measurement keep reading, so the drawn line and the measured one cannot disagree — and tones
+change ink only, never font, so the plain string measures exactly what the styled line draws.
+The same pass gave both text runs an honest overflow: a line wider than the panel's width cap
+ends in an ellipsis rather than a hard clip, because `7d resets in` with its number sliced off
+is a sentence claiming to be complete.
+
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
 rather than as a patch stuck on it — right for a control on an empty stretch of chrome, wrong for

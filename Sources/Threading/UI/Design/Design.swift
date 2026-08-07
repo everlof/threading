@@ -98,6 +98,12 @@ enum Design {
     enum Size {
         /// Height of a pill control. Also drives its corner radius.
         static let chipHeight: CGFloat = 26
+        /// Closed height of a compact chooser, authored by the active material.
+        static var choiceHeight: CGFloat {
+            AppThemePalette.current.material(
+                for: NSApplication.shared.effectiveAppearance
+            ).choiceHeight
+        }
         /// A selected destination in a horizontal strip or a sidebar.
         static let tabHeight: CGFloat = 28
         static let sidebarTabHeight: CGFloat = 30
@@ -443,7 +449,10 @@ enum Design {
             surface: FontSurface = .chrome
         ) -> NSFont {
             prose(
-                .systemFont(ofSize: scaled(12), weight: style.fontWeight.appKitWeight),
+                .systemFont(
+                    ofSize: scaled(12) * style.fontScale,
+                    weight: style.fontWeight.appKitWeight
+                ),
                 surface: surface,
                 buttonStyle: style
             )
@@ -538,6 +547,25 @@ enum Design {
             )
         }
 
+        /// The height `NSString.draw(in:)` actually lays a single line out at, so a rect built
+        /// from it **centres** the words instead of top-aligning them in slack.
+        ///
+        /// This is the number to place drawn text with, never `boundingRectForFont.height`.
+        /// That rect is the union of the family's glyph extremes and runs well past the line
+        /// box — SF 12 reports 14.79 against a 15pt line, so a rect centred on it looked right
+        /// and shipped, while Baskerville reports 15.66 against 14 and Geneva 24.41 against 16.
+        /// `draw(in:)` sets its line down from the rect's *top*, so every one of those extra
+        /// points lifts the text: under Platinum, whose Charcoal falls back to Geneva, a menu
+        /// row's title sat 4pt above the icon and the checkmark beside it, which are centred.
+        ///
+        /// Asked of the layout manager rather than computed from the metrics, for the reason
+        /// `ThemedButton.shortcutRectTop` asks it for the baseline: the offsets drawing uses
+        /// are not always `ascender - descender + leading`. Geneva's is 16 where that
+        /// arithmetic says 17, and half a point of that lands back in the same place.
+        static func lineHeight(of font: NSFont) -> CGFloat {
+            ceil(NSLayoutManager().defaultLineHeight(for: font))
+        }
+
         /// Emoji rendered as an application control mark, not prose.
         static func accountEmoji() -> NSFont { .systemFont(ofSize: scaled(16)) }
         static func emojiPickerCell() -> NSFont { .systemFont(ofSize: scaled(19)) }
@@ -579,6 +607,33 @@ enum Design {
         static func configuration(_ pointSize: CGFloat, weight: NSFont.Weight = .medium)
             -> NSImage.SymbolConfiguration {
             .init(pointSize: pointSize, weight: weight)
+        }
+
+        /// The share of a control's height that its glyph takes.
+        ///
+        /// Three-fifths, which is what the chrome already holds without having said so: the
+        /// toolbar button is a 16pt slot in 28 points and the inline one 12 in 20, both within
+        /// a point of it. Stated as a *ratio* because a control's height is not always ours —
+        /// `Design.Size.choiceHeight` is authored by the theme and editable from 14 to 44 — and
+        /// a glyph that keeps a fixed slot inside a control that does not reads as a mark
+        /// floating in a box at one end of that range and as one wedged into it at the other.
+        static let glyphFraction: CGFloat = 0.6
+
+        /// The glyph slot inside a control `height` points tall, on the pixel grid.
+        static func slot(inControlOfHeight height: CGFloat) -> CGFloat {
+            (height * glyphFraction).rounded()
+        }
+
+        /// The optical size a slot's mark is configured at.
+        ///
+        /// `image(_:slot:pointSize:)` only ever configures *down*, so the point size states the
+        /// weight the mark should carry and the slot caps its size. A slot at or above the
+        /// toolbar's takes the toolbar's heavier optical size; anything smaller takes the one
+        /// that sits beside a label. Without this a promoted button drew its old 11pt mark in a
+        /// slot half again as wide, which is a lighter stroke in a larger control — the
+        /// opposite of what growing it was for.
+        static func pointSize(forSlot slot: CGFloat) -> CGFloat {
+            slot >= Size.tabIconSlot ? toolbar : control
         }
 
         /// A symbol sized so its rendered form fits `slot` — by *configuring* smaller, never by
@@ -728,6 +783,25 @@ enum Design {
         /// answer again.
         static var annotationTarget: NSColor {
             NSColor(name: NSColor.Name("threading.surface.annotationTarget")) { _ in
+                let accent = AppThemePalette.current.resolved(.accent)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.annotationTargetGroundIncreasedContrast
+                    : Opacity.annotationTargetGround
+                return (accent.usingColorSpace(.sRGB) ?? accent).withAlphaComponent(alpha)
+            }
+        }
+
+        /// The ground under the row a drag would land on.
+        ///
+        /// The third of the same sentence: the accent means "the one thing you are aiming at",
+        /// and here the pointer is holding something that will land on it. Held as far back as
+        /// `annotationTarget`, and for the same reason — this covers a row the reader still has
+        /// to *read*, since which picture is under the pointer is the whole question the
+        /// affordance answers. An opaque plate answers it by hiding it, which is how the first
+        /// version of the attachments drop came to draw a saturated slab over the row it was
+        /// naming, louder than the window's own selection two rows above.
+        static var dropTarget: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.dropTarget")) { _ in
                 let accent = AppThemePalette.current.resolved(.accent)
                 let alpha = Accessibility.increasesContrast
                     ? Opacity.annotationTargetGroundIncreasedContrast
@@ -1203,6 +1277,10 @@ enum Design {
         /// rest or under Reduce Motion.
         static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
         static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
+        /// Weave answers an ordinary pass immediately. Rotation is earned by a deliberate
+        /// dwell, late enough that crossing the sidebar never turns the brand into ambient
+        /// motion, but soon enough to reward someone inspecting the implied box.
+        static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
         /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
         /// six-fold silhouette at the end is the silhouette it had at the beginning.
         static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
@@ -1537,43 +1615,143 @@ private final class ThemeBackdropPatternLayer: CALayer {
     }
 }
 
-/// A shadow-only companion layer for one half of a material shadow.
+/// An exterior-only companion layer for one half of a material shadow.
 ///
-/// The layer is transparent: its explicit path supplies the casting silhouette, so it cannot
-/// cover view-drawn content merely to make Core Animation produce a shadow. Drawn controls use
-/// one for their primary shadow too: shadowing the control's own layer makes its title and glyph
-/// cast shadows, which bleed back through a translucent face. Keeping the path here also makes
-/// it follow autoresizing; a path frozen in `applySurface` would retain the surface's
-/// construction-time width after its constraints laid it out.
+/// A transparent `CALayer` with only a `shadowPath` sounds like a shape-only caster, but Core
+/// Animation composites that shadow above its parent's background. A centred opaque shadow
+/// therefore fills the whole face it is meant to sit behind — Cyberpunk's dark cards became
+/// lime slabs with pale text. This layer draws the shadow into an expanded transparent canvas
+/// and clears the caster's interior afterwards, leaving only the pixels outside the surface.
+///
+/// Drawn controls use the same layer for their primary shadow: shadowing the control's own layer
+/// makes its title and glyph cast depth. The expanded canvas follows autoresizing, so a path
+/// configured before Auto Layout cannot retain the surface's construction-time width.
 private final class ThemeShadowLayer: CALayer {
+    private var horizontalInset: CGFloat = 0
+    private var verticalInset: CGFloat = 0
+    private var haloColor = NSColor.clear.cgColor
+    private var haloRadius: CGFloat = 0
+    private var haloOffset = CGSize.zero
+
     var surfaceRadius: CGFloat = 0 {
-        didSet { setNeedsLayout() }
+        didSet {
+            setNeedsLayout()
+            setNeedsDisplay()
+        }
     }
 
     override init() {
         super.init()
+        needsDisplayOnBoundsChange = true
+        drawsAsynchronously = false
         masksToBounds = false
     }
 
     override init(layer: Any) {
-        let copiedRadius = (layer as? ThemeShadowLayer)?.surfaceRadius
+        let source = layer as? ThemeShadowLayer
         super.init(layer: layer)
-        if let copiedRadius { surfaceRadius = copiedRadius }
+        if let source {
+            horizontalInset = source.horizontalInset
+            verticalInset = source.verticalInset
+            haloColor = source.haloColor
+            haloRadius = source.haloRadius
+            haloOffset = source.haloOffset
+            surfaceRadius = source.surfaceRadius
+        }
+        needsDisplayOnBoundsChange = true
+        drawsAsynchronously = false
+        masksToBounds = false
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        needsDisplayOnBoundsChange = true
+        drawsAsynchronously = false
+        masksToBounds = false
+    }
+
+    func configure(
+        hostBounds: CGRect,
+        surfaceRadius: CGFloat,
+        color: CGColor,
+        radius: CGFloat,
+        opacity: Float,
+        offset: CGSize
+    ) {
+        horizontalInset = ceil(abs(offset.width) + radius * 2 + 1)
+        verticalInset = ceil(abs(offset.height) + radius * 2 + 1)
+        haloColor = color.copy(alpha: color.alpha * CGFloat(opacity)) ?? color
+        haloRadius = radius
+        haloOffset = offset
+        self.surfaceRadius = surfaceRadius
+
+        frame = CGRect(
+            x: hostBounds.minX - horizontalInset,
+            y: hostBounds.minY - verticalInset,
+            width: hostBounds.width + horizontalInset * 2,
+            height: hostBounds.height + verticalInset * 2
+        )
+        autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+
+        // Retain the ordinary shadow properties as inspectable geometry, but draw the halo
+        // ourselves. `shadowOpacity == 0` is load-bearing: allowing Core Animation to draw the
+        // same path would put its interior wash back above the face.
+        shadowColor = color
+        shadowRadius = radius
+        shadowOpacity = 0
+        shadowOffset = offset
+        updateSurfacePath()
+        setNeedsDisplay()
     }
 
     override func layoutSublayers() {
         super.layoutSublayers()
-        let radius = min(max(0, surfaceRadius), min(bounds.width, bounds.height) / 2)
-        shadowPath = CGPath(
-            roundedRect: bounds,
+        updateSurfacePath()
+        setNeedsDisplay()
+    }
+
+    override func draw(in context: CGContext) {
+        let path = makeSurfacePath()
+
+        context.saveGState()
+        context.setShadow(offset: haloOffset, blur: haloRadius, color: haloColor)
+        context.setFillColor(NSColor.black.cgColor)
+        context.addPath(path)
+        context.fillPath()
+        context.restoreGState()
+
+        // The caster exists only to manufacture the outside shadow. Removing its exact face
+        // after the blur leaves the host's authored fill and every label above it untouched.
+        context.saveGState()
+        context.setBlendMode(.clear)
+        context.addPath(path)
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    private var surfaceRect: CGRect {
+        CGRect(
+            x: horizontalInset,
+            y: verticalInset,
+            width: max(0, bounds.width - horizontalInset * 2),
+            height: max(0, bounds.height - verticalInset * 2)
+        )
+    }
+
+    private func makeSurfacePath() -> CGPath {
+        let rect = surfaceRect
+        let radius = min(max(0, surfaceRadius), min(rect.width, rect.height) / 2)
+        return CGPath(
+            roundedRect: rect,
             cornerWidth: radius,
             cornerHeight: radius,
             transform: nil
         )
+    }
+
+    private func updateSurfacePath() {
+        shadowPath = makeSurfacePath()
     }
 }
 
@@ -1801,8 +1979,18 @@ extension NSView {
     /// `applySurface` without freezing their live state, so they call this from `draw(_:)`; the
     /// explicit path keeps the title and glyph from becoming shadow casters themselves.
     func applyThemeControlGlow(_ wantsGlow: Bool, radius: CGFloat) {
-        applyThemeShadow(
+        applyThemeControlGlow(
             wantsGlow ? AppThemePalette.current.material.controlGlow : nil,
+            radius: radius
+        )
+    }
+
+    /// Applies an explicit authored shadow while retaining the compact-control layer names.
+    /// Buttons use this to select between CTA depth and neutral panel relief without changing
+    /// the shadow renderer or making the face's title and glyph into casters.
+    func applyThemeControlGlow(_ glow: AppTheme.Glow?, radius: CGFloat) {
+        applyThemeShadow(
+            glow,
             radius: radius,
             primaryCompanionName: "threading.controlGlow.primary",
             highlightName: "threading.controlGlow.highlight"
@@ -1846,17 +2034,16 @@ extension NSView {
                 existingPrimary?.removeFromSuperlayer()
                 primaryLayer = ThemeShadowLayer()
                 primaryLayer.name = primaryCompanionName
-                primaryLayer.frame = layer.bounds
-                primaryLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
                 layer.insertSublayer(primaryLayer, at: 0)
             }
-            primaryLayer.surfaceRadius = radius
-            primaryLayer.shadowColor = AppThemePalette.current.resolved(spec.role).cgColor
-            primaryLayer.shadowRadius = spec.radius
-            primaryLayer.shadowOpacity = Float(spec.opacity)
-            primaryLayer.shadowOffset = CGSize(width: spec.offsetX, height: spec.offsetY)
-            primaryLayer.setNeedsLayout()
-            primaryLayer.layoutIfNeeded()
+            primaryLayer.configure(
+                hostBounds: layer.bounds,
+                surfaceRadius: radius,
+                color: AppThemePalette.current.resolved(spec.role).cgColor,
+                radius: spec.radius,
+                opacity: Float(spec.opacity),
+                offset: CGSize(width: spec.offsetX, height: spec.offsetY)
+            )
         } else {
             existingPrimary?.removeFromSuperlayer()
             layer.shadowColor = AppThemePalette.current.resolved(spec.role).cgColor
@@ -1878,17 +2065,16 @@ extension NSView {
             existingHighlight?.removeFromSuperlayer()
             highlightLayer = ThemeShadowLayer()
             highlightLayer.name = highlightName
-            highlightLayer.frame = layer.bounds
-            highlightLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             layer.insertSublayer(highlightLayer, at: 0)
         }
-        highlightLayer.surfaceRadius = radius
-        highlightLayer.shadowColor = AppThemePalette.current.resolved(highlight.role).cgColor
-        highlightLayer.shadowRadius = highlight.radius
-        highlightLayer.shadowOpacity = Float(highlight.opacity)
-        highlightLayer.shadowOffset = CGSize(width: highlight.offsetX, height: highlight.offsetY)
-        highlightLayer.setNeedsLayout()
-        highlightLayer.layoutIfNeeded()
+        highlightLayer.configure(
+            hostBounds: layer.bounds,
+            surfaceRadius: radius,
+            color: AppThemePalette.current.resolved(highlight.role).cgColor,
+            radius: highlight.radius,
+            opacity: Float(highlight.opacity),
+            offset: CGSize(width: highlight.offsetX, height: highlight.offsetY)
+        )
     }
 }
 
@@ -2049,7 +2235,10 @@ enum BevelArtwork {
         // the sheen lands on the measured #DEDEDE, and the frame line is *pure black* —
         // a first pass derived it at #131313, which is precisely the kind of almost that
         // reads as "the shadow is off" without the eye saying why.
-        let sheen = highlight.lightened(by: -0.12)
+        // 98.css names this rail #DFDFDF beneath a white highlight. An eighth-step toward
+        // black lands on that exact byte; -0.12 rounded to #E0 and made every classic raised
+        // face one value too bright despite the construction otherwise matching pixel-for-pixel.
+        let sheen = highlight.lightened(by: -0.125)
         let frame = soft ? shadow : shadow.lightened(by: -1)
         return sunken
             ? EdgeColors(

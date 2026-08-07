@@ -1015,7 +1015,9 @@ Choosing a login is when the number actually changes a decision — an account a
 week is a poor place to start a long task — so the composer shows it twice over:
 
 - **In the identity chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
-  accounts are compared before one is picked.
+  accounts are compared before one is picked. Within the line the values carry the ink:
+  window names and separators sit back, and a value turns amber as its window nears the
+  limit and red when it is nearly spent — the same colours the toolbar pill uses.
 - **In the model chip's menu**, every model carries what a session on it would be measured
   against — the account's windows, plus that model's own where the plan meters one separately.
   This is the menu where a spent limit is escaped, since switching model is the way out of it.

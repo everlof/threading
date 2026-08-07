@@ -194,6 +194,55 @@ struct AppTheme: Codable, Equatable {
             try container.encodeIfPresent(sidebar, forKey: .sidebar)
             try container.encodeIfPresent(chrome, forKey: .chrome)
         }
+
+        // MARK: - Rebuilding
+
+        /// A copy with only the stated pieces replaced.
+        ///
+        /// This is the one way an edit rebuilds a variant from an existing one. Constructing
+        /// a fresh `Variant(...)` at an edit site is how the Current Theme page silently
+        /// stripped the chrome block from every custom takeover theme it touched: the
+        /// memberwise initializer defaults each regional block to nil, so a call written
+        /// before a block existed keeps compiling and drops it. A copy carries every stored
+        /// field by construction, so a future regional block rides through edit sites that
+        /// have never heard of it — `WindowChromeStyleTests` sweeps the stock catalogue to
+        /// hold `replacing()` to the identity.
+        func replacing(
+            roles: [AppThemeRole: NSColor]? = nil,
+            terminalPalette: TerminalTheme? = nil,
+            material: Material? = nil
+        ) -> Variant {
+            Variant(
+                roles: roles ?? self.roles,
+                terminalPalette: terminalPalette ?? self.terminalPalette,
+                material: material ?? self.material,
+                sidebar: sidebar,
+                chrome: chrome
+            )
+        }
+
+        /// The regional blocks get their own verbs because "set it to nil" must be sayable —
+        /// an optional parameter on `replacing` could not tell "leave it alone" from "take it
+        /// away", which is the exact distinction `AppThemeEditing.SidebarChange` exists for.
+        func replacingSidebar(_ sidebar: SidebarStyle?) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome
+            )
+        }
+
+        func replacingChrome(_ chrome: WindowChromeStyle?) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome
+            )
+        }
     }
 
     /// Radii, border weight, an optional panel shadow — and the typeface the chrome is set in.
@@ -227,6 +276,14 @@ struct AppTheme: Codable, Equatable {
         /// components inventing smaller point sizes. This composes with the user's text-size
         /// preference, which remains the final authority.
         var textScale: CGFloat = 1
+
+        /// The closed height of a compact value chooser.
+        ///
+        /// Period controls do not merely use smaller type inside a modern box: Platinum's
+        /// pop-up is a sixteen-point strip, BeOS uses an eighteen-point menu field, and Win32's
+        /// combo box is taller again. Keeping the measure beside the chooser anatomy makes that
+        /// distinction authorable without shrinking unrelated buttons, fields, or hit targets.
+        var choiceHeight: CGFloat = 26
 
         /// A shadow behind opted-in panels, in one of the theme's own colours. A zero offset
         /// reads as a glow; a non-zero, zero-radius shadow gives Bauhaus and Neo Brutalism
@@ -334,6 +391,20 @@ struct AppTheme: Codable, Equatable {
         /// track is the one-bit texture used by workstation-era interfaces.
         var scrollerTrackStyle: ScrollerTrackStyle = .solid
 
+        /// The period-specific anatomy of a scrollbar: arrow placement, thumb construction,
+        /// track relief, and (for Aqua) translucent gel. `automatic` keeps the app's modern
+        /// proportional thumb and the user's overlay/legacy preference. Every other value is
+        /// an explicitly authored desktop-era control and therefore occupies persistent
+        /// legacy scrollbar space.
+        var scrollerAppearance: ScrollerAppearance = .automatic
+
+        /// The complete anatomy of app-owned menus. A menu is not merely the open half of a
+        /// chooser: its frame, hard or ambient shadow, row rhythm, separators, selection, and
+        /// submenu marks varied independently across the desktop systems the takeover themes
+        /// reproduce. Keeping that family explicit lets stock, custom, and contributed themes
+        /// select the same production implementation without a theme-name branch.
+        var menuAppearance: MenuAppearance = .automatic
+
         /// How determinate progress is painted. Continuous is the cross-theme default;
         /// segmented is the classic Win32 block control, whose smooth form was opt-in.
         var progressStyle: ProgressStyle = .continuous
@@ -373,6 +444,46 @@ struct AppTheme: Codable, Equatable {
             case stippled
         }
 
+        enum ScrollerAppearance: String, Codable, CaseIterable {
+            case automatic
+            case windows98 = "windows_98"
+            case platinum
+            case beOS = "beos"
+            case openStep = "openstep"
+            case irix
+            case amiga
+            case aqua
+            /// Mac OS X 10.4 Tiger's slimmer Aqua control: the blue gel belongs to the
+            /// thumb while the two neutral arrow buttons sit together at the scrolling end.
+            case aquaTiger = "aqua_tiger"
+
+            var usesLegacyPresentation: Bool { self != .automatic }
+
+            /// Classic Macintosh, OPENSTEP, and Amiga put both arrows together at the
+            /// scrolling end. The others bookend the track.
+            var groupsArrowsAtTrailingEnd: Bool {
+                switch self {
+                case .platinum, .openStep, .amiga, .aquaTiger: true
+                default: false
+                }
+            }
+        }
+
+        enum MenuAppearance: String, Codable, CaseIterable {
+            /// The modern rounded app menu grammar.
+            case automatic
+            case windows98 = "windows_98"
+            case platinum
+            case beOS = "beos"
+            case openStep = "openstep"
+            case irix
+            case amiga
+            case aqua
+            case aquaTiger = "aqua_tiger"
+
+            var isHistorical: Bool { self != .automatic }
+        }
+
         enum ProgressStyle: String, Codable, CaseIterable {
             case continuous
             case segmented
@@ -380,7 +491,18 @@ struct AppTheme: Codable, Equatable {
 
         enum ChoiceStyle: String, Codable, CaseIterable {
             case chip
+            /// A sunken value well with a separately raised down-arrow button (Win32 combo box).
             case dropdown
+            /// One raised face with a down-arrow segment (BeOS/workstation pop-up).
+            case popup
+            /// The Platinum pop-up: one raised face and paired up/down triangles.
+            case doubleArrowPopup = "double_arrow_popup"
+            /// Tiger Aqua's rounded silver value well with a blue gel up/down segment.
+            case aquaPopup = "aqua_popup"
+            /// An Amiga cycle gadget: one raised face with a cycling double-arrow mark.
+            case cycle
+
+            var isClassic: Bool { self != .chip }
         }
 
         struct BackdropPattern: Codable, Equatable {
@@ -535,6 +657,15 @@ struct AppTheme: Codable, Equatable {
                 case raised
             }
 
+            /// Selects which authored material shadow an ordinary bordered action casts.
+            /// Primary actions always use `material.controlGlow`; a reference can give its
+            /// secondary actions the broader neutral panel relief or keep them flat.
+            enum SecondaryShadow: String, Codable, CaseIterable {
+                case control
+                case panel
+                case none
+            }
+
             var textTransform: TextTransform = .none
             var fontWeight: FontWeight = .medium
             /// Nil inherits the material's prose face. A button may name its own face because
@@ -545,9 +676,34 @@ struct AppTheme: Codable, Equatable {
             /// Additional points between title glyphs. This is a compact-control value, not an
             /// em unit: it follows the app's semantic text scale without compounding it.
             var tracking: CGFloat = 0
+            /// Multiplier over the semantic control size. Period web implementations state
+            /// device-pixel text at 96 dpi; this preserves that ratio without replacing the
+            /// app-wide type scale with a theme-name branch.
+            var fontScale: CGFloat = 1
+            /// Optional native pushbutton floors. Nil preserves the app's ordinary semantic
+            /// size; a historical implementation may state its period control metrics.
+            var minimumWidth: CGFloat?
+            var minimumHeight: CGFloat?
+            /// Classic disabled pushbuttons engrave shadow-coloured ink with a one-pixel lit
+            /// echo instead of lowering the whole label's opacity.
+            var embossesDisabledTitle: Bool = false
+            /// Whether Core Graphics may soften the title's glyph edges. Bitmap-era systems
+            /// such as Win32 and Workbench drew their small UI strikes on the device grid;
+            /// turning this off preserves that construction without making modern themes jagged.
+            var antialiasesTitle: Bool = true
             var primaryTreatment: PrimaryTreatment = .filled
             /// The semantic colour supplying a primary button's fill, border, and title.
             var primaryRole: AppThemeRole = .accent
+            /// The face of an ordinary bordered action. Kept on the button style rather than
+            /// the material's global control role because a reference may put raised white
+            /// buttons beside recessed lavender fields without making either one lie.
+            var secondaryRole: AppThemeRole = .controlResting
+            /// Optional independent hover face. Defaults to the ordinary control-hover role;
+            /// clay keeps its white body and reports hover through lift and shadow instead.
+            var secondaryHoverRole: AppThemeRole = .controlHover
+            /// The shadow vocabulary for an ordinary bordered action. Existing documents keep
+            /// the historical compact-control shadow unless they state another source.
+            var secondaryShadow: SecondaryShadow = .control
             /// An optional independent rule around a filled primary. Outlined primaries always
             /// use `primaryRole` for their rule.
             var primaryBorderRole: AppThemeRole?
@@ -568,8 +724,16 @@ struct AppTheme: Codable, Equatable {
                 typeface: Typeface? = nil,
                 fontFamily: String? = nil,
                 tracking: CGFloat = 0,
+                fontScale: CGFloat = 1,
+                minimumWidth: CGFloat? = nil,
+                minimumHeight: CGFloat? = nil,
+                embossesDisabledTitle: Bool = false,
+                antialiasesTitle: Bool = true,
                 primaryTreatment: PrimaryTreatment = .filled,
                 primaryRole: AppThemeRole = .accent,
+                secondaryRole: AppThemeRole = .controlResting,
+                secondaryHoverRole: AppThemeRole = .controlHover,
+                secondaryShadow: SecondaryShadow = .control,
                 primaryBorderRole: AppThemeRole? = nil,
                 hoverOffsetX: CGFloat = 0,
                 hoverOffsetY: CGFloat = 0,
@@ -582,8 +746,16 @@ struct AppTheme: Codable, Equatable {
                 self.typeface = typeface
                 self.fontFamily = fontFamily
                 self.tracking = tracking
+                self.fontScale = fontScale
+                self.minimumWidth = minimumWidth
+                self.minimumHeight = minimumHeight
+                self.embossesDisabledTitle = embossesDisabledTitle
+                self.antialiasesTitle = antialiasesTitle
                 self.primaryTreatment = primaryTreatment
                 self.primaryRole = primaryRole
+                self.secondaryRole = secondaryRole
+                self.secondaryHoverRole = secondaryHoverRole
+                self.secondaryShadow = secondaryShadow
                 self.primaryBorderRole = primaryBorderRole
                 self.hoverOffsetX = hoverOffsetX
                 self.hoverOffsetY = hoverOffsetY
@@ -594,7 +766,10 @@ struct AppTheme: Codable, Equatable {
 
             private enum CodingKeys: String, CodingKey {
                 case textTransform, fontWeight, typeface, fontFamily, tracking
-                case primaryTreatment, primaryRole
+                case fontScale, minimumWidth, minimumHeight, embossesDisabledTitle
+                case antialiasesTitle
+                case primaryTreatment, primaryRole, secondaryRole, secondaryHoverRole
+                case secondaryShadow
                 case primaryBorderRole, hoverOffsetX, hoverOffsetY, pressedOffsetX
                 case pressedOffsetY, collapseShadowOnHover
             }
@@ -612,12 +787,30 @@ struct AppTheme: Codable, Equatable {
                 typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface)
                 fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
                 tracking = try container.decodeIfPresent(CGFloat.self, forKey: .tracking) ?? 0
+                fontScale = try container.decodeIfPresent(CGFloat.self, forKey: .fontScale) ?? 1
+                minimumWidth = try container.decodeIfPresent(CGFloat.self, forKey: .minimumWidth)
+                minimumHeight = try container.decodeIfPresent(CGFloat.self, forKey: .minimumHeight)
+                embossesDisabledTitle = try container.decodeIfPresent(
+                    Bool.self, forKey: .embossesDisabledTitle
+                ) ?? false
+                antialiasesTitle = try container.decodeIfPresent(
+                    Bool.self, forKey: .antialiasesTitle
+                ) ?? true
                 primaryTreatment = try container.decodeIfPresent(
                     PrimaryTreatment.self, forKey: .primaryTreatment
                 ) ?? .filled
                 primaryRole = try container.decodeIfPresent(
                     AppThemeRole.self, forKey: .primaryRole
                 ) ?? .accent
+                secondaryRole = try container.decodeIfPresent(
+                    AppThemeRole.self, forKey: .secondaryRole
+                ) ?? .controlResting
+                secondaryHoverRole = try container.decodeIfPresent(
+                    AppThemeRole.self, forKey: .secondaryHoverRole
+                ) ?? .controlHover
+                secondaryShadow = try container.decodeIfPresent(
+                    SecondaryShadow.self, forKey: .secondaryShadow
+                ) ?? .control
                 primaryBorderRole = try container.decodeIfPresent(
                     AppThemeRole.self, forKey: .primaryBorderRole
                 )
@@ -707,6 +900,7 @@ struct AppTheme: Codable, Equatable {
             controlBorderWidth: CGFloat? = nil,
             backdropPattern: BackdropPattern? = nil,
             textScale: CGFloat = 1,
+            choiceHeight: CGFloat = 26,
             glow: Glow? = nil,
             popoverStyle: PopoverStyle = .system,
             controlGlow: Glow? = nil,
@@ -718,6 +912,8 @@ struct AppTheme: Codable, Equatable {
             fontFallbacks: [String] = [],
             scrollerPlacement: ScrollerPlacement = .trailing,
             scrollerTrackStyle: ScrollerTrackStyle = .solid,
+            scrollerAppearance: ScrollerAppearance = .automatic,
+            menuAppearance: MenuAppearance = .automatic,
             progressStyle: ProgressStyle = .continuous,
             choiceStyle: ChoiceStyle = .chip
         ) {
@@ -727,6 +923,7 @@ struct AppTheme: Codable, Equatable {
             self.controlBorderWidth = controlBorderWidth
             self.backdropPattern = backdropPattern
             self.textScale = textScale
+            self.choiceHeight = choiceHeight
             self.glow = glow
             self.popoverStyle = popoverStyle
             self.controlGlow = controlGlow
@@ -738,16 +935,18 @@ struct AppTheme: Codable, Equatable {
             self.fontFallbacks = fontFallbacks
             self.scrollerPlacement = scrollerPlacement
             self.scrollerTrackStyle = scrollerTrackStyle
+            self.scrollerAppearance = scrollerAppearance
+            self.menuAppearance = menuAppearance
             self.progressStyle = progressStyle
             self.choiceStyle = choiceStyle
         }
 
         private enum CodingKeys: String, CodingKey {
             case panelRadius, controlRadius, borderWidth, controlBorderWidth, backdropPattern
-            case textScale
+            case textScale, choiceHeight
             case glow, popoverStyle, controlGlow, buttonStyle, headingStyle, bevel, typeface, fontFamily
             case fontFallbacks
-            case scrollerPlacement, scrollerTrackStyle
+            case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
             case progressStyle, choiceStyle
         }
 
@@ -767,6 +966,7 @@ struct AppTheme: Codable, Equatable {
                 BackdropPattern.self, forKey: .backdropPattern
             )
             textScale = try container.decodeIfPresent(CGFloat.self, forKey: .textScale) ?? 1
+            choiceHeight = try container.decodeIfPresent(CGFloat.self, forKey: .choiceHeight) ?? 26
             glow = try container.decodeIfPresent(Glow.self, forKey: .glow)
             popoverStyle = try container.decodeIfPresent(
                 PopoverStyle.self, forKey: .popoverStyle
@@ -793,6 +993,14 @@ struct AppTheme: Codable, Equatable {
                 ScrollerTrackStyle.self,
                 forKey: .scrollerTrackStyle
             ) ?? .solid
+            scrollerAppearance = try container.decodeIfPresent(
+                ScrollerAppearance.self,
+                forKey: .scrollerAppearance
+            ) ?? .automatic
+            menuAppearance = try container.decodeIfPresent(
+                MenuAppearance.self,
+                forKey: .menuAppearance
+            ) ?? .automatic
             progressStyle = try container.decodeIfPresent(
                 ProgressStyle.self,
                 forKey: .progressStyle

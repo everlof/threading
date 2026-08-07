@@ -4,13 +4,30 @@ import AppKit
 enum UsageFormat {
 
     /// Compact time until a reset: `47m`, `2h 14m`, `3d 4h`.
+    ///
+    /// Never `0m`: a reset a few seconds away is still one minute's worth of waiting to a reader,
+    /// and a countdown that reaches zero and stays there reads as stuck.
     static func remaining(until date: Date, from now: Date = Date()) -> String {
-        let interval = max(0, date.timeIntervalSince(now))
-        let minutes = Int(interval / 60)
+        let minutes = Int(max(0, date.timeIntervalSince(now)) / 60)
+        return span(minutes: max(minutes, 1))
+    }
 
-        if minutes < 60 {
-            return "\(max(minutes, 1))m"
-        }
+    /// A span of time as text: `12s`, `47m`, `2h 14m`, `3d 4h`.
+    ///
+    /// The same vocabulary as `remaining`, so "two hours before you start" and "two hours until
+    /// the reset" read as the same quantity — but it keeps seconds, because the things measured
+    /// this way (how long a poke took) are often shorter than a minute and rounding those up to
+    /// `1m` would overstate what they cost.
+    static func duration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, interval)
+        guard seconds >= 60 else { return "\(Int(seconds.rounded()))s" }
+        return span(minutes: Int(seconds / 60))
+    }
+
+    /// Whole minutes in the largest units that stay readable. Shared so a countdown and a
+    /// duration cannot drift into two spellings of the same hour.
+    private static func span(minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes)m" }
 
         let hours = minutes / 60
         if hours < 24 {

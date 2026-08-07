@@ -405,9 +405,10 @@ resolutions:
   popover, where the pane's height is not at stake.
 
 `UsageWindowRow` and `UsageBarView` belong to the toolbar's popover and the usage settings page
-now. `AccountUsage.compactSummary` is the plain text every other surface shares — the account
-and model menus, this line, the tooltips; the pill keeps its own attributed build, which the
-model cannot produce because each value there carries its own window's severity colour.
+now. `AccountUsage.readings` is the structured reading every tinting surface consumes — the
+pill's attributed build and both menus' toned segments — and `AccountUsage.compactSummary` is
+the same list joined plain, for the surfaces that cannot tint: the tooltips and the composer's
+line inside the prompt box.
 
 **A bar travels to a new reading rather than appearing at it** (`UsageBarView.apply`): the fill
 eases over `Design.Motion.standard` and the severity tint crossfades, while the words state the

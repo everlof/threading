@@ -171,6 +171,27 @@ final class ChipViewTests: XCTestCase {
         }
     }
 
+    /// A styled subtitle has one entry point, and it keeps both halves in step: the runs the
+    /// row draws, and the plain join everything that is not drawing keeps reading — the
+    /// tooltip, the filter, the measured width. Two properties drifting apart would be a row
+    /// whose tooltip says something its pixels do not.
+    func testSettingSubtitleSegmentsKeepsThePlainStringInStep() {
+        var item = ThemedMenuItem(title: "Everlof")
+
+        item.setSubtitle([
+            ThemedMenuSubtitleSegment("Claude Code"),
+            ThemedMenuSubtitleSegment(" · ", .muted),
+            ThemedMenuSubtitleSegment("7d ", .muted),
+            ThemedMenuSubtitleSegment("93%", .critical)
+        ])
+        XCTAssertEqual(item.subtitle, "Claude Code · 7d 93%")
+        XCTAssertEqual(item.subtitleSegments?.count, 4)
+
+        item.setSubtitle([])
+        XCTAssertNil(item.subtitle)
+        XCTAssertNil(item.subtitleSegments)
+    }
+
     /// Choosing records the selection *and* reports it, in that order — a caller reading
     /// `selectedItem` from inside `onSelect` has to see the new value, not the old one.
     func testChoosingRecordsTheSelectionBeforeReportingIt() throws {

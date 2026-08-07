@@ -5,9 +5,46 @@ import AppKit
 /// Feature code describes meaning and state; `ThemedMenuPresenter` draws the complete dropdown
 /// from app roles. Keeping presentation details out of this type means both `ChipView` and
 /// `ThemedPopUp` share one visual and behavioral contract.
+/// One run of a themed menu subtitle, for the line that is more than one uniform ink.
+///
+/// The account rows' usage reading is why this exists: `Claude Code · 5h 22% · 7d 15%` as one
+/// secondary string is a wall of equally weighted numbers, and the comparison the menu exists
+/// for lives in exactly two of them. A tone names what a run *is* — furniture or a value, calm
+/// or under pressure — and the row resolves it to a colour at draw time, so a live theme switch
+/// re-inks the next frame rather than honouring colours frozen in at decoration time.
+struct ThemedMenuSubtitleSegment {
+
+    /// Semantic, not a colour: the row owns the palette, including the grounds where a tone
+    /// cannot be honoured at all (a classic selection band flattens every run to its own ink).
+    enum Tone {
+        /// The subtitle's own ink — what a plain, unsegmented subtitle draws in.
+        case standard
+        /// Quieter than the line: labels and separators, the furniture between values.
+        case muted
+        /// A value near its limit, in the theme's warning role.
+        case warning
+        /// A value nearly spent, in the theme's negative role.
+        case critical
+    }
+
+    let text: String
+    let tone: Tone
+
+    init(_ text: String, _ tone: Tone = .standard) {
+        self.text = text
+        self.tone = tone
+    }
+}
+
 struct ThemedMenuItem {
     let title: String
     var subtitle: String?
+    /// Toned runs over `subtitle`, set through `setSubtitle(_:)` so the two cannot disagree.
+    /// The row draws these when present; everything that is not drawing — the tooltip, the
+    /// type-to-filter, the measured width — keeps reading the plain string. One font across
+    /// every run, deliberately: tones change ink only, so the plain string measures exactly
+    /// what the styled line draws.
+    private(set) var subtitleSegments: [ThemedMenuSubtitleSegment]?
     var image: NSImage?
     var preview: ThemedMenuPreview?
     var representedValue: Any?
@@ -40,6 +77,15 @@ struct ThemedMenuItem {
         self.isEnabled = isEnabled
         self.onChoose = onChoose
         self.submenu = submenu
+    }
+
+    /// Sets both halves of a styled subtitle at once: the runs the row draws, and the plain
+    /// join every non-drawing consumer keeps — the tooltip, the filter, the measured width.
+    /// One entry point rather than two properties, because the two drifting apart is a row
+    /// whose tooltip says something its pixels do not.
+    mutating func setSubtitle(_ segments: [ThemedMenuSubtitleSegment]) {
+        subtitleSegments = segments.isEmpty ? nil : segments
+        subtitle = segments.isEmpty ? nil : segments.map(\.text).joined()
     }
 }
 
@@ -240,8 +286,11 @@ extension ThemedMenuEntry {
 
 // MARK: - Geometry
 
+@MainActor
 enum ThemedMenuLayout {
-    static let gap: CGFloat = Design.Spacing.tight
+    /// Modern popovers float off their opener. A classic dropdown is the other half of its
+    /// control and starts on the control's edge, as a Win32 popup menu does.
+    static var gap: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : Design.Spacing.tight }
     static let screenInset: CGFloat = Design.Spacing.small
     /// The tallest panel a window may carry — a share of the window rather than a flat number.
     /// The cap was a flat 360, set when the longest menu was half its eventual size; by the
@@ -304,7 +353,13 @@ enum ThemedMenuLayout {
 
     /// How far a submenu tucks under its parent panel's edge. Panels that merely touched read
     /// as two unrelated windows; the platform's own submenus overlap for the same reason.
-    static let submenuOverlap: CGFloat = gap
+    static var submenuOverlap: CGFloat {
+        switch ThemedMenuMetrics.appearance {
+        case .windows98: return 5
+        case .automatic: return gap
+        default: return 2
+        }
+    }
 
     /// Where a submenu panel lands: beside its parent panel, its first row level with the row
     /// that opened it. To the right until there is no room, then mirrored to the left; clamped
@@ -1333,17 +1388,41 @@ private final class ThemedMenuOverlayView: ThemedControl {
 /// same place, and that is an arithmetic claim rather than something a render shows.
 @MainActor
 enum ThemedMenuMetrics {
+    /// Menus have their own authored anatomy. A chooser and the menu it opens are related, but
+    /// Platinum's paired-arrow field does not imply its menu frame or row rhythm, and three
+    /// workstation families all use a down-arrow popup while drawing different menus.
+    static var appearance: AppTheme.Material.MenuAppearance {
+        AppThemePalette.current.material.menuAppearance
+    }
+
+    static var usesClassicGrammar: Bool {
+        appearance.isHistorical
+    }
+
     /// Between the panel's edge and its rows, so a highlighted row's capsule floats inside
     /// the panel instead of grazing its border.
-    static let outerInset: CGFloat = Design.Spacing.small
-    static let rowHeight: CGFloat = 28
+    static var outerInset: CGFloat {
+        switch appearance {
+        case .platinum: return 1
+        case .automatic: return Design.Spacing.small
+        default: return 2
+        }
+    }
+    static var rowHeight: CGFloat {
+        switch appearance {
+        case .platinum: return 19
+        case .windows98: return 21
+        case .automatic: return 28
+        default: return 18
+        }
+    }
     /// Taller than the ink it holds, and deliberately so: a title and its subtitle are drawn as
     /// one centred block, so everything above this beyond that block becomes the gap to the row
     /// stacked against it. At 42 the two gaps came out ~18pt within a pair against ~24pt between
     /// them and the pairs did not read as pairs; 46 buys a little over 2:1, which is the point at
     /// which proximity does the grouping on its own — no rules, no alternating fill, both of
     /// which would have fought the hover pill this row draws at full bleed.
-    static let subtitleRowHeight: CGFloat = 46
+    static var subtitleRowHeight: CGFloat { usesClassicGrammar ? 31 : 46 }
     /// How far a row's fill sits inside its own slot, so two *adjacent* filled rows are parted
     /// by a hairline rather than meeting.
     ///
@@ -1356,13 +1435,17 @@ enum ThemedMenuMetrics {
     ///
     /// Half a hairline each side, so the gap the pair opens is the whole one. Same arithmetic,
     /// and the same 1pt, as the sidebar's `hoverHighlightInsetY`.
-    static let fillInset: CGFloat = Design.Spacing.hairline / 2
+    static var fillInset: CGFloat {
+        usesClassicGrammar ? 0 : Design.Spacing.hairline / 2
+    }
     /// A separator's slot. Sized so the gap it opens between two rows' text reads as the
     /// ordinary inter-row rhythm plus the rule — at the old 9pt the rule crowded whichever
     /// row's fill it sat against and the spacing read as unequal.
-    static let separatorHeight: CGFloat = 13
+    static var separatorHeight: CGFloat {
+        appearance == .platinum ? 2 : (usesClassicGrammar ? 9 : 13)
+    }
     /// The strip across the top echoing what has been typed while the menu is open.
-    static let filterHeaderHeight: CGFloat = 22
+    static var filterHeaderHeight: CGFloat { usesClassicGrammar ? 18 : 22 }
     /// How far a filtered-out row's ink drops. Dimmed rather than hidden, so the menu keeps
     /// its shape while the user types and nothing moves under the pointer.
     static let filteredOutDimming: CGFloat = 0.4
@@ -1373,22 +1456,75 @@ enum ThemedMenuMetrics {
     static let disabledHoverWash: CGFloat = 0.4
     /// A row's own leading and trailing padding — also where the checkmark sits, which was
     /// previously drawn 4pt from the row's edge and read as pinned to the panel's side.
-    static let contentInset: CGFloat = Design.Spacing.medium
-    static let checkSize: CGFloat = 10
+    static var contentInset: CGFloat {
+        appearance == .windows98 ? 5 : (usesClassicGrammar ? 4 : Design.Spacing.medium)
+    }
+    static var checkSize: CGFloat { usesClassicGrammar ? 8 : 10 }
     /// The checkmark column: glyph plus the gap to whatever follows it.
-    static let leadingSlot: CGFloat = checkSize + Design.Spacing.small
-    static let imageSize: CGFloat = 14
-    static let imageSlot: CGFloat = 18
+    static var leadingSlot: CGFloat {
+        checkSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
+    }
+    static var imageSize: CGFloat { usesClassicGrammar ? 16 : 14 }
+    static var imageSlot: CGFloat {
+        imageSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
+    }
     /// A live preview's column. The orb is the widest thing that goes in it and states its own
     /// 20pt footprint, so the slot is that plus the gap to whatever follows — the same shape as
     /// the image column one size up, rather than a second guess at it.
-    static let previewSize: CGFloat = 20
-    static let previewSlot: CGFloat = previewSize + Design.Spacing.tight
+    static var previewSize: CGFloat { usesClassicGrammar ? 16 : 20 }
+    static var previewSlot: CGFloat {
+        previewSize + (usesClassicGrammar ? 3 : Design.Spacing.tight)
+    }
 
     /// The chevron marking a row that opens a submenu, and the column it sits in — trailing,
     /// where the platform's own submenu arrow lives.
-    static let submenuChevronSize: CGFloat = 8
-    static let submenuChevronSlot: CGFloat = submenuChevronSize + Design.Spacing.small
+    static var submenuChevronSize: CGFloat {
+        appearance == .windows98 ? 6 : (usesClassicGrammar ? 7 : 8)
+    }
+    static var submenuTrailingInset: CGFloat {
+        appearance == .windows98 ? 4 : contentInset
+    }
+    static var submenuChevronSlot: CGFloat {
+        submenuChevronSize + (usesClassicGrammar ? 4 : Design.Spacing.small)
+    }
+
+    static var titleFont: NSFont {
+        if appearance == .platinum {
+            return Design.Typography.control(weight: .bold)
+        }
+        let font = usesClassicGrammar
+            ? Design.Typography.controlRegular()
+            : Design.Typography.control()
+        guard appearance == .windows98 else { return font }
+
+        // The shell's nominal eight-point menu face was rasterised at the 96-dpi logical
+        // scale, while AppKit's point maps directly to a backing pixel in this 1x evidence
+        // fixture. The 10/9 correction turns the theme's authored 9.6pt control role into the
+        // measured 10.67px GDI raster without bypassing either the user's text-size preference
+        // or the resolved MS Sans Serif/W95FA fallback family.
+        return NSFont(
+            descriptor: font.fontDescriptor,
+            size: font.pointSize * 10 / 9
+        ) ?? font
+    }
+
+    /// Classic GDI placed the menu face one device pixel below AppKit's centred line box.
+    /// Keep this on the anatomy axis: a custom theme choosing Win98 menus inherits the same
+    /// baseline, while a different menu family under the Win98 palette does not.
+    static var titleBaselineOffset: CGFloat {
+        appearance == .windows98 ? -1 : 0
+    }
+
+    /// Win32 seats a 16px menu bitmap one device pixel above AppKit's geometric centre.
+    static var imageBaselineOffset: CGFloat {
+        appearance == .windows98 ? 1 : 0
+    }
+
+    static var panelFill: NSColor {
+        usesClassicGrammar ? Design.Surface.controlResting : Design.Surface.elevated
+    }
+
+    static var panelHasGlow: Bool { appearance == .automatic }
 
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
@@ -1421,14 +1557,25 @@ enum ThemedMenuMetrics {
     /// in the same place. A preview replaces the text rather than joining it, and a column of
     /// names that shifted sideways when one of them animated would read as a layout bug in the
     /// menu rather than as the transition it is demonstrating.
-    static var imageInset: CGFloat { contentInset + leadingSlot }
+    static var imageInset: CGFloat {
+        // Win32 reserves one leading mark column: a row contains either its check/radio mark
+        // or its icon. Adding both slots moved every icon and title 11px right of the native
+        // Start-menu cascade. Other families retain the independent columns their references
+        // expose (Platinum's icon-less Help rows still start after the check column).
+        appearance == .windows98 ? contentInset : contentInset + leadingSlot
+    }
 
     static func previewInset(hasImageColumn: Bool) -> CGFloat {
         imageInset + (hasImageColumn ? imageSlot : 0)
     }
 
     static func titleInset(hasImageColumn: Bool, hasPreviewColumn: Bool) -> CGFloat {
-        previewInset(hasImageColumn: hasImageColumn) + (hasPreviewColumn ? previewSlot : 0)
+        if appearance == .windows98 {
+            let markColumn = hasImageColumn ? imageSlot : leadingSlot
+            let previewColumn = hasPreviewColumn ? previewSlot : 0
+            return contentInset + max(markColumn, previewColumn)
+        }
+        return previewInset(hasImageColumn: hasImageColumn) + (hasPreviewColumn ? previewSlot : 0)
     }
 
     static func height(of entry: ThemedMenuEntry) -> CGFloat {
@@ -1482,7 +1629,7 @@ enum ThemedMenuMetrics {
         let text = entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry else { return nil }
             let title = ceil(item.title.size(
-                withAttributes: [.font: Design.Typography.control()]
+                withAttributes: [.font: titleFont]
             ).width)
             let subtitle = ceil((item.subtitle ?? "").size(
                 withAttributes: [.font: Design.Typography.detail()]
@@ -1493,19 +1640,25 @@ enum ThemedMenuMetrics {
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
         let chevronColumn = hasSubmenuColumn(entries) ? submenuChevronSlot : 0
+        let leadingColumns = appearance == .windows98
+            ? max(imageColumn == 0 ? leadingSlot : imageColumn, previewColumn)
+            : leadingSlot + imageColumn + previewColumn
         let content = outerInset * 2 + contentInset * 2
-            + leadingSlot + imageColumn + previewColumn + text + chevronColumn
+            + leadingColumns + text + chevronColumn
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
 }
 
 /// How the menu moves. File-local because no other surface animates this way yet; a second
 /// one promotes these to `Design`.
+@MainActor
 enum ThemedMenuMotion {
     static let appearScale: CGFloat = 0.97
     static let appearAnimationKey = "threading.menu.appear"
-    static let shadowOpacity: Float = 0.28
-    static let shadowRadius: CGFloat = 16
+    /// A classic menu is separated by its raised frame. A diffuse shadow is a modern floating-
+    /// card cue and makes the two-pixel submenu overlap look like an accidental gap.
+    static var shadowOpacity: Float { ThemedMenuMetrics.usesClassicGrammar ? 0 : 0.28 }
+    static var shadowRadius: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : 16 }
 
     /// How long the pointer rests on a parent row before its submenu opens. Short enough to
     /// feel attached to the hover, long enough that sweeping down a menu does not fan panels
@@ -1578,11 +1731,19 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         document = ThemedMenuDocumentView(views: views)
         super.init(frame: frame)
 
+        let paintsIndexedFrame = [
+            AppTheme.Material.MenuAppearance.windows98,
+            .platinum,
+        ].contains(ThemedMenuMetrics.appearance)
         applySurface(
-            fill: Design.Surface.elevated,
+            fill: ThemedMenuMetrics.panelFill,
             radius: .panel,
-            border: Design.Surface.border,
-            glow: true
+            // The two indexed classic frames are painted below. Leaving the generic layer
+            // border/bevel in place antialiases Windows' square four-tone edge and repaints
+            // Platinum's measured black/#222 containment rule with the theme border.
+            border: paintsIndexedFrame ? nil : Design.Surface.border,
+            glow: ThemedMenuMetrics.panelHasGlow,
+            bevel: paintsIndexedFrame ? .none : .automatic
         )
 
         scrollView.drawsBackground = false
@@ -1624,10 +1785,28 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        switch ThemedMenuMetrics.appearance {
+        case .windows98:
+            ThemedMenuPanelArtwork.drawWindows98Frame(in: bounds)
+        case .platinum:
+            ThemedMenuPanelArtwork.drawPlatinumFrame(in: bounds)
+        default:
+            break
+        }
+    }
+
     override func layout() {
         super.layout()
         let inset = ThemedMenuMetrics.outerInset
         var content = bounds.insetBy(dx: inset, dy: inset)
+        if ThemedMenuMetrics.appearance == .platinum {
+            // The menu's one-pixel hard shadow is outside the bordered panel on the trailing
+            // edge. A symmetric inset gave the document that shadow column and separators
+            // painted across the black containment rule at x = width - 2.
+            content.size.width = max(0, content.width - 1)
+        }
         if !filterLabel.isHidden {
             let header = ThemedMenuMetrics.filterHeaderHeight
             let labelHeight = ceil(filterLabel.font?.boundingRectForFont.height ?? header)
@@ -1694,19 +1873,100 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
     }
 }
 
+/// A render-only entrance to the same surface `ThemedMenuPresenter` puts on screen.
+///
+/// Historical conformance needs to give the production menu an exact source-sized frame and
+/// state without inventing a second HTML/CSS or test painter. Keeping the seam beside the
+/// private surface means the archive exercises the live rows, separators, selection, type,
+/// bevel, and scrolling implementation while ordinary callers still enter through the presenter.
+@MainActor
+enum ThemedMenuReferenceFixture {
+    static func make(
+        entries: [ThemedMenuEntry],
+        size: NSSize,
+        selectedEntryIndex: Int? = nil,
+        highlightedEntryIndex: Int? = nil
+    ) -> NSView {
+        let surface = ThemedMenuSurfaceView(
+            frame: NSRect(origin: .zero, size: size),
+            entries: entries,
+            selectedEntryIndex: selectedEntryIndex
+        )
+        surface.highlight(highlightedEntryIndex, scrollIntoView: false)
+        surface.layoutSubtreeIfNeeded()
+        surface.needsDisplay = true
+        return surface
+    }
+
+    /// A clipped source-sized view of a live submenu cascade. The production presenter owns
+    /// placement on screen; this seam keeps the same two menu surfaces while letting the
+    /// evidence archive compare the few overlapping edge pixels retained by a historical crop.
+    static func makeCascade(
+        entries: [ThemedMenuEntry],
+        size: NSSize,
+        highlightedEntryIndex: Int,
+        childEntries: [ThemedMenuEntry],
+        childSize: NSSize,
+        childOriginFromTopLeft: NSPoint,
+        childHighlightedEntryIndex: Int? = nil
+    ) -> NSView {
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        let parent = ThemedMenuSurfaceView(
+            frame: container.bounds,
+            entries: entries,
+            selectedEntryIndex: nil
+        )
+        parent.highlight(highlightedEntryIndex, scrollIntoView: false)
+        container.addSubview(parent)
+
+        let child = ThemedMenuSurfaceView(
+            frame: NSRect(
+                x: childOriginFromTopLeft.x,
+                y: size.height - childOriginFromTopLeft.y - childSize.height,
+                width: childSize.width,
+                height: childSize.height
+            ),
+            entries: childEntries,
+            selectedEntryIndex: nil
+        )
+        child.highlight(childHighlightedEntryIndex, scrollIntoView: false)
+        container.addSubview(child)
+        container.layoutSubtreeIfNeeded()
+        parent.needsDisplay = true
+        child.needsDisplay = true
+        return container
+    }
+}
+
 private final class ThemedMenuDocumentView: NSView {
 
     let naturalHeight: CGFloat
     private let views: [NSView]
+    private let viewHeights: [CGFloat]
 
     override var isFlipped: Bool { true }
 
     init(views: [NSView]) {
         self.views = views
-        naturalHeight = views.reduce(0) { total, view in
-            total + ((view as? ThemedMenuRowView)?.preferredHeight
-                ?? ThemedMenuMetrics.separatorHeight)
+        if ThemedMenuMetrics.appearance == .platinum, views.count > 1 {
+            // The official Help-menu crop exposes the actual edge rhythm: the first and last
+            // item slots are 18px, interior item slots 20px, and etched separators 2px. The
+            // outer slots meet the frame's inner highlight/shadow, so treating every row as a
+            // uniform 19px moved the first separator down while coincidentally leaving the
+            // second one correct.
+            viewHeights = views.enumerated().map { index, view in
+                guard view is ThemedMenuRowView else {
+                    return ThemedMenuMetrics.separatorHeight
+                }
+                return index == 0 || index == views.count - 1 ? 18 : 20
+            }
+        } else {
+            viewHeights = views.map { view in
+                (view as? ThemedMenuRowView)?.preferredHeight
+                    ?? ThemedMenuMetrics.separatorHeight
+            }
         }
+        naturalHeight = viewHeights.reduce(0, +)
         super.init(frame: .zero)
         for view in views { addSubview(view) }
     }
@@ -1719,9 +1979,7 @@ private final class ThemedMenuDocumentView: NSView {
     override func layout() {
         super.layout()
         var y: CGFloat = 0
-        for view in views {
-            let height = (view as? ThemedMenuRowView)?.preferredHeight
-                ?? ThemedMenuMetrics.separatorHeight
+        for (view, height) in zip(views, viewHeights) {
             view.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
             y += height
         }
@@ -1730,17 +1988,135 @@ private final class ThemedMenuDocumentView: NSView {
 
 private final class ThemedMenuSeparatorView: NSView, ThemedComponent {
     override func draw(_ dirtyRect: NSRect) {
-        let height = Design.Radius.border
+        if ThemedMenuMetrics.appearance == .platinum {
+            let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+            let shadowY = isFlipped ? bounds.minY : bounds.maxY - 1
+            let highlightY = isFlipped ? bounds.minY + 1 : bounds.maxY - 2
+            NSColor(srgbRed: 136 / 255, green: 136 / 255, blue: 136 / 255, alpha: 1)
+                .setFill()
+            NSRect(x: bounds.minX, y: shadowY, width: bounds.width, height: 1).fill()
+            Design.Surface.bevelHighlight.setFill()
+            NSRect(x: bounds.minX, y: highlightY, width: bounds.width, height: 1).fill()
+            return
+        }
         // Inset to the rows' own content padding, so the rule reads as part of the column
         // of text it divides rather than a wall-to-wall strut.
         let rect = NSRect(
             x: ThemedMenuMetrics.contentInset,
-            y: bounds.midY - height / 2,
+            y: bounds.midY - Design.Radius.border / 2,
             width: max(0, bounds.width - ThemedMenuMetrics.contentInset * 2),
-            height: height
+            height: Design.Radius.border
         )
-        Design.Surface.divider.setFill()
-        rect.fill()
+        if ThemedMenuMetrics.usesClassicGrammar {
+            // Win32's separator is an etched pair: BTNSHADOW followed by BTNHIGHLIGHT. A single
+            // translucent divider reads like a modern list rule against the flat button face.
+            Design.Surface.bevelShadow.setFill()
+            rect.fill()
+            Design.Surface.bevelHighlight.setFill()
+            rect.offsetBy(dx: 0, dy: 1).fill()
+        } else {
+            Design.Surface.divider.setFill()
+            rect.fill()
+        }
+    }
+}
+
+/// Indexed panel edges retained from the official Platinum Help-menu figure. The same reason
+/// the native scrollbars keep measured symbolic rows applies here: a generic raised bevel puts
+/// white on the outside top/left, while a Platinum menu has a black containment rule, one inner
+/// highlight/shadow pair, and a one-pixel hard drop shadow at the bottom/right.
+@MainActor
+private enum ThemedMenuPanelArtwork {
+    /// The Win32 popup frame is four indexed one-pixel rails, not the app's ordinary two-line
+    /// raised control bevel. In visual order it is BUTTONLIGHT, BTN HIGHLIGHT, BTN SHADOW,
+    /// black; the final black bottom/right rail is also the menu's hard one-pixel shadow.
+    ///
+    /// `outerLight` remains palette-derived so a custom theme that deliberately reuses the
+    /// Windows menu anatomy can recolour the face without inheriting a stray literal gray.
+    static func drawWindows98Frame(in rect: NSRect) {
+        guard rect.width >= 4, rect.height >= 4 else { return }
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        func visualRect(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) -> NSRect {
+            NSRect(
+                x: rect.minX + x,
+                y: isFlipped
+                    ? rect.minY + y
+                    : rect.maxY - y - height,
+                width: width,
+                height: height
+            )
+        }
+        func fill(_ color: NSColor, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+            color.setFill()
+            visualRect(x: x, y: y, width: width, height: height).fill()
+        }
+
+        let width = floor(rect.width)
+        let height = floor(rect.height)
+        let face = ThemedMenuMetrics.panelFill
+        let highlight = Design.Surface.bevelHighlight
+        let shadow = Design.Surface.bevelShadow
+        // BUTTONLIGHT is the quantized #DF step over the stock #C0 face. A half-channel bias
+        // keeps CoreGraphics' round-to-nearest conversion on that indexed value at 1x.
+        let outerLight = face.blended(withFraction: 30.5 / 63, of: highlight) ?? highlight
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.shouldAntialias = false
+        fill(face, 0, 0, width, height)
+        fill(outerLight, 0, 0, width, 1)
+        fill(outerLight, 0, 1, 1, height - 2)
+        fill(highlight, 1, 1, width - 2, 1)
+        fill(highlight, 1, 2, 1, height - 4)
+        fill(shadow, width - 2, 2, 1, height - 3)
+        fill(shadow, 1, height - 2, width - 2, 1)
+        fill(.black, width - 1, 1, 1, height - 1)
+        fill(.black, 0, height - 1, width, 1)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    static func drawPlatinumFrame(in rect: NSRect) {
+        guard rect.width >= 4, rect.height >= 4 else { return }
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        func visualRect(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) -> NSRect {
+            NSRect(
+                x: rect.minX + x,
+                y: isFlipped
+                    ? rect.minY + y
+                    : rect.maxY - y - height,
+                width: width,
+                height: height
+            )
+        }
+        func fill(_ color: NSColor, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+            color.setFill()
+            visualRect(x: x, y: y, width: width, height: height).fill()
+        }
+
+        let width = floor(rect.width)
+        let height = floor(rect.height)
+        // The source pixel is literal black. `label` is semantic elsewhere, but a user-edited
+        // role must not recolour historical menu hardware after `.platinum` has selected it.
+        let ink = NSColor.black
+        let face = ThemedMenuMetrics.panelFill
+        let innerShadow = NSColor(
+            srgbRed: 153 / 255, green: 153 / 255, blue: 153 / 255, alpha: 1
+        )
+        let hardShadow = NSColor(
+            srgbRed: 34 / 255, green: 34 / 255, blue: 34 / 255, alpha: 1
+        )
+
+        fill(.white, 0, 0, width, height)
+        fill(hardShadow, 2, height - 1, width - 2, 1)
+        fill(hardShadow, width - 1, 2, 1, height - 2)
+        fill(ink, 0, 0, width, 1)
+        fill(ink, 0, 0, 1, height - 1)
+        fill(ink, width - 2, 0, 1, height - 1)
+        fill(ink, 0, height - 2, width - 1, 1)
+        fill(face, 1, 1, width - 3, height - 3)
+        fill(Design.Surface.bevelHighlight, 1, 1, width - 4, 1)
+        fill(Design.Surface.bevelHighlight, 1, 1, 1, height - 3)
+        fill(innerShadow, width - 3, 2, 1, height - 4)
+        fill(innerShadow, 2, height - 3, width - 4, 1)
     }
 }
 
@@ -2010,18 +2386,44 @@ private final class ThemedMenuRowView: ThemedControl {
     override func draw(_ dirtyRect: NSRect) {
         // Every fill takes the same silhouette: one shape, drawn at two strengths. The inset
         // is what keeps a filled row off the one stacked against it.
-        let fillRect = bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.fillInset)
+        let fillRect: NSRect
+        if ThemedMenuMetrics.appearance == .windows98 {
+            // The native band starts one pixel inside the document's leading/top edge. Its
+            // trailing/bottom edges remain flush, producing the measured 20px band in a 21px
+            // row rather than a modern symmetrically inset capsule.
+            fillRect = NSRect(
+                x: bounds.minX + 1,
+                y: bounds.minY,
+                width: max(0, bounds.width - 2),
+                height: max(0, bounds.height - 1)
+            )
+        } else {
+            fillRect = bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.fillInset)
+        }
 
         // **A checked row is not a filled row.** The check states what is on; the fill states
         // where the pointer or the keyboard is, and only one row can be that at a time. Painting
         // both meant a menu of toggles came up three-quarters filled before it had been touched —
         // and the role it filled with, `selection`, is the ground behind selected *text*: at
-        // Win98's near-opaque navy or the System theme's accent it read as three highlighted rows
+        // Win98's solid navy or the System theme's accent it read as three highlighted rows
         // fighting the one the pointer was actually on.
         //
         // The open-submenu fill is the menu path: the parent stays lit while the pointer is
         // anywhere in the chain it opened, which is what keeps a three-panel menu readable.
-        if isKeyboardHighlighted || pressed || openSubmenuSurface != nil {
+        let isHighlighted = isKeyboardHighlighted || pressed || openSubmenuSurface != nil
+        let selection = isHighlighted && ThemedMenuMetrics.usesClassicGrammar
+            ? SelectionSurface.stated(over: ThemedMenuMetrics.panelFill)
+            : nil
+        if let selection {
+            // A Win32 menu highlight is a flat COLOR_HIGHLIGHT band, not another raised
+            // pushbutton. `bevel: .none` is load-bearing under hard-relief materials.
+            ThemedSurface.draw(
+                fillRect,
+                fill: selection.fill,
+                radius: 0,
+                bevel: .none
+            )
+        } else if isHighlighted {
             ThemedSurface.draw(
                 fillRect,
                 fill: Design.Surface.controlHover,
@@ -2042,13 +2444,16 @@ private final class ThemedMenuRowView: ThemedControl {
         }
 
         let alpha = contentAlpha
-        let label = ink(Design.Text.label, alpha)
+        let selectionLabel = selection != nil && ThemedMenuMetrics.appearance == .windows98
+            ? Design.Surface.bevelHighlight
+            : selection?.ink.label
+        let label = ink(selectionLabel ?? Design.Text.label, alpha)
         // `secondary` rather than `tertiary`, deliberately. A subtitle here is not decoration —
         // it is the sentence that says what a permission mode will *do* — and rendered against
         // these titles `tertiary` read as disabled rather than as support. The separation the
         // pair was missing comes from `ink` no longer flattening this role to opaque black, and
         // from the rhythm, not from taking the copy down another tier.
-        let secondary = ink(Design.Text.secondary, alpha)
+        let secondary = ink(selection?.ink.secondary ?? Design.Text.secondary, alpha)
 
         if selected {
             drawCheckMark(
@@ -2065,7 +2470,8 @@ private final class ThemedMenuRowView: ThemedControl {
         if hasImageColumn, let image = item.image {
             let imageRect = NSRect(
                 x: ThemedMenuMetrics.imageInset,
-                y: bounds.midY - ThemedMenuMetrics.imageSize / 2,
+                y: bounds.midY - ThemedMenuMetrics.imageSize / 2
+                    + ThemedMenuMetrics.imageBaselineOffset,
                 width: ThemedMenuMetrics.imageSize,
                 height: ThemedMenuMetrics.imageSize
             )
@@ -2075,7 +2481,7 @@ private final class ThemedMenuRowView: ThemedControl {
         if item.submenu != nil {
             drawChevron(
                 in: NSRect(
-                    x: bounds.maxX - ThemedMenuMetrics.contentInset
+                    x: bounds.maxX - ThemedMenuMetrics.submenuTrailingInset
                         - ThemedMenuMetrics.submenuChevronSize,
                     y: bounds.midY - ThemedMenuMetrics.submenuChevronSize / 2,
                     width: ThemedMenuMetrics.submenuChevronSize,
@@ -2091,10 +2497,17 @@ private final class ThemedMenuRowView: ThemedControl {
             hasImageColumn: hasImageColumn,
             hasPreviewColumn: hasPreviewColumn
         )
-        let titleFont = Design.Typography.control()
-        let titleHeight = ceil(titleFont.boundingRectForFont.height)
+        let titleFont = ThemedMenuMetrics.titleFont
+        // The **line box**, not `boundingRectForFont`. That rect carries the family's glyph
+        // extremes, `draw(in:)` sets its line down from the rect's top, and the difference is
+        // dead air above the words: under SF the two heights all but coincide and this read as
+        // centred, while under Platinum — whose Charcoal falls back to Geneva, 24.4pt of
+        // bounding rect around a 16pt line — every title sat 4pt above the checkmark and the
+        // icon in its own row, which are placed against `midY`. It also disagreed with a
+        // *hosted* preview in the title column, which is centred by constraint.
+        let titleHeight = Design.Typography.lineHeight(of: titleFont)
         let subtitleFont = Design.Typography.detail()
-        let subtitleHeight = ceil(subtitleFont.boundingRectForFont.height)
+        let subtitleHeight = Design.Typography.lineHeight(of: subtitleFont)
         let hasSubtitle = item.subtitle?.isEmpty == false
         // The two lines are placed as **one block, centred** — not each against `midY`
         // separately, which is what this did before. Independently, they sat 4pt apart inside a
@@ -2103,34 +2516,95 @@ private final class ThemedMenuRowView: ThemedControl {
         // ratio proximity states nothing and the menu reads as one evenly stacked column of
         // alternating weights rather than as pairs.
         //
-        // Stacked flush, because `boundingRectForFont.height` already carries the font's internal
-        // leading — the gap between the lines is inside the boxes, and adding another one on top
-        // is what re-opens the problem. Centring the block pools the row's remaining space at its
-        // two edges, where it separates rows, instead of splitting it around the text.
+        // Stacked flush, because a line box already carries the font's own leading — the gap
+        // between the lines is inside the boxes, and adding another one on top is what re-opens
+        // the problem. Centring the block pools the row's remaining space at its two edges,
+        // where it separates rows, instead of splitting it around the text.
         let blockBottom = bounds.midY - (titleHeight + subtitleHeight) / 2
-        let titleY = hasSubtitle
+        let titleY = (hasSubtitle
             ? blockBottom + subtitleHeight
-            : bounds.midY - titleHeight / 2
+            : bounds.midY - titleHeight / 2) + ThemedMenuMetrics.titleBaselineOffset
         let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
         let textWidth = max(
             0,
             bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn - x
         )
-        (item.title as NSString).draw(
-            in: NSRect(x: x, y: titleY, width: textWidth, height: titleHeight),
-            withAttributes: [.font: titleFont, .foregroundColor: label]
-        )
+        // Win98's GDI text and Platinum's QuickDraw menu face are indexed bitmaps. Letting
+        // CoreGraphics smooth either fallback produces the right outline under a gray veil,
+        // but does not reproduce the source pixels. Keep this deliberately narrower than the
+        // whole theme so ordinary prose remains readable.
+        let drawsIndexedText = ThemedMenuMetrics.appearance == .windows98
+            || ThemedMenuMetrics.appearance == .platinum
+        if drawsIndexedText {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.shouldAntialias = false
+            NSGraphicsContext.current?.cgContext.setShouldAntialias(false)
+            NSGraphicsContext.current?.cgContext.setAllowsAntialiasing(false)
+            NSGraphicsContext.current?.cgContext.setShouldSmoothFonts(false)
+            NSGraphicsContext.current?.cgContext.setAllowsFontSmoothing(false)
+        }
+        let drewPlatinumBitmap = ThemedMenuMetrics.appearance == .platinum
+            && AppSettings.chromeFontFamily == nil
+            && titleFont.familyName?.caseInsensitiveCompare("Charcoal") != .orderedSame
+            && !hasSubtitle
+            && PlatinumBitmapFont.draw(
+                item.title,
+                penX: x + 1,
+                baselineFromTop: PlatinumBitmapFont.centeredBaseline(
+                    in: bounds,
+                    offset: -1
+                ) ?? 0,
+                in: bounds,
+                ink: label
+            )
+        // An ellipsis rather than a hard clip when the panel's width cap wins: a menu is
+        // entitled to cut a line short — `ThemedMenuLayout.maximumWidth` exists — but a row
+        // sliced mid-word reads as a rendering fault, and `7d resets in` with the number gone
+        // is a sentence claiming to be complete. The mark is what says the line continues.
+        let truncating = NSMutableParagraphStyle()
+        truncating.lineBreakMode = .byTruncatingTail
+        if !drewPlatinumBitmap {
+            (item.title as NSString).draw(
+                in: NSRect(x: x, y: titleY, width: textWidth, height: titleHeight),
+                withAttributes: [
+                    .font: titleFont, .foregroundColor: label, .paragraphStyle: truncating
+                ]
+            )
+        }
 
         if let subtitle = item.subtitle, !subtitle.isEmpty {
-            (subtitle as NSString).draw(
+            let line = NSMutableAttributedString()
+            // Toned runs are resolved to colours *here*, per draw, so a theme switch under an
+            // open menu re-inks the next frame — the same reason the row reads `Design` roles
+            // instead of caching them. A classic selection band flattens every run to the
+            // band's own subtitle ink: that authored pair is the only ink measured against the
+            // band's solid fill, and a status hue or a quaternary grey over Win98 navy is
+            // exactly the unmeasured contrast the pair exists to prevent. The tint is a
+            // second signal, never the only one — the numbers say the same thing in any ink.
+            let runs = selection == nil ? item.subtitleSegments : nil
+            for segment in runs ?? [ThemedMenuSubtitleSegment(subtitle)] {
+                let tone: NSColor
+                switch segment.tone {
+                case .standard: tone = secondary
+                case .muted: tone = ink(Design.Text.tertiary, alpha)
+                case .warning: tone = ink(Design.Status.warning, alpha)
+                case .critical: tone = ink(Design.Status.negative, alpha)
+                }
+                line.append(NSAttributedString(string: segment.text, attributes: [
+                    .font: subtitleFont, .foregroundColor: tone, .paragraphStyle: truncating
+                ]))
+            }
+            line.draw(
                 in: NSRect(
                     x: x,
                     y: blockBottom,
                     width: textWidth,
                     height: subtitleHeight
-                ),
-                withAttributes: [.font: subtitleFont, .foregroundColor: secondary]
+                )
             )
+        }
+        if drawsIndexedText {
+            NSGraphicsContext.restoreGraphicsState()
         }
     }
 
@@ -2139,6 +2613,21 @@ private final class ThemedMenuRowView: ThemedControl {
     }
 
     private func drawCheckMark(in rect: NSRect, color: NSColor) {
+        if ThemedMenuMetrics.usesClassicGrammar {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.shouldAntialias = false
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: rect.minX, y: rect.midY))
+            path.line(to: NSPoint(x: rect.minX + rect.width * 0.36, y: rect.minY + 1))
+            path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - 1))
+            path.lineWidth = 1.5
+            path.lineCapStyle = .square
+            path.lineJoinStyle = .miter
+            color.setStroke()
+            path.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
         let path = NSBezierPath()
         path.move(to: NSPoint(x: rect.minX, y: rect.midY))
         path.line(to: NSPoint(x: rect.minX + rect.width * 0.38, y: rect.minY))
@@ -2153,6 +2642,19 @@ private final class ThemedMenuRowView: ThemedControl {
     /// The submenu chevron: `›`, drawn with the checkmark's own stroke so the two glyph
     /// columns read as one hand. Symmetric about the row's midline, so flip cannot skew it.
     private func drawChevron(in rect: NSRect, color: NSColor) {
+        if ThemedMenuMetrics.usesClassicGrammar {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.shouldAntialias = false
+            let triangle = NSBezierPath()
+            triangle.move(to: NSPoint(x: rect.minX + 1, y: rect.minY))
+            triangle.line(to: NSPoint(x: rect.maxX - 1, y: rect.midY))
+            triangle.line(to: NSPoint(x: rect.minX + 1, y: rect.maxY))
+            triangle.close()
+            color.setFill()
+            triangle.fill()
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
         let path = NSBezierPath()
         path.move(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.minY))
         path.line(to: NSPoint(x: rect.maxX - rect.width * 0.2, y: rect.midY))

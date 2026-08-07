@@ -275,6 +275,77 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(UsageFormat.resetCredits(3), "3 limit resets banked")
     }
 
+    // MARK: - Toned Segments
+
+    /// The menu line's grammar: names and separators recede, a calm value keeps the line's own
+    /// ink, and only a window under pressure takes its severity colour — the pill's rule,
+    /// transplanted. The tint is a second signal on top of the number, never a replacement.
+    @MainActor
+    func testMenuSegmentsTintOnlyThePressuredValues() {
+        var usage = makeUsage(windows: [
+            window(id: "5h", fraction: 0.43, resetsIn: 3600),
+            window(id: "7d", fraction: 0.80, resetsIn: 86_400)
+        ])
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.95, resetsIn: 86_400)]
+
+        let segments = AccountUsageMenu.summarySegments(for: usage, metering: nil, at: now)
+
+        XCTAssertEqual(
+            segments.map(\.text).joined(),
+            "5h 43% · 7d 80% · 7d Fable 95% · 7d resets in 1d"
+        )
+        XCTAssertEqual(tone(of: "43%", in: segments), .standard)
+        XCTAssertEqual(tone(of: "80%", in: segments), .warning)
+        XCTAssertEqual(tone(of: "95%", in: segments), .critical)
+        XCTAssertEqual(tone(of: "5h ", in: segments), .muted)
+        XCTAssertEqual(tone(of: "7d Fable ", in: segments), .muted)
+        XCTAssertEqual(tone(of: UsageDefaults.segmentSeparator, in: segments), .muted)
+        XCTAssertEqual(tone(of: "7d resets in 1d", in: segments), .muted)
+    }
+
+    /// The plain string every non-drawing consumer keeps — the tooltip, the filter, the
+    /// measured width — is the segments' own text joined, so the two cannot disagree.
+    @MainActor
+    func testMenuSegmentsAndTheirPlainLineSayTheSameThing() {
+        var usage = makeUsage(windows: [window(id: "7d", fraction: 0.56, resetsIn: 54_000)])
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: nil, resetsIn: -60)]
+
+        XCTAssertEqual(
+            AccountUsageMenu.summarySegments(for: usage, metering: nil, at: now).map(\.text).joined(),
+            AccountUsageMenu.summary(for: usage, metering: nil, at: now)
+        )
+        XCTAssertEqual(
+            AccountUsageMenu.modelSummarySegments(for: usage, running: "fable", at: now).map(\.text).joined(),
+            AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now)
+        )
+    }
+
+    /// The runtime leads the identity row's subtitle and survives a login with no reading —
+    /// it is identity, not decoration, and the one segment a network round trip cannot remove.
+    @MainActor
+    func testIdentitySegmentsLeadWithTheRuntimeAndSurviveAnEmptyReading() {
+        let usage = makeUsage(windows: [window(id: "5h", fraction: 0.22, resetsIn: 3600)])
+
+        let read = AccountUsageMenu.identitySegments(
+            runtime: .claude, for: usage, metering: nil, at: now
+        )
+        XCTAssertEqual(read.first?.text, "Claude Code")
+        XCTAssertEqual(read.first?.tone, .standard)
+        XCTAssertEqual(read.map(\.text).joined(), "Claude Code · 5h 22% · 5h resets in 1h")
+
+        let unread = AccountUsageMenu.identitySegments(
+            runtime: .claude, for: nil, metering: nil, at: now
+        )
+        XCTAssertEqual(unread.map(\.text), ["Claude Code"])
+    }
+
+    private func tone(
+        of text: String,
+        in segments: [ThemedMenuSubtitleSegment]
+    ) -> ThemedMenuSubtitleSegment.Tone? {
+        segments.first { $0.text == text }?.tone
+    }
+
     // MARK: - Helpers
 
     private func window(
