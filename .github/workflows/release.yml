@@ -79,7 +79,11 @@ jobs:
 
       - name: Resolve Sparkle's command-line tools
         run: |
+          # -disableAutomaticPackageResolution: resolve exactly the committed Package.resolved.
+          # Without it, a floating pin (Sparkle is upToNextMinor) rewrites the tracked file the
+          # day a new patch ships, and publish_release.sh's clean-worktree preflight fails.
           xcodebuild -resolvePackageDependencies \
+            -disableAutomaticPackageResolution \
             -project Threading.xcodeproj -scheme Threading \
             -derivedDataPath "$RUNNER_TEMP/dd"
           echo "THREADING_SPARKLE_BIN=$RUNNER_TEMP/dd/SourcePackages/artifacts/sparkle/Sparkle/bin" >> "$GITHUB_ENV"

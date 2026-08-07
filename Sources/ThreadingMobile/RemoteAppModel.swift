@@ -125,6 +125,12 @@ final class RemoteAppModel: ObservableObject {
         isDemo = true
         isPairing = false
         navigationPath = []
+        // The same hygiene as `selectHost`: a half-open theme-events socket for the real Mac
+        // would exit its receive loop on the first frame (the activeHostID guard) while
+        // leaving `themeEventsTask` non-nil, and `ensureThemeEvents` would then refuse to
+        // reconnect it after the demo ends — live theme and session events silently dead.
+        disconnectThemeEvents()
+        invalidateRefreshes()
         let host = DemoExperience.pairedHost
         hosts = [host]
         activeHostID = host.id
@@ -152,7 +158,8 @@ final class RemoteAppModel: ObservableObject {
         activeHostID = loaded.first?.id
         continuity.setActiveHostID(activeHostID)
         phase = .idle
-        if activeHostID != nil {
+        if let host = activeHost {
+            ensureThemeEvents(for: host)
             Task { await refresh() }
         }
     }

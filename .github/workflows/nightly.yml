@@ -93,7 +93,11 @@ jobs:
       - name: Resolve Sparkle's command-line tools
         if: steps.moved.outputs.changed == 'true'
         run: |
+          # -disableAutomaticPackageResolution: resolve exactly the committed Package.resolved.
+          # Without it, a floating pin (Sparkle is upToNextMinor) rewrites the tracked file the
+          # day a new patch ships, and publish_release.sh's clean-worktree preflight fails.
           xcodebuild -resolvePackageDependencies \
+            -disableAutomaticPackageResolution \
             -project Threading.xcodeproj -scheme Threading \
             -derivedDataPath "$RUNNER_TEMP/dd"
           echo "THREADING_SPARKLE_BIN=$RUNNER_TEMP/dd/SourcePackages/artifacts/sparkle/Sparkle/bin" >> "$GITHUB_ENV"
@@ -145,17 +149,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The tag rolls: delete release and tag together, then recreate at HEAD. gh creates
-          # the tag server-side, so nothing here runs `git push` (see CLAUDE.md on why local
-          # pushes are never scripted).
-          gh release delete nightly --cleanup-tag --yes || true
-          gh release create nightly \
-            "build/release/Threading-$THREADING_VERSION.zip" \
-            "build/release/appcast.xml" \
-            --prerelease \
-            --target "$(git rev-parse HEAD)" \
-            --title "Nightly $THREADING_VERSION" \
-            --notes-file "$RUNNER_TEMP/nightly-notes.md"
+          # Gapless roll: the previous nightly's feed stays live until the replacement is in
+          # place. Assets go up first — the appcast last, so it never names a zip that is not
+          # uploaded yet — then the tag is force-moved server-side via the API. Nothing here
+          # runs `git push` (see CLAUDE.md on why local pushes are never scripted), and a
+          # failure at any step leaves yesterday's nightly serving rather than a 404.
+          sha="$(git rev-parse HEAD)"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release upload nightly "build/release/Threading-$THREADING_VERSION.zip" --clobber
+            gh release upload nightly "build/release/appcast.xml" --clobber
+            gh api "repos/${{ github.repository }}/git/refs/tags/nightly" \
+              -X PATCH -f sha="$sha" -F force=true
+            gh release edit nightly \
+              --title "Nightly $THREADING_VERSION" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md"
+            # Date-named zips accumulate on a rolling release; keep only the one the feed names.
+            gh release view nightly --json assets -q '.assets[].name' \
+              | grep -E '^Threading-.*\.zip$' \
+              | grep -v "^Threading-$THREADING_VERSION.zip$" \
+              | while IFS= read -r asset; do
+                  gh release delete-asset nightly "$asset" --yes || true
+                done
+          else
+            gh release create nightly \
+              "build/release/Threading-$THREADING_VERSION.zip" \
+              "build/release/appcast.xml" \
+              --prerelease \
+              --target "$sha" \
+              --title "Nightly $THREADING_VERSION" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md"
+          fi
 
       - name: Remove the Sparkle private key
         if: always()
