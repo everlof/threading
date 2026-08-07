@@ -409,6 +409,7 @@ struct MobileAppIconChoice: Identifiable, Equatable {
         themed("irix-indigo-magic", "IRIX Indigo Magic", "IRIX"),
         themed("amiga-workbench-31", "Amiga Workbench 3.1", "Amiga"),
         themed("retro-98", "Windows 98", "Windows98"),
+        themed("tui", "TUI", "TUI"),
         themed("christmas", "Christmas", "Christmas"),
     ]
 

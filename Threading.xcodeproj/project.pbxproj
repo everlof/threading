@@ -2052,11 +2052,14 @@
 					AppIconThemeBotanical,
 					AppIconThemeIndustrial,
 					AppIconThemePlatinum,
+					AppIconThemeAqua,
+					AppIconThemeTiger,
 					AppIconThemeBeOS,
 					AppIconThemeOpenStep,
 					AppIconThemeIRIX,
 					AppIconThemeAmiga,
 					AppIconThemeWindows98,
+					AppIconThemeTUI,
 					AppIconThemeChristmas,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -2107,11 +2110,14 @@
 					AppIconThemeBotanical,
 					AppIconThemeIndustrial,
 					AppIconThemePlatinum,
+					AppIconThemeAqua,
+					AppIconThemeTiger,
 					AppIconThemeBeOS,
 					AppIconThemeOpenStep,
 					AppIconThemeIRIX,
 					AppIconThemeAmiga,
 					AppIconThemeWindows98,
+					AppIconThemeTUI,
 					AppIconThemeChristmas,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;

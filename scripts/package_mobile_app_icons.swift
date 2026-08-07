@@ -20,11 +20,14 @@ private let themes: [ThemeIcon] = [
     .init(id: "botanical", suffix: "Botanical"),
     .init(id: "industrial", suffix: "Industrial"),
     .init(id: "platinum-9", suffix: "Platinum"),
+    .init(id: "aqua-cheetah", suffix: "Aqua"),
+    .init(id: "aqua-tiger", suffix: "Tiger"),
     .init(id: "beos-r5", suffix: "BeOS"),
     .init(id: "openstep-42", suffix: "OpenStep"),
     .init(id: "irix-indigo-magic", suffix: "IRIX"),
     .init(id: "amiga-workbench-31", suffix: "Amiga"),
     .init(id: "retro-98", suffix: "Windows98"),
+    .init(id: "tui", suffix: "TUI"),
     .init(id: "christmas", suffix: "Christmas"),
 ]
 
