@@ -1,0 +1,103 @@
+# Builds, notarizes, and publishes a tagged release, entirely through the same scripts a
+# release from a Mac uses — scripts/publish_release.sh is the single implementation, and this
+# workflow only provisions what a fresh runner lacks: the signing certificate, the notary
+# credentials, and Sparkle's private key. Maintaining the steps here instead would be the
+# second list scripts/ci.sh exists to avoid.
+#
+# Trigger: push an annotated tag `vX.Y.Z` (by hand — pushes from the release machine recurse
+# into the submodule forks, so scripts never push; see CLAUDE.md).
+#
+# Required repository secrets:
+#   APPLE_CERTIFICATE_P12       base64 of a .p12 export of the Developer ID Application
+#                               certificate and its private key
+#   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+#   APPLE_ID                    the Apple ID that owns the certificate
+#   APPLE_APP_PASSWORD          an app-specific password for that Apple ID (notarytool)
+#   SPARKLE_PRIVATE_KEY         the contents of the file written by
+#                               generate_keys -x <file> --account mjukis-threading — the
+#                               base64 EdDSA seed. Threading's own key, deliberately not
+#                               claudex's, so this secret can never sign a claudex update;
+#                               see releasing.md.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # The publish script verifies the annotated tag object and its remote twin;
+          # a shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Select the newest Xcode 26
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+
+      - name: Install policy tools
+        run: brew install swiftlint ripgrep
+
+      - name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+
+      - name: Store the notary credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials threading-ci \
+            --apple-id "$APPLE_ID" --team-id SMQ3E8Y57T --password "$APPLE_APP_PASSWORD"
+
+      - name: Resolve Sparkle's command-line tools
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Threading.xcodeproj -scheme Threading \
+            -derivedDataPath "$RUNNER_TEMP/dd"
+          echo "THREADING_SPARKLE_BIN=$RUNNER_TEMP/dd/SourcePackages/artifacts/sparkle/Sparkle/bin" >> "$GITHUB_ENV"
+
+      - name: Write the Sparkle private key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          KEY_FILE="$RUNNER_TEMP/sparkle-ed25519"
+          (umask 077; printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE")
+          echo "THREADING_SPARKLE_PRIVATE_KEY_FILE=$KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Build, notarize, and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARY_PROFILE: threading-ci
+        run: scripts/publish_release.sh
+
+      - name: Remove the Sparkle private key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sparkle-ed25519"

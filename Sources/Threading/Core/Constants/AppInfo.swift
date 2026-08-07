@@ -25,6 +25,12 @@ enum AppInfo {
     static var buildChannel: BuildChannel {
         BuildChannel(infoValue: Bundle.main.infoDictionary?["ThreadingBuildChannel"])
     }
+
+    /// The human version — `0.0.0` on any build a release did not stamp, which is a useful
+    /// tell rather than a bug (see `docs/architecture/releasing.md`).
+    static var marketingVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
 }
 
 /// The release channel a build was made for.

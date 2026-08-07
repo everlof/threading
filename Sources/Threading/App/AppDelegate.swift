@@ -1033,14 +1033,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(.separator())
 
         // Under Help rather than the app menu, beside the support report: both are "something is
-        // wrong, or might be" errands, and neither is a preference.
-        let updateItem = NSMenuItem(
-            title: L10n.string("Check for Updates…"),
-            action: #selector(checkForUpdates),
-            keyEquivalent: ""
-        )
-        updateItem.target = self
-        menu.addItem(updateItem)
+        // wrong, or might be" errands, and neither is a preference. A command item like the
+        // rest, so the Keyboard page lists it and can bind it a chord.
+        menu.addItem(commandItem(AppCommands.ID.checkForUpdates, action: #selector(checkForUpdates)))
 
         // Above the support report on purpose: filing a ticket is what someone came to this
         // menu to do, and exporting a diagnostics file is what they do when asked to.
@@ -1123,6 +1118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             menuItem.isHidden = !MCPToolCatalog.hasEnabledThemeTools
             menuItem.state = mainWindowController?.isCurrentThemeVisible == true ? .on : .off
             return MCPToolCatalog.hasEnabledThemeTools
+        }
+        // Sparkle refuses re-entrant checks, and it also refuses everything when the updater
+        // failed to start — either way the item reads as unavailable instead of doing nothing.
+        if menuItem.action == #selector(checkForUpdates) {
+            return AppUpdater.shared.canCheckForUpdates
         }
 
         guard menuItem.action == #selector(performExtensionCommand(_:)),

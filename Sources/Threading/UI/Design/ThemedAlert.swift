@@ -114,6 +114,18 @@ final class ThemedAlert {
         NSAccessibility.post(element: panel, notification: .created)
     }
 
+    /// Ends the presentation without a button having been chosen.
+    ///
+    /// Exists for callers whose dialog can be *overtaken* — a software-update stage that
+    /// Sparkle moves past, a progress sheet whose work finished — where waiting for a click
+    /// would leave a dead sheet describing a state that no longer exists. Answers `.abort`
+    /// (or the caller's stated response) through the ordinary completion path, and does
+    /// nothing when nothing is presented.
+    func dismiss(with response: NSApplication.ModalResponse = .abort) {
+        guard presentedWindow != nil else { return }
+        finish(with: response)
+    }
+
     /// Builds the actual themed dialog tree without presenting it, for gallery and behavior tests.
     func makeContentView() -> NSView {
         prepareDefaultButtonIfNeeded()

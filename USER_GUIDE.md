@@ -2593,6 +2593,16 @@ projects. Switch it off under **Settings ▸ General ▸ Software Updates**; **H
 Updates…** still works when it is off, so turning off background traffic never means losing the
 ability to look.
 
+When an update is found, the offer appears as a sheet in Threading's own style: the new
+version, what you are on, the release notes rendered right there, and three answers —
+**Install Update**, **Remind Me Later** (also what Escape means), and **Skip This Version**.
+Skip is withheld for a critical fix, since skipping silences every future prompt for that
+version. An update found by the daily background check waits until Threading is frontmost
+before it says anything. Download and preparation each show a progress sheet — download can be
+cancelled, and once preparing starts the sheet says so instead of offering a Cancel that would
+no longer work — and the final step asks before the app quits and reopens as the new version.
+The menu command can also be given a keyboard shortcut under **Settings ▸ Keyboard**.
+
 **Reporting something.** **Help ▸ Report a Problem…** files an issue on Threading's GitHub
 without leaving the app. Pick whether it is a **Problem** or an **Improvement** — that is the
 label the ticket arrives with — give it a title and the details, and press Submit; ⌘Return in
@@ -2877,6 +2887,7 @@ sharing control.
 | Full Screen | Cmd+Ctrl+F |
 | Minimize | Cmd+M |
 | Settings (opens, and closes again) | Cmd+, |
+| Check for Updates… | unbound by default — assign one in Settings ▸ Keyboard |
 
 ### In the terminal
 

@@ -1,9 +1,14 @@
 # Releasing & Automatic Updates
 
 How a distributable Threading.app is produced, and how Sparkle updates it. Sparkle is wired in:
-`AppUpdater` is the only file that imports it, the switch is Settings ▸ General ▸ Software
-Updates, and what an update check reveals is on the Privacy page. What remains planned rather
-than done is the custom `SPUUserDriver` — see [The UI is ours](#the-ui-is-ours-with-one-documented-exception).
+`Core/Updates` is the only place that imports it, the switch is Settings ▸ General ▸ Software
+Updates, and what an update check reveals is on the Privacy page. The custom `SPUUserDriver` is
+built — every update stage renders as Threading's own sheets; see
+[The UI is ours](#the-ui-is-ours-with-one-documented-exception). So is everything after the
+stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
+nightly workflows under `.github/workflows/`. What remains before the first tag is one manual
+`generate_keys` run ([Keys](#keys--threadings-own-one-manual-step-from-real)) and a GitHub
+remote for this repository.
 
 ## Distribution signing is not a build setting
 
@@ -127,10 +132,16 @@ badge answers "which kind of build is this screenshot", not "which build".
 nightly install would permanently outrank stable and stop seeing updates the moment it
 should return there. A separate `SUFeedURL` — a rolling `nightly` pre-release tag serving its
 own `appcast.xml` — sidesteps the comparison entirely, and date-dotted versions satisfy both
-the dotted-digits guard and Sparkle's ordering within the feed. The nightly *pipeline* (a
-scheduled workflow that runs `ci.sh`, skips an unmoved `master`, and needs the Developer ID
-certificate, notary credentials and the Sparkle private key as CI secrets) is not built yet;
-its open questions live below.
+the dotted-digits guard and Sparkle's ordering within the feed. The nightly pipeline is
+`.github/workflows/nightly.yml`: scheduled, skips an unmoved `master` by comparing HEAD to the
+rolling `nightly` tag, builds `--channel nightly` with the date version through the same
+`release.sh` (whose quality gate is `ci.sh`), embeds a commits-since-last-nightly notes file,
+and republishes the rolling prerelease with its own `appcast.xml`. The app side is
+`UpdateFeedPolicy`: a nightly-channel build's `SPUUpdaterDelegate` routes to
+`releases/download/nightly/appcast.xml`, and the stable `SUFeedURL` in the plist stays the
+single source of truth for everyone else. A dev build (`0.0.0`) additionally never checks on a
+schedule — it is outranked by every release forever, so the daily check would nag daily
+forever; Help ▸ Check for Updates… still works there.
 
 **Beta is a feed feature, not a third pipeline.** Sparkle 2 items can carry
 `<sparkle:channel>beta</sparkle:channel>` in the stable appcast, invisible to updaters unless
@@ -223,24 +234,45 @@ nine (four app-side, five Sparkle) as Developer ID, hardened and timestamped.
 `SPUStandardUpdaterController` brings Sparkle's stock alert, progress and release-notes windows.
 That is third-party AppKit chrome inside an app whose whole design system exists to prevent
 exactly that, and `docs/THEME_BOUNDARY.md` forbids feature code from reaching stock controls at
-all. So the standard driver is not the plan; it is at most a scaffold to delete.
+all. The standard driver was a scaffold, and it is deleted: `AppUpdater` constructs
+`SPUUpdater(hostBundle:applicationBundle:userDriver:delegate:)` directly around
+`UpdateUserDriver`.
 
-**`SPUUserDriver` is a full replacement, not a set of hooks.** Implement it and drive
-`SPUUpdater` directly:
+**`SPUUserDriver` is a full replacement, not a set of hooks**, and the implementation is split
+where the tests want to stand. `UpdateFlow.swift` holds the provider-neutral vocabulary — what a
+found update may offer, when a download fraction is honest, how a notes payload decodes — with
+no Sparkle import; `UpdateUserDriver` reduces every callback to those values; `UpdatePresenter`
+renders them as `ThemedAlert` sheets on the main window, with `ThemedProgressBar`/`ThemedSpinner`
+for download and extraction, `ConfirmationAlert` for the two stages that ask a question
+(`.installUpdate` and `.installUpdateAndRelaunch` in the `ConfirmationPrompt` register, under
+the `.newQuestionEachTime` policy added for them), and "Check for Updates…" is an `AppCommand`
+(`app.checkForUpdates`), so the Keyboard page lists it and can bind it a chord.
 
-```swift
-SPUUpdater(hostBundle:applicationBundle:userDriver:delegate:)
-```
+Decisions a reader would otherwise re-litigate:
 
-Every stage becomes ours: permission request, check-in-progress, update found, release notes,
-download progress, extraction progress, ready-to-install, installing, installed, errors, and
-dismiss. Nearly all of its methods are required — `showUpdateInFocus` is the only one explicitly
-optional — which is the honest cost: the protocol is the whole lifecycle, not a themeable alert.
-
-The mapping onto existing components is direct, which is what makes this affordable: the update
-alert is a themed sheet, download and extraction are `ThemedProgressBar`, release notes render in
-the display panel's web view, and "Check for Updates…" is an `AppCommand` like everything else,
-so it picks up a keyboard binding for free.
+- **Release notes render natively in the sheet, not in the display panel's web view** (an
+  earlier draft of this file sketched the panel). The panel belongs to a session; an update
+  belongs to the app, and can arrive with no session selected. `MarkdownView` already draws in
+  the active theme, which no web view does for free.
+- **The appcast embeds release notes as Markdown.** `scripts/generate_appcast.sh` hands
+  `generate_appcast --embed-release-notes` a `.md` file, which it embeds as
+  `<description sparkle:format="markdown">` — the exact shape the sheet renders — and the
+  script fails the release if the generated feed carries any other format. Embedded notes
+  need no second fetch; a feed that links notes instead still works, decoded through the
+  declared encoding with UTF-8 and Latin-1 fallbacks.
+- **Sparkle's first-run permission prompt never draws.** Threading already owns that choice as
+  the Settings ▸ General switch, so the driver answers the request from the recorded setting,
+  and the system profile is never sent — the Privacy page's description depends on that.
+- **A scheduled check never interrupts.** An update found in the background waits until the app
+  is active and has a window before its sheet appears; a user-initiated check answers on the
+  spot, and its "Checking…" sheet appears only after 0.6 s so the common sub-second check shows
+  nothing but the verdict.
+- **A critical update is offered no Skip** — skipping suppresses every future prompt for that
+  version — and an information-only item offers its `infoURL` page rather than an Install
+  Sparkle forbids.
+- **The no-update and error sheets speak Sparkle's own alert-ready strings**, because "no update
+  for you" has reasons a hardcoded "You're up to date" would misreport: OS too old, channel
+  gated, already newest.
 
 **The one thing a custom driver cannot take over.** After the app terminates for the file swap,
 Sparkle's own installer agent can put a small progress window on screen —
@@ -259,39 +291,52 @@ package is the right default until that window actually bothers someone.
 
 Either way the decision belongs in `design-system.md` too, as a decision rather than an accident.
 
-### Keys — reusing the existing one
+### Keys — Threading's own, one manual step from real
 
-**Do not run `generate_keys`.** A Sparkle EdDSA key already exists in the login keychain and
-Threading reuses it:
+**The decision is made: Threading signs with its own EdDSA key, not claudex's.** An earlier
+draft of this file chose to reuse the claudex keypair (account `mjukis-claudex`), which worked
+while both apps signed on one private machine. The release pipeline now lives in GitHub
+Actions, where the private key is a repository secret — and a shared key would extend
+*claudex's* blast radius to anyone who compromises Threading's CI. Nothing has shipped through
+Sparkle, so minting a separate key was free; after the first published build it would have
+meant every install reinstalling by hand.
 
-```
-service:       https://sparkle-project.org
-account:       mjukis-claudex
-SUPublicEDKey: 1oYHD7FlQLUy7qQc9NISuCUFzscHMjMnk5Sm6d3/noM=
-```
-
-That is the claudex key. Sharing one keypair across both apps is a deliberate choice and works
-without ceremony — the feed URL is per-app and the public key is baked into each bundle — but it
-means the two share a blast radius: whoever can sign an update for one can sign one for the
-other. The account name stays `mjukis-claudex` rather than being renamed, because renaming a
-keychain account that claudex signs against would break claudex's releases for no gain.
-
-Every tool needs the account named explicitly, since it is not the default global one:
+The one manual step, which agents cannot perform (creating a signing key in the login keychain
+is deliberately permission-gated):
 
 ```
-sign_update --account mjukis-claudex <archive>
-generate_appcast --account mjukis-claudex <release-dir>
-generate_keys -p --account mjukis-claudex        # re-print the public key
+generate_keys --account mjukis-threading         # prints the public key
 ```
 
-**Lose this key and no existing install of either app can be updated again** — a new key means
-every user reinstalls by hand. `generate_keys -x <file> --account mjukis-claudex` exports it
-(base64 of the 32-byte private seed) for an offline backup; `-f <file>` imports it on a second
-machine. For CI, pipe it from a secret rather than the deprecated `-s` flag:
+Then put the printed public key into `Sources/Threading/Resources/Info.plist` under
+`SUPublicEDKey` — which today still carries the claudex public key from the earlier draft.
+This cannot be forgotten halfway: `scripts/generate_appcast.sh` compares the signing account's
+public key against the shipped plist and refuses to sign on a mismatch, and `generate_appcast`
+itself leaves the enclosure unsigned when the app's key disagrees, which the script also
+treats as fatal. A half-made swap fails the release rather than stranding installs.
+
+Every tool needs the account named explicitly, since it is not the default global one; the
+scripts default to it (`THREADING_SPARKLE_ACCOUNT` overrides):
 
 ```
-echo "$SPARKLE_PRIVATE_KEY" | ./sign_update --ed-key-file - <archive>
+sign_update --account mjukis-threading <archive>
+generate_appcast --account mjukis-threading <release-dir>
+generate_keys -p --account mjukis-threading      # re-print the public key
 ```
+
+**Lose this key and no existing install can be updated again** — a new key means every user
+reinstalls by hand. `generate_keys -x <file> --account mjukis-threading` exports it (base64 of
+the 32-byte private seed) for an offline backup and for CI: the `SPARKLE_PRIVATE_KEY`
+repository secret is that file's contents, which the workflows hand to the scripts through
+`THREADING_SPARKLE_PRIVATE_KEY_FILE` (`--ed-key-file` under the hood, never the deprecated
+`-s` flag).
+
+**The feed is signed too, not just the archives.** `SURequireSignedFeed` and
+`SUVerifyUpdateBeforeExtraction` are set in Info.plist (claudex's hardening, adopted): the
+appcast must carry a valid EdDSA signature over itself — GitHub serving the feed is otherwise
+part of the trusted surface — and an archive is verified before it is unpacked, so an
+archive-parsing bug cannot be reached by unsigned bytes. Declaring `SURequireSignedFeed` is
+also what makes `generate_appcast` sign the feed at all, which the script asserts.
 
 ### Steps
 
@@ -302,35 +347,43 @@ echo "$SPARKLE_PRIVATE_KEY" | ./sign_update --ed-key-file - <archive>
 2. Back up the existing private key (above) before anything is published.
 3. Info.plist: `SUFeedURL` (HTTPS, non-negotiable under ATS), the existing `SUPublicEDKey`, and
    `SUEnableAutomaticChecks`.
-4. Wire the updater with a custom `SPUUserDriver`. There is no MainMenu.xib here
-   (`NSMainNibFile` is empty), so the nib route in Sparkle's docs does not apply — construct
-   `SPUUpdater` in code and hang "Check for Updates…" off the app menu as an `AppCommand`.
-5. Extend `scripts/release.sh`: run `generate_appcast --account mjukis-claudex` over the release
-   directory (it signs the archives, writes `appcast.xml`, and produces delta updates), then
-   publish the zips and the appcast together. It runs *after* the notarize-and-staple step, since
-   the zip has to be rebuilt from the stapled bundle and re-signing a changed archive would
-   otherwise invalidate the appcast's signature.
-6. Host the appcast and archives over HTTPS. Whatever serves them is now part of the app's
-   trusted surface — a compromised feed is only stopped by the EdDSA signature, which is the
-   reason `SUPublicEDKey` is baked into the bundle.
-7. A settings surface for update preferences belongs on a page; General is the natural home, and
-   Privacy should stay about OS grants.
+4. ~~Wire the updater with a custom `SPUUserDriver`.~~ Done — see
+   [The UI is ours](#the-ui-is-ours-with-one-documented-exception). `SPUUpdater` is constructed
+   in code (there is no MainMenu.xib; `NSMainNibFile` is empty) and "Check for Updates…" lives
+   in the Help menu as the `app.checkForUpdates` `AppCommand`.
+5. ~~Generate and publish the appcast.~~ Done — `scripts/generate_appcast.sh` (signing, the
+   CHANGELOG.md-section release notes, markdown-format and signature assertions) and
+   `scripts/publish_release.sh` (tag preflight, `release.sh --notarize`, the appcast, and the
+   GitHub release carrying zip + `appcast.xml` together). The appcast step runs *after*
+   notarize-and-staple, since the zip is rebuilt from the stapled bundle and re-signing a
+   changed archive would invalidate the appcast's signature. **Neither script ever pushes**:
+   `submodule.recurse` makes a push from this machine publish the forked submodules, so the
+   tag is pushed by hand and `publish_release.sh` only verifies the remote already has it, at
+   HEAD, annotated.
+6. ~~Host the appcast and archives over HTTPS.~~ Done — GitHub Releases, claudex's pattern:
+   the stable feed is `releases/latest/download/appcast.xml`, uploaded beside each release's
+   zip so `latest` always resolves to a matching pair. Whatever serves the feed is part of the
+   app's trusted surface, which is why the feed itself is now signed (`SURequireSignedFeed`)
+   on top of the enclosure signatures. `.github/workflows/release.yml` runs the same
+   `publish_release.sh` on a pushed `v*` tag, provisioning only what a fresh runner lacks
+   (certificate, notary profile, the Sparkle key secret — see the workflow header for the
+   secret names).
+7. ~~A settings surface for update preferences.~~ Done long since — Settings ▸ General ▸
+   Software Updates owns the switch, and Privacy stays about OS grants.
 
-### Open questions before starting
+### What remains open
 
 - Does an update need to preserve anything beyond `~/Library/Application Support/Threading`?
   Sparkle replaces the bundle, so the SQLite store and settings survive, but the extension
   helpers' quarantine state is worth checking against a real upgrade — that is the one piece of
   this app's state that lives outside the usual containers.
 - Whether Threading is distributed publicly at all, or only to a handful of machines. A private
-  feed changes nothing technically but makes the Homebrew cask and website steps moot.
-- **Whether the claudex key sharing survives open-sourcing and nightly CI.** The shared keypair
-  above was chosen when both apps signed on one private machine. A nightly pipeline puts the
-  private key in GitHub Actions secrets of a public repository, which extends *claudex's* blast
-  radius to anyone who compromises Threading's CI. Nothing has shipped through Sparkle yet, so
-  the "lose this key and no install updates again" constraint has not started — minting
-  Threading its own EdDSA key is free today and impossible after the first published build.
-  Decide before anything publishes.
-- A dev build (`0.0.0`) that checks the stable feed will be offered every release as an
-  "update" forever. Harmless until the feed exists; once it does, `AppUpdater` probably wants
-  to leave scheduled checks off for `.dev` builds while keeping the explicit menu command.
+  feed changes nothing technically, but the Homebrew cask and any website step wait on this —
+  claudex's `publish-homebrew-cask.sh` is the template if the answer is public.
+- The repository itself has no `origin` remote yet; the workflows and `publish_release.sh` are
+  dormant until it does, and each fails with a sentence saying so rather than half-working.
+
+Two questions this section used to carry are settled: the claudex key sharing is ended (see
+[Keys](#keys--threadings-own-one-manual-step-from-real) — one manual `generate_keys` run
+remains), and a dev build no longer schedules checks against the stable feed
+(`UpdateFeedPolicy.allowsScheduledChecks`, tested in `UpdateFlowTests`).

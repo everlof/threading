@@ -24899,7 +24899,28 @@
           }
         }
       }
-    }
+    },
+    "Later": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senare"}}}},
+    "Checking for Updates…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Söker efter uppdateringar…"}}}},
+    "Update Available": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdatering tillgänglig"}}}},
+    "Downloading Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hämtar uppdateringen…"}}}},
+    "Preparing Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbereder uppdateringen…"}}}},
+    "Ready to Install": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Redo att installera"}}}},
+    "Install Update": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installera uppdateringen"}}}},
+    "Install and Relaunch": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installera och starta om"}}}},
+    "Remind Me Later": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Påminn mig senare"}}}},
+    "Skip This Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hoppa över den här versionen"}}}},
+    "Learn More…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läs mer…"}}}},
+    "Loading release notes…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser in versionsinformationen…"}}}},
+    "Release notes could not be loaded.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Versionsinformationen kunde inte läsas in."}}}},
+    "Installing Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installerar uppdateringen…"}}}},
+    "Update Installed": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdateringen är installerad"}}}},
+    "Threading %@ is ready to download. You have %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading %@ är redo att hämtas. Du har %@."}}}},
+    "Threading %@ is available.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading %@ är tillgänglig."}}}},
+    "Threading will quit and reopen as the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas och öppnas igen som den nya versionen."}}}},
+    "Threading will quit in a moment.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas om en stund."}}}},
+    "Threading is now running the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kör nu den nya versionen."}}}},
+    "Asks the release feed whether a newer Threading exists.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frågar utgåvoflödet om det finns en nyare version av Threading."}}}}
   },
   "version": "1.0"
 }

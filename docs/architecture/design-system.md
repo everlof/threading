@@ -375,6 +375,19 @@ line, written beside the remaining lifecycle prompts: **a prompt is right where 
 a different action the user has to know to take, and wrong where the way back can be handed to
 them.** Deleting is the other side of it — nothing survives to undo with, so it still asks.
 
+**A question that is new each time it is asked is its own policy reason.** The software-update
+prompts (`.installUpdate`, `.installUpdateAndRelaunch`) are `.alwaysAsks(.newQuestionEachTime)`:
+each names a version that did not exist when the last answer was given, so a remembered answer
+would approve something sight unseen — which is automatic installation, a capability the app
+deliberately does not offer. Return stays on the affirmative, since nothing on that branch is
+destructive and declining is one Escape away. The whole update flow otherwise composes what this
+file already owns — `ThemedAlert` sheets, `ThemedProgressBar`/`ThemedSpinner`, `MarkdownView`
+release notes — with one recorded exception: after the app terminates for the file swap,
+Sparkle's own installer agent can put a small progress window on screen if the swap runs long.
+No user driver can take that over; it appears only when no Threading window exists to disagree
+with it, and forking Sparkle to remove it is the escape hatch if it ever grates
+(see [`releasing.md`](releasing.md)).
+
 **How long a receipt holds is a fact about who caused it, so it belongs to the request.** The six
 seconds are measured from a click: the hand is on the mouse and the eye is on the row that
 changed. An agent archiving its own session (see [`sessions.md`](sessions.md)) puts the same band

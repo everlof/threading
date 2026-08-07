@@ -141,6 +141,8 @@ enum AppCommands {
         /// stored shortcut override keys on — renaming it would silently drop the binding of
         /// anyone who had rebound the one command that survived.
         static let inspectElement = "inspect.element"
+
+        static let checkForUpdates = "app.checkForUpdates"
     }
 
     // MARK: Editable
@@ -228,7 +230,14 @@ enum AppCommands {
         // One command, not two. Element and freeflow are read from the modifiers held while
         // pointing, so the old ⌥⇧⌘I still opens freeflow — it arrives with ⇧ already down.
         AppCommand(id: ID.inspectElement, group: .inspect, title: "Inspect…",
-                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .option]), isEditable: true)
+                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .option]), isEditable: true),
+
+        // Threading's own errand listed beside the platform's chords, since "the app itself"
+        // is what the System section means to a reader. No default chord — checking for
+        // updates is a Help-menu visit, not a reflex — but a command, so it can earn one.
+        AppCommand(id: ID.checkForUpdates, group: .system, title: "Check for Updates…",
+                   detail: "Asks the release feed whether a newer Threading exists.",
+                   defaultShortcut: nil, isEditable: true)
     ]
 
     // MARK: Fixed

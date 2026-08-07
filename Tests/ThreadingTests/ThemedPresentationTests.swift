@@ -408,6 +408,32 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertTrue(window.firstResponder === source)
     }
 
+    /// `dismiss()` exists for a dialog that is *overtaken* — a software-update stage Sparkle
+    /// moves past — so it must end the sheet through the ordinary completion path without a
+    /// button having answered, and do nothing at all when nothing is presented.
+    func testAlertDismissEndsTheSheetWithoutAButtonAnswer() throws {
+        let window = testWindow()
+        defer { settle(window) }
+
+        let alert = ThemedAlert()
+        alert.messageText = "Downloading Update…"
+        alert.addButton(withTitle: "Cancel")
+
+        let dismissed = expectation(description: "sheet dismissed")
+        alert.beginSheetModal(for: window) { response in
+            XCTAssertEqual(response, .abort)
+            dismissed.fulfill()
+        }
+        XCTAssertNotNil(alert.presentedWindow)
+
+        alert.dismiss()
+        wait(for: [dismissed], timeout: 1)
+        XCTAssertNil(alert.presentedWindow)
+
+        // Nothing presented, nothing to do — not a crash, and not a second completion.
+        alert.dismiss()
+    }
+
     // MARK: - Semantics and themes
 
     func testAlertTreeExposesTheDialogCopyButtonsAndSuppressionChoice() throws {

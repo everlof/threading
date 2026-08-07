@@ -52,4 +52,7 @@ enum ThreadingLogger {
 
     /// GitHub connectivity — credential resolution, the app connection, brokered reads.
     static let github = Logger(subsystem: subsystem, category: "github")
+
+    /// Sparkle software updates — updater start, check outcomes, driver-stage failures.
+    static let updates = Logger(subsystem: subsystem, category: "updates")
 }

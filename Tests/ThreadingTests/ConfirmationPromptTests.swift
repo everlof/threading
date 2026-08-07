@@ -59,7 +59,9 @@ final class ConfirmationPromptTests: XCTestCase {
             "updateExtensionCapabilities",
             "approveAgentExtensionInstall",
             "shareChatLink",
-            "approveSystemPermissionPrompt"
+            "approveSystemPermissionPrompt",
+            "installUpdate",
+            "installUpdateAndRelaunch"
         ])
     }
 
@@ -86,7 +88,7 @@ final class ConfirmationPromptTests: XCTestCase {
             switch prompt.policy {
             case .alwaysAsks(.irreversible):
                 XCTAssertTrue(prompt.defaultsToCancel, "\(prompt.rawValue)")
-            case .alwaysAsks(.securityGrant), .suppressible:
+            case .alwaysAsks(.securityGrant), .alwaysAsks(.newQuestionEachTime), .suppressible:
                 XCTAssertFalse(prompt.defaultsToCancel, "\(prompt.rawValue)")
             }
         }

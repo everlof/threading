@@ -233,6 +233,8 @@
 		3EB0E276281A481C7F994E0D /* BrowserBaselineUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D25C04556FB4CB74F20B84B /* BrowserBaselineUITests.swift */; };
 		459A0DCE44921A5FCD022976 /* BrowserAutoCaptureRingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1081214BFD6E95CD70E381ED /* BrowserAutoCaptureRingTests.swift */; };
 		4A64033374581939A3547DA3 /* BrowserDiagnosticsComparisonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D791D3BB124A89937A536080 /* BrowserDiagnosticsComparisonTests.swift */; };
+		D12F7679985D2110DB1D795B /* UpdateFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F185843B43BA8B383EFFA9 /* UpdateFlowTests.swift */; };
+		FC5706F6BB5D936C011B4BF3 /* UpdateSheetRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -510,6 +512,8 @@
 		0D25C04556FB4CB74F20B84B /* BrowserBaselineUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserBaselineUITests.swift; sourceTree = "<group>"; };
 		1081214BFD6E95CD70E381ED /* BrowserAutoCaptureRingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserAutoCaptureRingTests.swift; sourceTree = "<group>"; };
 		D791D3BB124A89937A536080 /* BrowserDiagnosticsComparisonTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserDiagnosticsComparisonTests.swift; sourceTree = "<group>"; };
+		F1F185843B43BA8B383EFFA9 /* UpdateFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateFlowTests.swift; sourceTree = "<group>"; };
+		A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateSheetRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -850,6 +854,8 @@
 				0D25C04556FB4CB74F20B84B /* BrowserBaselineUITests.swift */,
 				1081214BFD6E95CD70E381ED /* BrowserAutoCaptureRingTests.swift */,
 				D791D3BB124A89937A536080 /* BrowserDiagnosticsComparisonTests.swift */,
+				F1F185843B43BA8B383EFFA9 /* UpdateFlowTests.swift */,
+				A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1434,6 +1440,8 @@
 				3EB0E276281A481C7F994E0D /* BrowserBaselineUITests.swift in Sources */,
 				459A0DCE44921A5FCD022976 /* BrowserAutoCaptureRingTests.swift in Sources */,
 				4A64033374581939A3547DA3 /* BrowserDiagnosticsComparisonTests.swift in Sources */,
+				D12F7679985D2110DB1D795B /* UpdateFlowTests.swift in Sources */,
+				FC5706F6BB5D936C011B4BF3 /* UpdateSheetRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

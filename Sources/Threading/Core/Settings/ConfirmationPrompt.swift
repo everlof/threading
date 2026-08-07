@@ -80,6 +80,11 @@ enum ConfirmationPrompt: String, CaseIterable {
     case shareChatLink
     case approveSystemPermissionPrompt
 
+    // MARK: Software updates
+
+    case installUpdate
+    case installUpdateAndRelaunch
+
     // MARK: - Policy
 
     enum Policy {
@@ -113,6 +118,14 @@ enum ConfirmationPrompt: String, CaseIterable {
             /// and revocable from Settings. What must never happen is the *grant* becoming
             /// invisible, which is exactly what a "Don't ask again" box on this branch is.
             case securityGrant
+
+            /// The question is new each time it appears: a software update names a version
+            /// that did not exist when the last answer was given, so a remembered answer
+            /// would approve something sight unseen — which is automatic installation, a
+            /// capability this app deliberately does not offer (`AppUpdater.apply`). Return
+            /// stays on the affirmative: nothing on this branch is destructive, and declining
+            /// is one Escape away.
+            case newQuestionEachTime
         }
     }
 
@@ -231,6 +244,9 @@ enum ConfirmationPrompt: String, CaseIterable {
              // system dialog, which is the bug rather than the quieter setting.
              .approveSystemPermissionPrompt:
             return .alwaysAsks(.securityGrant)
+
+        case .installUpdate, .installUpdateAndRelaunch:
+            return .alwaysAsks(.newQuestionEachTime)
         }
     }
 
@@ -250,7 +266,8 @@ enum ConfirmationPrompt: String, CaseIterable {
     var defaultsToCancel: Bool {
         switch policy {
         case .alwaysAsks(.irreversible): return true
-        case .alwaysAsks(.securityGrant), .suppressible: return false
+        case .alwaysAsks(.securityGrant), .alwaysAsks(.newQuestionEachTime), .suppressible:
+            return false
         }
     }
 
