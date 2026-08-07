@@ -24920,7 +24920,12 @@
     "Threading will quit and reopen as the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas och öppnas igen som den nya versionen."}}}},
     "Threading will quit in a moment.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas om en stund."}}}},
     "Threading is now running the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kör nu den nya versionen."}}}},
-    "Asks the release feed whether a newer Threading exists.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frågar utgåvoflödet om det finns en nyare version av Threading."}}}}
+    "Asks the release feed whether a newer Threading exists.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frågar utgåvoflödet om det finns en nyare version av Threading."}}}},
+    "Copy selected text to the clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera markerad text till urklipp"}}}},
+    "Selecting with the mouse copies, the way it does in a Linux terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a separate selection, so this replaces what you copied last, which is why it is off until you ask for it. Selecting nothing changes nothing, and programs that track the mouse themselves keep taking the drag.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Att markera med musen kopierar, precis som i en Linux-terminal – inget ⌘C efteråt. macOS har ett enda urklipp i stället för en separat markering, så det här ersätter det du kopierade senast, och därför är det avstängt tills du ber om det. Att markera ingenting ändrar ingenting, och program som själva följer musen fortsätter att ta dragningen."}}}},
+    "terminal selection": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalmarkering"}}}},
+    "copy on select": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "kopiera vid markering"}}}},
+    "clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "urklipp"}}}}
   },
   "version": "1.0"
 }

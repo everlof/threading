@@ -330,6 +330,38 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertTrue(SettingsPages.search("").isEmpty, "an empty query is not a search")
     }
 
+    /// The Startup section's verbs joined the vocabulary the day a search for the relaunch
+    /// feature found nothing: the section relaunches and reopens sessions, and neither word
+    /// was indexed on General.
+    func testTheCatalogueFindsTheStartupRelaunchFeatureByItsVerbs() {
+        for query in ["relaunch", "reopen at startup", "resume automatically"] {
+            XCTAssertTrue(
+                SettingsPages.search(query).contains { $0.pageID == SettingsPages.generalID },
+                "\(query) no longer lands on General"
+            )
+        }
+    }
+
+    /// Copy-on-select is a terminal behaviour that lives on a page called Profiles, so the word
+    /// someone will actually type for it is "terminal" — and the result has to *say* selection,
+    /// not leave them opening the page to find out which of its settings matched.
+    func testTheCatalogueFindsCopyOnSelectByWhatItIsCalled() throws {
+        for query in ["copy on select", "clipboard", "terminal selection"] {
+            XCTAssertTrue(
+                SettingsPages.search(query).contains { $0.pageID == SettingsPages.profilesID },
+                "\(query) no longer lands on Profiles"
+            )
+        }
+
+        let match = try XCTUnwrap(
+            SettingsPages.search("terminal").first { $0.pageID == SettingsPages.profilesID }
+        )
+        XCTAssertTrue(
+            match.terms.contains("Terminal selection"),
+            "a search for terminal should name the selection setting, showed \(match.terms)"
+        )
+    }
+
     /// Typing filters destinations in place. Search terms decide whether a page stays, but do
     /// not become extra rows that can overflow the sidebar or duplicate the destination.
     func testTheListFiltersPagesWithoutAddingSettingHits() {

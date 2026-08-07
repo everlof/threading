@@ -68,6 +68,25 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     are what say so: Claude Code turns a *pasted* image path into `[Image #1]` and Codex into its
     own attachment, while the identical bytes typed stay a line of path. See
     `TerminalDrop` and `TerminalDropPasteTests`, which pin the wire format.
+  - **The selection seam is ours**, and it carries copy-on-select. `selectionGestureEnded()` is
+    called when a *pointer* gesture settles a selection — a drag released, a double- or
+    triple-click, a shift-click extension — and `selectedText` answers what is selected, nil when
+    that is nothing. `SelectionService` is internal upstream, so an embedder could see neither.
+    Deliberately **not** `selectionChanged(source:)`: that one is posted from every `dragExtend`,
+    i.e. every mouse-moved event inside a drag, so a host copying there would rewrite the
+    pasteboard dozens of times per gesture and hand back a half-made selection each time. Nothing
+    calls it for `selectAll` or for a click whose only effect is to clear a selection. The policy
+    lives in the app — `EmojiFixedTerminalView` reads `AppSettings.copiesTerminalSelection` at the
+    moment of the gesture, so a toggle needs no notification to reach open terminals.
+    Two smaller changes hang off it: `copy(_:)` now refuses an empty selection, because it clears
+    the pasteboard *before* writing and so used to throw the user's clipboard away whenever
+    something called it with nothing selected (⌘C never did — menu validation gates it — but the
+    app's own terminal context menu did, and copy-on-select would have done it on every stray
+    click); and `pasteboard` replaces the hardcoded `NSPasteboard.general` in `copy`/`paste` so a
+    hosted test can exercise copying without spending the developer's real clipboard, which is
+    the same trap as a test writing to `UserDefaults.standard`. `TerminalCopyOnSelectTests` pins
+    all of it, including that a one-event drag selects nothing: the selection anchors at the
+    first *drag* event, not at the press.
   - **The Option-word keys are ours.** `TerminalSession` sets `optionAsMetaKey = false` so
     Option still composes `~ | \ @` on non-US layouts. Upstream's meta branch is also the only
     place that turned Option-arrow into word motion, so that one switch silently dropped the

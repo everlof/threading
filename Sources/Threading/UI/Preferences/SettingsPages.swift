@@ -191,8 +191,11 @@ enum SettingsPages {
             symbol: "person.crop.circle",
             group: appearanceGroup,
             searchTerms: terms(
-                "terminal font", "terminal size", "cursor", "scrollback", "colour",
-                "background", "dropped images"
+                // "terminal selection" sits third because the terms shown under a result are
+                // capped: a search for "terminal" lands on the two above it as well, and the
+                // one the reader is most likely to be hunting for has to survive the cap.
+                "terminal font", "terminal size", "terminal selection", "copy on select",
+                "clipboard", "cursor", "scrollback", "colour", "background", "dropped images"
             )
         ) { ProfilePreferencesViewController() },
         Page(

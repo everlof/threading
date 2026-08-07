@@ -280,6 +280,27 @@ final class AppSettings {
         return UserDefaults.standard.bool(forKey: Keys.convertsDroppedImages)
     }
 
+    /// Whether selecting text in a terminal with the mouse also puts it on the clipboard.
+    ///
+    /// Off unless asked for, and unlike most of the defaults here that is not caution about
+    /// surprise: macOS has one pasteboard where X11 has two, so there is no separate primary
+    /// selection for this to land in and every stray drag overwrites whatever the user last
+    /// pressed ⌘C on. Someone who wants it wants it badly — it is how selection works in every
+    /// Linux terminal — and someone who does not would lose a copied URL to a mis-click.
+    var copiesTerminalSelection: Bool {
+        get { Self.copiesTerminalSelection }
+        set {
+            defaults.set(newValue, forKey: Keys.copiesTerminalSelection)
+            notifyChanged()
+        }
+    }
+
+    /// Read at the end of the selection gesture, which is a view's main-thread work.
+    nonisolated static var copiesTerminalSelection: Bool {
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.copiesTerminalSelection)
+    }
+
     /// Whether the sidebar follows the agent's own name for the conversation — the terminal
     /// title while a PTY is attached, the transcript's title records otherwise.
     var usesAgentTitleInSidebar: Bool {
@@ -985,6 +1006,9 @@ final class AppSettings {
         static let discoversAccountAvatars = "discoversAccountAvatars"
         static let harmonizesTerminalBackgrounds = "harmonizesTerminalBackgrounds"
         static let convertsDroppedImages = "convertsDroppedImages"
+        /// Unseeded on purpose: `bool(forKey:)` answering `false` for an absent key is exactly
+        /// the documented default, and copy-on-select is opt-in.
+        static let copiesTerminalSelection = "copiesTerminalSelection"
         static let notifiesOnAttention = "notifiesOnAttention"
         static let disabledAttentionAlerts = "disabledAttentionAlerts"
         static let playsAttentionAlertSound = "playsAttentionAlertSound"

@@ -948,11 +948,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     func cut (sender: Any?) {}
     
+    /// The pasteboard `copy` and `paste` read and write.
+    ///
+    /// Ours, and it exists for the tests. `NSPasteboard.general` is the developer's own
+    /// clipboard, so a unit test that exercised copying threw away whatever they had on it —
+    /// the same trap as a hosted test writing to `UserDefaults.standard`. Defaulting to
+    /// `.general` leaves every shipping path exactly as it was.
+    public var pasteboard: NSPasteboard = .general
+
     @objc
     open func paste(_ sender: Any)
     {
-        let clipboard = NSPasteboard.general
-        let text = clipboard.string(forType: .string)
+        let text = pasteboard.string(forType: .string)
         insertText(text ?? "", replacementRange: NSRange(location: 0, length: 0), isPaste: true)
     }
 
@@ -970,17 +977,47 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         insertText(text, replacementRange: NSRange(location: 0, length: 0), isPaste: true)
     }
 
+    /// The selected text, or nil when nothing is selected and when the selection covers no
+    /// characters at all.
+    ///
+    /// Ours. `SelectionService` is internal, so an embedder had no way to ask what — or
+    /// whether — the user had selected; the nil-for-empty half is the load-bearing one, since
+    /// `copy` clears the pasteboard before it writes and a caller that cannot tell an empty
+    /// selection from a real one wipes the clipboard on an ordinary click.
+    public var selectedText: String? {
+        guard let selection, selection.active else { return nil }
+        let text = selection.getSelectedText()
+        return text.isEmpty ? nil : text
+    }
+
+    /// Called when a **pointer gesture** has finished settling the selection: a drag released, a
+    /// double- or triple-click, a shift-click extension. Does nothing here; a host overrides it
+    /// to implement copy-on-select.
+    ///
+    /// Ours, and deliberately not `selectionChanged(source:)`: `SelectionService` posts that one
+    /// on every `dragExtend`, which is every mouse-moved event inside a drag, so a host copying
+    /// there would rewrite the pasteboard a hundred times per gesture and hand back a half-made
+    /// selection each time. Nothing calls this for `selectAll`, nor for a click whose only
+    /// effect is to clear a selection — neither is a user choosing text to take with them.
+    open func selectionGestureEnded()
+    {
+    }
+
     @objc
     open func copy(_ sender: Any)
     {
         // find the selected range of text in the buffer and put in the clipboard
-        let str = selection.getSelectedText()
-        
-        let clipboard = NSPasteboard.general
-        clipboard.clearContents()
-        clipboard.setString(str, forType: .string)
+        //
+        // The guard is ours: `clearContents` before an empty write turned a copy with nothing
+        // selected into "throw away the user's clipboard". ⌘C never reached it — the menu
+        // validation below gates on `selection.active` — but an embedder's own context menu
+        // and copy-on-select both call this directly.
+        guard let str = selectedText else { return }
+
+        pasteboard.clearContents()
+        pasteboard.setString(str, forType: .string)
     }
-    
+
     public override func selectAll(_ sender: Any?)
     {
         selectAll ()
@@ -1051,25 +1088,35 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
         
         let hit = calculateMouseHit(with: event).grid
-        
+
+        // Whether this click *made* a selection rather than cleared one. A drag has no say
+        // here; it settles on mouseUp.
+        var settledSelection = false
+
         switch event.clickCount {
         case 1:
             if selection.active == true {
                 if event.modifierFlags.contains(.shift) {
                     selection.shiftExtend(row: hit.row, col: hit.col)
+                    settledSelection = true
                 } else {
                     selection.active = false
                 }
             }
         case 2:
             selection.selectWordOrExpression(at: Position(col: hit.col, row: hit.row + terminal.buffer.yDisp), in: terminal.buffer)
-            
+            settledSelection = true
+
         default:
             // 3 and higher
-            
+
             selection.select(row: hit.row + terminal.buffer.yDisp)
+            settledSelection = true
         }
         setNeedsDisplay(bounds)
+        if settledSelection {
+            selectionGestureEnded()
+        }
     }
     
     func getPayload (for event: NSEvent) -> Any?
@@ -1098,8 +1145,14 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         // let hit = calculateMouseHit(with: event)
         //print ("Up at col=\(hit.col) row=\(hit.row) count=\(event.clickCount) selection.active=\(selection.active) didSelectionDrag=\(didSelectionDrag) ")
         #endif
-        
+
+        // The release is where a dragged selection is finally what the user meant, including
+        // one the autoscroll timer kept extending past the edge of the view.
+        let draggedASelection = didSelectionDrag && selection.active
         didSelectionDrag = false
+        if draggedASelection {
+            selectionGestureEnded()
+        }
     }
     
     open override func mouseDragged(with event: NSEvent) {

@@ -579,6 +579,18 @@ When the running program handles the mouse itself (Claude Code scrolls its own t
 the scroll wheel is passed to it, matching how other terminals behave. Hold **Option** while
 scrolling to scroll the terminal's own scrollback instead.
 
+### Selecting text
+Drag to select, double-click for a word or a bracketed expression, triple-click for a line, and
+shift-click to extend what is already selected. **Cmd+C** copies, as does **Copy** in the
+terminal's right-click menu; neither touches the clipboard when nothing is selected.
+
+**Settings ▸ Profiles ▸ Selection ▸ Copy selected text to the clipboard** makes selecting enough
+on its own, the way it works in a Linux terminal. It is off until you turn it on, because macOS
+keeps a single clipboard rather than a separate selection — with this on, a stray drag replaces
+whatever you last copied. Selecting nothing still leaves the clipboard alone, and a program that
+handles the mouse itself takes the drag before a selection can start, exactly as it does for
+scrolling above.
+
 ### Resuming
 Selecting a dormant session reopens it, resuming the prior conversation where it left off.
 When a session's agent exits while you're watching, the pane shows a **Resume Session**

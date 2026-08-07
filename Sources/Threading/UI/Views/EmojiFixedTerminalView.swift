@@ -172,6 +172,24 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             && !(acceptsLocalInput?() ?? true)
     }
 
+    // MARK: - Copy on Select
+
+    /// Puts a pointer-made selection on the clipboard, when the user has asked for that.
+    ///
+    /// The setting is read here rather than mirrored onto the view, so the next selection after
+    /// a toggle already obeys it and nothing has to observe `AppSettingsDidChange` on the
+    /// terminal's behalf — the same arrangement as the dropped-image conversion above.
+    ///
+    /// Goes through `copy(_:)` rather than writing the pasteboard itself, so ⌘C, the context
+    /// menu and this all put text on the clipboard by one route — including its refusal to
+    /// clear the clipboard for an empty selection, which is what keeps a click on blank screen
+    /// from costing the user whatever they had copied.
+    override func selectionGestureEnded() {
+        super.selectionGestureEnded()
+        guard AppSettings.copiesTerminalSelection else { return }
+        copy(self)
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         installScroller(ThemedScroller(frame: .zero, inkSource: .backdrop))

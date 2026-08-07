@@ -237,6 +237,7 @@
 		FC5706F6BB5D936C011B4BF3 /* UpdateSheetRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */; };
 		6E3C72429EDBB4D4635EB2D2 /* SidebarOutlineUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B749AB4ED0740BB1E42F3271 /* SidebarOutlineUpdateTests.swift */; };
 		2A930AB0EED9800F4092F799 /* SidebarRowAnimationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */; };
+		499E878F58A0896D446FBBFD /* TerminalCopyOnSelectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -518,6 +519,7 @@
 		A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateSheetRenderTests.swift; sourceTree = "<group>"; };
 		B749AB4ED0740BB1E42F3271 /* SidebarOutlineUpdateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarOutlineUpdateTests.swift; sourceTree = "<group>"; };
 		1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowAnimationTests.swift; sourceTree = "<group>"; };
+		311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalCopyOnSelectTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -866,6 +868,7 @@
 				A2309AB84227BABEA27042E2 /* UpdateSheetRenderTests.swift */,
 				B749AB4ED0740BB1E42F3271 /* SidebarOutlineUpdateTests.swift */,
 				1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */,
+				311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1454,6 +1457,7 @@
 				FC5706F6BB5D936C011B4BF3 /* UpdateSheetRenderTests.swift in Sources */,
 				6E3C72429EDBB4D4635EB2D2 /* SidebarOutlineUpdateTests.swift in Sources */,
 				2A930AB0EED9800F4092F799 /* SidebarRowAnimationTests.swift in Sources */,
+				499E878F58A0896D446FBBFD /* TerminalCopyOnSelectTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

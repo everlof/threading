@@ -51,6 +51,12 @@ final class ProfilePreferencesViewController: NSViewController {
         action: #selector(droppedImageConversionChanged)
     )
 
+    private lazy var copyOnSelectToggle: ThemedToggle = SettingsUI.toggle(
+        isOn: AppSettings.shared.copiesTerminalSelection,
+        target: self,
+        action: #selector(copyOnSelectChanged)
+    )
+
     private lazy var scrollbackField: NSTextField = {
         let field = SettingsUI.textField(target: self, action: #selector(scrollbackChanged))
         field.placeholderString = "10000"
@@ -136,6 +142,18 @@ final class ProfilePreferencesViewController: NSViewController {
             )
         ])
 
+        let selection = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Copy selected text to the clipboard",
+                subtitle: "Selecting with the mouse copies, the way it does in a Linux "
+                    + "terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a "
+                    + "separate selection, so this replaces what you copied last, which is why "
+                    + "it is off until you ask for it. Selecting nothing changes nothing, and "
+                    + "programs that track the mouse themselves keep taking the drag.",
+                control: copyOnSelectToggle
+            )
+        ])
+
         let preview = SettingsCard(rows: [
             SettingsUI.fullRow(previewContent())
         ])
@@ -145,6 +163,7 @@ final class ProfilePreferencesViewController: NSViewController {
             SettingsUI.section("Cursor", cursor),
             SettingsUI.section("Colour", colour),
             SettingsUI.section("Scrollback", scrollback),
+            SettingsUI.section("Selection", selection),
             SettingsUI.section("Dropped files", drops),
             SettingsUI.section("Preview", preview)
         ], hostPage: .profiles)
@@ -249,5 +268,11 @@ final class ProfilePreferencesViewController: NSViewController {
     /// from this. The drop reads the setting as it happens, so the next drop already obeys it.
     @objc private func droppedImageConversionChanged() {
         AppSettings.shared.convertsDroppedImages = droppedImageToggle.state == .on
+    }
+
+    /// Likewise read at the moment it matters — the end of a selection gesture — so every
+    /// terminal already open obeys the new answer on the next drag.
+    @objc private func copyOnSelectChanged() {
+        AppSettings.shared.copiesTerminalSelection = copyOnSelectToggle.state == .on
     }
 }
