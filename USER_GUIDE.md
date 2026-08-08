@@ -947,6 +947,28 @@ OpenCode keeps its richer per-tool policy in `opencode.json`; its `--auto` optio
 these six postures. OpenCode sessions therefore show no Threading Permission Mode control.
 Grok accepts all six postures directly; Manual is sent using Grok's spelling, `default`.
 
+### Conversation speed
+
+**Settings > General > Conversation Speed** chooses how Claude and Codex sessions start,
+independently:
+
+- **Agent's Setting** leaves the decision to Claude Code or Codex. This is the default, so an
+  existing Claude `fastMode` choice or Codex `service_tier` configuration keeps working exactly
+  as it did before Threading exposed the setting.
+- **Standard** explicitly turns Fast off. It also overrides an account configured for Fast.
+- **Fast** explicitly requests the provider's faster service on supported models. Fast uses more
+  credits than Standard.
+
+The choice applies to both **Terminal** and **Native** sessions on their next launch or resume.
+The speed chip in both the **new-session draft** and a **Native reply box** offers **Follow General
+Setting**, **Standard**, and **Fast**. Standard or Fast is saved for that chat and takes precedence
+over General; Follow General remains linked to the provider-specific choice above rather than
+copying its current value. A scheduled draft freezes that choice with the rest of its session
+options. If General is Agent's Setting, returning a running Native chat to Follow General takes
+effect the next time it starts because there is no generic live command that restores a
+provider-owned setting. For Claude, a known non-Opus model stays Standard even when the app
+default is Fast, because a speed preference must not silently replace an explicit model choice.
+
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
 or reply from your phone. That is Claude's own feature, not Threading's Remote Access below —
@@ -1281,9 +1303,13 @@ terminal session continues to use the agent CLI's own image input.
 
 **What the next message will be sent with lives inside the reply box**, on a row along its
 bottom: the **model**, the **permission mode**, the **reasoning effort** where the provider
-offers one, and **Fast** or **Standard**. The context meter and the send sit at the other end of
-that same row. Changing the model, the effort or the speed applies from your next message onward:
-Claude takes it without restarting, Codex takes it with the next turn.
+offers one, and the conversation **speed**. The context meter and the send sit at the other end of
+that same row. The speed menu offers **Follow General Setting**, **Standard**, and **Fast**, just
+like the new-session draft. Changing the model, the effort or an explicit speed applies from your
+next message onward: Claude takes it without restarting, Codex takes it with the next turn. Until
+a chat chooses its own speed, the chip reflects the provider-specific startup choice in General
+settings. Returning to Follow General while General says Agent's Setting is recorded for the next
+start; the running agent keeps its current speed and the chat says so.
 
 The **permission mode** chip is the same choice as Permission Mode in a session's **…** menu, and
 it shows the mode that will actually apply: the one this chat has chosen, or the app-wide default
@@ -1343,6 +1369,10 @@ The same pattern reaches beyond messages:
 Several references and comments can be staged together. The reply box keeps them as compact count
 receipts; opening a receipt lists the individual messages, lines, and files.
 
+For a code comment, the box shows the selected line with nearby diff lines above the field. Every
+line in a multi-line selection is highlighted; a very large selection shows its beginning and end
+with an omission marker, while the full selection is still included when the comment is sent.
+
 **Return holds it, ⌘Return sends it.** The comment box has two buttons: **Add to Chat** parks the
 comment above the reply box so you can add more, and **Send** hands it to the agent straight away
 as its own turn — along with anything you had already typed. Both chords are drawn on the buttons.
@@ -1375,7 +1405,8 @@ Reopened sessions fold their past turns the same way, timed from the transcript'
 While the agent works, the view no longer chases the newest line. Sending a message lifts it
 toward the top and holds it there while the reply streams in below; scrolling up releases the
 view to you and nothing moves it until you scroll back near the bottom, which resumes
-following. The scrollbar and mouse wheel always win over the stream.
+following. A floating **↓** appears whenever you are away from the latest message; click it to
+jump back and resume following. The scrollbar and mouse wheel always win over the stream.
 
 A long message of your own — a pasted log, a briefing past a screenful — collapses to its
 first eight lines behind a fade. **Show full message** opens it in place, and **Copy**
@@ -2301,8 +2332,9 @@ The model line names whatever the session is running, including when you never c
 pinned a model in the composer, or your Claude account's `settings.json` names one, that is what
 it says; otherwise Threading reads the model back out of the conversation's own transcript, so a
 session left on the CLI's own default still reports it — and a `/model` typed mid-conversation
-moves the line the next time the card refreshes. A terminal session whose own status line already
-prints the model shows it once, on that line, rather than twice.
+moves the line the next time the card refreshes. The card says what it knows whether or not your
+own Claude status line already prints the same thing, so a line that names the model shows it
+twice — once there, once on the card.
 
 **The same line names the permission mode a Claude session is actually in** — Auto, Plan, Accept
 Edits, Manual, Don't Ask or Bypass Permissions — between the model and the effort. It is read from
@@ -2311,6 +2343,11 @@ moves the line the next time the card refreshes. Chats where the posture cannot 
 none: Codex, Grok and OpenCode record nothing to read, and a chat that has not been started yet
 has nothing to have observed. The mode shown here is a *reading*; the place to change it is still
 the chat's **⋯** menu ▸ Permission Mode, which takes effect the next time the chat starts.
+
+**A bolt at the end of that line means the chat is running in Fast mode.** Standard speed shows
+nothing — it is what a chat runs at unless you asked otherwise, so it costs no ink. VoiceOver reads
+the state as the word "Fast" in the bolt's place. Only runtimes whose speed Threading sets can show
+it, so a Claude terminal session draws no bolt even if its own CLI is running fast.
 
 While the agent is working, that card becomes a live run receipt: the branch gives way to a
 working orb, the current **Step n / total** when the agent reports a plan, and the number of
@@ -2342,18 +2379,21 @@ The chip at the top picks what is compared:
 Each changed file is a collapsible row — its path, what happened to it (`+` added, `−`
 deleted, `±` modified, `→` renamed), and its `+/−` counts. Small files open expanded; click
 a row to open or close it. Untracked files appear as all-added diffs, binary files as a
-`binary` note. The `+N −M` beside the chip totals the whole diff. Diffs are **syntax
+`binary` note. The `+N −M` beside the chip totals the whole diff, abbreviating large values the
+same way as the session status card; hover it for the exact counts. Diffs are **syntax
 highlighted** for the languages Threading recognises by file extension; a file it does not
-recognise renders plain rather than guessed at.
+recognise renders plain rather than guessed at. A floating **↓** appears while you are away from
+the end of a long diff and returns you there; the redundant floating totals pill is not repeated.
 
 Secondary-click a rendered line to **Add line to chat** or **Comment on line…**. To speak about
 several lines at once, select them first — a secondary click inside the selection offers **Add
 lines to chat** and **Comment on lines…** for the whole run. Either way the targeted lines light
 up whole, so what is highlighted is exactly what the comment will quote. The staged receipt keeps
 the file path, the line number or range, and the line text together. The file row's own
-secondary-click menu offers the same pair for the complete file. In the comment box, Return parks
-it above the reply box and ⌘Return sends it immediately; a session running its agent in a
-terminal is pasted the same thing instead.
+secondary-click menu offers the same pair for the complete file. The comment box repeats the
+target as a small diff with surrounding lines, and highlights every selected line rather than
+only the range's first anchor. In the comment box, Return parks it above the reply box and ⌘Return
+sends it immediately; a session running its agent in a terminal is pasted the same thing instead.
 
 **A changed image opens too.** A row whose binary file is a raster image (PNG, JPEG, GIF,
 WebP, HEIC, TIFF, BMP, ICNS) says `image` instead of `binary` and expands into the same
@@ -2626,7 +2666,8 @@ Sessions shown as a conversation rather than a terminal are drawn in the system'
 a theme sets only the backdrop behind them.
 
 **Some themes take over the whole window frame.** Windows 98, Mac OS 9 Platinum, Mac OS X
-10.0 Aqua, BeOS R5, OPENSTEP 4.2, IRIX Indigo Magic, Amiga Workbench 3.1, and TUI replace the
+10.0 Aqua, Mac OS X 10.4 Tiger, BeOS R5, OPENSTEP 4.2, IRIX Indigo Magic, Amiga Workbench 3.1,
+Classic Player, and TUI replace the
 native macOS titlebar with their own furniture. That includes more than colour: their window
 buttons, title texture and placement, square or tabbed frame, compact choosers, menus, and
 scrollbars use the reference system's own anatomy. Aqua is the early Cheetah appearance with
@@ -2639,6 +2680,19 @@ double-click it for your System Settings titlebar action, resize from any edge, 
 Dock, and enter full screen as usual. Switching back to System restores the native frame exactly
 as you left it. Custom themes can opt into every one of these frame and scrollbar vocabularies
 through the theme tools.
+
+**Classic Player supports classic Winamp `.wsz` skins for the window band.** In
+**Settings ▸ Themes ▸ App ▸ Classic skins**, choose **Import…**, or drop one or more `.wsz`
+files anywhere on the Themes page. Each becomes a custom theme and is selected immediately.
+Threading uses the skin's active/inactive title strip and its options, minimize, shade, and close
+button pixels; Shade performs the Mac's Zoom/Restore action and Options opens the ordinary window
+menu. The rest of the app stays readable in Classic Player's authored dark material—playlist,
+equalizer, transport, cursor, and font artwork is not applied to unrelated controls.
+
+The original archive is not retained. Its title artwork is validated, converted to PNG, and
+stored only on this Mac beside the custom theme. Duplicating the theme duplicates that asset;
+deleting it deletes the asset. Threading ships no Winamp skin or logo, so use skins you are
+licensed to use.
 
 **The Dock icon follows the app theme.** Choosing anything other than System redraws Threading's
 icon in that theme's ground and accent — Cyberpunk's neon green on near-black, Bauhaus's red
@@ -2814,6 +2868,8 @@ than borrowing an unrelated app translation.
 
 ### General
 - **New sessions use** — the agent the composer opens on; any other can be picked there
+- **Conversation Speed** — choose Agent's Setting, Standard, or Fast independently for Claude
+  and Codex; applies to Terminal and Native sessions on their next launch
 - **Opening Message** — optional text appended once to every new chat's first turn; see
   [Creating](#creating)
 - **Name sessions after the agent's own title** — see [Names](#names)
@@ -2880,9 +2936,9 @@ carries model, effort and branch, and the toolbar pill carries rate limits. Your
 are untouched — the override travels in the same session-only settings file as the hooks, never
 in your Claude configuration. Your status-line command still **runs** on every turn with its
 output thrown away, so a command with side effects (such as a usage-caching bridge) keeps
-feeding whatever depends on it. With the line hidden, Threading's status card stops deferring to
-it and shows every fact itself. Codex has no user status line, so there is nothing to hide there.
-Applies the next time a session starts or resumes.
+feeding whatever depends on it. Threading's status card shows the same facts either way — it
+does not read your line or defer to it. Codex has no user status line, so there is nothing to
+hide there. Applies the next time a session starts or resumes.
 
 #### Codex hooks
 

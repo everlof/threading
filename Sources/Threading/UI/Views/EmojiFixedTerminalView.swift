@@ -51,10 +51,10 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// they want attention.
     var onBell: (() -> Void)?
 
-    /// Called when a scroll wheel event is about to be forwarded to the process as mouse
-    /// input. The repaint that answers it is output we caused, and must not read as the
-    /// agent working.
-    var onWheelForwarded: (() -> Void)?
+    /// Called when a mouse event — a wheel tick, or a pointer move under any-event tracking —
+    /// is about to be forwarded to the process as a mouse report. The repaint that answers it
+    /// is output we caused, and must not read as the agent working.
+    var onMouseReportForwarded: (() -> Void)?
 
     /// Local keyboard/paste input, excluding bytes injected by a remote controller.
     var onUserInput: (() -> Void)?
@@ -119,7 +119,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             return
         }
         if forwards {
-            onWheelForwarded?()
+            onMouseReportForwarded?()
         }
         super.scrollWheel(with: event)
     }
@@ -148,6 +148,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     override func mouseDragged(with event: NSEvent) {
         guard shouldSuppressLocalMouseReporting else {
+            if forwardsMotion { onMouseReportForwarded?() }
             super.mouseDragged(with: event)
             return
         }
@@ -159,6 +160,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     override func mouseMoved(with event: NSEvent) {
         guard shouldSuppressLocalMouseReporting else {
+            if forwardsMotion { onMouseReportForwarded?() }
             super.mouseMoved(with: event)
             return
         }
@@ -170,6 +172,18 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     private var shouldSuppressLocalMouseReporting: Bool {
         allowMouseReporting && getTerminal().mouseMode != .off
             && !(acceptsLocalInput?() ?? true)
+    }
+
+    /// Whether pointer movement reaches the process at all, mirroring the routing condition in
+    /// the fork's `MacTerminalView.mouseMoved` the way `scrollWheel` above mirrors its own.
+    ///
+    /// Deliberately not the fork's second test — that the pointer crossed into a *new* cell,
+    /// which is what decides whether a report is written. That state is the emulator's, and the
+    /// condition this stands for is "the pointer is moving over a program that tracks it", which
+    /// is when its repaints are ours. Jitter inside one cell reports nothing and repaints
+    /// nothing, so counting it costs a slightly wider quiet window and nothing else.
+    private var forwardsMotion: Bool {
+        allowMouseReporting && getTerminal().mouseMode.sendMotionEvent()
     }
 
     // MARK: - Copy on Select
@@ -256,7 +270,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         // Filed as the user's, because scanning cannot do it: the CLI swallows the path into
         // `[Image #1]`, so the one place this drop is still a path is right here.
         if let sessionID = owningSessionID(),
-           let project = ProjectStore.shared.project(forSessionID: sessionID) {
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
             PromptAttachment.record(
                 paths: readable,
                 sessionID: sessionID,
@@ -432,8 +446,11 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             )
         )
 
+        // A rename asks for no accelerated affirmative, so `.immediate` cannot arrive — and if
+        // one were ever added, the name it carries is still the name.
         switch TextPromptAlert.ask(request) {
-        case .text(let name): ProjectStore.shared.renameSession(id: sessionID, to: name)
+        case .text(let name), .immediate(let name):
+            ProjectStore.shared.renameSession(id: sessionID, to: name)
         case .cleared: ProjectStore.shared.renameSession(id: sessionID, to: "")
         case nil: return
         }

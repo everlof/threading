@@ -14,6 +14,10 @@ enum TabHostID: Hashable {
   case displayPanel
   /// The drawer strip at the content pane's bottom edge.
   case drawer
+  /// A browser window detached from the main window, named by its own id because a session may
+  /// have more than one. Unlike the two panes, this host is *pinned* to one session rather than
+  /// following the selection — see `DetachedBrowserHostViewController`.
+  case detachedWindow(UUID)
 }
 
 // MARK: - Display Content
@@ -99,6 +103,23 @@ final class PaneTab {
     if case .browser(let browser) = body { return browser }
     if case .audit(let audit) = body { return audit.browser }
     return nil
+  }
+
+  /// Whether an agent's `browser_*` tools should be pointed at this tab's browser.
+  ///
+  /// Not the same question as `browser != nil`, and the difference is a bug that shipped. An
+  /// audit tab owns a live browser so its split mode can put tool calls beside the page they
+  /// affected — but in plain audit mode that browser is hidden and has never loaded anything.
+  /// Opening the Execution audit made it the panel's *active* tab, so it became the session's
+  /// preferred browser, and every lease-gated tool then answered "No authorized page is loaded"
+  /// about a page still sitting in the browser tab beside it.
+  ///
+  /// Enumeration deliberately still counts an audit tab as browser-bearing (`browser`): a lease
+  /// re-checking where its browser lives must find it whatever kind of tab holds it. Only
+  /// *preference* — which browser a new action reaches for — is narrowed here.
+  var holdsAgentDrivableBrowser: Bool {
+    if case .audit(let audit) = body { return audit.mode == .browserSplit }
+    return browser != nil
   }
 
   var audit: ExecutionAuditViewController? {

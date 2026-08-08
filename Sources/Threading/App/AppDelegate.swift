@@ -28,6 +28,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
 
+    /// What the launch history said about this launch, decided once at the top of the launch and
+    /// held.
+    ///
+    /// Three things read it and none of them can re-derive it: the journal has already recorded
+    /// it, the support report is written much later, and the unclean-exit notice goes up behind a
+    /// gate that can fire twice. Deciding again would also mean reading the ledger again, after
+    /// this launch has written into it.
+    private(set) var launchDecision: CrashLoopDecision = .launchNormally(.available)
+
+    /// The ledger read the decision was made from, for the support report's own field. A decision
+    /// with nothing behind it and a decision made on a history that could not be read are the
+    /// same recommendation, and a report has to be able to tell them apart.
+    private(set) var launchLedgerRead: LaunchLedgerRead = .missing
+
+    /// What this launch is allowed to start, decided once from the decision above and read at
+    /// each step below. A value rather than a mode test at twenty call sites: the whole rule is
+    /// then one table a test can assert without an application, a window or a store.
+    private(set) var launchPlan = LaunchPlan(
+        resolution: .normalLaunch,
+        decision: .launchNormally(.available),
+        extensionsDisabledOnce: false,
+        needsOnboarding: false
+    )
+
+    /// The `.ips` the recovery surface can point at, held because the marker's answer is
+    /// consumed once and the surface is built after that.
+    private var launchCrashReport: URL?
+
+    /// The three restore paths, and what an unclean previous exit does to two of them.
+    ///
+    /// Built lazily against the window controller rather than holding it: this object outlives
+    /// nothing and is asked for the window only when a restore actually happens.
+    private lazy var launchRestoration = LaunchRestoration(
+        actions: LaunchRestoration.Actions(
+            restoreSelectedSession: { [weak self] in
+                self?.mainWindowController?.restoreSelectedSession()
+            },
+            // Behind the same two gates for the same reasons — every launch reads the MCP port —
+            // and after the selected session, which the user is about to look at and which the
+            // relaunch therefore leaves out. The record is consumed even when the setting is
+            // off, so enabling it later cannot act on a list from some earlier quit.
+            relaunchSessionsFromLastQuit: { [weak self] in
+                self?.mainWindowController?.relaunchSessionsFromLastQuit()
+            },
+            // After both session-restore paths, so a window whose session is coming back anyway
+            // is not built twice — `restoreDetachedBrowserWindows` skips ids it already holds.
+            restoreDetachedBrowserWindows: { [weak self] in
+                self?.mainWindowController?.restoreDetachedBrowserWindowsAtLaunch()
+            },
+            presentNotice: { [weak self] crashReport, escalation, restore in
+                EventLog.shared.record(.app, EventLogDefaults.heldBackWorkspaceMessage, [
+                    "crashReport": crashReport?.path ?? "none",
+                    "escalated": escalation == .none ? "no" : "yes"
+                ])
+                self?.mainWindowController?.presentUncleanExitNotice(
+                    crashReport: crashReport,
+                    escalation: escalation,
+                    restore: restore
+                )
+            }
+        )
+    )
+
     /// Whether the system, rather than the user, started this quit.
     ///
     /// `applicationShouldTerminate` is the same entry point for Cmd+Q and for a logout, restart
@@ -63,11 +126,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         ownsSingleInstanceLock = true
 
-        // Immediately after the lock and before any store is opened: the app was renamed, and
-        // with it its Application Support directory, so the first launch after that came up on
-        // an empty store with everything still in the old one. Runs once, and only while the
-        // new store has no projects in it.
-        let adoption = LegacyApplicationSupportMigration.runIfNeeded()
+        // The first thing this instance does once it owns the state, because until the marker is
+        // down a launch that dies leaves nothing behind to say so. It is deliberately *ahead* of
+        // the adoption below, which used to sit in that blind window and is the one part of a
+        // launch that moves someone's database around. Nothing between the lock and here can
+        // fail, so the whole of `applicationDidFinishLaunching` is now covered.
+        //
+        // Safe to precede the adoption because the adoption keys on the legacy directory, on its
+        // own `.adopted-from-skalman` marker and on the *database* here — none of which this
+        // writes — and the directory it needs was already created by the lock above. The one
+        // thing that did interact is that the adoption used to copy the legacy `Logs` over the
+        // top of this journal; it leaves them behind now. See `docs/architecture/persistence.md`.
+        //
+        // After the lock, so only the instance that owns the state writes the journal.
+        EventLog.shared.beginLaunch()
+
+        // Beside the marker and immediately after it, because the two mean the same launch by the
+        // same id: the marker knows *how* the previous launch ended and only the ledger knows how
+        // far it got, so the ledger is told the marker's answer rather than deriving a second one
+        // that could disagree with it. What comes back is the history as the tombstones it just
+        // wrote left it, which is what the policy then reads.
+        //
+        // **Opening and beginning are two steps now**, because the `begin` record carries the
+        // mode and the mode is decided from what the opening returns. Everything between them
+        // reads and decides; nothing between them writes.
+        let opening = LaunchLedger.shared.openLaunch(
+            previousOutcome: EventLog.shared.previousLaunchOutcome
+        )
+        let decision = CrashLoopPolicy.decide(opening.read)
+        launchDecision = decision
+        launchLedgerRead = opening.read
+        if case .unclean(let report) = EventLog.shared.previousLaunchOutcome {
+            launchCrashReport = report
+        }
+
+        // Spent whichever branch wins, so a one-shot outranked by an explicit request is still
+        // one-shot. Reading it is also the last thing that happens before the mode is known.
+        let flags = LaunchFlagsStore.shared.consume(launchID: EventLog.shared.currentLaunchID)
+        let resolution = LaunchModeResolver.resolve(
+            decision: decision,
+            optionHeld: Self.isOptionHeldAtLaunch(),
+            arguments: CommandLine.arguments,
+            forceNormalOnce: flags.forceNormalNextLaunch
+        )
+        RecoveryMode.enter(resolution)
+        LaunchLedger.shared.beginLaunch(
+            opening,
+            id: EventLog.shared.currentLaunchID,
+            mode: resolution.mode
+        )
+        journal(decision, ledger: opening.read, resolution: resolution, flags: flags)
+
+        // The plan is built after the mode and before the first step reads it. `needsOnboarding`
+        // touches `ProjectStore`, which is why the store's write policy is settled by the mode
+        // already being in force rather than by a flag set on it afterwards.
+        launchPlan = LaunchPlan(
+            resolution: resolution,
+            decision: decision,
+            extensionsDisabledOnce: flags.disableExtensionsNextLaunch,
+            needsOnboarding: OnboardingState.needsOnboarding
+        )
+        let plan = launchPlan
+
+        // Before any store is opened: the app was renamed, and with it its Application Support
+        // directory, so the first launch after that came up on an empty store with everything
+        // still in the old one. Runs once, and only while the new store has no projects in it.
+        //
+        // Recovery weighs this one rather than refusing it — see `LaunchPlan`: an empty sidebar
+        // after the rename reads as data loss, and that is the worst possible message here.
+        var adoption = LegacyApplicationSupportMigration.Outcome()
+        if plan.runsLegacyMigration {
+            adoption = LegacyApplicationSupportMigration.runIfNeeded()
+        }
+        LaunchLedger.shared.record(.migrationDone, detail: [
+            StartupCheckpointDefaults.migrationField: plan.runsLegacyMigration
+                ? StartupCheckpointDefaults.migrationRan
+                : StartupCheckpointDefaults.migrationSkippedInRecovery
+        ])
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willPowerOffNotification,
@@ -79,9 +214,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         }
 
-        // After the lock, so only the instance that owns the state writes the journal — and
-        // early, because the first thing it reports is how the *previous* launch ended.
-        EventLog.shared.beginLaunch()
         MetricKitDiagnostics.shared.start()
         // Recorded after the journal opens rather than inside the migration, so the one launch
         // that adopted the old directory says so in the same place every other launch fact goes.
@@ -96,12 +228,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
         ])
 
+        // After the journal, so the sweep has somewhere to report to; before anything can start
+        // a conversation, because it decides by pid and a pid is only unambiguous while nothing
+        // new has been spawned. Only this instance runs it: it is below both the hosted-test
+        // bail-out and the single-instance lock, and a launch that owns neither must not signal
+        // processes another one is using.
+        OrphanedAgentChildSweep.run()
+
         // Before the first window is built, so everything is created already themed and nothing
         // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
         // Extension-contributed themes and fonts are pure package data, so they register first
         // — a restore that resolves a contributed theme must find it already in the library.
-        ExtensionManager.shared.prepareAppearanceContributions()
-        AppThemeLibrary.restore()
+        //
+        // Neither runs in recovery: contributions are an extension's, and the restore is pinned
+        // to System in memory. A stored contributed theme therefore falls back for this launch,
+        // which `contributedThemesDidChange` already heals the moment the tier comes back.
+        if plan.startsExtensions {
+            ExtensionManager.shared.prepareAppearanceContributions()
+        }
+        AppThemeLibrary.restore(plan.mode)
+        LaunchLedger.shared.record(.themeRestored, detail: [
+            StartupCheckpointDefaults.themeField: plan.isRecovery
+                ? StartupCheckpointDefaults.themeRecoveryStock
+                : StartupCheckpointDefaults.themeStored
+        ])
         AppThemeRefresh.startObservingAccessibilityDisplayOptions()
         AppThemeRefresh.startObservingSystemAppearance()
         AppThemeRefresh.startObservingFontOverrides()
@@ -113,21 +263,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         setupMenuBar()
 
         // Optional MCP systems are installed at the composition root. The MCP server itself
-        // knows only its replaceable provider seam and works unchanged when this remains nil.
-        MCPExternalToolRegistry.shared.provider = ExtensionMCPToolProvider()
-        installComponentCustomizationProvider()
-        ExtensionIdentityResolverProviderSlot.shared.provider =
-            ExtensionIdentityResolverRegistry.shared
+        // knows only its replaceable provider seam and works unchanged when this remains nil —
+        // which is exactly what recovery leaves it as. All three are extension seams, and an
+        // unfilled slot means every component draws its own answer rather than a package's.
+        if plan.startsExtensions {
+            MCPExternalToolRegistry.shared.provider = ExtensionMCPToolProvider()
+            installComponentCustomizationProvider()
+            ExtensionIdentityResolverProviderSlot.shared.provider =
+                ExtensionIdentityResolverRegistry.shared
+        }
 
         let mainWindowController = MainWindowController()
         self.mainWindowController = mainWindowController
-        RemoteWorkspaceBridge.install(mainWindowController)
+        LaunchLedger.shared.record(.mainWindowConstructed)
+        // The bridge's only client is the remote server, which recovery never starts, and it is
+        // the seam a phone drives this window through.
+        if plan.startsBackgroundServices {
+            RemoteWorkspaceBridge.install(mainWindowController)
+        }
 
         // First launch defers the main window behind the onboarding walkthrough. Everything
         // else in this launch sequence still runs: every downstream consumer needs the
         // controller *instance*, not a visible window. Session restore is the one exception,
         // gated in `restoreSelectedSessionIfReady`.
-        if OnboardingState.needsOnboarding {
+        if plan.showsOnboarding {
             isOnboardingActive = true
             let onboarding = OnboardingWindowController { [weak self] in
                 self?.onboardingDidFinish()
@@ -137,32 +296,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             mainWindowController.showWindow(nil)
         }
+        noteFirstWindowVisible(armsStability: plan.armsStabilityCheckpoint)
+        if plan.isRecovery {
+            presentRecoveryMode(on: mainWindowController)
+        }
         MainThreadStallMonitor.shared.start()
 
         // After the window exists, so a clicked notification always has somewhere to land.
         // Never under tests: only `start()` touches `UNUserNotificationCenter`.
-        AttentionAlertCenter.shared.start()
-        ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
-            [weak mainWindowController] sessionID in
-            mainWindowController?.extensionShellRootPid(for: sessionID)
+        //
+        // Neither runs in recovery. The alert centre can raise a permission dialog, and nothing
+        // in recovery can produce an alert to justify one; the workload monitor watches agents,
+        // and there are none.
+        if plan.startsBackgroundServices {
+            AttentionAlertCenter.shared.start()
+            AgentWorkloadMonitor.shared.start()
         }
 
-        // Installed extensions get a separate, tokenized host-data/service channel. It must be
-        // ready before a host-capable process starts, because that process receives the
-        // short-lived endpoint and bearer token only in its launch environment.
-        if let componentCustomizationRegistry {
-            ExtensionHostService.shared.start(
-                registry: componentCustomizationRegistry,
-                identityRegistry: .shared
-            ) {
-                ExtensionManager.shared.startEnabledExtensions()
+        if plan.startsExtensions {
+            ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
+                [weak mainWindowController] sessionID in
+                mainWindowController?.extensionShellRootPid(for: sessionID)
             }
-        } else {
-            ExtensionManager.shared.startEnabledExtensions()
+
+            // Installed extensions get a separate, tokenized host-data/service channel. It must
+            // be ready before a host-capable process starts, because that process receives the
+            // short-lived endpoint and bearer token only in its launch environment.
+            if let componentCustomizationRegistry {
+                ExtensionHostService.shared.start(
+                    registry: componentCustomizationRegistry,
+                    identityRegistry: .shared
+                ) {
+                    ExtensionManager.shared.startEnabledExtensions()
+                    LaunchLedger.shared.record(.extensionsStarted)
+                }
+            } else {
+                ExtensionManager.shared.startEnabledExtensions()
+                LaunchLedger.shared.record(.extensionsStarted)
+            }
+        } else if !plan.isRecovery {
+            // A normal launch that was asked, once, to come up without extensions. The pane says
+            // so, because a user who armed that yesterday and forgot must not conclude their
+            // extensions have been uninstalled.
+            mainWindowController.presentExtensionsHeldBackNotice()
         }
 
-        cleanupOrphanedHistoryFiles()
-        StateManager.shared.clearLegacySessionState()
+        // Both delete: one removes history files whose sessions are gone, the other clears a
+        // legacy key. A recovery launch removes nothing.
+        if plan.startsBackgroundServices {
+            cleanupOrphanedHistoryFiles()
+            StateManager.shared.clearLegacySessionState()
+        }
+
+        // Everything below is optional background machinery, and recovery starts none of it: the
+        // three that write into the store or the support directory (icon discovery, branch
+        // following, name backfill), the three that spawn subprocesses or reach the network
+        // (usage prefetch, the email probe, the code count), the one that starts a real agent
+        // turn on a schedule (the usage-window poker), the one that watches live sessions
+        // (limit recovery), the remote listener and its tunnel child, and the disk survey.
+        // The launch ends here in recovery. A `guard` rather than a wrapper around the rest,
+        // because the rest is a single run of starts with no ordering left to preserve: the MCP
+        // listener is the last thing above that anything waited on, and its callback is where
+        // restoration and the scheduled-message services live.
+        guard plan.startsBackgroundServices else { return }
 
         // Fills empty icon slots in the background; it observes the store from here on, so
         // projects added later are swept as they appear.
@@ -177,10 +373,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // each login's usage rather than filling in only on a second look.
         AccountUsageMenu.prefetch()
 
-        // Codex is the one runtime with a reversible provider archive. Reconcile before the
-        // startup restore is released where possible, then again whenever Threading regains
-        // focus after an archive or restore performed in another client.
-        ProviderArchiveSync.shared.start()
+        // Opens the day's usage window at the planned moment. Started unconditionally and gated
+        // on its own schedule, like the branch follower above: the alternative is a service that
+        // only exists if the setting was on at launch, which is the version where turning it on
+        // does nothing until the next restart.
+        UsageWindowPoker.shared.start()
+
+        // Watches live sessions for a usage-limit refusal and carries out the user's chosen
+        // recovery. Started unconditionally for the poker's reason — the policy is read at the
+        // moment a refusal is found, so flipping it on needs no restart.
+        LimitRecoveryCoordinator.shared.start()
 
         // The same idea for *who* each login is. Only accounts whose address is not already on
         // disk are asked, and the answer is cached across launches, so this is normally a
@@ -201,7 +403,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             AgentRuntime.shared.applyLifecycle(report)
         }
 
+        // Codex is the one runtime with a reversible provider archive. Reconcile before the
+        // startup restore is released where possible, then again whenever Threading regains
+        // focus after an archive or restore performed in another client.
+        ProviderArchiveSync.shared.start()
+
+        // A published managed session owns its opaque remote branch until the pull request is
+        // merged or closed. Reconcile that provider lifecycle independently of the archived
+        // conversation: deletion is lease-protected and never needs the disposed worktree.
+        ManagedWorkspaceRemoteCleanupCoordinator.shared.start()
+
         MCPServer.shared.start { [weak self] in
+            LaunchLedger.shared.record(.mcpListenerStarted)
             self?.mcpServerHasStarted = true
             self?.restoreSelectedSessionIfReady()
         }
@@ -229,19 +442,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // A lock-losing instance quits without touching the stores: even *instantiating*
         // ProjectStore writes projects.json once, which is the exact clobber the lock exists
-        // to prevent.
+        // to prevent. The launch marker is the same shape of hazard in the other direction —
+        // removing it here would tell the *running* instance's next launch that its crash was a
+        // clean quit — so `EventLog` enforces that one too, by refusing to end a launch this
+        // process never began.
         guard ownsSingleInstanceLock else { return .terminateNow }
 
         guard confirmQuitIfAgentsRunning() else { return .terminateCancel }
 
         // Projects are persisted by ProjectStore as they change, but a coalesced write may
         // still be pending, so it is flushed before the agents are torn down.
-        ProjectStore.shared.flushPendingSave()
-        // What is live right now, recorded for the next launch to bring back — necessarily
-        // ahead of `terminateAll`, after which nothing is. `AppRelaunch.discardingState()`
-        // exits without running this on purpose: a reset comes back to nothing running.
-        let runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
-        StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
+        //
+        // **Neither happens in recovery, and the second is the one that matters.** Nothing was
+        // running, so the list this would write is empty — and writing an empty list over the
+        // record left by the last clean quit is how a user who dropped into recovery to look at
+        // something loses the sessions the *next* normal launch was going to bring back. The
+        // record is not consumed in recovery either (`relaunchSessionsFromLastQuit` hangs off the
+        // MCP listener's callback, which never runs), so leaving it untouched is what preserves
+        // it end to end.
+        var runningSessionIDs: [SessionID] = []
+        if launchPlan.recordsRunningSessionsOnQuit {
+            ProjectStore.shared.flushPendingSave()
+            // What is live right now, recorded for the next launch to bring back — necessarily
+            // ahead of `terminateAll`, after which nothing is. `AppRelaunch.discardingState()`
+            // exits without running this on purpose: a reset comes back to nothing running.
+            runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
+            StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
+        }
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
@@ -260,6 +487,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         EventLog.shared.endLaunch(detail: [
             "runningSessions": String(runningSessionIDs.count)
         ])
+        // The same fact in the ledger, and the ten-minute stability timer cancelled with it: a
+        // timer left armed on a queue that is about to stop being drained would either never fire
+        // or fire into a half-torn-down app, and neither is a launch certifying itself stable.
+        // `systemInitiated` is carried because a logout that outran the quit is the one clean
+        // ending that can also look abrupt.
+        LaunchLedger.shared.endLaunch(.clean, systemInitiated: isSystemInitiatedQuit)
 
         return .terminateNow
     }
@@ -353,14 +586,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// launch reads its port for `--mcp-config`) and a main window actually on screen (a
     /// terminal must be installed in a laid-out, visible view — restoring into the window
     /// onboarding is still deferring would launch a PTY into a never-shown pane).
+    ///
+    /// The gate answers *when*; `LaunchRestoration` answers **how much**. After an unclean
+    /// previous exit the two workspace paths are held back and offered in a notice instead —
+    /// and because the offer hangs off this same gate, it cannot appear over the walkthrough,
+    /// in a hosted test bundle, or in an instance that lost the single-instance lock, none of
+    /// which ever reach here.
     private func restoreSelectedSessionIfReady() {
+        // Recovery never reaches here today — its only two callers are the MCP listener's start
+        // callback, which recovery does not start, and the walkthrough's completion, which
+        // recovery does not run. Stated anyway, because this is where a future third caller would
+        // arrive, and what hangs off this gate is every restoration path plus both
+        // scheduled-message services.
+        guard launchPlan.restoresWorkspace else { return }
         guard mcpServerHasStarted, !isOnboardingActive else { return }
-        mainWindowController?.restoreSelectedSession()
-        // Behind the same two gates for the same reasons — every launch reads the MCP port —
-        // and after the selected session, which the user is about to look at and which the
-        // relaunch therefore leaves out. The record is consumed even when the setting is off,
-        // so enabling it later cannot act on a list from some earlier quit.
-        mainWindowController?.relaunchSessionsFromLastQuit()
+        let plan = launchRestoration.run(
+            previousLaunch: EventLog.shared.previousLaunchOutcome,
+            escalation: UncleanExitEscalation(decision: launchDecision)
+        )
+        LaunchLedger.shared.record(.selectedSessionRestored, detail: [
+            StartupCheckpointDefaults.restorationField: plan == .restoresEverything
+                ? StartupCheckpointDefaults.restorationRestored
+                : StartupCheckpointDefaults.restorationHeldBack
+        ])
+
+        // Behind this gate rather than in `applicationDidFinishLaunching`, and for the same two
+        // reasons the relaunch is: a scheduled start reads the MCP port for `--mcp-config`, and
+        // one that fired into the window onboarding is still deferring would put a PTY in a pane
+        // nobody will ever see. Its first act is to settle what the clock passed while the app
+        // was not running — which it reports, and never sends.
+        ScheduledMessageNotifier.shared.start()
+        ScheduledMessageScheduler.shared.start()
     }
 
     /// The walkthrough on request — Settings ▸ Advanced. The main window is already visible,
@@ -403,7 +659,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return true
         }
 
-        if !flag {
+        // The main window's own visibility, not `flag`. The system's flag answers "is *any*
+        // window visible", which stops being the same question the moment the app has a second
+        // one: with the main window miniaturized behind a visible auxiliary window — the
+        // component gallery today, a detached browser window later — a Dock click reported
+        // `flag == true` and did nothing at all, which is the one gesture whose whole purpose is
+        // to bring the app back. A miniaturized window reports `isVisible == false`, which is
+        // exactly the case that should re-front it.
+        if mainWindowController.window?.isVisible != true {
             mainWindowController.showWindow(nil)
         }
         return true
@@ -474,6 +737,193 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func refreshAfterRemoteSurfaceMutation(sessionID: SessionID) {
         guard ownsSingleInstanceLock, let mainWindowController else { return }
         mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+    }
+
+    // MARK: - Private Methods — The Launch Ledger
+
+    /// Records the readiness checkpoint, once the run loop has proved the launch survived it.
+    ///
+    /// **A window is on screen plus one run-loop turn.** Ordering a window front is a call that
+    /// returns whether or not anything comes of it; what says the app got up is the run loop
+    /// draining the next turn, and a block enqueued here is the cheapest honest proof of that —
+    /// a launch that dies inside its own turn never reaches this handler. Whichever window it
+    /// was: on a first launch the walkthrough is the app, and an app showing its walkthrough
+    /// started successfully.
+    ///
+    /// It is also where the ten-minute stability timer is armed, because that is the clock this
+    /// checkpoint starts — **except in recovery**. `stable` is a claim that the app works, and a
+    /// launch that started nothing has not made it; arming it there would mean sitting in
+    /// recovery for ten minutes erases the crash-loop count that put the user in it.
+    private func noteFirstWindowVisible(armsStability: Bool) {
+        DispatchQueue.main.async {
+            LaunchLedger.shared.record(.firstWindowVisible)
+            guard armsStability else { return }
+            LaunchLedger.shared.armStabilityCheckpoint()
+        }
+    }
+
+    /// Whether Option is held right now.
+    ///
+    /// The class property rather than an event: at `applicationDidFinishLaunching` no key event
+    /// has been delivered to the app, so there is nothing to inspect — this is the documented way
+    /// to ask what is held at this instant. It also needs no accessibility grant, unlike a
+    /// `CGEventTap`, so the manual way into recovery costs the user no new permission.
+    ///
+    /// Read once and passed to the resolver, never re-read: the answer must be a fact about the
+    /// launch rather than about whenever something happened to ask.
+    private static func isOptionHeldAtLaunch() -> Bool {
+        NSEvent.modifierFlags.contains(.option)
+    }
+
+    /// Puts the recovery surface in the window, and records that it got there.
+    ///
+    /// One run-loop turn after the window, the readiness checkpoint's own proof: a launch that
+    /// dies drawing this screen never reaches the handler, which is precisely the case the
+    /// checkpoint exists to make visible.
+    @MainActor
+    private func presentRecoveryMode(on windowController: MainWindowController) {
+        windowController.presentRecoveryMode(
+            reason: launchPlan.reason,
+            checkpoint: launchDecision.lastReachedCheckpoint,
+            crashReport: launchCrashReport,
+            extensionsDisabledNextLaunch: LaunchFlagsStore.shared
+                .read()
+                .disableExtensionsNextLaunch,
+            actions: recoveryActions(on: windowController)
+        )
+        DispatchQueue.main.async {
+            LaunchLedger.shared.record(.recoverySurfaceShown)
+        }
+    }
+
+    /// Each offer wired to the primitive that performs it, and nothing else.
+    ///
+    /// Built here because this is where the launch's own facts are, and handed to the window as
+    /// closures so the screen can be pressed in a test without relaunching the app or moving
+    /// anybody's data.
+    @MainActor
+    private func recoveryActions(on windowController: MainWindowController) -> RecoveryModeActions {
+        RecoveryModeActions(
+            tryNormalLaunchOnce: { [weak self] in
+                self?.tryNormalLaunchOnce()
+            },
+            continueInRecoveryMode: { [weak windowController] in
+                // Not a relaunch: nothing needs restarting to carry on doing less. The band
+                // stays, so the surface is one press away for the rest of the launch.
+                windowController?.dismissRecoverySurface()
+            },
+            toggleExtensionsForNextLaunch: { [weak self] in
+                self?.toggleExtensionsForNextLaunch(on: windowController)
+            },
+            resetWindowLayout: {
+                WindowLayoutReset.perform()
+            },
+            createSupportReport: { [weak self] in
+                self?.createRemoteSupportReport()
+            },
+            moveAppDataAside: { [weak self] in
+                self?.moveAppDataAsideFromRecovery()
+            },
+            revealCrashReport: { [weak self] in
+                guard let report = self?.launchCrashReport else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([report])
+            }
+        )
+    }
+
+    /// Arms the one-shot and restarts. The flag is what the *next* launch reads; nothing about
+    /// this process changes, because a mode is decided at launch and stays decided.
+    @MainActor
+    private func tryNormalLaunchOnce() {
+        LaunchFlagsStore.shared.set(
+            .forceNormalNextLaunch,
+            armed: true,
+            launchID: EventLog.shared.currentLaunchID
+        )
+        AppRelaunch.discardingState(reason: .recoveryRelaunch)
+    }
+
+    /// Arms or disarms the second one-shot, and rebuilds the surface so its button says which.
+    ///
+    /// **It never touches `enabledIdentifiers`.** That is what makes "for the next launch only"
+    /// true by construction rather than by a promise: no extension is disabled, so there is no
+    /// state for a later launch to inherit.
+    @MainActor
+    private func toggleExtensionsForNextLaunch(on windowController: MainWindowController) {
+        let store = LaunchFlagsStore.shared
+        let armed = !store.read().disableExtensionsNextLaunch
+        store.set(
+            .disableExtensionsNextLaunch,
+            armed: armed,
+            launchID: EventLog.shared.currentLaunchID
+        )
+        windowController.installRecoverySurface(
+            reason: launchPlan.reason,
+            checkpoint: launchDecision.lastReachedCheckpoint,
+            crashReport: launchCrashReport,
+            extensionsDisabledNextLaunch: store.read().disableExtensionsNextLaunch,
+            actions: recoveryActions(on: windowController)
+        )
+    }
+
+    /// The recoverable reset, from the crash screen rather than from a settings page.
+    ///
+    /// The same flow Advanced takes, wording and all: a reset performed here has exactly the
+    /// blast radius it has there, and a second sentence describing it would eventually describe
+    /// something else.
+    @MainActor
+    private func moveAppDataAsideFromRecovery() {
+        let request = ConfirmationRequest(
+            prompt: .resetAppData,
+            title: AdvancedStrings.confirmEverythingTitle,
+            message: AdvancedStrings.confirmEverythingBody,
+            confirmTitle: AdvancedStrings.resetEverythingButton,
+            cancelTitle: L10n.string("Cancel")
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+
+        do {
+            try AppDataResetFlow.perform(.everything)
+        } catch {
+            ThreadingLogger.agent.error(
+                "Reset failed: \(error.localizedDescription, privacy: .public)"
+            )
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = AdvancedStrings.resetFailedTitle
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: L10n.string("OK"))
+            alert.runModal()
+        }
+    }
+
+
+    /// Puts the launch's own verdict in the journal, beside the crash it is about.
+    ///
+    /// Journalled rather than merely held, for the reason every other launch fact here is: a
+    /// support report that says the app decided it was in a crash loop is a different report from
+    /// one that says it decided nothing, and by the time anyone asks, the ledger has this
+    /// launch's records in it too.
+    /// The mode and its reason go in the *same* record as the decision, deliberately: what a
+    /// report is asked afterwards is "why did it come up like that", and a decision in one line
+    /// with the mode in another is two facts a reader has to join by timestamp.
+    private func journal(
+        _ decision: CrashLoopDecision,
+        ledger: LaunchLedgerRead,
+        resolution: LaunchModeResolution,
+        flags: LaunchFlags
+    ) {
+        var detail = [
+            CrashLoopDefaults.decisionField: decision.token,
+            CrashLoopDefaults.ledgerField: ledger.token,
+            LaunchModeDefaults.resolutionField: resolution.mode.rawValue,
+            LaunchModeDefaults.reasonField: resolution.reason.rawValue,
+            LaunchModeDefaults.flagsField: flags.token
+        ]
+        if let checkpoint = decision.lastReachedCheckpoint {
+            detail[CrashLoopDefaults.checkpointField] = checkpoint.rawValue
+        }
+        EventLog.shared.record(.app, CrashLoopDefaults.decisionMessage, detail)
     }
 
     // MARK: - Private Methods
@@ -568,6 +1018,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         let item = NSMenuItem(title: command.title, action: action, keyEquivalent: "")
+        // Stamped so `validateMenuItem` can ask the recovery policy by id in one lookup. The
+        // extension items already carry theirs the same way, and our actions differ from
+        // `performExtensionCommand`, so the two uses cannot be confused for each other.
+        item.representedObject = id
         apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
         commandItems[id] = item
         return item
@@ -873,6 +1327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // stamped in `validateMenuItem`, since a Back with nowhere to go should read that way.
         menu.addItem(commandItem(AppCommands.ID.navigateBack, action: #selector(navigateBack)))
         menu.addItem(commandItem(AppCommands.ID.navigateForward, action: #selector(navigateForward)))
+        menu.addItem(commandItem(AppCommands.ID.previousTurn, action: #selector(previousTurn)))
+        menu.addItem(commandItem(AppCommands.ID.nextTurn, action: #selector(nextTurn)))
+        menu.addItem(commandItem(AppCommands.ID.previousStep, action: #selector(previousStep)))
+        menu.addItem(commandItem(AppCommands.ID.nextStep, action: #selector(nextStep)))
 
         // The sidebar's own arrangement, beside its toggle: what the list groups and how it
         // sorts are View concerns, and the two toggles need a home a shortcut can live in.
@@ -1099,6 +1557,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // Recovery first, and only for items that carry a command id. The menu bar also holds the
+        // platform's own — Quit, Copy, Minimize, About, the Help entries — and those are not
+        // commands at all, so they stay enabled by construction rather than by being listed
+        // anywhere. A refused command reads as unavailable rather than beeping at an advertised
+        // chord, which is the treatment a checkout-less Open In already gets below.
+        if RecoveryMode.isActive,
+           let commandID = menuItem.representedObject as? String,
+           !RecoveryModeCommandPolicy.allows(commandID: commandID) {
+            return false
+        }
+
         // The arrangement toggles carry state, so their checks are stamped here — validation
         // runs on every menu open, which is the one moment the check has to be true.
         if menuItem.action == #selector(toggleBranchGrouping) {
@@ -1124,6 +1593,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if menuItem.action == #selector(navigateForward) {
             return mainWindowController?.canGoForward ?? false
+        }
+        // A terminal session, the settings window and an empty window have no exchanges to move
+        // between, so these read as unavailable rather than beeping at an advertised chord.
+        if [
+            #selector(previousTurn), #selector(nextTurn),
+            #selector(previousStep), #selector(nextStep)
+        ].contains(where: { menuItem.action == $0 }) {
+            return mainWindowController?.isShowingConversation ?? false
         }
         if menuItem.action == #selector(toggleCurrentTheme) {
             menuItem.isHidden = !MCPToolCatalog.hasEnabledThemeTools
@@ -1187,6 +1664,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func navigateForward() {
         mainWindowController?.goForward()
+    }
+
+    @objc private func previousTurn() {
+        mainWindowController?.moveConversation(byTurn: false)
+    }
+
+    @objc private func nextTurn() {
+        mainWindowController?.moveConversation(byTurn: true)
+    }
+
+    @objc private func previousStep() {
+        mainWindowController?.moveConversation(byStep: false)
+    }
+
+    @objc private func nextStep() {
+        mainWindowController?.moveConversation(byStep: true)
     }
 
     @objc private func selectPreviousTab() {
@@ -1258,7 +1751,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             extensionCount: extensions.count,
             companionCount: extensions.reduce(0) { $0 + $1.companions.count },
             agentAccounts: accounts,
-            previousLaunchWasClean: EventLog.shared.previousLaunchEndedCleanly
+            previousLaunchWasClean: EventLog.shared.previousLaunchEndedCleanly,
+            // Held from the top of the launch rather than read again: the ledger has this
+            // launch's own records in it by now, so a second read would answer a different
+            // question from the one the app acted on.
+            crashLoopDecision: launchDecision,
+            launchLedgerRead: launchLedgerRead,
+            // Read here rather than kept resident: the payloads are Apple's delayed record of
+            // this and previous launches, and nothing else in the app asks about them. The read
+            // is bounded by `MetricKitReadBudget`, which is what makes it safe to do inline on a
+            // menu command that is already writing a file.
+            metricKitDiagnostics: MetricKitDiagnosticReader().read()
         )
 
         do {

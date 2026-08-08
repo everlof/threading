@@ -74,8 +74,8 @@ the currency of this category, and they spent some of theirs.
 
 The premise "open source is required for trust" is *mostly* right and worth sharpening.
 What buys trust for a tool that hosts an agent with shell access is **auditable local
-behavior**: no account, no telemetry, no bytes leaving the machine, verifiable network
-silence. Evidence both ways:
+behavior**: no account, no telemetry, and no bytes leaving the machine without an explicit
+user-started network feature, with verifiable network silence otherwise. Evidence both ways:
 
 - Conductor is closed and praised; Obsidian and 1Password are closed and trusted — via
   local-first architecture and reputation.
@@ -136,9 +136,10 @@ un-open.** Default to FSL first, loosen if strategy demands.
    - **Anti-models**: reselling inference (contradicts the BYO identity; opencode runs
      Zen at zero markup as strategic break-even — not an indie business), and any paid
      tier whose economics a lab can meter away (see §2 platform risk).
-5. **Make "nothing leaves your machine" the loudly stated brand promise.** Threading's
-   current truth: no account, no telemetry, the only network egress is opt-in avatar
-   probes and icon discovery the project itself points at. That is the differentiator
+5. **Make "nothing leaves without your action" the loudly stated brand promise.** Threading's
+   current truth: no account and no telemetry; network egress belongs to explicit features such
+   as remote access, GitHub, issue reporting, avatar probes, and icon discovery the project itself
+   points at. Each surface states what it sends before enabling it. That is the differentiator
    t3code fumbled — state it on the landing page, in the README, and keep it testable.
 6. **Pre-publication hygiene**:
    - Scrub **git history**, not just HEAD: secrets, tokens, machine paths, and pre-scrub
@@ -155,7 +156,7 @@ un-open.** Default to FSL first, loosen if strategy demands.
 Open the code under **FSL with contributions closed**; sell the **signed, notarized,
 auto-updating build** (compile-yourself remains free); build the **phone-notification
 companion** on the APNs seam as the second product; keep enterprise policy/audit as the
-kept-warm third; and make **"nothing leaves your machine"** the stated identity. That
+kept-warm third; and make **"nothing leaves without your action"** the stated identity. That
 captures the trust that requires source availability, prices the things a fork cannot
 take (signature, distribution, push, brand), and avoids both of t3code's self-inflicted
 wounds — the telemetry breach and the load-bearing free tier with no path to revenue.

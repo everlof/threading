@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - Terminal Defaults
 
@@ -18,6 +19,21 @@ enum TerminalDefaults {
     /// environment, which — unlike an interactive shell — carries no `COLORTERM`, so without
     /// this Claude Code and other tools fall back to monochrome.
     static let colorTerm = "truecolor"
+
+    /// What Return sends to a PTY. Named because it is being *typed on the user's behalf* — by
+    /// `SessionContextHandoff`, when a comment is sent rather than parked — and a bare `"\r"`
+    /// at a call site reads like a line ending rather than like pressing a key.
+    static let submitSequence = "\r"
+
+    /// How long a turn waits after a pasted file path before Return is typed for it.
+    ///
+    /// Claude Code and Codex resolve a pasted image path asynchronously — they read the file
+    /// and mint their own attachment — so a Return sent in the same runloop turn risks
+    /// submitting the prompt while the picture is still arriving, and the agent would answer a
+    /// comment about an image it was never given. The value is a guess at the safe side of that
+    /// race, not a measurement: it is long enough to clear a local file read and short enough
+    /// that the send still reads as immediate. Raise it if a sent comment ever arrives bare.
+    static let pastedTurnSubmitDelay: TimeInterval = 0.35
 }
 
 // MARK: - Window Defaults
@@ -135,6 +151,13 @@ enum AgentDefaults {
     static let codexSandboxFlag = "--sandbox"
     static let grokPermissionModeFlag = "--permission-mode"
 
+    /// What Claude and Grok call Manual in their own vocabulary. It is Claude's *internal* name
+    /// — `manual` is the external one its `--help` documents and the one `AgentPermissionMode`
+    /// persists — but it is the spelling both CLIs hand back: Claude's control channel answers
+    /// `{"mode":"default"}` to a `manual` request, and its transcript's `permission-mode`
+    /// records carry it too. So it is written out, not accepted.
+    static let agentInternalManualMode = "default"
+
     static let codexApprovalUntrusted = "untrusted"
     static let codexApprovalOnRequest = "on-request"
     static let codexApprovalNever = "never"
@@ -155,7 +178,11 @@ enum AgentDefaults {
     /// listing to read and no per-account access filter, so a copy here would be a hand-kept
     /// list that goes stale every release while claiming to be the catalog. An account granted
     /// anything beyond these four surfaces it through `claudeAdditionalModelsKey` instead.
-    static let claudeModels = ["opus", "sonnet", "fable", "haiku"]
+    ///
+    /// Written most capable first, which is the order `AgentModels.byCapability` puts them in
+    /// anyway. Kept honest here so the constant is not read as a ranking that disagrees with the
+    /// menu it feeds.
+    static let claudeModels = ["fable", "opus", "sonnet", "haiku"]
 
     /// Fast mode is an Opus-family capability (measured against CLI 2.1.218). Matching the family
     /// name rather than pinning dated ids keeps the check correct as new Opus versions ship — the
@@ -168,6 +195,10 @@ enum AgentDefaults {
     static let claudeModelKey = "model"
     static let claudeEffortKey = "effortLevel"
     static let claudeEffortFlag = "--effort"
+
+    /// Claude's persisted speed switch. Threading writes it only into the per-session
+    /// `--settings` layer, so choosing a startup speed never edits the account's own file.
+    static let claudeFastModeKey = "fastMode"
 
     /// The session-level values the installed CLI documents for `--effort` (2.1.222).
     /// Unlike Codex, Claude does not publish per-model subsets, so these apply to every model
@@ -222,6 +253,21 @@ enum AgentDefaults {
     /// its knob is reasoning effort above, because a model name would have to come from the
     /// account's own catalog.
     static let claudeResearchModel = "sonnet"
+
+    /// The model a usage-window poke asks for: the cheapest one there is.
+    ///
+    /// The opposite trade to `claudeResearchModel`, and for the opposite reason. A research run
+    /// is read for its answer, so quality is worth four cents; a poke's answer is discarded
+    /// unread and the *only* thing it buys is the window's opening timestamp. Every token it
+    /// spends comes out of the weekly limit the poke exists to spend more carefully, so the run
+    /// asks the smallest model for the smallest reply it can.
+    static let claudePokeModel = "haiku"
+
+    /// What a poke says. One token in, one token out.
+    ///
+    /// Deliberately not a question: anything Claude might want to *do* about it costs tool calls
+    /// and turns. The reply is never read.
+    static let usageWindowPokePrompt = "Reply with the single character: ."
 
     /// Research runs work in a neutral scratch directory, which is not a repository. Codex
     /// refuses to run outside one unless told this is deliberate.
@@ -342,6 +388,16 @@ enum MCPDefaults {
     static let portEnvironmentKey = "THREADING_MCP_PORT"
     static let sessionTokenEnvironmentKey = "THREADING_SESSION_TOKEN"
 
+    /// Pre-rename aliases exported beside the current routing variables.
+    ///
+    /// Existing Codex hooks were approved by the hash of their exact command text. Rewriting
+    /// `SKALMAN_*` to `THREADING_*` would invalidate that approval, so launches with the
+    /// integration enabled keep the old vocabulary alive while the installer recognises the
+    /// known-compatible old commands. These names carry the same per-process values and do not
+    /// broaden the endpoint's reach.
+    static let legacyPortEnvironmentKey = "SKALMAN_MCP_PORT"
+    static let legacySessionTokenEnvironmentKey = "SKALMAN_SESSION_TOKEN"
+
     /// Set only for sessions Threading renders itself, and read by Codex's `PreToolUse` hook.
     ///
     /// Codex has one `hooks.json` per account, shared by every session, so a surface-specific
@@ -349,6 +405,7 @@ enum MCPDefaults {
     /// to one surface: a terminal session raises Codex's own approval prompt and must not be
     /// intercepted, so it simply does not export this.
     static let brokerEnvironmentKey = "THREADING_BROKER_TOOLS"
+    static let legacyBrokerEnvironmentKey = "SKALMAN_BROKER_TOOLS"
 
     /// Marks the entries in a shared `hooks.json` that belong to Threading.
     ///
@@ -441,7 +498,13 @@ enum DisplayPaneDefaults {
     /// At the pane's own chrome width the panel costs the window nothing it was not already
     /// paying, and a divider dragged past it still snaps the panel shut (`canCollapse`). The
     /// 200pt is still where it opens; it is simply no longer where the *window* stops.
-    static let slimmestWidth: CGFloat = 48
+    ///
+    /// Stated as the parts rather than as the number they came to, because the parts are what
+    /// moves it: the header's two trailing controls — `+` and the pane's close — and the margin
+    /// the row keeps from the pane's edge. The tab strip is not in the sum; it scrolls, and
+    /// yields its whole width here (see `DisplayPaneController.setupConstraints`).
+    static let slimmestWidth: CGFloat =
+        padding + buttonSize + controlGap + buttonSize + controlGap * 2
 
     /// How hard the panel holds the width the divider was dragged to.
     ///
@@ -457,6 +520,11 @@ enum DisplayPaneDefaults {
     )
     static let padding: CGFloat = 8
     static let buttonSize: CGFloat = 20
+
+    /// The air between two of the header row's own controls — tighter than `padding`, which is
+    /// what the row keeps from the pane's edge. One constant so `+`, the close and the strip
+    /// beside them are spaced by the same hand.
+    static let controlGap: CGFloat = 4
     static let titleFontSize: CGFloat = 11
     static let captionFontSize: CGFloat = 10
 
@@ -887,6 +955,40 @@ struct SessionArchivedStateDidChange: AppEvent {
 struct SessionNotificationOpened: AppEvent {
     static let name = Notification.Name("sessionNotificationOpened")
     let sessionID: SessionID
+    let destination: RemoteNotificationDestinationDTO
+
+    init(
+        sessionID: SessionID,
+        destination: RemoteNotificationDestinationDTO = .session
+    ) {
+        self.sessionID = sessionID
+        self.destination = destination
+    }
+}
+
+/// Something was scheduled, unscheduled, rescheduled, delivered or given up on.
+///
+/// Carries no identity: every surface that draws scheduled sends draws a *list* of them, and a
+/// per-item event would have each one rebuilding the same list anyway.
+struct ScheduledMessagesDidChange: AppEvent {
+    static let name = Notification.Name("scheduledMessagesDidChange")
+}
+
+/// A scheduled send's moment has arrived.
+///
+/// Announced rather than performed, for `SessionArchiveRequestDidBecomeDue`'s reason:
+/// `ScheduledMessageScheduler` lives in Core and knows nothing about sidebars, surfaces or
+/// launching. `SessionCoordinator` performs it — and **claims the record first**, because a send
+/// is not idempotent the way an archive is.
+struct ScheduledMessageDidBecomeDue: AppEvent {
+    static let name = Notification.Name("scheduledMessageDidBecomeDue")
+    let id: ScheduledMessageID
+}
+
+/// Sends whose moment passed while the app was not running, gathered for one review.
+struct ScheduledMessagesWereMissed: AppEvent {
+    static let name = Notification.Name("scheduledMessagesWereMissed")
+    let ids: [ScheduledMessageID]
 }
 
 struct AppSettingsDidChange: AppEvent {
@@ -921,6 +1023,17 @@ struct ProfileDidChange: AppEvent {
 struct AccountUsageDidChange: AppEvent {
     static let name = Notification.Name("ThreadingAccountUsageDidChange")
     let accountID: AccountID
+}
+
+/// The usage-window poke's schedule was edited.
+struct UsageWindowScheduleDidChange: AppEvent {
+    static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")
+}
+
+/// A poke fired, failed, or the standing reason it is holding changed — the signal the settings
+/// page redraws its ledger on.
+struct UsageWindowPokeDidChange: AppEvent {
+    static let name = Notification.Name("ThreadingUsageWindowPokeDidChange")
 }
 
 struct ThemesDidChange: AppEvent {

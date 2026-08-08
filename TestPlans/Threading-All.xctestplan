@@ -9,6 +9,12 @@
     }
   ],
   "defaultOptions" : {
+    "environmentVariableEntries" : [
+      {
+        "key" : "THREADING_GITHUB_E2E_REPOSITORY",
+        "value" : "$(THREADING_GITHUB_E2E_REPOSITORY)"
+      }
+    ],
     "targetForVariableExpansion" : {
       "containerPath" : "container:Threading.xcodeproj",
       "identifier" : "F6000001000000000000001",

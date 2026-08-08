@@ -15,11 +15,16 @@ struct NavigationHistory: Equatable {
 
     /// One thing the content pane can show. A session's conversation, a project's composer,
     /// or a settings page — the same three pages the sidebar can put there.
+    ///
+    /// The AI settings search is a page too, deliberately: opening one of its suggestions
+    /// replaces the pane with the suggested page, and without a Back step the run's answer —
+    /// paid for with the user's own usage — would be one click from unrecoverable.
     enum Page: Equatable, Hashable {
         case session(SessionID)
         case terminal(TerminalID)
         case composer(ProjectID)
         case settings(String)
+        case settingsAISearch
     }
 
     private(set) var backStack: [Page] = []

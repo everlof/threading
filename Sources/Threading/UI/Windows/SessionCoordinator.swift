@@ -8,12 +8,20 @@ import AppKit
 @MainActor
 final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
-    private let sidebar: ProjectSidebarViewController
-    private let container: TerminalContainerViewController
+    /// Not private: `SessionCoordinator+ScheduledMessages` performs a due send against the same
+    /// two surfaces every other lifecycle decision here goes through, and a scheduled start that
+    /// reached for its own sidebar would be a second answer to "where does a session appear".
+    let sidebar: ProjectSidebarViewController
+    let container: TerminalContainerViewController
     private let onPresentationChanged: () -> Void
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
+
+    /// One network publication per session. The generated ref makes retries idempotent across
+    /// launches; this gate also prevents two finish notifications in the same launch from
+    /// racing through discovery and both attempting review creation.
+    private var managedWorkspacePublications: Set<SessionID> = []
 
     /// Released with this coordinator, which the window owns for its own lifetime.
     private let appEvents = AppEventObservations()
@@ -35,6 +43,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // `archiveAtAgentRequest(_:reason:)`.
         appEvents.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
             self?.archiveAtAgentRequest(event.sessionID, reason: event.reason)
+        }
+
+        // The same arrangement, one feature along: `ScheduledMessageScheduler` is in Core and
+        // owns only the clock. See `SessionCoordinator+ScheduledMessages`.
+        appEvents.observe(ScheduledMessageDidBecomeDue.self) { [weak self] event in
+            self?.performScheduledSend(event.id)
         }
     }
 
@@ -113,6 +127,16 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         }
 
+        // A person filing an unfinished managed session is not the finish handshake. Preserve
+        // its checkout explicitly; only the agent's post-turn archive route validates, merges
+        // and removes it.
+        if let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace,
+           workspace.state == .active {
+            ProjectStore.shared.update(sessionID: sessionID) {
+                $0.managedWorkspace = ManagedGitWorkspace.keepForReview(workspace)
+            }
+        }
+
         archive(sessionID) { session, wasRunning, undo in
             Self.archiveToast(for: session, wasRunning: wasRunning, undo: undo)
         }
@@ -129,6 +153,44 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Arriving here at all means the request already waited for the turn to end
     /// (`SessionArchiveScheduler`); this is only the archive.
     func archiveAtAgentRequest(_ sessionID: SessionID, reason: String?) {
+        if let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace {
+            if workspace.publication != nil {
+                publishManagedWorkspaceAndArchive(
+                    workspace,
+                    sessionID: sessionID,
+                    reason: reason
+                )
+                return
+            }
+            switch ManagedGitWorkspace.finishLocalDelivery(workspace) {
+            case .completed(let completed):
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.managedWorkspace = completed
+                }
+
+            case .needsAttention(let failed):
+                let message = failed.lastError
+                    ?? L10n.string("Managed workspace needs attention")
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.managedWorkspace = failed
+                }
+                sidebar.presentToast(ToastRequest(
+                    message: L10n.string("Managed workspace needs attention"),
+                    detail: message,
+                    identifier: "sidebar.toast.managed-workspace.failed"
+                ))
+                EventLog.shared.record(.session, "Managed workspace integration refused", [
+                    "session": sessionID.uuidString,
+                    "reason": message
+                ])
+                return
+            }
+        }
+
+        finishAgentRequestedArchive(sessionID, reason: reason)
+    }
+
+    private func finishAgentRequestedArchive(_ sessionID: SessionID, reason: String?) {
         archive(
             sessionID,
             receipt: { session, wasRunning, undo in
@@ -147,8 +209,97 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                     "session": sessionID.uuidString,
                     "reason": reason ?? "none"
                 ])
+            },
+            onArchiveFailed: { [weak self] in
+                self?.recoverManagedWorkspaceAfterArchiveFailure(sessionID)
             }
         )
+    }
+
+    /// Remote publication is the second opt-in, and therefore the only managed finish that may
+    /// cross the network. The review receipt is persisted before local disposal so a crash or a
+    /// cleanup refusal can retry by discovering the same generated branch rather than creating
+    /// a duplicate change request.
+    private func publishManagedWorkspaceAndArchive(
+        _ workspace: ManagedWorkspace,
+        sessionID: SessionID,
+        reason: String?
+    ) {
+        guard managedWorkspacePublications.insert(sessionID).inserted else { return }
+        let publisher = ManagedWorkspacePublisher.live()
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.managedWorkspacePublications.remove(sessionID) }
+            do {
+                let result = try await publisher.publish(workspace)
+                guard let session = ProjectStore.shared.session(withID: sessionID),
+                      var recorded = session.managedWorkspace,
+                      recorded.worktreeRoot == workspace.worktreeRoot else { return }
+
+                recorded.finalCommit = result.finalCommit
+                recorded.changeRequest = result.changeRequest
+                recorded.remoteBranchState = .awaitingReviewCompletion
+                recorded.lastError = nil
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.managedWorkspace = recorded
+                }
+
+                if result.wasCreated {
+                    ChangeRequestReceiptStore.shared.append(ChangeRequestReceipt(
+                        date: Date(),
+                        action: result.changeRequest.isDraft ? .createdDraft : .createdReady,
+                        repository: result.changeRequest.repository,
+                        branch: result.changeRequest.branch,
+                        url: result.changeRequest.url,
+                        credentialTier: result.credentialTier
+                    ))
+                }
+
+                // A person may have archived the row while publication was in flight. Manual
+                // archive means preserve the checkout; retain the remote receipt without
+                // overriding that newer choice or filing the session a second time.
+                guard !session.isArchived, recorded.state != .kept else { return }
+
+                let completed = try ManagedGitWorkspace.cleanPublished(recorded)
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.managedWorkspace = completed
+                }
+                self.finishAgentRequestedArchive(sessionID, reason: reason)
+            } catch {
+                self.recordManagedWorkspaceFailure(
+                    sessionID: sessionID,
+                    message: error.localizedDescription,
+                    event: "Managed workspace publication refused"
+                )
+            }
+        }
+    }
+
+    private func recordManagedWorkspaceFailure(
+        sessionID: SessionID,
+        message: String,
+        event: String
+    ) {
+        var shouldPresent = false
+        ProjectStore.shared.update(sessionID: sessionID) {
+            guard var failed = $0.managedWorkspace,
+                  failed.state != .kept,
+                  failed.state != .published else { return }
+            failed.state = .needsAttention
+            failed.lastError = message
+            $0.managedWorkspace = failed
+            shouldPresent = true
+        }
+        guard shouldPresent else { return }
+        sidebar.presentToast(ToastRequest(
+            message: L10n.string("Managed workspace needs attention"),
+            detail: message,
+            identifier: "sidebar.toast.managed-workspace.failed"
+        ))
+        EventLog.shared.record(.session, event, [
+            "session": sessionID.uuidString,
+            "reason": message
+        ])
     }
 
     /// Archiving, with the receipt left to the caller.
@@ -161,7 +312,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     private func archive(
         _ sessionID: SessionID,
         receipt: @escaping (AgentSession, Bool, @escaping () -> Void) -> ToastRequest,
-        onArchived: @escaping () -> Void = {}
+        onArchived: @escaping () -> Void = {},
+        onArchiveFailed: @escaping () -> Void = {}
     ) -> Bool {
         guard let session = ProjectStore.shared.session(withID: sessionID),
               !session.isArchived else { return false }
@@ -179,6 +331,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 })
                 onArchived()
             case .failure(let failure):
+                onArchiveFailed()
                 sidebar.presentToast(Self.archiveFailureToast(
                     for: session,
                     failure: failure,
@@ -187,6 +340,33 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
         return true
+    }
+
+    /// Integration happens before provider filing because the process must still have reached
+    /// its final turn before repository state moves. If provider filing then refuses, put the
+    /// removed cwd back so the still-visible session remains launchable.
+    private func recoverManagedWorkspaceAfterArchiveFailure(_ sessionID: SessionID) {
+        guard let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace
+        else { return }
+        do {
+            let active = try ManagedGitWorkspace.restore(workspace)
+            ProjectStore.shared.update(sessionID: sessionID) {
+                $0.managedWorkspace = active
+            }
+        } catch {
+            let message = error.localizedDescription
+            ProjectStore.shared.update(sessionID: sessionID) {
+                guard var failed = $0.managedWorkspace else { return }
+                failed.state = .needsAttention
+                failed.lastError = message
+                $0.managedWorkspace = failed
+            }
+            sidebar.presentToast(ToastRequest(
+                message: L10n.string("Couldn’t restore the managed workspace"),
+                detail: message,
+                identifier: "sidebar.toast.managed-workspace.archive-recovery.failed"
+            ))
+        }
     }
 
     /// The undo behind the archive toast.
@@ -202,6 +382,26 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// behind an undo would be a heavier thing than the click being taken back.
     private func restore(_ sessionID: SessionID, reselecting: Bool) {
         let session = ProjectStore.shared.session(withID: sessionID)
+
+        if let workspace = session?.managedWorkspace,
+           workspace.state == .integrated
+            || workspace.state == .published
+            || workspace.state == .kept {
+            do {
+                let restored = try ManagedGitWorkspace.restore(workspace)
+                ProjectStore.shared.update(sessionID: sessionID) {
+                    $0.managedWorkspace = restored
+                }
+            } catch {
+                sidebar.presentToast(ToastRequest(
+                    message: L10n.string("Couldn’t restore the managed workspace"),
+                    detail: error.localizedDescription,
+                    identifier: "sidebar.toast.managed-workspace.restore.failed"
+                ))
+                return
+            }
+        }
+
         ProviderArchiveSync.shared.setArchived(false, for: sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -443,9 +643,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
+        managedWorkspacePlan: ManagedWorkspacePlan?,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool {
@@ -456,10 +658,59 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         )
 
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let opening = NewChatOpeningMessage.compose(
+        var opening = NewChatOpeningMessage.compose(
             prompt: task,
             reusableMessage: AppSettings.shared.newChatOpeningMessage
         )
+
+        let sessionID = SessionID()
+        let managedWorkspace: ManagedWorkspace?
+        if let managedWorkspacePlan {
+            guard ManagedWorkspaceEligibility.supportsFinishHandshake(
+                kind: kind,
+                usesNativeUI: usesNativeUI
+            ) else {
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Could not create managed workspace")
+                alert.informativeText = L10n.string(
+                    "Managed workspaces require an agent surface with Threading session tools."
+                )
+                alert.alertStyle = .warning
+                if let window = composer.view.window {
+                    alert.beginSheetModal(for: window)
+                } else {
+                    alert.runModal()
+                }
+                return false
+            }
+            guard let targetProject = ProjectStore.shared.project(withID: targetProjectID) else {
+                return false
+            }
+            do {
+                managedWorkspace = try ManagedGitWorkspace.provision(
+                    sessionID: sessionID,
+                    from: targetProject,
+                    plan: managedWorkspacePlan
+                )
+                opening = ManagedWorkspaceInstructions.append(
+                    to: opening,
+                    plan: managedWorkspacePlan
+                )
+            } catch {
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Could not create managed workspace")
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                if let window = composer.view.window {
+                    alert.beginSheetModal(for: window)
+                } else {
+                    alert.runModal()
+                }
+                return false
+            }
+        } else {
+            managedWorkspace = nil
+        }
 
         guard let session = ProjectStore.shared.addSession(
             to: targetProjectID,
@@ -467,10 +718,18 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             accountHandle: accountHandle,
             model: model,
             reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
             usesNativeUI: usesNativeUI,
             permissionMode: permissionMode,
-            title: SessionNaming.promptTitle(from: task)
-        ) else { return false }
+            title: SessionNaming.promptTitle(from: task),
+            managedWorkspace: managedWorkspace,
+            id: sessionID
+        ) else {
+            if let managedWorkspace {
+                try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
+            }
+            return false
+        }
 
         // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
         // as a mode. Reading the resolved flag back belongs to the "Launching agent" entry,
@@ -481,6 +740,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "agent": kind.rawValue,
             "account": accountHandle.name,
             "reasoningEffort": reasoningEffort ?? "inherit",
+            "speed": fastMode.map { $0 ? "fast" : "standard" } ?? "inherit",
             "permissionMode": permissionMode?.rawValue ?? "inherit",
             "prompt": opening ?? ""
         ])
@@ -490,7 +750,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // recorded nothing: the opening prompt's images were the only ones a session could never
         // show back, and the temporary file the path points at outlives the turn by nothing.
         if !attachmentPaths.isEmpty,
-           let folder = ProjectStore.shared.project(withID: targetProjectID)?.folderPath {
+           let folder = ProjectStore.shared.workingDirectory(forSessionID: session.id) {
             PromptAttachment.record(
                 paths: attachmentPaths,
                 sessionID: session.id,
@@ -557,17 +817,72 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         return session
     }
 
-    func sessionComposer(
-        _ composer: SessionComposerViewController,
-        importSession session: ImportableSession,
-        into projectID: ProjectID
-    ) {
-        guard let adopted = ProjectStore.shared.importSession(session, into: projectID) else {
-            return
+    /// Creates the session a scheduled start named, without selecting it.
+    ///
+    /// Deliberately *not* `startRemoteSession`'s route. That one selects the row, because a
+    /// phone asking for a session wants it on screen when its owner looks; a schedule firing at
+    /// 09:00 must not reach across whatever the user is reading and replace it. The launch is
+    /// `container.launchInBackground`'s job, and `pendingPrompt` — a single slot spent by the
+    /// next selection — is not involved at all.
+    func startSessionUnattended(plan: ScheduledSessionPlan, title: String) -> AgentSession? {
+        let targetProjectID = Self.targetProjectID(
+            startingAt: plan.projectID,
+            branch: plan.branch,
+            checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
+        )
+        guard let targetProject = ProjectStore.shared.project(withID: targetProjectID) else {
+            return nil
         }
 
+        let sessionID = SessionID()
+        let workspace: ManagedWorkspace?
+        if let managedPlan = plan.managedWorkspacePlan {
+            guard ManagedWorkspaceEligibility.supportsFinishHandshake(
+                kind: plan.kind,
+                usesNativeUI: plan.usesNativeUI
+            ) else { return nil }
+            workspace = try? ManagedGitWorkspace.provision(
+                sessionID: sessionID,
+                from: targetProject,
+                plan: managedPlan
+            )
+            guard workspace != nil else { return nil }
+        } else {
+            workspace = nil
+        }
+
+        let session = ProjectStore.shared.addSession(
+            to: targetProjectID,
+            kind: plan.kind,
+            accountHandle: plan.accountHandle,
+            model: plan.model,
+            reasoningEffort: plan.reasoningEffort,
+            fastMode: plan.fastMode,
+            usesNativeUI: plan.usesNativeUI,
+            permissionMode: plan.permissionMode,
+            title: SessionNaming.promptTitle(from: title),
+            managedWorkspace: workspace,
+            id: sessionID
+        )
+        if session == nil, let workspace {
+            try? ManagedGitWorkspace.discardUnstarted(workspace)
+        }
+        return session
+    }
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        importSessions sessions: [ImportableSession],
+        into projectID: ProjectID
+    ) {
+        // One write and one notification however many were chosen, and the newest is selected:
+        // it is the row at the top of the sheet, and the one somebody adopting a single
+        // conversation asked for.
+        let adopted = ProjectStore.shared.importSessions(sessions, into: projectID)
+        guard let first = adopted.first else { return }
+
         sidebar.reload()
-        sidebar.select(sessionID: adopted.id)
+        sidebar.select(sessionID: first.id)
     }
 
     func sessionComposer(

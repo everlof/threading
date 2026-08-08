@@ -44,14 +44,14 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     /// Without the public key Sparkle cannot verify what it downloaded, and an unsigned update is
-    /// arbitrary code execution with extra steps. Its *value* matters too: this is the key shared
-    /// with claudex, and a mismatch means every signature check fails after release.
-    func testTheUpdateSigningKeyIsPresentAndIsTheSharedOne() throws {
+    /// arbitrary code execution with extra steps. Its *value* matters too: Threading has its own
+    /// release key, and a mismatch means every signature check fails after release.
+    func testTheUpdateSigningKeyIsPresentAndIsThreadingsDedicatedOne() throws {
         let key = try XCTUnwrap(
             Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
             "SUPublicEDKey is missing, so downloaded updates could not be verified"
         )
-        XCTAssertEqual(key, "1oYHD7FlQLUy7qQc9NISuCUFzscHMjMnk5Sm6d3/noM=")
+        XCTAssertEqual(key, "18EoXEv3Y17zr3HN/HUNBN7TqSy4RTLYhmNkZkJPon8=")
 
         // Base64 of an ed25519 public key — 32 bytes. A truncated paste still decodes.
         let decoded = try XCTUnwrap(Data(base64Encoded: key), "the key is not valid base64")

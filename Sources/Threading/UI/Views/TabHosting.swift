@@ -1,5 +1,93 @@
 import AppKit
 
+// MARK: - Session Browser Hosting
+
+/// A pane that can hold a session's browser, asked where that browser is.
+///
+/// Deliberately **not** folded into `TabHosting`. That protocol answers what a strip draws for
+/// the pane's current state, and the agent is asking a different question: the panel showing
+/// the app-theme document draws no session tabs at all and still holds the browser the agent is
+/// driving, and a host follows the session on screen while `browser_*` names the session the
+/// tool call arrived for. Both differences are exactly where a shared signature would have gone
+/// quietly wrong, so the two questions stay two protocols.
+@MainActor
+protocol SessionBrowserHosting: AnyObject {
+
+    /// Every browser-bearing tab this host holds for the session, in strip order.
+    func browserTabs(for sessionID: SessionID) -> [PaneTab]
+
+    /// Which of them this host offers as the session's, for an agent action to reach for: its
+    /// active tab when that holds a drivable browser, else whichever the host prefers among the
+    /// rest. Nil when it holds none.
+    ///
+    /// Per host because any recency involved is the host's own: a content tool putting a
+    /// screenshot in front of a browser must not change which browser the next action reaches.
+    /// The panel therefore remembers the last browser tab it had active; the drawer, whose tabs
+    /// are the user's own furniture and few, simply takes its first. Both are answers to "which
+    /// of mine", which is all this asks.
+    ///
+    /// Narrower than "holds a browser" — see `PaneTab.holdsAgentDrivableBrowser`, which is what
+    /// keeps an Execution audit's hidden, never-loaded browser from capturing the session's
+    /// browser tools the moment the audit tab is opened.
+    func preferredBrowserTabID(for sessionID: SessionID) -> UUID?
+
+    /// Brings one of this host's browser tabs to the front of its own strip, so a tool that
+    /// drove a page can show the user the page it drove.
+    func activateBrowserTab(id: UUID, for sessionID: SessionID)
+
+    /// The window this host is showing in, so a prompt about a browser it holds can be raised
+    /// over the page it is about.
+    ///
+    /// Asked of the *host* rather than of the browser's own view on purpose: a host installs
+    /// only its active tab, so a background browser's view is in no window at all — and a
+    /// prompt that fell back to the app's main window on that basis would be asking about a
+    /// page shown somewhere else entirely.
+    var hostWindow: NSWindow? { get }
+}
+
+extension SessionBrowserHosting where Self: TabHosting {
+
+    /// Every host that holds browsers is also a tab host, and activation is the same act.
+    func activateBrowserTab(id: UUID, for sessionID: SessionID) {
+        activateTab(id: id, for: sessionID)
+    }
+}
+
+extension SessionBrowserHosting where Self: NSViewController {
+
+    /// Guarded by `isViewLoaded`, because asking an unloaded controller for its `view` builds
+    /// the whole pane — a steep price for answering "which window", and one that would run
+    /// during a tool call on a session nobody has opened.
+    var hostWindow: NSWindow? {
+        isViewLoaded ? view.window : nil
+    }
+}
+
+// MARK: - Drop Band Hosting
+
+/// A tab host that can take a dropped chip, asked in **screen** coordinates.
+///
+/// Screen rather than window coordinates because the gesture now spans windows: a chip dragged
+/// out of the display panel may land in a detached browser window, and there is no single window
+/// whose coordinates both ends of that drag share. Each host converts into its own window, which
+/// is the only place that conversion is knowable.
+@MainActor
+protocol TabDropBandHosting: AnyObject {
+
+    /// Whether the host's strip band is on screen at all. A collapsed pane or an unshown window
+    /// takes no drop — it is reached by the menu, which opens it on landing.
+    var isDropBandVisible: Bool { get }
+
+    /// Whether a screen point lands where a dropped tab would join this host.
+    func dropBandContains(screenPoint: NSPoint) -> Bool
+
+    /// The slot a drop at this screen point takes, by the strip's own midpoint rule.
+    func dropInsertionIndex(screenPoint: NSPoint) -> Int
+
+    /// The wash on this host's strip while another's chip would land here.
+    func setDropTargetHighlighted(_ highlighted: Bool)
+}
+
 // MARK: - Tab Hosting
 
 /// What every tab-hosting pane answers for, stated once so tab commands — cycling, closing,

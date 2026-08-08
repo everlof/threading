@@ -128,6 +128,243 @@ final class EventLogTests: XCTestCase {
         }
     }
 
+    // MARK: - Who Owns the Marker
+
+    /// The second-instance shape: a process that never began a launch quits without disturbing
+    /// the marker of the one that did.
+    ///
+    /// The app is single-instance by an `flock` that fails open, so a second process reaching its
+    /// quit path is ordinary — it puts up "already running" and terminates. If that path removed
+    /// the marker, the running instance's next crash would be reported as a clean quit, which is
+    /// the one thing this file exists to catch.
+    func testAProcessThatNeverBeganALaunchRemovesNothingOnItsWayOut() throws {
+        let running = EventLog(directory: testDirectory)
+        running.beginLaunch()
+
+        let secondInstance = EventLog(directory: testDirectory)
+        secondInstance.endLaunch()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: markerPath),
+            "an instance that never launched must not be able to close someone else's launch"
+        )
+        let next = EventLog(directory: testDirectory)
+        next.beginLaunch()
+        guard case .unclean = next.previousLaunchOutcome else {
+            return XCTFail("the running instance's death is still what the next launch reports")
+        }
+    }
+
+    /// And it says nothing either: a `Quit` record from a process with no `Launched` record reads
+    /// as the running instance having quit, in the same journal that instance is still writing to.
+    func testAProcessThatNeverBeganALaunchJournalsNoQuit() throws {
+        EventLog(directory: testDirectory).beginLaunch()
+
+        EventLog(directory: testDirectory).endLaunch()
+
+        let messages = try journalRecords().compactMap { $0["message"] as? String }
+        XCTAssertFalse(messages.contains(EventLogDefaults.quitMessage))
+    }
+
+    /// Ownership is per launch, not per file: once another launch has written the marker, the
+    /// earlier one's quit leaves it alone. Otherwise the sequence "A starts, B starts, A quits"
+    /// ends with B running and no marker on disk.
+    func testAQuitDoesNotRemoveAMarkerAnotherLaunchHasSinceWritten() throws {
+        let first = EventLog(directory: testDirectory)
+        first.beginLaunch()
+
+        let second = EventLog(directory: testDirectory)
+        second.beginLaunch()
+
+        first.endLaunch()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: markerPath),
+            "the marker on disk belongs to the second launch, which has not quit"
+        )
+    }
+
+    /// The ordinary case, unchanged: the launch that wrote the marker is the one that takes it
+    /// away again.
+    func testTheLaunchThatWroteTheMarkerRemovesIt() {
+        let log = EventLog(directory: testDirectory)
+        log.beginLaunch()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: markerPath))
+
+        log.endLaunch()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markerPath))
+    }
+
+    /// Beginning twice in one process is a no-op rather than a second launch. The marker it would
+    /// read back is the one it wrote a moment earlier, so a re-entered launch would report the
+    /// process it is running in as having crashed.
+    func testBeginningTwiceInOneProcessDoesNotReportItselfAsACrash() throws {
+        let log = EventLog(directory: testDirectory)
+        log.beginLaunch()
+        log.beginLaunch()
+
+        let messages = try journalRecords().compactMap { $0["message"] as? String }
+        XCTAssertEqual(messages.filter { $0 == EventLogDefaults.uncleanExitMessage }.count, 0)
+        XCTAssertEqual(messages.filter { $0 == EventLogDefaults.launchedMessage }.count, 1)
+        XCTAssertEqual(log.previousLaunchOutcome, .unknown)
+    }
+
+    // MARK: - The Typed Outcome
+
+    /// The fact the window's own notice acts on. It has to be *kept*, because the marker it is
+    /// derived from is consumed a few lines into the same `beginLaunch` — by the time anything
+    /// asks, there is nothing left on disk to re-derive it from.
+    func testALaunchThatNeverQuitIsReportedToTheNextOneAsUnclean() {
+        EventLog(directory: testDirectory).beginLaunch()
+
+        let next = EventLog(directory: testDirectory)
+        next.beginLaunch()
+
+        guard case .unclean = next.previousLaunchOutcome else {
+            return XCTFail("a marker left lying there is the definition of an unclean exit")
+        }
+        XCTAssertEqual(next.previousLaunchEndedCleanly, false)
+    }
+
+    func testADeliberateQuitIsReportedToTheNextLaunchAsClean() {
+        let first = EventLog(directory: testDirectory)
+        first.beginLaunch()
+        first.endLaunch()
+
+        let next = EventLog(directory: testDirectory)
+        next.beginLaunch()
+
+        XCTAssertEqual(next.previousLaunchOutcome, .clean)
+        XCTAssertEqual(next.previousLaunchEndedCleanly, true)
+    }
+
+    /// **The reset relaunch, which is neither a quit nor a crash.**
+    ///
+    /// The reset flows have to `exit` rather than terminate — a polite quit would write the state
+    /// they just moved aside straight back — so the marker survives the restart. Reset Settings
+    /// leaves the support directory alone, so for it the marker was still lying there on the next
+    /// launch and read as a crash: the workspace was held back and a crash notice went up over a
+    /// window the user had pressed a button to get back.
+    func testAResetRelaunchIsReportedAsDeliberateRatherThanAsACrash() throws {
+        let first = EventLog(directory: testDirectory)
+        first.beginLaunch()
+        first.recordIntentionalExit(.reset)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: markerPath),
+            "the marker is stamped, not removed: removing it would say the app quit"
+        )
+
+        let next = EventLog(directory: testDirectory)
+        next.beginLaunch()
+
+        XCTAssertEqual(next.previousLaunchOutcome, .intentional(reason: .reset))
+        XCTAssertEqual(
+            LaunchRestorationPlan(previousLaunch: next.previousLaunchOutcome),
+            .restoresEverything,
+            "a restart the user asked for must not hold their workspace back"
+        )
+
+        let messages = try journalRecords().compactMap { $0["message"] as? String }
+        XCTAssertFalse(
+            messages.contains(EventLogDefaults.uncleanExitMessage),
+            "a deliberate restart was journalled as a launch that never came back"
+        )
+        XCTAssertTrue(messages.contains(EventLogDefaults.intentionalExitMessage))
+    }
+
+    /// The stamp is consumed exactly as the marker always was, so a reset is reported once rather
+    /// than at every launch after it.
+    func testTheDeliberateStampIsConsumedLikeAnyOtherMarker() {
+        let first = EventLog(directory: testDirectory)
+        first.beginLaunch()
+        first.recordIntentionalExit(.reset)
+
+        let second = EventLog(directory: testDirectory)
+        second.beginLaunch()
+        second.endLaunch()
+
+        let third = EventLog(directory: testDirectory)
+        third.beginLaunch()
+
+        XCTAssertEqual(third.previousLaunchOutcome, .clean)
+    }
+
+    /// A process that never began a launch has no marker of its own to stamp, and stamping
+    /// someone else's would hand a running launch a verdict it has not earned.
+    func testStampingWithoutHavingBegunALaunchDoesNothing() {
+        EventLog(directory: testDirectory).recordIntentionalExit(.reset)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markerPath))
+    }
+
+    /// The ledger files its records under the marker's own token. One id shared by the two is the
+    /// whole reason the ledger can be *told* how a launch ended rather than deriving a second
+    /// answer that could disagree.
+    func testTheLaunchTokenIsReadableWhileALaunchIsOpen() {
+        let log = EventLog(directory: testDirectory)
+        XCTAssertNil(log.currentLaunchID)
+
+        log.beginLaunch()
+
+        XCTAssertNotNil(log.currentLaunchID)
+    }
+
+    /// Not a quit and not a crash: there is no previous launch to judge. The distinction is the
+    /// whole reason the outcome is a type — `nil` used to stand for this *and* for "quit
+    /// cleanly", and a caller had to guess which it had been handed.
+    func testAMachineTheAppHasNeverRunOnReportsUnknownRatherThanClean() {
+        let first = EventLog(directory: testDirectory)
+        first.beginLaunch()
+
+        XCTAssertEqual(first.previousLaunchOutcome, .unknown)
+        XCTAssertNil(first.previousLaunchEndedCleanly)
+    }
+
+    /// **The order inside `beginLaunch`.** A missing marker means either "quit cleanly" or
+    /// "never ran here", and the only thing separating the two is whether a journal survives —
+    /// so the question has to be put before the retention sweep deletes the answer. Pruning
+    /// first, a machine left alone for longer than the retention window came back reporting that
+    /// the app had never run on it.
+    func testTheOutcomeIsDecidedBeforeTheRetentionSweepRemovesTheEvidence() throws {
+        let expired = testDirectory.appendingPathComponent(
+            "\(EventLogDefaults.filePrefix)2020-01-01.\(EventLogDefaults.fileExtension)"
+        )
+        try Data("{}\n".utf8).write(to: expired)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-EventLogDefaults.retention * 2)],
+            ofItemAtPath: expired.path
+        )
+
+        let log = EventLog(directory: testDirectory)
+        log.beginLaunch()
+
+        XCTAssertEqual(
+            log.previousLaunchOutcome, .clean,
+            "a fortnight of not being opened is not the same as never having run here"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: expired.path),
+            "the fixture proves nothing unless the sweep actually removed the journal"
+        )
+    }
+
+    /// The outcome is one-shot for the same reason the journal record is: the marker is spent
+    /// when it is read, so the launch after the one that reported the crash is an ordinary one.
+    func testTheLaunchAfterTheOneThatReportedACrashIsOrdinary() {
+        EventLog(directory: testDirectory).beginLaunch()
+
+        let reporting = EventLog(directory: testDirectory)
+        reporting.beginLaunch()
+        reporting.endLaunch()
+
+        let next = EventLog(directory: testDirectory)
+        next.beginLaunch()
+
+        XCTAssertEqual(next.previousLaunchOutcome, .clean)
+    }
+
     func testPerformanceTraceExportsCompletedAndActiveSpans() throws {
         var configuration = PerformanceRecorder.Configuration()
         configuration.slowMainThreadMilliseconds = .greatestFiniteMagnitude
@@ -199,6 +436,10 @@ final class EventLogTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private var markerPath: String {
+        testDirectory.appendingPathComponent(EventLogDefaults.markerFileName).path
+    }
 
     private func journalRecords() throws -> [[String: Any]] {
         let log = EventLog(directory: testDirectory)

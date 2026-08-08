@@ -1,6 +1,70 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A bounded diff-shaped slice for a code comment: target rows keep their marker, additions and removals keep theirs, and a large source never turns into a large sheet.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett begränsat, diff-format utdrag för en kodkommentar: målrader behåller sin markör, tillägg och borttagningar sina, och en stor källfil blir aldrig ett stort blad." } } }
+    },
+    "Activity beam is idle.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitetsringen är inaktiv." } } }
+    },
+    "Activity beam shows one working agent.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitetsringen visar en arbetande agent." } } }
+    },
+    "Activity beam shows three agents, including top effort.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitetsringen visar tre agenter, inklusive högsta arbetsinsats." } } }
+    },
+    "AgentActivityBeamView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "AgentActivityBeamView" } } }
+    },
+    "AgentWorkSummaryView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "AgentWorkSummaryView" } } }
+    },
+    "CodeContextPreviewView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "CodeContextPreviewView" } } }
+    },
+    "Cycle workload": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Växla arbetsbelastning" } } }
+    },
+    "Harden tests": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Stärk testerna" } } }
+    },
+    "One continuous themed card whose repeating rows are recycled at the viewport boundary. Scroll it to exercise real cell reuse rather than a retained stack disguised as a list.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett sammanhängande temakort vars upprepade rader återanvänds vid visningsområdets gräns. Rulla för att prova faktisk cellåteranvändning i stället för en bevarad stapel förklädd till lista." } } }
+    },
+    "Refactor sidebar": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Omstrukturera sidofältet" } } }
+    },
+    "The System-theme activity ring around a live surface. Cycle idle, one agent, and three agents at top effort; styled themes intentionally decline it.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Systemtemats aktivitetsring runt en aktiv yta. Växla mellan inaktiv, en agent och tre agenter med högsta arbetsinsats; formgivna teman avstår avsiktligt från den." } } }
+    },
+    "The detailed, bounded project aggregate behind a sidebar workprint: the repository atlas, action ribbon, counts, and recent agents share one stable file axis even when the checkout has thousands of files.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den detaljerade, begränsade projektsammanställningen bakom sidofältets arbetsavtryck: kodförrådets atlas, åtgärdsband, antal och senaste agenter delar en stabil filaxel även när arbetskopian har tusentals filer." } } }
+    },
+    "ThemedGroupedTableView & ThemedVirtualTableCell": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedGroupedTableView och ThemedVirtualTableCell" } } }
+    },
+    "Three agents are working": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tre agenter arbetar" } } }
+    },
+    "Virtual rows": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Virtuella rader" } } }
+    },
     " · %d agents": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": " · %d agenter" } } }
@@ -65,6 +129,18 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tunna markeringar är läsningar; fyllda är redigeringar; en toppmarkering betyder att agenter överlappar." } } }
     },
+    "Capture an HTML attachment — tables, charts, diagrams, rich reports.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spara en HTML-bilaga – tabeller, diagram, illustrationer och innehållsrika rapporter." } } }
+    },
+    "Images, documents, and HTML from this session will appear here.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilder, dokument och HTML från den här sessionen visas här." } } }
+    },
+    "Let agents show inspectable attachments and live content beside the chat.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Låt agenter visa bilagor som kan granskas och aktivt innehåll bredvid chatten." } } }
+    },
     "Couldn’t ask “%@” to report back": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte be ”%@” rapportera tillbaka" } } }
@@ -72,6 +148,138 @@
     "Its agent could not take the request. Try again when it is idle.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess agent kunde inte ta emot förfrågan. Försök igen när den är ledig." } } }
+    },
+    "Automatic review publishing currently requires a GitHub origin remote.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Automatisk publicering för granskning kräver för närvarande en GitHub-origin-fjärr." } } }
+    },
+    "Automatic review publishing requires a GitHub sign-in in Threading, gh, or Git.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Automatisk publicering för granskning kräver en GitHub-inloggning i Threading, gh eller Git." } } }
+    },
+    "Could not create managed workspace": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte skapa hanterad arbetsyta" } } }
+    },
+    "Couldn’t restore the managed workspace": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte återställa den hanterade arbetsytan" } } }
+    },
+    "Finish: Keep workspace for review": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avslut: Behåll arbetsytan för granskning" } } }
+    },
+    "Finish: Merge and clean up": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avslut: Slå ihop och städa" } } }
+    },
+    "Git returned an ambiguous remote branch response.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Git returnerade ett tvetydigt svar för fjärrgrenen." } } }
+    },
+    "GitHub returned a pull-request state Threading does not understand.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "GitHub returnerade ett pull request-tillstånd som Threading inte förstår." } } }
+    },
+    "Its checkout no longer has a supported pull-request remote.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess utcheckning har inte längre en fjärr som stöds för pull requests." } } }
+    },
+    "Managed workspace needs attention": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan behöver ses över" } } }
+    },
+    "Managed workspaces require a Git project.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hanterade arbetsytor kräver ett Git-projekt." } } }
+    },
+    "Managed workspaces require an agent surface with Threading session tools.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hanterade arbetsytor kräver en agentyta med Threadings sessionsverktyg." } } }
+    },
+    "Open a pull request when finished": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna en pull request när arbetet är klart" } } }
+    },
+    "Review: Draft pull request": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Granskning: Utkast till pull request" } } }
+    },
+    "Review: Ready pull request": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Granskning: Pull request redo" } } }
+    },
+    "Run in an isolated managed worktree": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kör i ett isolerat, hanterat worktree" } } }
+    },
+    "The agent left uncommitted changes in its managed workspace.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten lämnade ändringar som inte checkats in i sin hanterade arbetsyta." } } }
+    },
+    "The generated review branch changed remotely, so Threading left it in place.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den genererade granskningsgrenen ändrades på fjärren, så Threading lämnade den kvar." } } }
+    },
+    "The generated review branch still exists after Git accepted its removal.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den genererade granskningsgrenen finns fortfarande efter att Git godkände borttagningen." } } }
+    },
+    "The managed workspace already exists: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan finns redan: %@" } } }
+    },
+    "The managed workspace changed after its review was published.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan ändrades efter att granskningen publicerades." } } }
+    },
+    "The managed workspace has no committed changes to publish.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan har inga incheckade ändringar att publicera." } } }
+    },
+    "The managed workspace has no recorded change request to finish.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan har ingen registrerad change request att slutföra." } } }
+    },
+    "The managed workspace is missing: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan saknas: %@" } } }
+    },
+    "The managed workspace no longer descends from the commit it started on.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan utgår inte längre från den incheckning där den startade." } } }
+    },
+    "The selected checkout has uncommitted changes. Commit or stash them first.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den valda utcheckningen har ändringar som inte checkats in. Checka in eller lägg undan dem först." } } }
+    },
+    "This managed workspace was not configured to publish for review.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här hanterade arbetsytan konfigurerades inte för publicering till granskning." } } }
+    },
+    "The selected checkout is detached. Switch it to a branch first.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den valda utcheckningen är frånkopplad. Byt först till en gren." } } }
+    },
+    "The source checkout moved from %@ to %@.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Källutcheckningen flyttades från %@ till %@." } } }
+    },
+    "The stored review no longer matches Threading’s generated branch, so the remote branch was left in place.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den lagrade granskningen matchar inte längre Threadings genererade gren, så fjärrgrenen lämnades kvar." } } }
+    },
+    "The target branch moved while the session was working. The workspace was kept for review.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Målgrenen flyttades medan sessionen arbetade. Arbetsytan behölls för granskning." } } }
+    },
+    "Threading could not match the published review to this repository’s origin remote.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte matcha den publicerade granskningen mot lagrets origin-fjärr." } } }
+    },
+    "a detached commit": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "en frånkopplad incheckning" } } }
     },
     "%@ could not archive this conversation: %@": {
       "extractionState": "manual",
@@ -312,6 +520,10 @@
     },
     "Its checkout for %@ is gone.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess utcheckning för %@ är borta." } } }
+    },
+    "Its agent surface no longer has Threading session tools.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess agentyta har inte längre Threadings sessionsverktyg." } } }
     },
     "Its session could not be created.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess session kunde inte skapas." } } }
@@ -11110,13 +11322,13 @@
         }
       }
     },
-    "Let agents notify your paired devices when requested work is ready.": {
+    "Let agents notify this Mac or a paired iPhone when requested work is ready.": {
       "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Låt agenter meddela dina parade enheter när den begärda arbetet är klart."
+            "value": "Låt agenter meddela den här Macen eller en parad iPhone när det begärda arbetet är klart."
           }
         }
       }
@@ -26609,7 +26821,39 @@
     "Try Normal Launch Once": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Prova en normal start"}}}},
     "Writes a share-safe diagnostics file and reveals it.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriver en delningssäker diagnosfil och visar den."}}}},
     "You held Option at launch, so Threading started in recovery mode.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Du höll ned alt vid start, så Threading startade i återställningsläge."}}}},
-    "Recovery mode is showing the stock appearance. Your saved theme is still %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställningsläget visar standardutseendet. Ditt sparade tema är fortfarande %@."}}}}
+    "Recovery mode is showing the stock appearance. Your saved theme is still %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställningsläget visar standardutseendet. Ditt sparade tema är fortfarande %@."}}}},
+    "Cannot Import Classic Skin": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det går inte att importera det klassiska skalet"}}}},
+    "Classic skins": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Klassiska skal"}}}},
+    "Import Classic Skin": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importera klassiskt skal"}}}},
+    "Import a classic Winamp .wsz skin, or drop one on this page. Files stay on this Mac.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importera ett klassiskt Winamp-skal i .wsz-format eller släpp ett på den här sidan. Filerna stannar på denna Mac."}}}},
+    "Import…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importera…"}}}},
+    "Choose a classic .wsz skin file.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj en klassisk skalfil i .wsz-format."}}}},
+    "Encrypted skin archives are not supported.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Krypterade skalarkiv stöds inte."}}}},
+    "Imported Classic Skin": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importerat klassiskt skal"}}}},
+    "Imported classic .wsz window skin. Stored only on this Mac.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importerat klassiskt .wsz-fönsterskal. Sparas endast på denna Mac."}}}},
+    "The expanded skin is too large to import safely.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det uppackade skalet är för stort för att importeras säkert."}}}},
+    "The skin archive is too large to import.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalarkivet är för stort för att importeras."}}}},
+    "The skin artwork could not be stored.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalets grafik kunde inte sparas."}}}},
+    "The skin contains too many files.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalet innehåller för många filer."}}}},
+    "The skin does not contain TITLEBAR.BMP.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalet innehåller inte TITLEBAR.BMP."}}}},
+    "The skin is not a valid ZIP archive.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalet är inte ett giltigt ZIP-arkiv."}}}},
+    "The skin uses an unsupported ZIP compression method.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalet använder en ZIP-komprimeringsmetod som inte stöds."}}}},
+    "The skin's TITLEBAR image could not be read.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalets TITLEBAR-bild kunde inte läsas."}}}},
+    "The skin's TITLEBAR image is too large (%lld×%lld).": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalets TITLEBAR-bild är för stor (%lld×%lld)."}}}},
+    "The skin's TITLEBAR image is too small (%lld×%lld).": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skalets TITLEBAR-bild är för liten (%lld×%lld)."}}}},
+    "Conversation Speed": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konversationshastighet"}}}},
+    "Claude sessions start in": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Claude-sessioner startar i"}}}},
+    "Codex sessions start in": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Codex-sessioner startar i"}}}},
+    "Applies to Terminal and Native chats. Agent's Setting preserves Claude Code's own choice; Fast uses more credits and works only with supported models.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gäller för Terminal- och Native-chattar. Agentens inställning bevarar Claude Codes eget val; Snabb använder fler krediter och fungerar bara med modeller som stöds."}}}},
+    "Applies to Terminal and Native chats. Agent's Setting preserves Codex's own service tier; Fast uses more credits.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gäller för Terminal- och Native-chattar. Agentens inställning bevarar Codex egen servicenivå; Snabb använder fler krediter."}}}},
+    "conversation speed": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "konversationshastighet"}}}},
+    "credits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "krediter"}}}},
+    "fast mode": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "snabbläge"}}}},
+    "service tier": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "servicenivå"}}}},
+    "standard mode": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "standardläge"}}}},
+    "Follow General Setting": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Följ inställningen i Allmänt"}}}},
+    "Uses the Conversation Speed choice in General settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använder valet Konversationshastighet i inställningarna under Allmänt."}}}},
+    "This chat keeps the speed it is running with. The agent's own setting applies the next time it starts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här chatten behåller hastigheten den körs med. Agentens egen inställning gäller nästa gång den startas."}}}}
   },
   "version": "1.0"
 }

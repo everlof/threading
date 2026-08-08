@@ -71,11 +71,52 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private(set) lazy var displayPaneController = DisplayPaneController()
     private lazy var displayItem = NSSplitViewItem(viewController: displayPaneController)
 
+    /// Where a session's browser is, across every pane that can hold one. Window-owned for the
+    /// same reason `tabTransfer` is: only the window sees all the hosts. Panel first — it is
+    /// where a browser is built and where a session with none gets one.
+    private lazy var browserResolver = SessionBrowserResolver(hosts: { [weak self] in
+        guard let self else { return [] }
+        // Detached windows last, so a browser the user is looking at *in a pane* still answers
+        // first. A window they parked on another display is the session's browser only when no
+        // pane holds one — which is exactly the case the feature is for.
+        return [
+            (.displayPanel, displayPaneController),
+            (.drawer, containerViewController.drawerHostController)
+        ] + orderedDetachedWindows.map { (.detachedWindow($0.windowID), $0.host) }
+    })
+
+    /// The session's detached browser windows, by their own id. Window-owned like every other
+    /// host: only this controller can see all of them at once.
+    private var detachedBrowserWindows: [UUID: DetachedBrowserWindowController] = [:]
+
+    /// The same windows in a **stable** order. `Dictionary.values` reorders itself as the
+    /// dictionary mutates, so with two windows for one session the resolver's answer could flip
+    /// — and a lease then fails with "a different browser tab became active" because an
+    /// unrelated window happened to open. Creation order is arbitrary but it does not move.
+    private var detachedWindowOrder: [UUID] = []
+
+    private var orderedDetachedWindows: [DetachedBrowserWindowController] {
+        detachedWindowOrder.compactMap { detachedBrowserWindows[$0] }
+    }
+
     /// Owns agent-originated browser, display, storage, and theme requests.
     private(set) lazy var agentToolCoordinator = AgentToolCoordinator(
         displayPaneController: displayPaneController,
+        browserResolver: browserResolver,
         visibleSessionID: { [weak self] in self?.currentSessionID },
         setPaneVisible: { [weak self] visible in self?.setDisplayPaneVisible(visible) },
+        revealBrowserHost: { [weak self] hostID in
+            guard let self else { return }
+            switch hostID {
+            case .displayPanel: setDisplayPaneVisible(true)
+            case .drawer: containerViewController.openShellDrawer()
+            case .detachedWindow(let id):
+                // Ordered front, never made key: an agent acting on a page must not take the
+                // keyboard out from under whatever the user is typing into. `showWindow` is
+                // what the *user's* own "Focus" does.
+                detachedBrowserWindows[id]?.window?.orderFront(nil)
+            }
+        },
         windowProvider: { [weak self] in self?.window }
     )
 
@@ -320,6 +361,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func setupSplitViewController() {
         sidebarViewController.delegate = self
 
+        // Provider archive can change while Threading is not frontmost. The store notification
+        // rebuilds the tree; this lifecycle event also empties a pane whose row was filed away,
+        // matching the local and remote archive paths instead of leaving an invisible session on
+        // screen until another row is selected.
+        appEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
+            self?.refreshAfterRemoteSessionMutation(
+                sessionID: event.sessionID,
+                archived: event.isArchived
+            )
+        }
+
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
         // sidebar's new silhouette.
         //
@@ -361,17 +413,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.delegate = self
 
         containerViewController.composerViewController.delegate = sessionCoordinator
-        // Provider archive can change while Threading is not frontmost. The store notification
-        // rebuilds the tree; this lifecycle event also empties a pane whose row was filed away,
-        // matching the local and remote archive paths instead of leaving an invisible session on
-        // screen until another row is selected.
-        appEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
-            self?.refreshAfterRemoteSessionMutation(
-                sessionID: event.sessionID,
-                archived: event.isArchived
-            )
-        }
-
         pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
         pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
         // The header shows exactly one page, and it is always the current one.
@@ -647,6 +688,30 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self?.containerViewController.shellRootPid(for: sessionID)
         }
 
+        // Where a page went, answered in the pane it left. Built here because which windows
+        // exist is the window's knowledge, and the panel is deliberately not told how to make
+        // one — only what to draw and what the two answers do.
+        displayPaneController.sessionBrowserCount = { [weak self] sessionID in
+            self?.browserResolver.locations(for: sessionID).count ?? 0
+        }
+
+        displayPaneController.detachedWindowProxies = { [weak self] sessionID in
+            guard let self else { return [] }
+            return orderedDetachedWindows
+                .filter { $0.sessionID == sessionID }
+                .map { controller in
+                    DisplayPaneController.DetachedWindowProxy(
+                        windowID: controller.windowID,
+                        title: controller.host.windowTitle,
+                        onFocus: { [weak controller] in controller?.showWindow(nil) },
+                        onBringBack: { [weak self, weak controller] in
+                            guard let self, let controller else { return }
+                            bringDetachedWindowBack(controller)
+                        }
+                    )
+                }
+        }
+
         displayItem.canCollapse = true
 
         // The pane's own chrome, not the width it opens at: a split item's minimum is required,
@@ -678,8 +743,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self?.updateSessionTitleItem()
         }
 
-        // A clicked macOS notification lands here. Selecting through the sidebar keeps it on
-        // the same path as a local click, exactly like a remote resume.
+        // A clicked macOS notification lands here. The sidebar owns the chat selection; the
+        // destination is then resolved against the session's current durable/live surfaces.
         appEvents.observe(SessionNotificationOpened.self) { [weak self] event in
             guard let self,
                   ProjectStore.shared.session(withID: event.sessionID) != nil else { return }
@@ -688,6 +753,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // sidebar keeps listing settings sections, with no row to show which one arrived.
             self.exitSettingsForNavigation()
             self.sidebarViewController.select(sessionID: event.sessionID)
+            DispatchQueue.main.async { [weak self] in
+                self?.openNotificationDestination(event.destination, for: event.sessionID)
+            }
         }
         appEvents.observe(SessionLocalInputBlocked.self) { [weak self] event in
             guard let self, self.currentSessionID == event.sessionID,
@@ -963,6 +1031,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func syncDisplayPane(to sessionID: SessionID?) {
         displayPaneController.showSession(sessionID)
 
+        // A session's detached windows come back when the session does. The panes restore on
+        // their first *ask* and that is invisible because a pane is not on screen until its
+        // session is either — but nothing ever asks a window into existence, so this is the
+        // ask. Existing windows stay exactly where they are: a window is not a pane, and
+        // switching sessions must not sweep another session's browser off the screen.
+        if let sessionID {
+            restoreDetachedBrowserWindows(for: sessionID)
+        }
+
         // The theme document is app-wide, so changing or temporarily clearing the selected
         // session must not close it. Its agent attribution remains whichever conversation is in
         // the main pane; only the inspector itself is global.
@@ -1003,6 +1080,147 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
               let sessionID = ProjectStore.shared.selectedSessionID,
               ProjectStore.shared.session(withID: sessionID) != nil else { return }
         sidebarViewController.select(sessionID: sessionID)
+    }
+
+    /// Says that the previous launch died, and offers back the workspace this one held.
+    ///
+    /// **A band in the pane, never an alert.** A launch that stops to ask a question asks it
+    /// before the user has asked the app for anything, and what it would be asking about is the
+    /// *previous* launch — nothing is waiting on the answer. So the report sits above the
+    /// content where the pane's other chrome does, waits as long as it takes to be read, and
+    /// leaves when it is answered or dismissed.
+    ///
+    /// The report is *revealed* rather than opened: an `.ips` opens in Console, and what someone
+    /// filing a bug needs is the file, in the Finder, ready to attach.
+    ///
+    /// The escalated wording is the only thing a crash *loop* changes here. It says the app has
+    /// died more than once and stops: what to do about it is Recovery Mode's to offer, and a band
+    /// that hinted at a mode the build does not have would be worse than one that says nothing.
+    func presentUncleanExitNotice(
+        crashReport: URL?,
+        escalation: UncleanExitEscalation = .none,
+        restore: @escaping () -> Void
+    ) {
+        var actions: [PaneNoticeAction] = [
+            PaneNoticeAction(title: L10n.string("Restore")) { [weak self] in
+                self?.containerViewController.dismissNotice()
+                restore()
+            }
+        ]
+        if let crashReport {
+            actions.append(
+                PaneNoticeAction(
+                    title: L10n.string("Show Crash Report"),
+                    emphasis: .tertiary
+                ) {
+                    NSWorkspace.shared.activateFileViewerSelecting([crashReport])
+                }
+            )
+        }
+
+        let notice = PaneNoticeView(
+            tone: .attention,
+            message: Self.uncleanExitMessage(escalation: escalation),
+            actions: actions,
+            onDismiss: { [weak self] in self?.containerViewController.dismissNotice() }
+        )
+        containerViewController.showNotice(notice)
+    }
+
+    /// Puts the recovery surface in the pane, with a standing band above it.
+    ///
+    /// **A band with no dismissal.** `PaneNoticeView` already draws a standing condition the pane
+    /// found on its own, and this is the most standing one there is: the only thing that ends it
+    /// is a relaunch. Without it the surface would be a screen the user could navigate away from
+    /// and never get back, because every route that used to reach the pane now shows something
+    /// else.
+    ///
+    /// The actions are handed in rather than built here, so the screen can be exercised without
+    /// relaunching the app or moving anybody's data.
+    func presentRecoveryMode(
+        reason: LaunchModeReason,
+        checkpoint: StartupCheckpoint?,
+        crashReport: URL?,
+        extensionsDisabledNextLaunch: Bool,
+        actions: RecoveryModeActions
+    ) {
+        installRecoverySurface(
+            reason: reason,
+            checkpoint: checkpoint,
+            crashReport: crashReport,
+            extensionsDisabledNextLaunch: extensionsDisabledNextLaunch,
+            actions: actions
+        )
+
+        let notice = PaneNoticeView(
+            tone: .attention,
+            message: RecoveryModeDefaults.bandMessage,
+            actions: [
+                PaneNoticeAction(title: RecoveryModeDefaults.bandAction) { [weak self] in
+                    self?.containerViewController.showRecoverySurface()
+                }
+            ]
+        )
+        containerViewController.showNotice(notice)
+    }
+
+    /// Builds the surface and hands it to the pane. Called again when something on it changed
+    /// state — the extensions button's title is the one such thing, and a button that does not
+    /// answer a press reads as broken.
+    func installRecoverySurface(
+        reason: LaunchModeReason,
+        checkpoint: StartupCheckpoint?,
+        crashReport: URL?,
+        extensionsDisabledNextLaunch: Bool,
+        actions: RecoveryModeActions
+    ) {
+        containerViewController.installRecoverySurface(
+            RecoveryModeSurface.make(
+                reason: reason,
+                checkpoint: checkpoint,
+                hasCrashReport: crashReport != nil,
+                extensionsDisabledNextLaunch: extensionsDisabledNextLaunch,
+                actions: actions
+            )
+        )
+    }
+
+    /// Takes the surface off the pane, leaving the band. "Continue in Recovery Mode": the app
+    /// stays exactly as it is, and the pane goes back to what a recovery selection shows.
+    func dismissRecoverySurface() {
+        containerViewController.dismissRecoverySurface()
+    }
+
+    /// Says that a normal launch deliberately came up without extensions.
+    func presentExtensionsHeldBackNotice() {
+        let notice = PaneNoticeView(
+            tone: .informational,
+            message: L10n.string(
+                "Extensions did not start this launch. They start again the next time Threading opens."
+            ),
+            actions: [
+                PaneNoticeAction(title: L10n.string("Open Extensions Settings")) { [weak self] in
+                    self?.containerViewController.dismissNotice()
+                    self?.showSettingsPage(id: SettingsPages.extensionsID)
+                }
+            ],
+            onDismiss: { [weak self] in self?.containerViewController.dismissNotice() }
+        )
+        containerViewController.showNotice(notice)
+    }
+
+    /// Built apart from being shown, so a test can hold the wording without a window.
+    static func uncleanExitMessage(escalation: UncleanExitEscalation) -> String {
+        switch escalation {
+        case .none:
+            return L10n.string(
+                "Threading quit unexpectedly last time. Its open session and browser windows were not reopened."
+            )
+        case .repeatedUnexpectedExits:
+            return L10n.string(
+                "Threading has quit unexpectedly more than once, so its open session and browser windows were not reopened."
+            )
+        }
     }
 
     /// Relaunches, without selecting them, the sessions that were running at the last quit.
@@ -1267,17 +1485,243 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Tab Transfer
 
-    /// Moves tabs between the window's hosts; only the window sees both.
+    /// Moves tabs between the window's hosts; only the window sees them all.
     private lazy var tabTransfer = TabTransferCoordinator(host: { [weak self] hostID in
         guard let self else { return nil }
         switch hostID {
         case .displayPanel: return displayPaneController
         case .drawer: return containerViewController.drawerHostController
+        case .detachedWindow(let id): return detachedBrowserWindows[id]?.host
         }
     })
 
-    /// Wires movement into both strip panes' context menus, the drag-out gesture, and the
-    /// browser resolution's cross-host fallback. Called once, after both panes exist.
+    // MARK: - Detached Browser Windows
+
+    /// Moves a tab into a window of its own, and shows it.
+    ///
+    /// The window is built empty and the tab moved into it through the same transfer path every
+    /// other move uses — detach without teardown, adopt — so the browser keeps its page, its
+    /// history and its signed-in state, exactly as it does travelling between the two panes.
+    @discardableResult
+    func detachTabIntoWindow(
+        _ tabID: UUID,
+        from sourceID: TabHostID,
+        droppedAt screenPoint: NSPoint? = nil
+    ) -> Bool {
+        guard let source = tabTransfer.resolve(sourceID),
+              let tab = source.tabs(for: nil).first(where: { $0.id == tabID })
+                ?? currentSessionID.flatMap({ session in
+                    source.tabs(for: session).first { $0.id == tabID }
+                }),
+              let sessionID = tab.owningSessionID ?? currentSessionID
+        else {
+            NSSound.beep()
+            return false
+        }
+
+        let controller = makeDetachedBrowserWindow(
+            for: sessionID,
+            droppedAt: screenPoint
+        )
+        guard tabTransfer.move(
+            tabID: tabID,
+            from: sourceID,
+            to: TabHostID.detachedWindow(controller.windowID),
+            sessionID: sessionID
+        ) else {
+            // Nothing moved, so nothing should have been built.
+            forgetDetachedWindow(controller.windowID)
+            controller.close()
+            NSSound.beep()
+            return false
+        }
+
+        controller.showWindow(nil)
+        persistDetachedWindow(controller)
+        return true
+    }
+
+    private func makeDetachedBrowserWindow(
+        for sessionID: SessionID,
+        windowID: UUID = UUID(),
+        restoredFrame: NSRect? = nil,
+        droppedAt screenPoint: NSPoint? = nil
+    ) -> DetachedBrowserWindowController {
+        let host = DetachedBrowserHostViewController(sessionID: sessionID, windowID: windowID)
+        let controller = DetachedBrowserWindowController(
+            host: host,
+            restoredFrame: restoredFrame,
+            droppedAt: screenPoint
+        )
+
+        host.sessionBrowserCount = { [weak self] in
+            self?.browserResolver.locations(for: sessionID).count ?? 0
+        }
+        host.transferEntries = { [weak self, weak controller] tabID in
+            guard let self, let controller else { return [] }
+            return transferMenuEntries(
+                from: TabHostID.detachedWindow(controller.windowID),
+                tabID: tabID
+            )
+        }
+        // The window's strip drags by the same rules the panes' do, already in screen space.
+        host.dragOutDestination = { [weak self, weak controller] tabID, screenPoint in
+            guard let self, let controller else { return false }
+            return trackDrag(
+                from: .detachedWindow(controller.windowID),
+                tabID: tabID,
+                at: screenPoint
+            ) != nil
+        }
+        host.performDragOut = { [weak self, weak controller] tabID, screenPoint in
+            guard let self, let controller else { return }
+            dropDraggedTab(
+                from: .detachedWindow(controller.windowID),
+                tabID: tabID,
+                at: screenPoint
+            )
+        }
+        host.dragOutEnded = { [weak self] _ in
+            self?.dragDidSettle()
+        }
+        controller.onPersist = { [weak self] controller in
+            guard let self else { return }
+            persistDetachedWindow(controller)
+            // The chip carries the page's own title, so it follows the page.
+            refreshDetachedWindowProxies()
+        }
+        controller.onClose = { [weak self] windowID in
+            self?.forgetDetachedWindow(windowID)
+        }
+
+        detachedBrowserWindows[windowID] = controller
+        detachedWindowOrder.append(windowID)
+        refreshDetachedWindowProxies()
+        return controller
+    }
+
+    /// The proxy chips are drawn from `detachedBrowserWindows`, so the panel is asked to redraw
+    /// whenever that set changes — a window opening, closing, or renaming itself.
+    private func refreshDetachedWindowProxies() {
+        // A redraw, not a re-point. `showSessionTabs` also dismisses the app-theme document —
+        // right for a keystroke, catastrophic here, where this fires on every window move,
+        // resize and page change: dragging a detached window would have closed a document the
+        // user was reading.
+        displayPaneController.refreshDetachedWindowProxies()
+    }
+
+    private func persistDetachedWindow(_ controller: DetachedBrowserWindowController) {
+        DisplayPaneStore.shared.saveDetachedWindowLayout(
+            controller.persistedWindow,
+            tabs: controller.host.persistedTabs,
+            for: controller.sessionID
+        )
+    }
+
+    /// Closes the detached windows of sessions that no longer exist.
+    ///
+    /// Without this an orphan window stays on screen and keeps persisting — and
+    /// `saveDetachedWindowLayout` rebuilds a `panel_layout` row from nothing, so the deleted
+    /// session's document comes *back* moments after the sweep that removed it.
+    func closeDetachedWindows(forSessionsOutside liveSessionIDs: Set<SessionID>) {
+        for controller in orderedDetachedWindows
+        where !liveSessionIDs.contains(controller.sessionID) {
+            forgetDetachedWindow(controller.windowID)
+            controller.close()
+        }
+    }
+
+    /// Moves every page in a detached window back into the panel. The window empties as its
+    /// last tab leaves and closes itself, which is the same path a drag back takes — nothing
+    /// here knows how to close a window, and nothing needs to.
+    private func bringDetachedWindowBack(_ controller: DetachedBrowserWindowController) {
+        let sessionID = controller.sessionID
+        for tab in controller.host.tabs(for: sessionID) {
+            moveTab(tab.id, from: .detachedWindow(controller.windowID), to: .displayPanel)
+        }
+    }
+
+    private func forgetDetachedWindow(_ windowID: UUID) {
+        guard let controller = detachedBrowserWindows.removeValue(forKey: windowID) else { return }
+        detachedWindowOrder.removeAll { $0 == windowID }
+        refreshDetachedWindowProxies()
+        // A window closed with tabs still in it ends what they held, exactly as closing a tab
+        // does; one emptied by a move has nothing left to forget and already wrote that.
+        if !controller.host.isEmpty {
+            DisplayPaneStore.shared.removeDetachedWindow(windowID, for: controller.sessionID)
+        }
+    }
+
+    /// Brings back every session's detached windows at launch.
+    ///
+    /// **Eager, and it has to be.** Both panes restore on their first *ask*, which is invisible
+    /// because a pane is not on screen until its session is either — but nothing ever asks a
+    /// window into existence. Hanging this on session selection instead, as an earlier pass did,
+    /// means the headline case does not come back at all: `relaunchSessionsFromLastQuit`
+    /// relaunches without *selecting*, so a fullscreen browser on a second display would wait
+    /// until the user happened to click that session.
+    ///
+    /// The scan is over `panel_layout` rows, not conversations: a session's layout is a small
+    /// JSON document in its own table, deliberately not foreign-keyed to `session`, and building
+    /// a browser needs a session id and nothing else. Gated on the same switches that decide how
+    /// much of the workspace comes back at all.
+    func restoreDetachedBrowserWindowsAtLaunch() {
+        guard AppSettings.shared.restoresLastSession
+            || AppSettings.shared.restoresRunningSessions else { return }
+
+        for session in ProjectStore.shared.projects.flatMap(\.sessions) where !session.isArchived {
+            restoreDetachedBrowserWindows(for: session.id)
+        }
+    }
+
+    /// Brings back the detached windows a session left behind.
+    ///
+    /// Eager, and it has to be: every pane restores on first *ask* — selecting the session asks
+    /// — but nothing ever asks a window into existence. Ordered on screen for a second reason
+    /// the measurement found: WebKit renders nothing for a view in a window that was never
+    /// shown, so a window restored but never ordered in would hand an agent blank captures
+    /// forever (`BrowserOffScreenCaptureTests`).
+    func restoreDetachedBrowserWindows(for sessionID: SessionID) {
+        guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID) else { return }
+
+        for window in panel.detachedWindows {
+            guard let windowID = UUID(uuidString: window.id),
+                  detachedBrowserWindows[windowID] == nil
+            else { continue }
+
+            let persistedTabs = panel.tabs(inDetachedWindow: windowID)
+            guard !persistedTabs.isEmpty else { continue }
+
+            let controller = makeDetachedBrowserWindow(
+                for: sessionID,
+                windowID: windowID,
+                restoredFrame: window.frame.map(NSRectFromString)
+            )
+            let tabs = persistedTabs.map { persisted in
+                PaneTab(
+                    id: UUID(uuidString: persisted.id) ?? UUID(),
+                    body: .browser(controller.host.makeRestoredBrowser(url: persisted.url)),
+                    owningSessionID: sessionID
+                )
+            }
+            controller.host.restore(
+                tabs,
+                activeID: window.activeTabID.flatMap(UUID.init(uuidString:))
+            )
+            // Ordered in, never made key: selecting a session in the sidebar is not a request
+            // to type into a browser, and with several windows each would have grabbed the
+            // keyboard in turn. Being ordered in at all is still required — WebKit renders
+            // nothing for a view in a window that was never shown.
+            controller.window?.orderFront(nil)
+            if window.isFullScreen == true, controller.window?.styleMask.contains(.fullScreen) != true {
+                controller.window?.toggleFullScreen(nil)
+            }
+        }
+    }
+
+    /// Wires movement into both strip panes' context menus and the drag-out gesture. Called
+    /// once, after both panes exist. Finding a browser across those panes is
+    /// `browserResolver`'s job, not a hook installed here.
     private func configureTabTransfer() {
         displayPaneController.transferEntries = { [weak self] tabID in
             self?.transferMenuEntries(from: .displayPanel, tabID: tabID) ?? []
@@ -1287,28 +1731,36 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.dragOutDestination = { [weak self] tabID, windowPoint in
-            self?.trackDrag(from: .displayPanel, tabID: tabID, at: windowPoint) != nil
+            guard let self, let point = screenPoint(windowPoint, in: displayPaneController.view)
+            else { return false }
+            return trackDrag(from: .displayPanel, tabID: tabID, at: point) != nil
         }
         displayPaneController.performDragOut = { [weak self] tabID, windowPoint in
-            self?.dropDraggedTab(from: .displayPanel, tabID: tabID, at: windowPoint)
+            guard let self, let point = screenPoint(windowPoint, in: displayPaneController.view)
+            else { return }
+            dropDraggedTab(from: .displayPanel, tabID: tabID, at: point)
         }
         displayPaneController.dragOutEnded = { [weak self] _ in
             self?.dragDidSettle()
         }
         containerViewController.drawerHostController.dragOutDestination = {
             [weak self] tabID, windowPoint in
-            self?.trackDrag(from: .drawer, tabID: tabID, at: windowPoint) != nil
+            guard let self, let point = screenPoint(
+                windowPoint,
+                in: containerViewController.drawerHostController.view
+            ) else { return false }
+            return trackDrag(from: .drawer, tabID: tabID, at: point) != nil
         }
         containerViewController.drawerHostController.performDragOut = {
             [weak self] tabID, windowPoint in
-            self?.dropDraggedTab(from: .drawer, tabID: tabID, at: windowPoint)
+            guard let self, let point = screenPoint(
+                windowPoint,
+                in: containerViewController.drawerHostController.view
+            ) else { return }
+            dropDraggedTab(from: .drawer, tabID: tabID, at: point)
         }
         containerViewController.drawerHostController.dragOutEnded = { [weak self] _ in
             self?.dragDidSettle()
-        }
-
-        displayPaneController.browserFallback = { [weak self] sessionID in
-            self?.containerViewController.drawerHostController.browser(for: sessionID)
         }
     }
 
@@ -1318,73 +1770,122 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         var openedDrawer = false
         var revealedPanel = false
         var dropped = false
+        /// The session the panel was showing before a spring re-pointed it at the travelling
+        /// tab's own. Left behind, the pane keeps showing another session's tabs — and
+        /// `tabSession`'s fallback then resolves the wrong session for the next gesture.
+        var paneSessionBeforeSpring: SessionID??
     }
 
     private var dragSpring = DragSpringState()
 
-    /// One pointer sample of a travelling chip: springs a closed destination open once the
-    /// drag has left its own band, keeps the destination strip's wash in step, and answers
-    /// whether a drop right now would land.
+    /// The strip reports its own window's coordinates; every question after this is asked in
+    /// screen space, because the drag can now end in another window entirely.
+    private func screenPoint(_ windowPoint: NSPoint, in view: NSView) -> NSPoint? {
+        view.window.map { $0.convertPoint(toScreen: windowPoint) }
+    }
+
+    /// Every host that can take a dropped chip, with its id. Enumerated rather than paired: the
+    /// drag used to map each source to *the* other pane, which stops being a rule the moment
+    /// there are three hosts and stops being expressible the moment there are many.
+    /// Whether a host's window can actually receive a drop *now*.
+    ///
+    /// Asked here rather than inside `isDropBandVisible` because the hosts answer a geometry
+    /// question that a built-but-never-shown fixture window must still be able to answer. The
+    /// earlier reasoning — that screen coordinates make visibility redundant — was wrong for the
+    /// windows this feature adds: a miniaturized window, one on another Space, and a fully
+    /// occluded one all keep their frame, so their bands do contain live screen points. A
+    /// fullscreen browser on Space 2 owns the top strip of the whole screen, and a drag near the
+    /// top of Space 1 would have landed the tab in a window nobody can see.
+    private func isWindowUsableForDrop(_ host: TabDropBandHosting) -> Bool {
+        guard let window = (host as? NSViewController)?.view.window else { return false }
+        return window.isVisible
+            && !window.isMiniaturized
+            && window.occlusionState.contains(.visible)
+    }
+
+    private var dropBandHosts: [(TabHostID, TabDropBandHosting)] {
+        [
+            (.displayPanel, displayPaneController),
+            (.drawer, containerViewController.drawerHostController)
+        ] + detachedBrowserWindows.values.map { (.detachedWindow($0.windowID), $0.host) }
+    }
+
+    /// One pointer sample of a travelling chip: springs a closed destination open once the drag
+    /// has left its own band, keeps the destination strip's wash in step, and answers whether a
+    /// drop right now would land.
     private func trackDrag(
         from sourceID: TabHostID,
         tabID: UUID,
-        at windowPoint: NSPoint
-    ) -> TabHostID? {
-        springDestinationOpen(from: sourceID, tabID: tabID, at: windowPoint)
-        let destination = dragDestination(from: sourceID, tabID: tabID, at: windowPoint)
-        highlightDropTarget(destination)
-        return destination
+        at screenPoint: NSPoint
+    ) -> DragLanding? {
+        springDestinationOpen(from: sourceID, tabID: tabID, at: screenPoint)
+        let landing = dragDestination(from: sourceID, tabID: tabID, at: screenPoint)
+        highlightDropTarget(landing?.hostID)
+        return landing
     }
 
-    /// A drop needs a visible band, so the band makes itself visible: the moment a movable
-    /// chip leaves its own strip's row, a closed destination opens — Finder's spring-loaded
-    /// folder, for panes. Springing on *leaving* rather than on grabbing is what keeps an
-    /// ordinary reorder from flinging the other pane open.
+    /// Where a travelling chip would land. A tear-off is not a host, which is the whole reason
+    /// this is not simply a `TabHostID?`.
+    private enum DragLanding {
+        case host(TabHostID)
+        /// Outside every window: let go and the tab gets one of its own.
+        case newWindow
+
+        var hostID: TabHostID? {
+            if case .host(let id) = self { return id }
+            return nil
+        }
+    }
+
+    /// A drop needs a visible band, so the band makes itself visible: the moment a movable chip
+    /// leaves its own strip's row, a closed *pane* opens — Finder's spring-loaded folder, for
+    /// panes. Springing on leaving rather than on grabbing is what keeps an ordinary reorder
+    /// from flinging the other pane open.
+    ///
+    /// Only the two panes spring. A detached window is not a pane the window can open on the
+    /// user's behalf — it is either on screen or it is not, and one summoned by a drag passing
+    /// over where it used to be would be a window appearing from nowhere.
     private func springDestinationOpen(
         from sourceID: TabHostID,
         tabID: UUID,
-        at windowPoint: NSPoint
+        at screenPoint: NSPoint
     ) {
-        guard let sessionID = currentSessionID else { return }
+        guard let sessionID = tabSession(of: tabID, in: sourceID) else { return }
+        guard !isOverOwnBand(sourceID, screenPoint) else { return }
 
-        let stillOverOwnBand: Bool
-        let destinationID: TabHostID
-        switch sourceID {
-        case .displayPanel:
-            stillOverOwnBand = displayPaneController.dropBandContains(windowPoint: windowPoint)
-            destinationID = .drawer
-        case .drawer:
-            stillOverOwnBand = containerViewController.drawerHostController
-                .dropBandContains(windowPoint: windowPoint)
-            destinationID = .displayPanel
-        }
-
-        guard !stillOverOwnBand, tabTransfer.canMove(
-            tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
-        ) else { return }
-
-        switch destinationID {
-        case .drawer:
-            guard !containerViewController.isShellDrawerOpen else { return }
-            dragSpring.openedDrawer = true
-            containerViewController.openShellDrawer()
-        case .displayPanel:
-            guard displayItem.isCollapsed else { return }
+        if displayItem.isCollapsed, tabTransfer.canMove(
+            tabID: tabID, from: sourceID, to: .displayPanel, sessionID: sessionID
+        ) {
             dragSpring.revealedPanel = true
+            if dragSpring.paneSessionBeforeSpring == nil {
+                dragSpring.paneSessionBeforeSpring = .some(displayPaneController.currentSessionID)
+            }
             displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
+        }
+        if !containerViewController.isShellDrawerOpen, tabTransfer.canMove(
+            tabID: tabID, from: sourceID, to: .drawer, sessionID: sessionID
+        ) {
+            dragSpring.openedDrawer = true
+            containerViewController.openShellDrawer()
         }
         updateToolbarControlStates()
     }
 
-    private func highlightDropTarget(_ destinationID: TabHostID?) {
-        containerViewController.drawerHostController
-            .setDropTargetHighlighted(destinationID == .drawer)
-        displayPaneController.setDropTargetHighlighted(destinationID == .displayPanel)
+    private func isOverOwnBand(_ hostID: TabHostID, _ screenPoint: NSPoint) -> Bool {
+        dropBandHosts
+            .first { $0.0 == hostID }?.1
+            .dropBandContains(screenPoint: screenPoint) ?? false
     }
 
-    /// The drag is over, dropped or not: washes clear, and a pane sprung open for a drop
-    /// that never came goes back where it was.
+    private func highlightDropTarget(_ destinationID: TabHostID?) {
+        for (hostID, host) in dropBandHosts {
+            host.setDropTargetHighlighted(hostID == destinationID)
+        }
+    }
+
+    /// The drag is over, dropped or not: washes clear, and a pane sprung open for a drop that
+    /// never came goes back where it was.
     private func dragDidSettle() {
         highlightDropTarget(nil)
         if !dragSpring.dropped {
@@ -1394,58 +1895,88 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             if dragSpring.revealedPanel {
                 setDisplayPaneVisible(false)
             }
+            if case .some(let previous) = dragSpring.paneSessionBeforeSpring {
+                displayPaneController.showSessionTabs(previous)
+            }
             updateToolbarControlStates()
         }
         dragSpring = DragSpringState()
     }
 
-    /// The host a tab dragged out of `sourceID` would land in at this pointer position, or nil
-    /// while the drop would do nothing. Only a *visible* strip band takes a drop — a closed
-    /// drawer or collapsed panel is reached by the context menu, which opens it on landing.
+    /// The host a tab dragged out of `sourceID` would land in at this screen position, or nil
+    /// while the drop would do nothing. Only a *visible* band takes a drop — a collapsed pane or
+    /// an unshown window is reached by the menu, which opens it on landing.
     private func dragDestination(
         from sourceID: TabHostID,
         tabID: UUID,
-        at windowPoint: NSPoint
-    ) -> TabHostID? {
-        guard let sessionID = currentSessionID else { return nil }
+        at screenPoint: NSPoint
+    ) -> DragLanding? {
+        guard let sessionID = tabSession(of: tabID, in: sourceID) else { return nil }
 
-        let destinationID: TabHostID
-        let bandHit: Bool
-        switch sourceID {
-        case .displayPanel:
-            destinationID = .drawer
-            bandHit = containerViewController.isShellDrawerOpen
-                && containerViewController.drawerHostController
-                    .dropBandContains(windowPoint: windowPoint)
-        case .drawer:
-            destinationID = .displayPanel
-            bandHit = !displayItem.isCollapsed
-                && displayPaneController.dropBandContains(windowPoint: windowPoint)
+        for (hostID, host) in dropBandHosts where hostID != sourceID {
+            // The drawer is furniture under the session on screen, so a tab belonging to another
+            // one cannot land there: `moveTab` would adopt it into its own session's drawer while
+            // `openShellDrawer` opened the visible session's, and the tab would be in no drawer
+            // anyone can see. The chip menu already refuses this; the drag has to agree.
+            if hostID == .drawer, sessionID != currentSessionID { continue }
+            guard host.isDropBandVisible,
+                  isWindowUsableForDrop(host),
+                  host.dropBandContains(screenPoint: screenPoint),
+                  tabTransfer.canMove(
+                      tabID: tabID, from: sourceID, to: hostID, sessionID: sessionID
+                  )
+            else { continue }
+            return .host(hostID)
         }
 
-        guard bandHit, tabTransfer.canMove(
-            tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
-        ) else { return nil }
-        return destinationID
+        return wouldTearOff(sourceID, tabID: tabID, at: screenPoint) ? .newWindow : nil
     }
 
-    private func dropDraggedTab(from sourceID: TabHostID, tabID: UUID, at windowPoint: NSPoint) {
-        guard let destinationID = dragDestination(
-            from: sourceID, tabID: tabID, at: windowPoint
+    /// **Carried out of the window, not merely off a band.** The looser rule — anywhere no host
+    /// would take it — would make a window out of every drag that overshot the strip by a few
+    /// points, and an unwanted window is far more expensive to undo than a chip that springs
+    /// back. Leaving the window the tab lives in is a thing a hand does on purpose.
+    private func wouldTearOff(
+        _ sourceID: TabHostID,
+        tabID: UUID,
+        at screenPoint: NSPoint
+    ) -> Bool {
+        guard canDetachTabIntoWindow(tabID, from: sourceID) else { return false }
+
+        // A window's only tab has nowhere to go: the source would close as the destination
+        // opened, which is an expensive way to move a window.
+        if case .detachedWindow(let id) = sourceID,
+           detachedBrowserWindows[id]?.host.tabCount ?? 0 <= 1 {
+            return false
+        }
+
+        guard let source = dropBandHosts.first(where: { $0.0 == sourceID })?.1,
+              let frame = (source as? NSViewController)?.view.window?.frame
+        else { return false }
+        return !frame.contains(screenPoint)
+    }
+
+    private func dropDraggedTab(from sourceID: TabHostID, tabID: UUID, at screenPoint: NSPoint) {
+        guard let landing = dragDestination(
+            from: sourceID, tabID: tabID, at: screenPoint
         ) else { return }
         dragSpring.dropped = true
 
-        // The slot the pointer names, by the destination strip's own midpoint rule — a drop
-        // lands where it was aimed, not at the end of the row.
-        let index: Int
-        switch destinationID {
-        case .drawer:
-            index = containerViewController.drawerHostController
-                .dropInsertionIndex(windowPoint: windowPoint)
-        case .displayPanel:
-            index = displayPaneController.dropInsertionIndex(windowPoint: windowPoint)
+        switch landing {
+        case .host(let destinationID):
+            // The slot the pointer names, by the destination strip's own midpoint rule — a drop
+            // lands where it was aimed, not at the end of the row.
+            let index = dropBandHosts
+                .first { $0.0 == destinationID }?.1
+                .dropInsertionIndex(screenPoint: screenPoint)
+            moveTab(tabID, from: sourceID, to: destinationID, insertionIndex: index)
+
+        case .newWindow:
+            // Placed so the page appears under the hand that carried it there, rather than
+            // cascading off the main window as the menu's own "Open in New Window" does — the
+            // pointer already said where this belongs.
+            detachTabIntoWindow(tabID, from: sourceID, droppedAt: screenPoint)
         }
-        moveTab(tabID, from: sourceID, to: destinationID, insertionIndex: index)
     }
 
     /// The "Move to …" items for one tab — offered only where the destination would say yes,
@@ -1454,17 +1985,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         from sourceID: TabHostID,
         tabID: UUID
     ) -> [ThemedMenuEntry] {
-        guard let sessionID = currentSessionID else { return [] }
+        guard let sessionID = tabSession(of: tabID, in: sourceID) else { return [] }
 
-        let destinations: [(TabHostID, String)]
+        var destinations: [(TabHostID, String)] = []
         switch sourceID {
         case .displayPanel:
             destinations = [(.drawer, L10n.string("Move to Shell Drawer"))]
         case .drawer:
             destinations = [(.displayPanel, L10n.string("Move to Display Panel"))]
+        case .detachedWindow:
+            // A window's tab goes back to the panel; the drawer is furniture under a session on
+            // screen, and offering it from a window pinned to a session the user may not be
+            // looking at would land the tab somewhere they are not.
+            destinations = [(.displayPanel, L10n.string("Move to Main Window"))]
         }
 
-        return destinations.compactMap { destinationID, title in
+        var entries: [ThemedMenuEntry] = destinations.compactMap { destinationID, title in
             guard tabTransfer.canMove(
                 tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
             ) else { return nil }
@@ -1472,6 +2008,42 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 self?.moveTab(tabID, from: sourceID, to: destinationID)
             }))
         }
+
+        // Offered from the panes only: a tab already in a window of its own has nowhere new to
+        // go, and moving it to a second empty window is not what the item means.
+        if case .detachedWindow = sourceID {} else if canDetachTabIntoWindow(
+            tabID,
+            from: sourceID
+        ) {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Open in New Window"),
+                onChoose: { [weak self] in
+                    self?.detachTabIntoWindow(tabID, from: sourceID)
+                }
+            )))
+        }
+        return entries
+    }
+
+    /// Whether a tab could live in a window of its own — asked of a *prospective* detached host
+    /// rather than guessed at, so the menu and the move cannot disagree about what travels.
+    private func canDetachTabIntoWindow(_ tabID: UUID, from sourceID: TabHostID) -> Bool {
+        guard let source = tabTransfer.resolve(sourceID),
+              let sessionID = tabSession(of: tabID, in: sourceID),
+              let tab = source.tabs(for: sessionID).first(where: { $0.id == tabID })
+        else { return false }
+        return DetachedBrowserHostViewController.canHold(tab)
+    }
+
+    /// Which session a tab belongs to. Its own answer first: a detached window is pinned to a
+    /// session that may not be the one on screen, so reading the *selection* would move its tab
+    /// into a different session's panel and take the page with it.
+    private func tabSession(of tabID: UUID, in hostID: TabHostID) -> SessionID? {
+        guard let host = tabTransfer.resolve(hostID) else { return currentSessionID }
+        if let owned = host.tabs(for: nil).first(where: { $0.id == tabID })?.owningSessionID {
+            return owned
+        }
+        return currentSessionID
     }
 
     /// Moves the tab and brings its destination into view — a move you cannot see landing is
@@ -1482,7 +2054,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         to destinationID: TabHostID,
         insertionIndex: Int? = nil
     ) {
-        guard let sessionID = currentSessionID,
+        // The tab's own session, not the selection. Both panes follow what is on screen, so the
+        // two agreed until a host could be *pinned*: dragging a tab back from a window bound to
+        // session A while the main window showed B put it in B's panel and took the page with
+        // it — a move that lands somewhere the user was not looking is the same as losing it.
+        guard let sessionID = tabSession(of: tabID, in: sourceID),
               tabTransfer.move(
                   tabID: tabID,
                   from: sourceID,
@@ -1498,8 +2074,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .drawer:
             containerViewController.openShellDrawer()
         case .displayPanel:
+            // Landing in a session that is not on screen would be invisible, so the move brings
+            // that session forward — the pane's own rule, applied to the session as well.
+            if sessionID != currentSessionID {
+                sidebarViewController.select(sessionID: sessionID)
+            }
             displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
+        case .detachedWindow(let id):
+            detachedBrowserWindows[id]?.showWindow(nil)
         }
     }
 
@@ -1644,6 +2227,24 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateNavigationButtons()
     }
 
+    /// ⌃⌘↑/↓ and ⌥⌘↑/↓ — the same retracing gesture one level in, over a conversation's own
+    /// exchanges and the tool calls inside them.
+    func moveConversation(byTurn forward: Bool) {
+        guard containerViewController.moveConversation(byTurn: forward) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    func moveConversation(byStep forward: Bool) {
+        guard containerViewController.moveConversation(byStep: forward) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    var isShowingConversation: Bool { containerViewController.isShowingConversation }
+
     /// ⌃⌘→ — the step back forward.
     func goForward() {
         guard let page = history.goForward() else {
@@ -1705,7 +2306,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .settings(let pageID):
             pendingHistoryTarget = page
             showSettingsPage(id: pageID)
+
+        case .settingsAISearch:
+            pendingHistoryTarget = page
+            showSettingsAISearchSurface()
         }
+    }
+
+    /// Shows the AI settings search holding whatever it last answered, without starting a
+    /// run — the Back path into suggestions the user navigated away from.
+    private func showSettingsAISearchSurface() {
+        showSettings()
+        containerViewController.reshowSettingsAISearch()
+        updateSessionTitleItem()
+        recordVisit(.settingsAISearch)
     }
 
     /// Leaving settings *sideways* — Back to a session rather than out through the toggle —
@@ -1767,11 +2381,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         displayPaneController.isShowingCurrentTheme && !displayItem.isCollapsed
     }
 
-    /// Opens the browser as a tab in the selected session's display panel, beside the terminal.
+    /// Brings the selected session's browser forward, wherever the user keeps it.
     ///
-    /// The browser is per-session — it is one of that session's display tabs, so the agent
-    /// running there and the user drive the same page. With no session selected there is nowhere
-    /// for it to live, so the gesture just beeps.
+    /// The browser is per-session — the agent running there and the user drive the same page —
+    /// so this shows *that* browser rather than the panel's. Reaching straight for the panel
+    /// built a second browser beside one the user had moved to the drawer and showed that
+    /// instead, which is `browser_navigate`'s bug in the shape of a keystroke; both now resolve
+    /// through `browserResolver`. The panel is still where a session with no browser gets one.
+    /// With no session selected there is nowhere for it to live, so the gesture just beeps.
     func showBrowser() {
         window?.makeKeyAndOrderFront(nil)
 
@@ -1780,22 +2397,47 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
 
+        if let location = browserResolver.location(for: sessionID) {
+            browserResolver.activate(location, for: sessionID)
+            revealBrowserHost(location.hostID, for: sessionID)
+            return
+        }
+
         displayPaneController.activateBrowser(for: sessionID)
-        displayPaneController.showSessionTabs(sessionID)
-        setDisplayPaneVisible(true)
+        revealBrowserHost(.displayPanel, for: sessionID)
+    }
+
+    /// Opens the pane that holds a browser — the window's half of the same rule the agent's
+    /// tools follow through `revealBrowserPane`.
+    private func revealBrowserHost(_ hostID: TabHostID, for sessionID: SessionID) {
+        switch hostID {
+        case .displayPanel:
+            displayPaneController.showSessionTabs(sessionID)
+            setDisplayPaneVisible(true)
+        case .drawer:
+            containerViewController.openShellDrawer()
+        case .detachedWindow(let id):
+            // The user's own gesture, so this one does take the keyboard — unlike the agent's
+            // reveal, which only orders the window forward.
+            detachedBrowserWindows[id]?.showWindow(nil)
+        }
     }
 
     // MARK: - Remote Workspace
 
+    /// Enumerated through `browserResolver`, not by adding the hosts up here. A hand-rolled
+    /// `panel + drawer` compiles unchanged when a host is added, so the mirror would have
+    /// quietly stopped showing a browser the user moved — while the invalidation pulses that
+    /// tell the phone to refetch are host-neutral and would have kept firing at nothing.
     func remoteBrowserTabs(for sessionID: SessionID) -> [RemoteBrowserTabDTO] {
-        let target = displayPaneController.browser(for: sessionID)
-        return browserTabsAcrossHosts(for: sessionID).compactMap { tab in
-            guard let browser = tab.browser else { return nil }
+        let target = browserResolver.browser(for: sessionID)
+        return browserResolver.locations(for: sessionID).map { location in
+            let browser = location.browser
             let isPrivate = browser.contextKind == .private
             let rawURL = browser.currentURL?.absoluteString ?? browser.restoredURL
             return RemoteBrowserTabDTO(
-                id: tab.id.uuidString,
-                title: isPrivate ? "" : boundedRemoteBrowserTitle(tab.title),
+                id: location.tabID.uuidString,
+                title: isPrivate ? "" : boundedRemoteBrowserTitle(location.tab.title),
                 displayURL: isPrivate ? nil : rawURL.map(BrowserURLRedactor.redact),
                 isActive: browser === target,
                 isPrivate: isPrivate,
@@ -1805,8 +2447,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func remoteBrowserPreview(for sessionID: SessionID, tabID: UUID) async -> Data? {
-        guard let browser = browserTabsAcrossHosts(for: sessionID)
-            .first(where: { $0.id == tabID })?
+        guard let browser = browserResolver.locations(for: sessionID)
+            .first(where: { $0.tabID == tabID })?
             .browser,
               browser.contextKind == .shared,
               browser.currentURL != nil,
@@ -1815,11 +2457,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return nil
         }
         return capture.data
-    }
-
-    private func browserTabsAcrossHosts(for sessionID: SessionID) -> [PaneTab] {
-        displayPaneController.tabs(for: sessionID)
-            + containerViewController.drawerHostController.tabs(for: sessionID)
     }
 
     private func boundedRemoteBrowserTitle(_ title: String) -> String {
@@ -2116,6 +2753,58 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         setDisplayPaneVisible(true)
     }
 
+    /// Resolves a notification's thin route only after its chat has become current. Durable
+    /// content is looked up by attachment identity; live content is looked up in the host that
+    /// owns it now, so moving a browser tab does not stale a notification.
+    private func openNotificationDestination(
+        _ destination: RemoteNotificationDestinationDTO,
+        for sessionID: SessionID
+    ) {
+        window?.makeKeyAndOrderFront(nil)
+
+        switch destination.kind {
+        case .session:
+            return
+
+        case .attachment:
+            guard let attachmentID = destination.attachmentID,
+                  let attachment = SessionAttachmentStore.shared.attachment(
+                    for: sessionID,
+                    id: attachmentID
+                  ),
+                  let controller = displayPaneController.activateAttachments(for: sessionID)
+            else { return }
+            controller.showAttachment(at: attachment.url)
+            displayPaneController.showSessionTabs(sessionID)
+            setDisplayPaneVisible(true)
+
+        case .browserTab:
+            guard let rawTabID = destination.browserTabID,
+                  let tabID = UUID(uuidString: rawTabID),
+                  let location = browserResolver.locations(for: sessionID).first(where: {
+                    $0.tabID == tabID
+                  }) else { return }
+            browserResolver.activate(location, for: sessionID)
+            revealBrowserHost(location.hostID, for: sessionID)
+
+        case .extensionPanel:
+            guard let extensionIdentifier = destination.extensionIdentifier,
+                  let panelID = destination.extensionPanelID,
+                  let item = ExtensionManager.shared.registeredPanel(
+                    extensionIdentifier: extensionIdentifier,
+                    panelID: panelID
+                  ) else { return }
+            displayPaneController.activateExtensionPanel(
+                extensionIdentifier: extensionIdentifier,
+                panelID: panelID,
+                title: item.panel.title,
+                for: sessionID
+            )
+            displayPaneController.showSessionTabs(sessionID)
+            setDisplayPaneVisible(true)
+        }
+    }
+
     /// Opens Settings in the content pane, or closes it and returns to what was on screen. The
     /// sidebar itself swaps to the section list rather than a second sidebar appearing.
     func toggleSettings() {
@@ -2143,7 +2832,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 syncDisplayPane(to: nil)
                 recordVisit(.composer(projectID))
 
-            case .settings, .none:
+            case .settings, .settingsAISearch, .none:
                 containerViewController.show(sessionID: nil)
             }
             preSettingsPage = nil
@@ -2166,15 +2855,30 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// four with defaults the user never saw. The composer is now the only way in, so every
     /// session starts from a choice.
     func newSession() {
+        // The three ways to start work all land back on the surface in recovery. The menu items
+        // are already refused by `RecoveryModeCommandPolicy`, so what reaches here is a route
+        // that did not go through the menu — the sidebar's `+`, a drop, a key equivalent
+        // validated a moment early — and doing nothing at all would read as a broken button.
+        guard !showRecoverySurfaceIfActive() else { return }
         sessionCoordinator.newSession()
     }
 
     func addProject() {
+        guard !showRecoverySurfaceIfActive() else { return }
         sessionCoordinator.addProject()
     }
 
     func newProject() {
+        guard !showRecoverySurfaceIfActive() else { return }
         sessionCoordinator.newProject()
+    }
+
+    /// Puts the recovery surface back in the pane, and says whether it did.
+    @discardableResult
+    func showRecoverySurfaceIfActive() -> Bool {
+        guard RecoveryMode.isActive else { return false }
+        containerViewController.showRecoverySurface()
+        return true
     }
 
     /// Closes the current session's terminal, leaving it dormant and resumable.
@@ -2468,6 +3172,12 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController) {
+        // A window pinned to a session that no longer exists goes with it — before the store
+        // sweep, or its own persistence writes the deleted session's document back.
+        closeDetachedWindows(
+            forSessionsOutside: Set(ProjectStore.shared.projects.flatMap(\.sessions).map(\.id))
+        )
+
         // The shown session may have just been deleted; fall back to an empty pane.
         if let currentSessionID, ProjectStore.shared.session(withID: currentSessionID) == nil {
             containerViewController.show(sessionID: nil)
@@ -2503,7 +3213,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
                 return liveTerminalIDs.contains(terminalID)
             case .composer(let projectID):
                 return ProjectStore.shared.project(withID: projectID) != nil
-            case .settings:
+            case .settings, .settingsAISearch:
                 return true
             }
         }
@@ -2548,6 +3258,9 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
             self?.showSettingsPage(id: pageID)
         }
         updateSessionTitleItem()
+        // A page in history, so opening a suggestion leaves the answer one Back away
+        // rather than gone.
+        recordVisit(.settingsAISearch)
     }
 
 }
@@ -2791,6 +3504,12 @@ enum SidebarWidth {
         guard width >= SidebarDefaults.minWidth else { return }
         PreferenceStore.shared.set(Double(width), forKey: key)
     }
+
+    /// Forgets the width, so the column opens at its default again. The key stays private and
+    /// the clearing lives with it — see `WindowLayoutReset`, which is what calls this.
+    static func reset() {
+        PreferenceStore.shared.removeObject(forKey: key)
+    }
 }
 
 // MARK: - Status Card Visibility
@@ -2816,6 +3535,12 @@ enum StatusCardVisibility {
     static var isEnabled: Bool {
         get { PreferenceStore.shared.object(forKey: key) as? Bool ?? true }
         set { PreferenceStore.shared.set(newValue, forKey: key) }
+    }
+
+    /// Back to on, by forgetting rather than by writing: absent is what "never asked" means here,
+    /// and a reset that wrote `true` would be a choice nobody made.
+    static func reset() {
+        PreferenceStore.shared.removeObject(forKey: key)
     }
 }
 
@@ -2847,6 +3572,11 @@ enum DisplayPaneWidth {
         let saved = PreferenceStore.shared.double(forKey: key)
         guard saved >= DisplayPaneDefaults.minWidth else { return nil }
         return CGFloat(saved)
+    }
+
+    /// Forgets the width, so a reveal opens at its share of the window again.
+    static func reset() {
+        PreferenceStore.shared.removeObject(forKey: key)
     }
 
     /// The width a reveal opens at: the one the user chose, or a share of the window the first

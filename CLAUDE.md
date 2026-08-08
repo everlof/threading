@@ -141,6 +141,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
 | Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
+| The draft opt-in for a session-owned detached worktree, execution-directory routing, finish handshake, local merge and disposal | [`managed-workspaces.md`](docs/architecture/managed-workspaces.md) |
 | The runtime capability matrix, side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
 | Writing a message now and sending it later: the record, the store, the clock, waking a dormant session, the usage-reset presets | [`scheduled-messages.md`](docs/architecture/scheduled-messages.md) |
 | A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
@@ -197,6 +198,40 @@ The vocabulary — flat over bezelled, quiet until relevant, content leads, syst
 [`docs/architecture/design-system.md`](docs/architecture/design-system.md). **Read it before
 building any new UI**: a screen assembled from stock `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app, and will fail the build lint.
+
+## Scaling Gate
+
+Apply this before implementing a UI or callback whose cardinality or frequency comes from outside
+a small fixed schema: files, transcripts, git changes, sessions, accounts, extensions, processes,
+browser data, provider responses, or streamed events. If the bound is uncertain, treat it as
+unbounded. Read the full rationale and current audit in
+[`docs/architecture/performance.md`](docs/architecture/performance.md#implementation-time-scaling-gate).
+
+- Write down the expected and stress cardinalities, the mutation frequency, and which operations
+  must be O(visible), O(changed), or O(1). A protocol/file-size cap is not automatically a safe UI
+  bound, and a per-item cap is not an aggregate bound.
+- Keep externally sized content as value models. Tables/collections/outlines own only viewport
+  views; do not put an unbounded stack or recursive subtree inside one virtual row.
+- Collapse, paginate, and cap **before** constructing views, attributed documents, images, or
+  constraints. Hiding a subtree after it was built saves pixels, not construction, layout, or
+  memory.
+- A local disclosure, toggle, append, or status change updates the affected stable identities. It
+  does not clear and rebuild a whole externally sized page or timeline.
+- Layout, resize, scroll, pointer, and stream callbacks do no filesystem/process work and no work
+  proportional to total content. Preserve a trackpad gesture's routing through its momentum tail;
+  a nested component must not silently consume vertical scrolling.
+- Discovery, parsing, filesystem reads, image decoding, and child processes stay off the main
+  actor unless a measured, documented bound makes them frame-cheap. Debouncing repeated calls is
+  useful only after one call is itself bounded.
+- Add an opt-in deterministic stress fixture when the surface can grow or the callback is
+  high-frequency. Measure background preparation, main-thread mount/mutation, layout, scroll or
+  resize tails, live view count, correctness of exact jumps/bottom position, and footprint as
+  applicable.
+
+A small fixed form may still use a retained stack and wholesale rebuild. The review question is
+not whether code contains `NSStackView` or `removeFromSuperview`; it is whether externally sized
+content or a high-frequency event can reach that path. Cell reuse and controller replacement are
+normal lifecycle work, not violations.
 
 ## Extension Authoring
 

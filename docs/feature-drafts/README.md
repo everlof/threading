@@ -20,3 +20,5 @@ short pointer to the durable record so this directory does not become a competin
 
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock.
+- [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
+  formats into Threading's existing theme and window-chrome model.

@@ -4,6 +4,11 @@
 #
 #   scripts/profile_threading.sh git-stress
 #   scripts/profile_threading.sh agent-work-stress
+#   scripts/profile_threading.sh tools-settings-stress
+#   scripts/profile_threading.sh component-gallery-stress
+#   scripts/profile_threading.sh changed-files-stress
+#   scripts/profile_threading.sh extension-ui-stress
+#   scripts/profile_threading.sh baseline-library-stress
 #   scripts/profile_threading.sh conversation-stress
 #   scripts/profile_threading.sh conversation-massive-stress
 #   scripts/profile_threading.sh conversation-active-turn-stress
@@ -36,7 +41,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,23p' "$0"
+  sed -n '3,31p' "$0"
 }
 
 resolve_pid() {
@@ -384,7 +389,7 @@ run_git_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
   local derived_data="${output_directory}/derived-data"
-  echo "Running deterministic Git Review file-index sweep…"
+  echo "Running deterministic Git Review file-index sweeps…"
 
   # Xcode test plans intentionally sanitize the launched test process's environment. Build the
   # normal test bundle through Xcode, then invoke that bundle directly so this opt-in workload
@@ -427,7 +432,69 @@ run_git_stress() {
       xcrun xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressLargeFileIndexesWhenEnabled \
         "${test_bundle}"
+
+    THREADING_GIT_MASSIVE_STRESS=1 \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.GitReviewViewTests/testStressMassiveExpandedFileIndexWhenEnabled \
+        "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/git-review-stress.log"
+}
+
+run_tools_settings_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic Tools settings render, disclosure and scroll sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_TOOLS_SETTINGS_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_TOOLS_SETTINGS_STRESS_THEME}")
+    fi
+    local theme
+    for theme in "${themes[@]}"; do
+      THREADING_TOOLS_SETTINGS_STRESS=1 \
+      THREADING_TOOLS_SETTINGS_STRESS_THEME="${theme}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsPreferencesWhenEnabled \
+          "${test_bundle}"
+    done
+  ) 2>&1 | tee "${output_directory}/tools-settings-stress.log"
 }
 
 build_macos_stress_test_bundle() {
@@ -466,6 +533,23 @@ build_macos_stress_test_bundle() {
   }
 }
 
+run_component_gallery_stress() {
+  local output_directory="$1"
+  echo "Running deterministic Component Gallery construction and scroll sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    THREADING_COMPONENT_GALLERY_STRESS=1 \
+    DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.ThemedControlTests/testComponentGalleryScrollStress \
+        "${THREADING_STRESS_TEST_BUNDLE}"
+  ) 2>&1 | tee "${output_directory}/component-gallery-stress.log"
+}
+
 run_agent_work_stress() {
   local output_directory="$1"
   echo "Running 100k-file, 64-agent work-atlas benchmark…"
@@ -481,6 +565,136 @@ run_agent_work_stress() {
         -XCTest ThreadingTests.FileActivityMapTests/testAgentWorkProjectionStressBenchmark \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${output_directory}/agent-work-stress.log"
+}
+
+run_changed_files_stress() {
+  local output_directory="$1"
+  echo "Running deterministic changed-files card construction and disclosure sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local workloads=(
+      "collapsed:10:0"
+      "collapsed:100:0"
+      "collapsed:500:0"
+      "collapsed:1000:0"
+      "previews:10:400"
+      "previews:100:400"
+      "previews:174:400"
+    )
+    local override_shape="${THREADING_CHANGED_FILES_STRESS_SHAPE:-}"
+    local override_files="${THREADING_CHANGED_FILES_STRESS_FILES:-}"
+    if [[ -n "${override_shape}" || -n "${override_files}" ]]; then
+      local shape="${override_shape:-collapsed}"
+      local default_files=1000
+      if [[ "${shape}" == "previews" ]]; then default_files=174; fi
+      workloads=(
+        "${shape}:${override_files:-${default_files}}:${THREADING_CHANGED_FILES_STRESS_LINES:-400}"
+      )
+    fi
+
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_CHANGED_FILES_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_CHANGED_FILES_STRESS_THEME}")
+    fi
+    local theme workload shape files lines
+    for theme in "${themes[@]}"; do
+      for workload in "${workloads[@]}"; do
+        IFS=: read -r shape files lines <<<"${workload}"
+        THREADING_CHANGED_FILES_STRESS=1 \
+        THREADING_CHANGED_FILES_STRESS_THEME="${theme}" \
+        THREADING_CHANGED_FILES_STRESS_SHAPE="${shape}" \
+        THREADING_CHANGED_FILES_STRESS_FILES="${files}" \
+        THREADING_CHANGED_FILES_STRESS_LINES="${lines}" \
+        DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+        DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+          xcrun xctest \
+            -XCTest ThreadingTests.ChangedFilesCardTests/testStressChangedFilesCardWhenEnabled \
+            "${THREADING_STRESS_TEST_BUNDLE}"
+      done
+    done
+  ) 2>&1 | tee "${output_directory}/changed-files-stress.log"
+}
+
+run_extension_ui_stress() {
+  local output_directory="$1"
+  echo "Running deterministic extension panel and settings scaling sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local panel_points=(50 250 500)
+    if [[ -n "${THREADING_EXTENSION_UI_STRESS_NODES:-}" ]]; then
+      panel_points=("${THREADING_EXTENSION_UI_STRESS_NODES}")
+    fi
+    local settings_points=(32 128 512)
+    if [[ -n "${THREADING_EXTENSION_SETTINGS_STRESS_FIELDS:-}" ]]; then
+      settings_points=("${THREADING_EXTENSION_SETTINGS_STRESS_FIELDS}")
+    fi
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_EXTENSION_UI_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_EXTENSION_UI_STRESS_THEME}")
+    fi
+
+    local theme count
+    for theme in "${themes[@]}"; do
+      for count in "${panel_points[@]}"; do
+        THREADING_EXTENSION_UI_STRESS=1 \
+        THREADING_EXTENSION_UI_STRESS_THEME="${theme}" \
+        THREADING_EXTENSION_UI_STRESS_NODES="${count}" \
+        DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+        DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+          xcrun xctest \
+            -XCTest ThreadingTests.ExtensionPanelLayoutTests/testStressExtensionPanelWhenEnabled \
+            "${THREADING_STRESS_TEST_BUNDLE}"
+      done
+      for count in "${settings_points[@]}"; do
+        THREADING_EXTENSION_SETTINGS_STRESS=1 \
+        THREADING_EXTENSION_UI_STRESS_THEME="${theme}" \
+        THREADING_EXTENSION_SETTINGS_STRESS_FIELDS="${count}" \
+        DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+        DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+          xcrun xctest \
+            -XCTest ThreadingTests.ExtensionPanelLayoutTests/testStressExtensionSettingsWhenEnabled \
+            "${THREADING_STRESS_TEST_BUNDLE}"
+      done
+    done
+  ) 2>&1 | tee "${output_directory}/extension-ui-stress.log"
+}
+
+run_baseline_library_stress() {
+  local output_directory="$1"
+  echo "Running deterministic browser baseline-library cold-load and mutation sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local points=(10 100 200)
+    if [[ -n "${THREADING_BASELINE_LIBRARY_STRESS_COUNT:-}" ]]; then
+      points=("${THREADING_BASELINE_LIBRARY_STRESS_COUNT}")
+    fi
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_BASELINE_LIBRARY_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_BASELINE_LIBRARY_STRESS_THEME}")
+    fi
+    local theme count
+    for theme in "${themes[@]}"; do
+      for count in "${points[@]}"; do
+        THREADING_BASELINE_LIBRARY_STRESS=1 \
+        THREADING_BASELINE_LIBRARY_STRESS_THEME="${theme}" \
+        THREADING_BASELINE_LIBRARY_STRESS_COUNT="${count}" \
+        DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+        DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+          xcrun xctest \
+            -XCTest ThreadingTests.BrowserBaselineUITests/testStressBaselineLibraryWhenEnabled \
+            "${THREADING_STRESS_TEST_BUNDLE}"
+      done
+    done
+  ) 2>&1 | tee "${output_directory}/baseline-library-stress.log"
 }
 
 run_conversation_stress() {
@@ -1054,6 +1268,31 @@ case "${command}" in
     run_agent_work_stress "${output_directory}"
     ;;
 
+  tools-settings-stress)
+    output_directory="$(new_run_directory tools-settings-stress)"
+    run_tools_settings_stress "${output_directory}"
+    ;;
+
+  component-gallery-stress)
+    output_directory="$(new_run_directory component-gallery-stress)"
+    run_component_gallery_stress "${output_directory}"
+    ;;
+
+  changed-files-stress)
+    output_directory="$(new_run_directory changed-files-stress)"
+    run_changed_files_stress "${output_directory}"
+    ;;
+
+  extension-ui-stress)
+    output_directory="$(new_run_directory extension-ui-stress)"
+    run_extension_ui_stress "${output_directory}"
+    ;;
+
+  baseline-library-stress)
+    output_directory="$(new_run_directory baseline-library-stress)"
+    run_baseline_library_stress "${output_directory}"
+    ;;
+
   conversation-stress)
     output_directory="$(new_run_directory conversation-stress)"
     run_conversation_stress "${output_directory}"
@@ -1190,6 +1429,7 @@ case "${command}" in
     output_directory="$(new_run_directory "${command}")"
 
     run_git_stress "${output_directory}"
+    run_tools_settings_stress "${output_directory}"
     run_conversation_stress "${output_directory}"
     run_subagent_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"
@@ -1208,6 +1448,10 @@ case "${command}" in
     done
 
     if [[ "${command}" == "full+" ]]; then
+      run_agent_work_stress "${output_directory}"
+      run_changed_files_stress "${output_directory}"
+      run_extension_ui_stress "${output_directory}"
+      run_baseline_library_stress "${output_directory}"
       run_conversation_stress "${output_directory}" massive
       run_conversation_active_turn_stress "${output_directory}"
       run_conversation_residency_stress "${output_directory}"

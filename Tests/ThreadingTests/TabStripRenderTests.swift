@@ -30,7 +30,8 @@ final class TabStripRenderTests: XCTestCase {
         static let themes: [(name: String, theme: AppTheme)] = [
             ("system", .system),
             ("cyberpunk", AppThemeStyles.cyberpunk),
-            ("swiss", AppThemeStyles.swissMinimalist)
+            ("swiss", AppThemeStyles.swissMinimalist),
+            ("bauhaus", AppThemeStyles.bauhaus)
         ]
 
         static let stories: [(name: String, width: CGFloat, tabCount: Int, isDropTarget: Bool)] = [
@@ -125,12 +126,17 @@ final class TabStripRenderTests: XCTestCase {
             host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
             host.appearance = appearance
             host.addSubview(strip)
+            let separator = SeparatorView()
+            host.addSubview(separator)
 
             NSLayoutConstraint.activate([
                 strip.leadingAnchor.constraint(equalTo: host.leadingAnchor),
                 strip.trailingAnchor.constraint(equalTo: host.trailingAnchor),
                 strip.topAnchor.constraint(equalTo: host.topAnchor),
-                strip.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+                strip.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                separator.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                separator.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                separator.bottomAnchor.constraint(equalTo: host.bottomAnchor)
             ])
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()
