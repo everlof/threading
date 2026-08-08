@@ -80,8 +80,15 @@ final class PromptView: NSView, ThemedComponent {
         }
     }
 
-    private var completionSuggestions: [ComposerCapability] = []
+    private enum CompletionAction {
+        case capability(ComposerCapability)
+        case workspaceFile(WorkspaceFileReference)
+    }
+    private var completionItems: [PromptCompletionItem] = []
+    private var completionActions: [CompletionAction] = []
     private var completionQuery: ComposerCompletionQuery?
+    private var workspaceFileQuery: WorkspaceFileMentionQuery?
+    private var workspaceSearchGeneration = 0
     private var selectedCompletionIndex = 0
     private var completionKindFilter: ComposerCapability.Kind?
 
@@ -152,6 +159,10 @@ final class PromptView: NSView, ThemedComponent {
     /// app, rather than only in this field.
     var onChange: ((String) -> Void)?
 
+    /// Context has draft semantics too. Keeping this separate from `onChange` lets an owner
+    /// persist a chip removal even when no editable character changed.
+    var onContextAttachmentsChange: (([ConversationContextAttachment]) -> Void)?
+
     /// The prompt owns presentation and removal; its conversation owner supplies the short text
     /// prompt that turns an existing reference or image into a comment.
     var onRequestContextComment: ((ConversationContextAttachment) -> Void)?
@@ -173,6 +184,17 @@ final class PromptView: NSView, ThemedComponent {
     /// refreshes an open query, which matters when Claude broadcasts `commands_changed` or a
     /// Codex skill is enabled while this composer already contains its trigger.
     var composerCapabilities: [ComposerCapability] = [] {
+        didSet { updateCompletions() }
+    }
+
+    /// Frontend-neutral workspace operation supplied by the conversation host. The prompt can
+    /// request relative references; it never receives a root URL or arbitrary read capability.
+    var workspaceFileSearch: (@MainActor @Sendable (
+        String,
+        @escaping @MainActor @Sendable (
+            Result<[WorkspaceFileReference], WorkspaceFileSearchFailure>
+        ) -> Void
+    ) -> Void)? {
         didSet { updateCompletions() }
     }
 
@@ -706,7 +728,16 @@ final class PromptView: NSView, ThemedComponent {
         contextRail.setAttachments(contextAttachments)
         updateSubmitState()
         updateHeight()
+        onContextAttachmentsChange?(contextAttachments)
         focus()
+    }
+
+    /// Restores a saved structured draft without pretending each item was newly staged.
+    func setContextAttachments(_ attachments: [ConversationContextAttachment]) {
+        contextAttachments = ConversationContextPolicy.normalized(attachments)
+        contextRail.setAttachments(contextAttachments)
+        updateSubmitState()
+        updateHeight()
     }
 
     func clearContextAttachments() {
@@ -715,6 +746,7 @@ final class PromptView: NSView, ThemedComponent {
         contextRail.setAttachments([])
         updateSubmitState()
         updateHeight()
+        onContextAttachmentsChange?(contextAttachments)
     }
 
     /// Opens the skill half of the live catalog from the app-owned `/skills` command. The
@@ -732,20 +764,39 @@ final class PromptView: NSView, ThemedComponent {
         updateCompletions()
     }
 
-    // MARK: - Command and Skill Completion
+    // MARK: - Command, Skill and Workspace Completion
 
     private func updateCompletions() {
-        guard textView.selectedRange().length == 0,
-              let query = ComposerCompletionQuery.parse(
-                  textView.string,
-                  caretUTF16Offset: textView.selectedRange().location
-              ) else {
+        guard textView.selectedRange().length == 0 else {
             dismissCompletions()
             return
         }
 
-        let previousSelectionID = completionSuggestions.indices.contains(selectedCompletionIndex)
-            ? completionSuggestions[selectedCompletionIndex].id
+        let caret = textView.selectedRange().location
+        if let query = ComposerCompletionQuery.parse(
+            textView.string,
+            caretUTF16Offset: caret
+        ) {
+            updateCapabilityCompletions(query)
+            return
+        }
+
+        if let query = WorkspaceFileMentionQuery.parse(
+            text: textView.string,
+            caretUTF16Offset: caret
+        ), let workspaceFileSearch {
+            updateWorkspaceFileCompletions(query, search: workspaceFileSearch)
+            return
+        }
+
+        dismissCompletions()
+    }
+
+    private func updateCapabilityCompletions(_ query: ComposerCompletionQuery) {
+        workspaceSearchGeneration += 1
+
+        let previousSelectionID = completionItems.indices.contains(selectedCompletionIndex)
+            ? completionItems[selectedCompletionIndex].id
             : nil
         let suggestions = query.suggestions(
             from: composerCapabilities,
@@ -757,9 +808,21 @@ final class PromptView: NSView, ThemedComponent {
         }
 
         completionQuery = query
-        completionSuggestions = suggestions
+        workspaceFileQuery = nil
+        completionActions = suggestions.map(CompletionAction.capability)
+        completionItems = suggestions.map { capability in
+            let argument = capability.argumentHint.isEmpty ? "" : "  \(capability.argumentHint)"
+            return PromptCompletionItem(
+                id: capability.id,
+                title: capability.invocationText + argument,
+                accessibilityTitle: capability.displayName,
+                detail: capability.unavailableReason ?? capability.description,
+                kind: capability.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
+                isEnabled: capability.isEnabled
+            )
+        }
         if let previousSelectionID,
-           let matchingIndex = suggestions.firstIndex(where: {
+           let matchingIndex = completionItems.firstIndex(where: {
                $0.id == previousSelectionID && $0.isEnabled
            }) {
             selectedCompletionIndex = matchingIndex
@@ -768,7 +831,7 @@ final class PromptView: NSView, ThemedComponent {
         }
 
         completionPresenter.present(
-            items: suggestions,
+            items: completionItems,
             selectedIndex: selectedCompletionIndex,
             from: self,
             onChoose: { [weak self] index in self?.acceptCompletion(at: index) },
@@ -776,11 +839,52 @@ final class PromptView: NSView, ThemedComponent {
         )
     }
 
+    private func updateWorkspaceFileCompletions(
+        _ query: WorkspaceFileMentionQuery,
+        search: @escaping @MainActor @Sendable (
+            String,
+            @escaping @MainActor @Sendable (
+                Result<[WorkspaceFileReference], WorkspaceFileSearchFailure>
+            ) -> Void
+        ) -> Void
+    ) {
+        completionQuery = nil
+        workspaceFileQuery = query
+        workspaceSearchGeneration += 1
+        let generation = workspaceSearchGeneration
+        search(query.term) { @MainActor @Sendable [weak self] result in
+            guard let self, generation == self.workspaceSearchGeneration,
+                  self.workspaceFileQuery == query else { return }
+            guard case .success(let references) = result, !references.isEmpty else {
+                self.dismissCompletions()
+                return
+            }
+            self.completionActions = references.map(CompletionAction.workspaceFile)
+            self.completionItems = references.map { reference in
+                PromptCompletionItem(
+                    id: reference.path,
+                    title: "@" + reference.path,
+                    detail: L10n.string("Workspace file reference — contents are not pasted"),
+                    kind: L10n.string("File"),
+                    isEnabled: true
+                )
+            }
+            self.selectedCompletionIndex = 0
+            self.completionPresenter.present(
+                items: self.completionItems,
+                selectedIndex: 0,
+                from: self,
+                onChoose: { [weak self] index in self?.acceptCompletion(at: index) },
+                onDismiss: { [weak self] in self?.clearCompletionState() }
+            )
+        }
+    }
+
     private func handleCompletionKey(_ event: NSEvent) -> Bool {
         // Esc stops the agent, but only once it has nothing nearer to dismiss. An open
         // completion list owns it first, which is why this is decided here rather than in
         // `keyDown`: the list is the thing the key was most recently made to mean.
-        guard completionPresenter.isVisible, !completionSuggestions.isEmpty else {
+        guard completionPresenter.isVisible, !completionItems.isEmpty else {
             switch event.keyCode {
             case PromptViewDefaults.escapeKeyCode where composerMode.canStop:
                 onStop?()
@@ -812,12 +916,12 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func moveCompletionSelection(by offset: Int) {
-        guard !completionSuggestions.isEmpty else { return }
+        guard !completionItems.isEmpty else { return }
         var candidate = selectedCompletionIndex
-        for _ in completionSuggestions.indices {
-            candidate = (candidate + offset + completionSuggestions.count)
-                % completionSuggestions.count
-            if completionSuggestions[candidate].isEnabled {
+        for _ in completionItems.indices {
+            candidate = (candidate + offset + completionItems.count)
+                % completionItems.count
+            if completionItems[candidate].isEnabled {
                 selectedCompletionIndex = candidate
                 completionPresenter.select(candidate)
                 return
@@ -826,14 +930,29 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func acceptCompletion(at index: Int) {
-        guard completionSuggestions.indices.contains(index),
-              completionSuggestions[index].isEnabled,
-              let completionQuery else { return }
-        let capability = completionSuggestions[index]
-        textView.insertText(
-            capability.invocationText + " ",
-            replacementRange: completionQuery.replacementRange
-        )
+        guard completionItems.indices.contains(index),
+              completionActions.indices.contains(index),
+              completionItems[index].isEnabled else { return }
+        switch completionActions[index] {
+        case .capability(let capability):
+            guard let completionQuery else { return }
+            textView.insertText(
+                capability.invocationText + " ",
+                replacementRange: completionQuery.replacementRange
+            )
+        case .workspaceFile(let reference):
+            guard let workspaceFileQuery else { return }
+            textView.insertText(
+                "@" + reference.path + " ",
+                replacementRange: workspaceFileQuery.replacementRange
+            )
+            addContextAttachment(ConversationContextAttachment(
+                kind: .reference,
+                source: .workspaceFile,
+                title: (reference.path as NSString).lastPathComponent,
+                locator: reference.path
+            ))
+        }
         dismissCompletions()
     }
 
@@ -847,8 +966,11 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func clearCompletionState() {
+        workspaceSearchGeneration += 1
         completionQuery = nil
-        completionSuggestions = []
+        workspaceFileQuery = nil
+        completionItems = []
+        completionActions = []
         selectedCompletionIndex = 0
         completionKindFilter = nil
     }
@@ -1044,6 +1166,7 @@ final class PromptView: NSView, ThemedComponent {
         contextRail.setAttachments(contextAttachments)
         updateSubmitState()
         updateHeight()
+        onContextAttachmentsChange?(contextAttachments)
         focus()
     }
 

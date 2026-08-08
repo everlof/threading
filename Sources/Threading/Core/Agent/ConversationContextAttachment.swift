@@ -17,6 +17,9 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
         case message
         case code
         case attachment
+        /// A project-relative path in the session's execution checkout. Contents are resolved
+        /// by the provider/tooling when needed; the composer never copies the file into prose.
+        case workspaceFile
     }
 
     let id: UUID
@@ -78,7 +81,7 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
         switch source {
         case .message:
             return title
-        case .code, .attachment:
+        case .code, .attachment, .workspaceFile:
             guard let locator, !locator.isEmpty else { return title }
             guard let lineStart else { return locator }
             guard let lineEnd, lineEnd > lineStart else { return "\(locator):\(lineStart)" }

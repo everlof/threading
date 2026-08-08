@@ -86,6 +86,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var workspaceNavigatorMenu: NSMenu?
+    private var commandPaletteController: CommandPaletteViewController?
+
+    /// The same semantic catalog and invocation route feeds menus, shortcuts and the palette.
+    /// It deliberately re-resolves window context each time either closure runs.
+    private lazy var hostCommandPlane = HostCommandPlane(
+        catalog: { [weak self] in self?.hostCommandCatalog() ?? [] },
+        invoke: { [weak self] id in
+            self?.performHostCommand(id: id)
+                ?? .refused(commandID: id, reason: L10n.string("The application is unavailable."))
+        }
+    )
 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
@@ -1434,17 +1445,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             keyEquivalent: ""
         )
         menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.string("Preferences…"),
-            action: #selector(showPreferences),
-            keyEquivalent: ","
-        )
+        menu.addItem(commandItem(
+            "system.preferences",
+            action: #selector(performHostMenuCommand(_:))
+        ))
         menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.format("Hide %@", appName),
-            action: #selector(NSApplication.hide(_:)),
-            keyEquivalent: "h"
-        )
+        menu.addItem(commandItem(
+            "system.hide",
+            action: #selector(performHostMenuCommand(_:))
+        ))
 
         let hideOthersItem = NSMenuItem(
             title: L10n.string("Hide Others"),
@@ -1460,11 +1469,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             keyEquivalent: ""
         )
         menu.addItem(.separator())
-        menu.addItem(
-            withTitle: L10n.format("Quit %@", appName),
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
+        menu.addItem(commandItem(
+            "system.quit",
+            action: #selector(performHostMenuCommand(_:))
+        ))
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -1516,13 +1524,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func makeEditMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.editMenu)
 
-        menu.addItem(withTitle: L10n.string("Undo"), action: #selector(UndoManager.undo), keyEquivalent: "z")
+        menu.addItem(commandItem("system.undo", action: #selector(performHostMenuCommand(_:))))
         menu.addItem(withTitle: L10n.string("Redo"), action: #selector(UndoManager.redo), keyEquivalent: "Z")
         menu.addItem(.separator())
-        menu.addItem(withTitle: L10n.string("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        menu.addItem(withTitle: L10n.string("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        menu.addItem(withTitle: L10n.string("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        menu.addItem(withTitle: L10n.string("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(commandItem("system.cut", action: #selector(performHostMenuCommand(_:))))
+        menu.addItem(commandItem("system.copy", action: #selector(performHostMenuCommand(_:))))
+        menu.addItem(commandItem("system.paste", action: #selector(performHostMenuCommand(_:))))
+        menu.addItem(commandItem("system.selectAll", action: #selector(performHostMenuCommand(_:))))
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.find, action: #selector(showFind)))
 
@@ -1534,6 +1542,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func makeViewMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
+        menu.addItem(commandItem(AppCommands.ID.commandPalette, action: #selector(openCommandPalette)))
+        menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
 
         let navigatorMenu = NSMenu(title: L10n.string("Navigator"))
@@ -1592,13 +1602,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         menu.addItem(.separator())
 
-        let fullScreenItem = NSMenuItem(
-            title: L10n.string("Enter Full Screen"),
-            action: #selector(NSWindow.toggleFullScreen(_:)),
-            keyEquivalent: "f"
-        )
-        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
-        menu.addItem(fullScreenItem)
+        menu.addItem(commandItem(
+            "system.fullScreen",
+            action: #selector(performHostMenuCommand(_:))
+        ))
 
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.biggerText, action: #selector(increaseFontSize)))
@@ -1687,11 +1694,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func makeWindowMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.windowMenu)
 
-        menu.addItem(
-            withTitle: L10n.string("Minimize"),
-            action: #selector(NSWindow.performMiniaturize(_:)),
-            keyEquivalent: "m"
-        )
+        menu.addItem(commandItem(
+            "system.minimize",
+            action: #selector(performHostMenuCommand(_:))
+        ))
         menu.addItem(
             withTitle: L10n.string("Zoom"),
             action: #selector(NSWindow.performZoom(_:)),
@@ -1760,32 +1766,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // MARK: - Menu Actions
 
     @MainActor @objc private func performExtensionCommand(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-              let command = CommandRegistry.shared.command(id: id),
-              case .extensionCommand = command.origin,
-              commandIsAvailable(command) else {
-            return
-        }
-
-        // Lowercased to match the sanitized snapshot IDs an extension already holds —
-        // context and snapshots must name the same entity with the same token.
-        let context = ExtensionCommandContext(
-            projectID: mainWindowController?.currentProjectID?.uuidString.lowercased(),
-            sessionID: mainWindowController?.currentSessionID?.uuidString.lowercased()
-        )
-        ExtensionCommandInvoker.perform(
-            command,
-            context: context,
-            window: mainWindowController?.window
-        )
+        guard let id = sender.representedObject as? String else { return }
+        _ = hostCommandPlane.invoke(commandID: id)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        // Recovery first, and only for items that carry a command id. The menu bar also holds the
-        // platform's own — Quit, Copy, Minimize, About, the Help entries — and those are not
-        // commands at all, so they stay enabled by construction rather than by being listed
-        // anywhere. A refused command reads as unavailable rather than beeping at an advertised
-        // chord, which is the treatment a checkout-less Open In already gets below.
+        // Recovery first, and only for items that carry a command id. Items still owned wholly
+        // by AppKit — About and the Help entries — carry none and stay enabled by construction.
+        // A refused command reads as unavailable rather than beeping at an advertised chord,
+        // which is the treatment a checkout-less Open In already gets below.
         if RecoveryMode.isActive,
            let commandID = menuItem.representedObject as? String,
            !RecoveryModeCommandPolicy.allows(commandID: commandID) {
@@ -1837,23 +1826,216 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return AppUpdater.shared.canCheckForUpdates
         }
 
-        guard menuItem.action == #selector(performExtensionCommand(_:)),
-              let id = menuItem.representedObject as? String,
-              let command = CommandRegistry.shared.command(id: id) else {
-            return true
-        }
+        guard let id = menuItem.representedObject as? String,
+              let command = CommandRegistry.shared.command(id: id) else { return true }
         return commandIsAvailable(command)
     }
 
     private func commandIsAvailable(_ command: AppCommand) -> Bool {
-        switch command.scope {
-        case .application:
-            return true
-        case .project:
-            return mainWindowController?.currentProjectID != nil
-        case .session:
-            return mainWindowController?.currentSessionID != nil
+        hostCommandAvailability(for: command).isAvailable
+    }
+
+    private func hostCommandCatalog() -> [HostCommandDescriptor] {
+        CommandRegistry.shared.all.map { command in
+            command.hostDescriptor(
+                shortcut: ShortcutOverrideStore.shared.shortcut(for: command)?.displayString,
+                availability: hostCommandAvailability(for: command)
+            )
         }
+    }
+
+    private func hostCommandAvailability(
+        for command: AppCommand
+    ) -> HostCommandDescriptor.Availability {
+        if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
+            return .unavailable(reason: L10n.string("This command is unavailable in Recovery Mode."))
+        }
+        switch command.scope {
+        case .application: break
+        case .project where mainWindowController?.currentProjectID == nil:
+            return .unavailable(reason: L10n.string("Select a project first."))
+        case .session where mainWindowController?.currentSessionID == nil:
+            return .unavailable(reason: L10n.string("Select a session first."))
+        case .project, .session: break
+        }
+
+        switch command.id {
+        case AppCommands.ID.closeTab:
+            guard mainWindowController?.canCloseActiveTab == true else {
+                return .unavailable(reason: L10n.string("There is no tab to close."))
+            }
+        case AppCommands.ID.find:
+            guard mainWindowController?.canShowFind == true else {
+                return .unavailable(reason: L10n.string("Find is unavailable on the active surface."))
+            }
+        case AppCommands.ID.openIn:
+            guard mainWindowController?.currentFolderURL != nil else {
+                return .unavailable(reason: L10n.string("The current surface has no checkout."))
+            }
+        case AppCommands.ID.navigateBack:
+            guard mainWindowController?.canGoBack == true else {
+                return .unavailable(reason: L10n.string("There is no previous location."))
+            }
+        case AppCommands.ID.navigateForward:
+            guard mainWindowController?.canGoForward == true else {
+                return .unavailable(reason: L10n.string("There is no next location."))
+            }
+        case AppCommands.ID.previousTurn, AppCommands.ID.nextTurn,
+             AppCommands.ID.previousStep, AppCommands.ID.nextStep:
+            guard mainWindowController?.isShowingConversation == true else {
+                return .unavailable(reason: L10n.string("The active surface is not a conversation."))
+            }
+        case AppCommands.ID.loneBranchHeadings:
+            guard AppSettings.shared.groupsSessionsByBranch else {
+                return .unavailable(reason: L10n.string("Turn on Group Sessions by Branch first."))
+            }
+        case AppCommands.ID.saveBaseline:
+            guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
+                return .unavailable(reason: L10n.string("Show a browser before saving a baseline."))
+            }
+        case AppCommands.ID.biggerText, AppCommands.ID.smallerText:
+            guard mainWindowController?.canAdjustTerminalText == true else {
+                return .unavailable(reason: L10n.string("The active surface is not a terminal."))
+            }
+        case AppCommands.ID.previousTab, AppCommands.ID.nextTab:
+            guard mainWindowController?.canSelectAdjacentTab == true else {
+                return .unavailable(reason: L10n.string("There is no other tab to select."))
+            }
+        case AppCommands.ID.currentTheme:
+            guard MCPToolCatalog.hasEnabledThemeTools else {
+                return .unavailable(reason: L10n.string("Theme tools are disabled."))
+            }
+        case AppCommands.ID.checkForUpdates:
+            guard AppUpdater.shared.canCheckForUpdates else {
+                return .unavailable(reason: L10n.string("An update check is already running."))
+            }
+        case AppCommands.ID.closeSession:
+            guard mainWindowController?.currentSessionID != nil else {
+                return .unavailable(reason: L10n.string("Select a session first."))
+            }
+        default:
+            break
+        }
+        if let number = Int(command.id.replacingOccurrences(of: "tab.select.", with: "")),
+           AppCommands.ID.selectTabNumbers.contains(number),
+           mainWindowController?.canSelectTab(atIndex: number - 1) != true {
+            return .unavailable(
+                reason: L10n.format("Tab %lld is not available.", Int64(number))
+            )
+        }
+        return .available
+    }
+
+    /// Authoritative command implementation. Selectors below are adapters for AppKit's menu and
+    /// responder chain; the palette calls this same function through `HostCommandPlane`.
+    private func performHostCommand(id: String) -> HostCommandInvocationOutcome {
+        guard let command = CommandRegistry.shared.command(id: id) else {
+            return .refused(commandID: id, reason: L10n.string("This command is no longer available."))
+        }
+        let availability = hostCommandAvailability(for: command)
+        guard availability.isAvailable else {
+            return .refused(
+                commandID: id,
+                reason: availability.disabledReason ?? L10n.string("This command is unavailable.")
+            )
+        }
+
+        if case .extensionCommand = command.origin {
+            let context = ExtensionCommandContext(
+                projectID: mainWindowController?.currentProjectID?.uuidString.lowercased(),
+                sessionID: mainWindowController?.currentSessionID?.uuidString.lowercased()
+            )
+            ExtensionCommandInvoker.perform(
+                command,
+                context: context,
+                window: mainWindowController?.window
+            )
+            return .invoked(commandID: id)
+        }
+
+        switch id {
+        case AppCommands.ID.commandPalette: showCommandPalette()
+        case AppCommands.ID.newSession: mainWindowController?.newSession()
+        case AppCommands.ID.newProject: mainWindowController?.newProject()
+        case AppCommands.ID.addProject: mainWindowController?.addProject()
+        case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
+        case AppCommands.ID.closeTab: mainWindowController?.closeActiveTab()
+        case AppCommands.ID.find: mainWindowController?.showFind()
+        case AppCommands.ID.openIn: mainWindowController?.openInPreferredApp()
+        case AppCommands.ID.toggleSidebar: mainWindowController?.toggleSidebar()
+        case AppCommands.ID.groupByBranch:
+            AppSettings.shared.groupsSessionsByBranch.toggle()
+            NotificationCenter.default.post(ProjectsDidChange())
+        case AppCommands.ID.loneBranchHeadings:
+            AppSettings.shared.groupsLoneBranches.toggle()
+            NotificationCenter.default.post(ProjectsDidChange())
+        case AppCommands.ID.compactTree: AppSettings.shared.compactsSidebarTree.toggle()
+        case AppCommands.ID.newTerminalTab: mainWindowController?.showTerminalTab()
+        case AppCommands.ID.browser: mainWindowController?.showBrowser()
+        case AppCommands.ID.files: mainWindowController?.showFilesTab()
+        case AppCommands.ID.review: mainWindowController?.showReview()
+        case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
+        case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
+        case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()
+        case AppCommands.ID.displayPanel: mainWindowController?.toggleDisplayPane()
+        case AppCommands.ID.statusCard: mainWindowController?.toggleStatusCard()
+        case AppCommands.ID.currentTheme: mainWindowController?.toggleCurrentTheme()
+        case AppCommands.ID.componentGallery: showComponentGalleryImplementation()
+        case AppCommands.ID.biggerText: mainWindowController?.increaseFontSize()
+        case AppCommands.ID.smallerText: mainWindowController?.decreaseFontSize()
+        case AppCommands.ID.navigateBack: mainWindowController?.goBack()
+        case AppCommands.ID.navigateForward: mainWindowController?.goForward()
+        case AppCommands.ID.previousTurn: mainWindowController?.moveConversation(byTurn: false)
+        case AppCommands.ID.nextTurn: mainWindowController?.moveConversation(byTurn: true)
+        case AppCommands.ID.previousStep: mainWindowController?.moveConversation(byStep: false)
+        case AppCommands.ID.nextStep: mainWindowController?.moveConversation(byStep: true)
+        case AppCommands.ID.previousTab: mainWindowController?.selectAdjacentTab(offset: -1)
+        case AppCommands.ID.nextTab: mainWindowController?.selectAdjacentTab(offset: 1)
+        case AppCommands.ID.inspectElement: mainWindowController?.toggleElementInspector()
+        case AppCommands.ID.checkForUpdates: AppUpdater.shared.checkForUpdates()
+        case "system.preferences": mainWindowController?.toggleSettingsFromCommand()
+        case "system.hide": NSApp.hide(nil)
+        case "system.quit": NSApp.terminate(nil)
+        case "system.undo": NSApp.sendAction(#selector(UndoManager.undo), to: nil, from: nil)
+        case "system.cut": NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+        case "system.copy": NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+        case "system.paste": NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+        case "system.selectAll": NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+        case "system.fullScreen": mainWindowController?.window?.toggleFullScreen(nil)
+        case "system.minimize": mainWindowController?.window?.miniaturize(nil)
+        default:
+            if let number = Int(id.replacingOccurrences(of: "tab.select.", with: "")),
+               AppCommands.ID.selectTabNumbers.contains(number) {
+                mainWindowController?.selectTab(atIndex: number - 1)
+            } else {
+                return .refused(commandID: id, reason: L10n.string("This command has no host implementation."))
+            }
+        }
+        return .invoked(commandID: id)
+    }
+
+    private func showCommandPalette() {
+        guard commandPaletteController == nil, let window = mainWindowController?.window else { return }
+        let controller = CommandPaletteViewController(
+            catalog: { [weak self] in self?.hostCommandPlane.commands() ?? [] },
+            invoke: { [weak self] id in
+                self?.hostCommandPlane.invoke(commandID: id)
+                    ?? .refused(commandID: id, reason: L10n.string("The application is unavailable."))
+            }
+        )
+        commandPaletteController = controller
+        controller.onDismiss = { [weak self, weak controller] in
+            guard self?.commandPaletteController === controller else { return }
+            self?.commandPaletteController = nil
+        }
+        controller.present(in: window)
+    }
+
+    private func showComponentGalleryImplementation() {
+        let controller = componentGalleryWindowController ?? ComponentGalleryWindowController()
+        componentGalleryWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func updateCurrentThemeMenuVisibility() {
@@ -1871,55 +2053,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// nothing. It used to be a trap, which is how the same force-unwrap in
     /// `applicationShouldHandleReopen` took a test run down.
     @objc private func showPreferences() {
-        mainWindowController?.toggleSettingsFromCommand()
+        _ = hostCommandPlane.invoke(commandID: "system.preferences")
+    }
+
+    @objc private func performHostMenuCommand(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        _ = hostCommandPlane.invoke(commandID: id)
+    }
+
+    @objc private func openCommandPalette() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.commandPalette)
     }
 
     @objc private func openTerminalTab() {
-        mainWindowController?.showTerminalTab()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.newTerminalTab)
     }
 
     @objc private func closeActiveTab() {
-        mainWindowController?.closeActiveTab()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.closeTab)
     }
 
     @objc private func navigateBack() {
-        mainWindowController?.goBack()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.navigateBack)
     }
 
     @objc private func navigateForward() {
-        mainWindowController?.goForward()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.navigateForward)
     }
 
     @objc private func previousTurn() {
-        mainWindowController?.moveConversation(byTurn: false)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.previousTurn)
     }
 
     @objc private func nextTurn() {
-        mainWindowController?.moveConversation(byTurn: true)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.nextTurn)
     }
 
     @objc private func previousStep() {
-        mainWindowController?.moveConversation(byStep: false)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.previousStep)
     }
 
     @objc private func nextStep() {
-        mainWindowController?.moveConversation(byStep: true)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.nextStep)
     }
 
     @objc private func selectPreviousTab() {
-        mainWindowController?.selectAdjacentTab(offset: -1)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.previousTab)
     }
 
     @objc private func selectNextTab() {
-        mainWindowController?.selectAdjacentTab(offset: 1)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.nextTab)
     }
 
     @objc private func selectTabByNumber(_ sender: NSMenuItem) {
-        mainWindowController?.selectTab(atIndex: sender.tag - 1)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.selectTab(sender.tag))
     }
 
     @objc private func openFilesTab() {
-        mainWindowController?.showFilesTab()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.files)
     }
 
     /// Reveals today's journal rather than opening it: `.jsonl` has no owning app, and what
@@ -1938,7 +2129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Creates the share-safe report, not a copy of the owner-local journal. The latter may
     /// contain prompts, commands and paths and remains available separately for local diagnosis.
     @MainActor @objc private func checkForUpdates() {
-        AppUpdater.shared.checkForUpdates()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.checkForUpdates)
     }
 
     /// Presented on the main window rather than in one of its own: the ticket is about the app
@@ -2009,66 +2200,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func openBrowser() {
-        mainWindowController?.showBrowser()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.browser)
     }
 
     @objc private func openReview() {
-        mainWindowController?.showReview()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.review)
     }
 
     @objc private func saveBrowserBaseline() {
-        mainWindowController?.saveVisibleBrowserBaseline()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.saveBaseline)
     }
 
     @objc private func openInfo() {
-        mainWindowController?.showInfo()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.sessionInfo)
     }
 
     @objc private func toggleShell() {
-        mainWindowController?.toggleShellDrawer()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.shell)
     }
 
     @objc private func toggleDisplayPanel() {
-        mainWindowController?.toggleDisplayPane()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.displayPanel)
     }
 
     @objc private func toggleStatusCard() {
-        mainWindowController?.toggleStatusCard()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.statusCard)
     }
 
     @objc private func toggleCurrentTheme() {
-        mainWindowController?.toggleCurrentTheme()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.currentTheme)
     }
 
     @objc private func showComponentGallery() {
-        let controller = componentGalleryWindowController ?? ComponentGalleryWindowController()
-        componentGalleryWindowController = controller
-        controller.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.componentGallery)
     }
 
     @objc private func newSession() {
-        mainWindowController?.newSession()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.newSession)
     }
 
     @objc private func addProject() {
-        mainWindowController?.addProject()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.addProject)
     }
 
     @objc private func newProject() {
-        mainWindowController?.newProject()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.newProject)
     }
 
     @objc private func openInExternalApp() {
-        mainWindowController?.openInPreferredApp()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.openIn)
     }
 
     @objc private func closeSession() {
-        mainWindowController?.closeCurrentSession()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.closeSession)
     }
 
     @objc private func toggleSidebar() {
-        mainWindowController?.toggleSidebar()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.toggleSidebar)
     }
 
     @objc private func selectWorkspaceNavigator(_ sender: NSMenuItem) {
@@ -2082,35 +2270,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // even before a window exists — and they post `ProjectsDidChange` because that is what
     // the sidebar rebuilds its tree on, the same route its own menus take.
     @MainActor @objc private func toggleBranchGrouping() {
-        AppSettings.shared.groupsSessionsByBranch.toggle()
-        NotificationCenter.default.post(ProjectsDidChange())
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.groupByBranch)
     }
 
     @MainActor @objc private func toggleLoneBranchHeadings() {
-        AppSettings.shared.groupsLoneBranches.toggle()
-        NotificationCenter.default.post(ProjectsDidChange())
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.loneBranchHeadings)
     }
 
     // Density changes no node, so it posts nothing extra: the setter's own settings event is
     // what the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
     @MainActor @objc private func toggleCompactTree() {
-        AppSettings.shared.compactsSidebarTree.toggle()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.compactTree)
     }
 
     @objc private func showFind() {
-        mainWindowController?.showFind()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.find)
     }
 
     @objc private func inspectElement() {
-        mainWindowController?.toggleElementInspector()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.inspectElement)
     }
 
     @objc private func increaseFontSize() {
-        mainWindowController?.increaseFontSize()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.biggerText)
     }
 
     @objc private func decreaseFontSize() {
-        mainWindowController?.decreaseFontSize()
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.smallerText)
     }
 }
 

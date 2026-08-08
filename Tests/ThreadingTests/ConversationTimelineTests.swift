@@ -105,6 +105,25 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertEqual(ConversationPrompt.replaying(prompt.transportText), prompt.userMessage)
     }
 
+    func testWorkspaceFileReferenceRoundTripsThroughTranscriptAndRemoteDTO() throws {
+        let attachment = ConversationContextAttachment(
+            id: UUID(uuidString: "83E6E2B1-BD3A-4E28-84D1-20DFD83F2C99")!,
+            kind: .reference,
+            source: .workspaceFile,
+            title: "PromptView.swift",
+            locator: "Sources/Threading/UI/Design/PromptView.swift"
+        )
+        let prompt = ConversationPrompt(text: "Review this file.", context: [attachment])
+
+        XCTAssertEqual(ConversationPrompt.replaying(prompt.transportText), prompt.userMessage)
+        XCTAssertEqual(
+            ConversationContextAttachment(remoteDTO: attachment.remoteDTO),
+            attachment
+        )
+        XCTAssertEqual(attachment.remoteDTO.locator, attachment.locator)
+        XCTAssertFalse(attachment.remoteDTO.locator?.hasPrefix("/") ?? true)
+    }
+
     func testCommentOnlyPromptGetsReadableFallbackWithoutFlatteningReceipt() {
         let comment = ConversationContextAttachment(
             kind: .comment,

@@ -30,10 +30,15 @@ final class SessionContinuityStore {
         states[sessionID] ?? SessionContinuityState()
     }
 
-    func setConversationDraft(_ draft: String, for sessionID: SessionID) {
+    func setConversationDraft(
+        _ draft: String,
+        context: [ConversationContextAttachment] = [],
+        for sessionID: SessionID
+    ) {
         update(sessionID) { state in
             state.conversationDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty ? "" : draft
+            state.conversationContext = ConversationContextPolicy.normalized(context)
         }
     }
 
@@ -102,14 +107,44 @@ final class SessionContinuityStore {
 
 struct SessionContinuityState: Codable, Equatable {
     var conversationDraft = ""
+    var conversationContext: [ConversationContextAttachment] = []
     var conversationViewportProgress: Double?
     var conversationFollowsBottom = true
     var updatedAt = Date()
 
     var isEmpty: Bool {
         conversationDraft.isEmpty
+            && conversationContext.isEmpty
             && conversationViewportProgress == nil
             && conversationFollowsBottom
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case conversationDraft
+        case conversationContext
+        case conversationViewportProgress
+        case conversationFollowsBottom
+        case updatedAt
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        conversationDraft = try values.decodeIfPresent(String.self, forKey: .conversationDraft) ?? ""
+        conversationContext = try values.decodeIfPresent(
+            [ConversationContextAttachment].self,
+            forKey: .conversationContext
+        ) ?? []
+        conversationViewportProgress = try values.decodeIfPresent(
+            Double.self,
+            forKey: .conversationViewportProgress
+        )
+        conversationFollowsBottom = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .conversationFollowsBottom
+        ) ?? true
+        updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 }
 

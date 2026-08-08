@@ -41,6 +41,13 @@ that lookup because their strings have already passed through
 “General” from accidentally borrowing Threading's translation. Stable page IDs, setting IDs,
 command IDs, values, and schemas are never localized.
 
+The global command palette is a design-system surface, not menu chrome rebuilt in feature code.
+`CommandPaletteViewController` uses `ThemedSearchField`, `ThemedTableView`, `ThemedScrollView` and
+`ThemedSurfaceView`; its table owns the viewport while descriptor values remain lightweight. The
+palette caps presentation at 100 rows, filters on a cancellable background task, preserves the
+resolved shortcut spelling, and exposes disabled reasons to both visible detail and accessibility.
+It owns focus, Escape, arrows and Return only; command meaning stays in the host command plane.
+
 Four consequences worth knowing before adding UI:
 
 - **Prose in the conversation passes `.conversation`**: `applyFont(.body, in: .conversation)`.

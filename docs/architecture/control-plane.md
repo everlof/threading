@@ -240,3 +240,24 @@ watch reaches exactly as far as a message does.
   including imitating the header or quoting an invented user. A structured provenance channel
   — the message as data, rendered by the receiver's own UI with an origin chip — is slice-two
   work; until then the one-header rule in the group instruction is the boundary.
+
+## Frontend-neutral interactive host operations
+
+The command palette and workspace-file mention search follow the same boundary rule as workspace
+control: a frontend receives semantic values and invokes a host operation; it does not inherit
+the objects the Mac adapter uses to draw or collect input.
+
+`HostCommandPlane` enumerates `HostCommandDescriptor` values carrying the existing stable command
+id, localized title/detail/group, resolved shortcut, origin, scope, risk and explicit
+availability. `AppCommand.hostDescriptor` is the one projection, and `AppDelegate` is the one
+invoker. Menu selectors, shortcuts and the palette all return to that invoker rather than
+implementing commands beside it. Invocation enumerates again before dispatch, so a changed
+selection, missing surface, or disabled extension becomes an honest refusal with its current
+reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
+
+`WorkspaceFileSearchPlane` accepts a session id plus query and returns only bounded
+`WorkspaceFileReference` values. The Mac root resolver uses
+`ProjectStore.executionProject(forSessionID:)`, so a managed session resolves to its execution
+worktree while retaining its logical project identity. No operation returning arbitrary bytes or
+an absolute URL is part of this contract. A future remote adapter may transport the structured
+relative reference, but it does not thereby acquire a filesystem browser.

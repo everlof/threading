@@ -162,7 +162,11 @@ extension ConversationViewController {
             for attachment in message.context {
                 self.promptView.addContextAttachment(attachment)
             }
-            SessionContinuityStore.shared.setConversationDraft(message.text, for: self.sessionID)
+            SessionContinuityStore.shared.setConversationDraft(
+                message.text,
+                context: message.context,
+                for: self.sessionID
+            )
             self.view.window?.makeFirstResponder(self.promptView)
             self.refreshOutboxRail()
             self.refreshScheduledStrip()

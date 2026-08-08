@@ -2093,3 +2093,20 @@ settings-search-stress`; override the ceiling with `THREADING_SETTINGS_SEARCH_ST
 Do not rebuild result cells for a query-only highlight change, and do not turn the result set back
 into one eager settings card. Action tags must continue to index the same match snapshot that
 created the row identities.
+
+## 2026-08-09 — command and workspace-file interactive bounds
+
+The command palette and file mentions cross both scaling axes: extension/file cardinality grows,
+and filtering runs at keystroke frequency. Their implementation-time gate is explicit:
+
+- command catalogs filter off-main, cancel superseded work, check cancellation during the pass,
+  and hand the main actor at most 100 value rows for a virtual table;
+- workspace discovery uses `git ls-files -co --exclude-standard -z` once per execution checkout,
+  never recursive enumeration per keystroke; the queue-confined index admits at most 100,000
+  contained regular paths and 16 MiB of Git output, cancels superseded queued queries, and returns
+  at most 64 relative references;
+- send-time validation deliberately refreshes the roster rather than trusting the completion
+  cache, which is why saved drafts detect deletes and renames;
+- the stress fixtures exercise 25,000 commands, 50,000 matching paths, result caps, and refusal
+  just past the 100,000-path index boundary. These are correctness workloads rather than timing
+  thresholds: CI variance must not turn a bounded architecture into a flaky stopwatch assertion.

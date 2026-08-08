@@ -177,6 +177,9 @@ final class ConversationViewController: NSViewController {
     /// of viewport rather than on every scroll event.
     private var stickyStepTopRow: Int?
     private var stickyStepRow: Int?
+    private lazy var workspaceFilePlane = WorkspaceFileSearchPlane { sessionID in
+        ProjectStore.shared.executionProject(forSessionID: sessionID)?.folderURL
+    }
     lazy var promptView: PromptView = {
         let prompt = PromptView()
         prompt.translatesAutoresizingMaskIntoConstraints = false
@@ -214,7 +217,9 @@ final class ConversationViewController: NSViewController {
                     isDirectory: true
                 )
             )
-            self.steer(ConversationPrompt(text: trimmed, context: context))
+            self.steerValidatingWorkspaceFiles(
+                ConversationPrompt(text: trimmed, context: context)
+            )
         }
         prompt.onStop = { [weak self] in
             self?.stopCurrentTurn()
@@ -229,9 +234,32 @@ final class ConversationViewController: NSViewController {
             guard let self else { return }
             self.requestComment(on: self.attachmentContext(path: path))
         }
-        prompt.onChange = { [weak self] text in
-            guard let self else { return }
-            SessionContinuityStore.shared.setConversationDraft(text, for: self.sessionID)
+        prompt.onChange = { [weak self, weak prompt] text in
+            guard let self, let prompt else { return }
+            SessionContinuityStore.shared.setConversationDraft(
+                text,
+                context: prompt.contextAttachments,
+                for: self.sessionID
+            )
+        }
+        prompt.onContextAttachmentsChange = { [weak self, weak prompt] context in
+            guard let self, let prompt else { return }
+            SessionContinuityStore.shared.setConversationDraft(
+                prompt.stringValue,
+                context: context,
+                for: self.sessionID
+            )
+        }
+        prompt.workspaceFileSearch = { [weak self] query, completion in
+            guard let self else {
+                completion(.failure(.sessionUnavailable))
+                return
+            }
+            self.workspaceFilePlane.search(
+                sessionID: self.sessionID,
+                query: query,
+                completion: completion
+            )
         }
         return prompt
     }()
@@ -740,6 +768,9 @@ final class ConversationViewController: NSViewController {
         let continuity = SessionContinuityStore.shared.state(for: sessionID)
         if !continuity.conversationDraft.isEmpty {
             promptView.stringValue = continuity.conversationDraft
+        }
+        if !continuity.conversationContext.isEmpty {
+            promptView.setContextAttachments(continuity.conversationContext)
         }
 
         wireConversationControls()
@@ -1758,7 +1789,11 @@ final class ConversationViewController: NSViewController {
             return
         }
         promptView.addContextAttachment(attachment)
-        SessionContinuityStore.shared.setConversationDraft(promptView.stringValue, for: sessionID)
+        SessionContinuityStore.shared.setConversationDraft(
+            promptView.stringValue,
+            context: promptView.contextAttachments,
+            for: sessionID
+        )
     }
 
     /// Stages the context and hands the turn over immediately — the ⌘Return half of the comment
@@ -1866,7 +1901,8 @@ final class ConversationViewController: NSViewController {
     private func submit(
         _ text: String,
         context: [ConversationContextAttachment] = [],
-        authorization: RemoteAuthorization? = nil
+        authorization: RemoteAuthorization? = nil,
+        workspaceFilesValidated: Bool = false
     ) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let context = ConversationContextPolicy.normalized(context)
@@ -1876,6 +1912,33 @@ final class ConversationViewController: NSViewController {
            !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
             refreshInputControl()
             return false
+        }
+
+        let workspaceFiles = workspaceReferences(in: context)
+        if !workspaceFilesValidated, !workspaceFiles.isEmpty {
+            isPreparingTurn = true
+            refreshInputControl()
+            workspaceFilePlane.validate(
+                sessionID: sessionID,
+                references: workspaceFiles
+            ) { [weak self] result in
+                guard let self else { return }
+                self.isPreparingTurn = false
+                switch result {
+                case .success:
+                    _ = self.submit(
+                        text,
+                        context: context,
+                        authorization: authorization,
+                        workspaceFilesValidated: true
+                    )
+                case .failure(let failure):
+                    self.presentWorkspaceFileFailure(failure)
+                    self.refreshInputControl()
+                    RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
+                }
+            }
+            return true
         }
 
         // A reference/comment turn is ordinary model input. Treating its leading `/word` as a
@@ -1971,6 +2034,77 @@ final class ConversationViewController: NSViewController {
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
         return true
+    }
+
+    private func workspaceReferences(
+        in context: [ConversationContextAttachment]
+    ) -> [WorkspaceFileReference] {
+        context.compactMap { attachment in
+            guard attachment.source == .workspaceFile,
+                  let path = attachment.locator,
+                  !path.isEmpty else { return nil }
+            return WorkspaceFileReference(path: path)
+        }
+    }
+
+    func validateWorkspaceFiles(
+        in prompt: ConversationPrompt,
+        completion: @escaping WorkspaceFileSearchPlane.ValidationCompletion
+    ) {
+        let references = workspaceReferences(in: prompt.context)
+        guard !references.isEmpty else {
+            completion(.success(()))
+            return
+        }
+        workspaceFilePlane.validate(
+            sessionID: sessionID,
+            references: references,
+            completion: completion
+        )
+    }
+
+    private func steerValidatingWorkspaceFiles(_ prompt: ConversationPrompt) {
+        let references = workspaceReferences(in: prompt.context)
+        guard !references.isEmpty else {
+            steer(prompt)
+            return
+        }
+        guard !isPreparingTurn else { return }
+        isPreparingTurn = true
+        refreshInputControl()
+        validateWorkspaceFiles(in: prompt) { [weak self] result in
+            guard let self else { return }
+            self.isPreparingTurn = false
+            switch result {
+            case .success:
+                self.steer(prompt)
+            case .failure(let failure):
+                self.presentWorkspaceFileFailure(failure)
+                self.refreshInputControl()
+                RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
+            }
+        }
+    }
+
+    func presentWorkspaceFileFailure(_ failure: WorkspaceFileSearchFailure) {
+        let message: String
+        switch failure {
+        case .fileUnavailable(let path):
+            message = L10n.format(
+                "The workspace file “%@” was moved, deleted, or is outside this checkout. Remove it and add the current file before sending.",
+                path
+            )
+        case .indexTooLarge(let limit):
+            message = L10n.format(
+                "This checkout has more than %lld visible files, so workspace mentions are unavailable.",
+                Int64(limit)
+            )
+        case .sessionUnavailable, .checkoutUnavailable:
+            message = L10n.string("The session’s execution checkout is no longer available.")
+        case .repositoryUnavailable:
+            message = L10n.string("Threading could not refresh this checkout’s visible files.")
+        }
+        apply(timeline.appendNotice(message, kind: .error))
     }
 
     /// Releases one accepted prompt after its immutable turn-start tree has been recorded.

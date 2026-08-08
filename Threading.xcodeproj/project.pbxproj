@@ -331,6 +331,7 @@
 		51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */; };
 		732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */; };
 		1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3683502D0102546A91853CD /* SessionSnoozeTests.swift */; };
+		F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -718,6 +719,7 @@
 		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitTurnCheckpointTests.swift; sourceTree = "<group>"; };
 		E3683502D0102546A91853CD /* SessionSnoozeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSnoozeTests.swift; sourceTree = "<group>"; };
+		8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostBoundaryFeatureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1182,6 +1184,7 @@
 				26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */,
 				4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */,
 				E3683502D0102546A91853CD /* SessionSnoozeTests.swift */,
+				8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2013,6 +2016,7 @@
 				51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */,
 				732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */,
 				1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */,
+				F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

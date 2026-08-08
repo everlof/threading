@@ -1865,6 +1865,50 @@ final class PromptInputTests: XCTestCase {
         XCTAssertFalse(try inlineSubmitButton(in: prompt).isEnabled)
     }
 
+    func testWorkspaceMentionCanBeCompletedUsingOnlyTheKeyboard() throws {
+        let prompt = PromptView()
+        var queries: [String] = []
+        prompt.workspaceFileSearch = { query, completion in
+            queries.append(query)
+            completion(.success([
+                WorkspaceFileReference(path: "Sources/Threading/UI/Design/PromptView.swift")
+            ]))
+        }
+        let window = makeWindow(hosting: prompt)
+        let editor = try promptTextView(in: prompt)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+
+        type("Review @Prompt", in: window)
+        pressReturn(in: window)
+
+        XCTAssertEqual(queries.last, "Prompt")
+        XCTAssertEqual(
+            prompt.stringValue,
+            "Review @Sources/Threading/UI/Design/PromptView.swift "
+        )
+        let reference = try XCTUnwrap(prompt.contextAttachments.first)
+        XCTAssertEqual(reference.source, .workspaceFile)
+        XCTAssertEqual(reference.locator, "Sources/Threading/UI/Design/PromptView.swift")
+        XCTAssertNil(reference.excerpt, "mention completion must not paste file contents")
+        XCTAssertFalse(reference.locator?.hasPrefix("/") ?? true)
+    }
+
+    func testOrdinaryAtInProseDoesNotOpenWorkspaceCompletion() throws {
+        let prompt = PromptView()
+        var searches = 0
+        prompt.workspaceFileSearch = { _, completion in
+            searches += 1
+            completion(.success([]))
+        }
+        let window = makeWindow(hosting: prompt)
+        XCTAssertTrue(window.makeFirstResponder(try promptTextView(in: prompt)))
+
+        type("mail@example.com", in: window)
+
+        XCTAssertEqual(searches, 0)
+        XCTAssertEqual(prompt.stringValue, "mail@example.com")
+    }
+
     private func inlineSubmitButton(in prompt: PromptView) throws -> ThemedButton {
         try XCTUnwrap(
             descendants(of: prompt).compactMap { $0 as? ThemedButton }.first,

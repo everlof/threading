@@ -1,6 +1,138 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "An update check is already running.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En uppdateringskontroll pågår redan." } } }
+    },
+    "Command Palette": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandopalett" } } }
+    },
+    "Command Palette…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandopalett…" } } }
+    },
+    "Command search": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandosökning" } } }
+    },
+    "File": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fil" } } }
+    },
+    "Find is unavailable on the active surface.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök är inte tillgängligt på den aktiva ytan." } } }
+    },
+    "Searches every currently available app and extension command.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Söker bland alla app- och tilläggskommandon som är tillgängliga just nu." } } }
+    },
+    "Select a project first.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj ett projekt först." } } }
+    },
+    "Select a session first.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj en session först." } } }
+    },
+    "The active surface is not a conversation.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den aktiva ytan är inte en konversation." } } }
+    },
+    "The active surface is not a terminal.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den aktiva ytan är inte en terminal." } } }
+    },
+    "The application is unavailable.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Appen är inte tillgänglig." } } }
+    },
+    "The current surface has no checkout.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den aktuella ytan har ingen utcheckning." } } }
+    },
+    "The session’s execution checkout is no longer available.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionens exekveringsutcheckning är inte längre tillgänglig." } } }
+    },
+    "The workspace file “%@” was moved, deleted, or is outside this checkout. Remove it and add the current file before sending.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Arbetsytefilen ”%@” har flyttats, raderats eller ligger utanför utcheckningen. Ta bort den och lägg till den aktuella filen innan du skickar." } } }
+    },
+    "Theme tools are disabled.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Temaverktygen är avstängda." } } }
+    },
+    "There is no other tab to select.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns ingen annan flik att välja." } } }
+    },
+    "There is no tab to close.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns ingen flik att stänga." } } }
+    },
+    "There is no next location.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns ingen nästa plats." } } }
+    },
+    "There is no previous location.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns ingen föregående plats." } } }
+    },
+    "This checkout has more than %lld visible files, so workspace mentions are unavailable.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här utcheckningen har fler än %lld synliga filer, så arbetsytereferenser är inte tillgängliga." } } }
+    },
+    "This command has no host implementation.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandot har ingen värdimplementering." } } }
+    },
+    "This command is no longer available.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandot är inte längre tillgängligt." } } }
+    },
+    "This command is unavailable in Recovery Mode.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandot är inte tillgängligt i återställningsläge." } } }
+    },
+    "This command is unavailable.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommandot är inte tillgängligt." } } }
+    },
+    "Show a browser before saving a baseline.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visa en webbläsare innan du sparar en baslinje." } } }
+    },
+    "Tab %lld is not available.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Flik %lld är inte tillgänglig." } } }
+    },
+    "Threading could not refresh this checkout’s visible files.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte uppdatera utcheckningens synliga filer." } } }
+    },
+    "Threading": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading" } } }
+    },
+    "Type a command": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skriv ett kommando" } } }
+    },
+    "Turn on Group Sessions by Branch first.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Gruppera sessioner efter gren först." } } }
+    },
+    "Workspace file reference — contents are not pasted": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Arbetsytefilreferens — innehållet klistras inte in" } } }
+    },
+    "↑↓ Move   Return Run   Escape Close": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "↑↓ Flytta   Retur Kör   Escape Stäng" } } }
+    },
     "Session is snoozed": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen är snoozad" } } }

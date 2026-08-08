@@ -109,6 +109,7 @@ enum AppCommands {
         static let closeTab = "tab.close"
         static let find = "edit.find"
         static let openIn = "session.openIn"
+        static let commandPalette = "app.commandPalette"
 
         static let toggleSidebar = "view.sidebar"
         static let groupByBranch = "view.groupByBranch"
@@ -156,7 +157,8 @@ enum AppCommands {
     /// Threading's own commands, in the order the page lists them.
     static let editable: [AppCommand] = [
         AppCommand(id: ID.newSession, group: .session, title: "New Session",
-                   defaultShortcut: KeyboardShortcut(key: "n", modifiers: .command), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "n", modifiers: .command), isEditable: true,
+                   scope: .project),
         AppCommand(id: ID.newProject, group: .session, title: "New Project…",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.addProject, group: .session, title: "Add Existing Project…",
@@ -167,15 +169,19 @@ enum AppCommands {
         AppCommand(id: ID.closeTab, group: .session, title: "Close Tab",
                    defaultShortcut: KeyboardShortcut(key: "w", modifiers: .command), isEditable: true),
         AppCommand(id: ID.closeSession, group: .session, title: "Close Session",
-                   defaultShortcut: nil, isEditable: true),
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.find, group: .session, title: "Find…",
                    defaultShortcut: KeyboardShortcut(key: "f", modifiers: .command), isEditable: true),
+        AppCommand(id: ID.commandPalette, group: .view, title: "Command Palette…",
+                   detail: "Searches every currently available app and extension command.",
+                   defaultShortcut: KeyboardShortcut(key: "p", modifiers: [.command, .shift]), isEditable: true),
         // ⌘O is the platform's Open, and this is the only opening this app does: it has no
         // documents of its own, and a checkout is what "open" means here. The app it opens in
         // is the one used last, which is why the title cannot name one.
         AppCommand(id: ID.openIn, group: .session, title: "Open in External App",
                    detail: "Opens the checkout in the editor, terminal or Finder you last chose.",
-                   defaultShortcut: KeyboardShortcut(key: "o", modifiers: .command), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "o", modifiers: .command), isEditable: true,
+                   scope: .project),
 
         AppCommand(id: ID.toggleSidebar, group: .view, title: "Toggle Sidebar",
                    defaultShortcut: KeyboardShortcut(key: "s", modifiers: [.command, .control]), isEditable: true),
@@ -191,17 +197,21 @@ enum AppCommands {
         // Mission Control owns the *bare* ⌃↑/↓, not these.
         AppCommand(id: ID.previousTurn, group: .view, title: "Previous Turn",
                    detail: "Jumps to the exchange before the one at the top of the conversation.",
-                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .control]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .control]), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.nextTurn, group: .view, title: "Next Turn",
-                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .control]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .control]), isEditable: true,
+                   scope: .session),
         // The ⌥⌘ layer of the same keys, the way Group by Branch's ⌃⌘B refines to ⌥⌘B: one idea
         // at two depths, the turn and the steps inside it. Steps in a folded turn are skipped,
         // because a folded turn is one line by the reader's own choice.
         AppCommand(id: ID.previousStep, group: .view, title: "Previous Step",
                    detail: "Jumps to the previous tool call, within a turn that is showing its work.",
-                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .option]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .option]), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.nextStep, group: .view, title: "Next Step",
-                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .option]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .option]), isEditable: true,
+                   scope: .session),
         // B for branch, on the sidebar-toggle's own ⌃⌘ layer — ⇧⌘B is the browser's. The
         // lone-branch refinement takes the ⌥⌘ layer of the same key, so the pair reads as
         // one idea at two depths.
@@ -218,30 +228,36 @@ enum AppCommands {
         // ⌘T for the terminal, which is what T means everywhere else. The browser keeps ⇧⌘B
         // rather than taking ⌘T from it.
         AppCommand(id: ID.newTerminalTab, group: .view, title: "Terminal",
-                   defaultShortcut: KeyboardShortcut(key: "t", modifiers: .command), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "t", modifiers: .command), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.browser, group: .view, title: "Browser",
-                   defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .shift]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .shift]), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.files, group: .view, title: "Activity",
-                   defaultShortcut: KeyboardShortcut(key: "p", modifiers: .command), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "p", modifiers: .command), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.review, group: .view, title: "Git Review",
-                   defaultShortcut: KeyboardShortcut(key: "r", modifiers: [.command, .shift]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "r", modifiers: [.command, .shift]), isEditable: true,
+                   scope: .session),
         // No default chord. It is a real command with a real menu item, and the plan it comes from
         // is explicit that a baseline capture has not yet earned permanent space — not on the
         // browser strip, and not in the app's small stock of unclaimed two-modifier keys. The
         // Keyboard page lets anyone who uses it constantly bind one.
         AppCommand(id: ID.saveBaseline, group: .view, title: "Save as Baseline…",
                    detail: "Keeps the visible browser page as this project's approved picture of it.",
-                   defaultShortcut: nil, isEditable: true),
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.sessionInfo, group: .view, title: "Session Info",
-                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .shift]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "i", modifiers: [.command, .shift]), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.shell, group: .view, title: "Shell",
-                   defaultShortcut: KeyboardShortcut(key: "`", modifiers: .control), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "`", modifiers: .control), isEditable: true,
+                   scope: .session),
         AppCommand(id: ID.displayPanel, group: .view, title: "Display Panel",
-                   defaultShortcut: nil, isEditable: true),
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.statusCard, group: .view, title: "Status Card",
-                   defaultShortcut: nil, isEditable: true),
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.currentTheme, group: .view, title: "Current Theme",
-                   defaultShortcut: nil, isEditable: true),
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.componentGallery, group: .view, title: "Component Gallery",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.biggerText, group: .view, title: "Bigger",

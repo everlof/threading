@@ -1,5 +1,31 @@
 import AppKit
 
+/// Presentation-only completion value shared by commands, skills and workspace files.
+struct PromptCompletionItem: Equatable {
+    let id: String
+    let title: String
+    let accessibilityTitle: String?
+    let detail: String
+    let kind: String
+    let isEnabled: Bool
+
+    init(
+        id: String,
+        title: String,
+        accessibilityTitle: String? = nil,
+        detail: String,
+        kind: String,
+        isEnabled: Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.accessibilityTitle = accessibilityTitle
+        self.detail = detail
+        self.kind = kind
+        self.isEnabled = isEnabled
+    }
+}
+
 /// A non-key, app-owned completion panel. It lives in the presenting window rather than in a
 /// second panel, so the prompt's text view keeps first responder while arrows move the visual
 /// selection and IME composition continues to own its keystrokes.
@@ -16,7 +42,7 @@ final class PromptCompletionPresenter {
     var isVisible: Bool { panel?.superview != nil }
 
     func present(
-        items: [ComposerCapability],
+        items: [PromptCompletionItem],
         selectedIndex: Int,
         from source: NSView,
         onChoose: @escaping (Int) -> Void,
@@ -186,13 +212,13 @@ private final class PromptCompletionPanel: NSView {
     }
 
     func configure(
-        items: [ComposerCapability],
+        items: [PromptCompletionItem],
         selectedIndex: Int,
         onChoose: @escaping (Int) -> Void
     ) {
         rows.forEach { $0.removeFromSuperview() }
         rows = items.enumerated().map { index, item in
-            let row = PromptCompletionRow(capability: item)
+            let row = PromptCompletionRow(item: item)
             row.onChoose = { onChoose(index) }
             document.addSubview(row)
             return row
@@ -256,26 +282,19 @@ private final class PromptCompletionRow: ThemedControl {
         }
     }
 
-    init(capability: ComposerCapability) {
+    init(item: PromptCompletionItem) {
         super.init(frame: .zero)
-        isEnabled = capability.isEnabled
+        isEnabled = item.isEnabled
 
-        let argument = capability.argumentHint.isEmpty ? "" : "  \(capability.argumentHint)"
-        titleLabel.stringValue = capability.invocationText + argument
+        titleLabel.stringValue = item.title
         titleLabel.applyFont(.body)
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        // The reason *replaces* the description on a refused row, which is why
-        // `ComposerCapability.Availability` requires one: this line can no longer fall through
-        // to a description that explains what the action does while the row refuses to do it.
-        let detail = capability.unavailableReason ?? capability.description
-        detailLabel.stringValue = detail
+        detailLabel.stringValue = item.detail
         detailLabel.applyFont(.detail())
         detailLabel.lineBreakMode = .byTruncatingTail
 
-        kindLabel.stringValue = capability.kind == .skill
-            ? L10n.string("Skill")
-            : L10n.string("Command")
+        kindLabel.stringValue = item.kind
         kindLabel.applyFont(.detail())
         kindLabel.alignment = .right
 
@@ -283,11 +302,12 @@ private final class PromptCompletionRow: ThemedControl {
         addSubview(detailLabel)
         addSubview(kindLabel)
         setAccessibilityRole(.menuItem)
-        let accessibility = [capability.invocationText, capability.displayName, detail]
+        let accessibility = [item.title, item.accessibilityTitle, item.detail]
+            .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
         setAccessibilityLabel(accessibility)
-        if !detail.isEmpty { setAccessibilityHelp(detail) }
+        if !item.detail.isEmpty { setAccessibilityHelp(item.detail) }
     }
 
     override func layout() {
@@ -414,7 +434,15 @@ enum PromptCompletionRowTestingSupport {
         capability: ComposerCapability,
         onChoose: (() -> Void)? = nil
     ) -> ThemedControl {
-        let row = PromptCompletionRow(capability: capability)
+        let argument = capability.argumentHint.isEmpty ? "" : "  \(capability.argumentHint)"
+        let row = PromptCompletionRow(item: PromptCompletionItem(
+            id: capability.id,
+            title: capability.invocationText + argument,
+            accessibilityTitle: capability.displayName,
+            detail: capability.unavailableReason ?? capability.description,
+            kind: capability.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
+            isEnabled: capability.isEnabled
+        ))
         row.onChoose = onChoose
         return row
     }

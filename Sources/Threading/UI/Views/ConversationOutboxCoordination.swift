@@ -92,36 +92,53 @@ extension ConversationViewController {
         isPreparingTurn = true
         refreshInputControl()
 
-        NativeGitTurnAdmission.admit(
-            sessionID: sessionID,
-            userTurnID: item.id.wireValue,
-            transport: { [weak self] _ in
-                self?.stream.send(item.prompt, identifiedBy: item.id) ?? false
-            }
-        ) { [weak self] admitted, _ in
+        // Mentions are checked before the turn is admitted: a prompt naming a file that is no
+        // longer in the checkout should not open a checkpoint, and the user should get the
+        // failure rather than a turn whose diff baseline stands for a message never sent.
+        validateWorkspaceFiles(in: item.prompt) { [weak self] validation in
             guard let self else { return }
-            self.isPreparingTurn = false
-
-            guard admitted else {
-                // The transport refused after all — it exited between the settle and here. The
-                // message goes back to the front of the queue rather than being lost.
+            guard case .success = validation else {
                 self.outbox.reclaim(item.id)
+                self.isPreparingTurn = false
+                if case .failure(let failure) = validation {
+                    self.presentWorkspaceFileFailure(failure)
+                }
                 self.refreshOutboxRail()
                 self.refreshComposerMode()
                 return
             }
 
-            self.recordSentTurn(item.prompt)
+            NativeGitTurnAdmission.admit(
+                sessionID: self.sessionID,
+                userTurnID: item.id.wireValue,
+                transport: { [weak self] _ in
+                    self?.stream.send(item.prompt, identifiedBy: item.id) ?? false
+                }
+            ) { [weak self] admitted, _ in
+                guard let self else { return }
+                self.isPreparingTurn = false
 
-            // A transport that reports nothing would leave this row saying "Sending…" forever.
-            // Its message is in the transcript from here on, which is a truer record than a
-            // queue row could be.
-            if !self.stream.reportsMessageLifecycle {
-                self.outbox.mark(item.id, as: .completed)
+                guard admitted else {
+                    // The transport refused after all — it exited between the settle and here. The
+                    // message goes back to the front of the queue rather than being lost.
+                    self.outbox.reclaim(item.id)
+                    self.refreshOutboxRail()
+                    self.refreshComposerMode()
+                    return
+                }
+
+                self.recordSentTurn(item.prompt)
+
+                // A transport that reports nothing would leave this row saying "Sending…" forever.
+                // Its message is in the transcript from here on, which is a truer record than a
+                // queue row could be.
+                if !self.stream.reportsMessageLifecycle {
+                    self.outbox.mark(item.id, as: .completed)
+                }
+
+                self.refreshOutboxRail()
+                self.refreshComposerMode()
             }
-
-            self.refreshOutboxRail()
-            self.refreshComposerMode()
         }
     }
 
@@ -247,7 +264,11 @@ extension ConversationViewController {
         for attachment in item.prompt.context {
             promptView.addContextAttachment(attachment)
         }
-        SessionContinuityStore.shared.setConversationDraft(item.prompt.text, for: sessionID)
+        SessionContinuityStore.shared.setConversationDraft(
+            item.prompt.text,
+            context: item.prompt.context,
+            for: sessionID
+        )
         view.window?.makeFirstResponder(promptView)
         refreshOutboxRail()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)

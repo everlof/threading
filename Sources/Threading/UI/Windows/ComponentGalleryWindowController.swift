@@ -97,6 +97,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ScheduledMessageRowView",
         "CompareInspectorView",
         "CodeContextPreviewView",
+        "CommandPaletteViewController",
         "ControlRowView",
         "ExecutionAuditEventView",
         "FileActivityMapView",
@@ -195,6 +196,7 @@ final class ComponentGalleryViewController: NSViewController {
 
     private var galleryPopover: ThemedPopover?
     private let galleryCompletionPresenter = PromptCompletionPresenter()
+    private var galleryCommandPalette: CommandPaletteViewController?
 
     /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
     /// pass that built the section.
@@ -2081,6 +2083,11 @@ final class ComponentGalleryViewController: NSViewController {
             action: #selector(showGalleryCompletions(_:))
         )
         completions.setAccessibilityIdentifier("gallery.presentation.completions")
+        let commandPalette = button(
+            "Command Palette",
+            action: #selector(showGalleryCommandPalette(_:))
+        )
+        commandPalette.setAccessibilityIdentifier("gallery.presentation.commandPalette")
         let hoverPolicies = makeHoverPolicySample()
 
         return section(
@@ -2101,6 +2108,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "PromptCompletionPresenter",
                     "Non-key command and skill suggestions that keep the composer focused while keyboard selection moves.",
                     completions
+                ),
+                story(
+                    "Command Palette",
+                    "Searches every currently available app and extension command.",
+                    commandPalette
                 ),
                 story(
                     "HoverPopoverScheduler",
@@ -3563,12 +3575,67 @@ final class ComponentGalleryViewController: NSViewController {
             )
         ]
         galleryCompletionPresenter.present(
-            items: items,
+            items: items.map { item in
+                PromptCompletionItem(
+                    id: item.id,
+                    title: item.invocationText
+                        + (item.argumentHint.isEmpty ? "" : "  \(item.argumentHint)"),
+                    accessibilityTitle: item.displayName,
+                    detail: item.description,
+                    kind: item.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
+                    isEnabled: item.isEnabled
+                )
+            },
             selectedIndex: 0,
             from: sender,
             onChoose: { [weak self] _ in self?.galleryCompletionPresenter.dismiss() },
             onDismiss: {}
         )
+    }
+
+    @objc private func showGalleryCommandPalette(_ sender: ThemedButton) {
+        guard galleryCommandPalette == nil, let window = view.window else { return }
+        let commands = [
+            HostCommandDescriptor(
+                id: "gallery.command.available",
+                title: L10n.string("Activity"),
+                detail: L10n.string("Searches every currently available app and extension command."),
+                group: "View",
+                shortcut: "⌘P",
+                origin: .builtIn,
+                scope: .session,
+                risk: .ordinary,
+                availability: .available
+            ),
+            HostCommandDescriptor(
+                id: "gallery.command.unavailable",
+                title: L10n.string("Git Review"),
+                detail: nil,
+                group: "View",
+                shortcut: "⇧⌘R",
+                origin: .extensionCommand(
+                    identifier: "codes.threading.gallery",
+                    name: L10n.string("Extensions"),
+                    localID: "review"
+                ),
+                scope: .session,
+                risk: .ordinary,
+                availability: .unavailable(reason: L10n.string("Select a session first."))
+            )
+        ]
+        let controller = CommandPaletteViewController(
+            catalog: { commands },
+            invoke: { [weak self] id in
+                self?.showReceipt(L10n.format("%@ pressed · %lld total.", id, Int64(1)))
+                return .invoked(commandID: id)
+            }
+        )
+        galleryCommandPalette = controller
+        controller.onDismiss = { [weak self, weak controller] in
+            guard self?.galleryCommandPalette === controller else { return }
+            self?.galleryCommandPalette = nil
+        }
+        controller.present(in: window)
     }
 
     @objc private func chooseExtensionDirectory() {

@@ -1278,3 +1278,19 @@ file. This is opencode's diff-viewer idea in AppKit and system colours.
 already read these files, and the transcript path was already derived in two places. The
 reader's correctness notes — never cap a record, let the caller decide when to stop — now live
 in one place instead of being rediscovered per caller.
+
+## Workspace-file mentions are references, not pasted files
+
+The composer recognizes a whitespace-delimited `@` token after the existing leading `/` command
+and `$` skill parsers have had their chance. An `@` inside a word remains text, so email addresses
+and ordinary prose are not captured. Choosing a row replaces only that token and stages a
+`ConversationContextAttachment` whose source is `workspaceFile` and whose locator is a
+project-relative path. It has no eager excerpt: file bytes do not enter editable prose or the
+completion model.
+
+The reference uses the existing context envelope through local continuity storage, scheduled and
+queued prompts, provider transcript replay, and `RemoteConversationContextAttachmentDTO`. Before
+submit or steer, the conversation host refreshes the Git-visible roster and verifies that every
+saved path is still a contained regular file. A missing, renamed, deleted, ignored, or escaping
+symlink is reported as stale and the draft remains staged; silently sending an unresolved
+reference would turn structured context into a false promise.

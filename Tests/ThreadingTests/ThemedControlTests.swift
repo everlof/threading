@@ -6223,6 +6223,7 @@ final class ThemedControlTests: XCTestCase {
                 "ScheduledMessageRowView",
                 "CompareInspectorView",
                 "CodeContextPreviewView",
+                "CommandPaletteViewController",
                 "ControlRowView",
                 "ExecutionAuditEventView",
                 "FileActivityMapView",

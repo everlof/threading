@@ -157,6 +157,26 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.state(for: first).conversationFollowsBottom)
     }
 
+    func testSessionContinuityPreservesStructuredWorkspaceReferences() {
+        let sessionID = SessionID()
+        let reference = ConversationContextAttachment(
+            id: UUID(uuidString: "6DFCC50B-180A-4E20-A601-B139DF88078E")!,
+            kind: .reference,
+            source: .workspaceFile,
+            title: "PromptView.swift",
+            locator: "Sources/Threading/UI/Design/PromptView.swift"
+        )
+        makeContinuityStore().setConversationDraft(
+            "Please review this",
+            context: [reference],
+            for: sessionID
+        )
+
+        let reloaded = makeContinuityStore().state(for: sessionID)
+        XCTAssertEqual(reloaded.conversationDraft, "Please review this")
+        XCTAssertEqual(reloaded.conversationContext, [reference])
+    }
+
     func testSessionContinuityClearsOnlyTheAcceptedDraft() {
         let sessionID = SessionID()
         let store = makeContinuityStore()

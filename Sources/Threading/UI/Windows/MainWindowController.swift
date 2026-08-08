@@ -2233,6 +2233,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
+    /// The same live answer `closeActiveTab` uses, exposed as a semantic capability so command
+    /// frontends can disable honestly instead of calling the implementation just to hear a beep.
+    var canCloseActiveTab: Bool {
+        if displayPaneController.isShowingCurrentTheme, !displayItem.isCollapsed,
+           let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: displayPaneController.view) {
+            return true
+        }
+        if let host = focusedTabHost() {
+            return host.activeTabID(for: currentSessionID) != nil
+        }
+        return containerViewController.isShowingSettings
+            || containerViewController.currentComposerProjectID != nil
+            || containerViewController.currentSessionID != nil
+            || containerViewController.currentTerminalID != nil
+    }
+
     /// Clicking the active page tab shows *where* it is, by selecting and scrolling to its row in
     /// the sidebar.
     ///
@@ -2790,6 +2807,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         revealActiveTabHost()
     }
 
+    var canSelectAdjacentTab: Bool {
+        (activeTabHost()?.tabs(for: currentSessionID).count ?? 0) > 1
+    }
+
     /// ⌘1–⌘9: the tab at that place in the focused host's strip. Out-of-range digits beep
     /// rather than clamp — ⌘9 is not a request for the last tab, it is a miss.
     func selectTab(atIndex index: Int) {
@@ -2806,6 +2827,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         host.activateTab(id: tabs[index].id, for: sessionID)
         revealActiveTabHost()
+    }
+
+    func canSelectTab(atIndex index: Int) -> Bool {
+        activeTabHost()?.tabs(for: currentSessionID).indices.contains(index) == true
     }
 
     /// Selecting a tab by keyboard means wanting to see it: a collapsed panel would take the
@@ -2843,6 +2868,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
         BrowserBaselineUI.captureBaseline(from: browser, sessionID: sessionID)
+    }
+
+    var canSaveVisibleBrowserBaseline: Bool {
+        guard let sessionID = containerViewController.currentSessionID else { return false }
+        return visibleBrowser(for: sessionID) != nil
     }
 
     /// The panel's own visible browser first, then whichever browser the session has.
@@ -3011,6 +3041,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.activeTerminalSession?.decreaseFontSize()
     }
 
+    var canAdjustTerminalText: Bool {
+        containerViewController.activeTerminalSession != nil
+    }
+
     // MARK: - Find
 
     func showFind() {
@@ -3055,6 +3089,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         findBar?.focus()
+    }
+
+    var canShowFind: Bool {
+        (!displayItem.isCollapsed && displayPaneController.currentBrowser != nil)
+            || containerViewController.activeTerminalSession != nil
     }
 
     func hideFindBar() {
