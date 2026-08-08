@@ -22,8 +22,39 @@ final class PromptView: NSView, ThemedComponent {
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
     private let submitButton = ThemedButton()
 
+    /// The half beside the send that offers to send it later. Built lazily and only ever added
+    /// once a `scheduleMenuProvider` exists, so a box with nothing to schedule carries no extra
+    /// view at all.
+    private lazy var scheduleChevron: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: PromptViewDefaults.scheduleChevronSymbol,
+            accessibility: L10n.string("Send later"),
+            target: .compactSplitMenu
+        )
+        button.toolTip = L10n.string("Send later")
+        button.onPress = { [weak self] in self?.presentScheduleMenu() }
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setAccessibilityIdentifier("composer.schedule")
+        return button
+    }()
+
+    /// What holds the text clear of the chevron when it is present, swapped for the plain
+    /// beside-the-send constraint when it is not. Held as a pair for the same reason the two
+    /// trailing edges below are: only one may be active at a time.
+    private var contentTrailingBesideChevron: NSLayoutConstraint?
+    /// The chevron is overlaid beside an inline send, but is an arranged peer of a footer send.
+    /// Retaining the inline pair lets placement changes migrate it without accumulating dormant
+    /// constraints between two different ownership trees.
+    private var scheduleInlineConstraints: [NSLayoutConstraint] = []
+
     /// The control row along the bottom of the box — see `SubmitPlacement.footer`.
     private let footerRow = NSStackView()
+
+    /// Whether anything has been put on that row. The row is the *controls'*, not the send's:
+    /// a box can carry what its message will be sent with and still have its send button
+    /// outside, which is the session brief. Kept as a flag rather than counted off
+    /// `arrangedSubviews`, since the spacer and the glyph are on the row either way.
+    private var hasFooterControls = false
 
     /// What pushes the trailing group to the far edge of that row. A view rather than a
     /// stack-view distribution: the two groups are pinned to their own edges and the gap
@@ -60,6 +91,48 @@ final class PromptView: NSView, ThemedComponent {
     /// Called when the prompt is submitted, by Return or by the button.
     var onSubmit: ((String) -> Void)?
 
+    /// Called when ⌘Return asks for the message to join the turn already running.
+    ///
+    /// Only ever fired in `.working(canSteer: true)`. A composer whose transport cannot steer
+    /// does not offer the chord at all rather than quietly doing something else with it.
+    var onSteer: ((String) -> Void)?
+
+    /// Called when the glyph, now a Stop, is pressed.
+    var onStop: (() -> Void)?
+
+    /// The other ways to take a send: later, at a time chosen from a menu.
+    ///
+    /// **Nil means no chevron at all**, which is what keeps every other box in the app exactly as
+    /// it was — the inspector's note and Help ▸ Report a Problem have nothing to schedule, and a
+    /// chevron beside their send would be offering a feature that does not apply to them.
+    ///
+    /// The chevron is drawn only while the glyph is a **Send**. In `.working` the glyph is a
+    /// Stop, and a chevron welded to a Stop reads as "stop, in other ways" — which is not a
+    /// sentence, and not what the menu does.
+    var scheduleMenuProvider: (() -> [ThemedMenuEntry])? {
+        didSet { updateSubmitState() }
+    }
+
+    /// ↑ in an empty box. Answering true consumes the key.
+    ///
+    /// The composer offers the gesture and the owner decides what "back" means — for a
+    /// conversation it is the last queued message, which is Claude Code's own affordance
+    /// ("Press up to edit queued messages"). An empty box is the whole condition: ↑ has to keep
+    /// moving the caret in a draft, or a multi-line prompt becomes uneditable.
+    var onRecallPrevious: (() -> Bool)?
+
+    /// What the composer is for at this moment.
+    ///
+    /// The box knows nothing about providers, transports or queues: the owner resolves all three
+    /// into this one value, and the glyph, the tooltip and what ⌘Return does follow from it. That
+    /// boundary is why adding a fourth runtime cannot reach into here.
+    var composerMode: PromptComposerMode = .ready {
+        didSet {
+            guard composerMode != oldValue else { return }
+            updateSubmitState()
+        }
+    }
+
     /// Called on every edit. Exists so what is typed can be kept somewhere it survives the
     /// app, rather than only in this field.
     var onChange: ((String) -> Void)?
@@ -76,12 +149,9 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     /// Why the send will not fire, said on the glyph rather than left to be guessed. Falls back
-    /// to what the glyph says at rest — see `PromptViewDefaults.submitTitle`.
+    /// to what the glyph says at rest — see `refreshSubmitTitle`.
     var submissionDisabledReason: String? {
-        didSet {
-            submitButton.toolTip = submissionDisabledReason ?? PromptViewDefaults.submitTitle
-            updateSubmitState()
-        }
+        didSet { updateSubmitState() }
     }
 
     /// Actions advertised by the live provider. Assigning a replacement catalog immediately
@@ -107,15 +177,20 @@ final class PromptView: NSView, ThemedComponent {
         /// Outside, as a button the owner places and titles. Return breaks the line and only
         /// ⌘Return sends.
         ///
-        /// For the two *fields* that are not composers: the inspector's note and Help ▸ Report
-        /// a Problem. Neither sends anywhere on its own — each is a paragraph attached to a
-        /// report that the surrounding sheet submits — so there is no send to put in the box,
-        /// and Return inside them is ordinary typing.
+        /// For the *fields* that are not composers: the inspector's note and Help ▸ Report a
+        /// Problem. Neither sends anywhere on its own — each is a paragraph attached to a report
+        /// that the surrounding sheet submits — so there is no send to put in the box, and
+        /// Return inside them is ordinary typing.
         ///
-        /// It was the session composer's placement too, for a reason that no longer holds here:
-        /// a brief is several lines and Return-sends turned each break into an accidental
-        /// launch. `AppSettings.promptReturnKey` answers that now, and the composer shares the
-        /// reply's box — see `docs/architecture/design-system.md`.
+        /// And for the session brief, for the reason that has always applied to it: a brief is
+        /// several lines, often a pasted paragraph, and a Return that sends spends one of those
+        /// breaks on an accidental launch. It sent on Return for one commit — the send had moved
+        /// onto the control row, and this enum was reading "the send is in the box" as "Return
+        /// sends" — while its tooltip went on promising ⌘Return, which is the one thing a send
+        /// may not do. The button outside says the chord on its face instead.
+        ///
+        /// It costs the box nothing: `setFooterControls` decides whether there is a control row,
+        /// not this. See `docs/architecture/design-system.md`.
         case outside
 
         /// Inside, on a control row along the bottom of the box, at the end of it. Return
@@ -128,6 +203,9 @@ final class PromptView: NSView, ThemedComponent {
         /// conversation nor part of the input. Every chat client that has grown model choice
         /// has arrived at the same place: the box holds the text, the row under it holds what
         /// the text will be sent with, and the send closes the row.
+        ///
+        /// This case is only about the *send*, though. A box gets its row from
+        /// `setFooterControls`, so `.outside` keeps whatever was put on it.
         case footer
     }
 
@@ -216,9 +294,9 @@ final class PromptView: NSView, ThemedComponent {
         )
         submitButton.isBordered = false
         submitButton.contentTintColor = Design.Text.tertiary
-        submitButton.toolTip = PromptViewDefaults.submitTitle
+        refreshSubmitTitle()
         submitButton.target = self
-        submitButton.action = #selector(submit)
+        submitButton.action = #selector(primaryAction)
         submitButton.translatesAutoresizingMaskIntoConstraints = false
 
         contentStack.orientation = .vertical
@@ -331,7 +409,15 @@ final class PromptView: NSView, ThemedComponent {
         let isFooter = submitPlacement == .footer
 
         submitButton.isHidden = submitPlacement == .outside
-        footerRow.isHidden = !isFooter
+        footerRow.isHidden = !showsFooterRow
+
+        // Break the inline bridge before the send is moved into its own content stack. Leaving
+        // it active for even that reparenting turn creates a cycle: the content stack must end
+        // before the chevron, while the send inside that same stack must begin after it.
+        if isFooter {
+            NSLayoutConstraint.deactivate(scheduleInlineConstraints)
+            contentTrailingBesideChevron?.isActive = false
+        }
 
         // The glyph belongs to one host at a time. Reparented rather than duplicated so the
         // button keeps its target, its tooltip, and whatever enabled state it was left in.
@@ -354,16 +440,47 @@ final class PromptView: NSView, ThemedComponent {
         contentTop?.constant = verticalInset
         contentBottom?.constant = -verticalInset
 
+        updateScheduleChevron(
+            hasContent: hasSubmittableContent,
+            isStop: composerMode.canStop
+        )
         needsLayout = true
         updateHeight()
+    }
+
+    /// Whether the box draws a control row under its text: because the send sits on one, or
+    /// because the owner put its own controls there.
+    private var showsFooterRow: Bool {
+        submitPlacement == .footer || hasFooterControls
     }
 
     /// The box's own top and bottom padding, which the control row changes — see
     /// `PromptViewDefaults.footerVerticalInset`.
     private var verticalInset: CGFloat {
-        submitPlacement == .footer
+        showsFooterRow
             ? PromptViewDefaults.footerVerticalInset
             : PromptViewDefaults.verticalInset
+    }
+
+    /// How tall the box stands with nothing in it.
+    ///
+    /// A field with no control row centres one line in `Design.Size.inputHeight`, which is what
+    /// `minimumHeight` has always meant. A box with a row under its text is not that shape: it is
+    /// a small panel, and the number that sized a single-line field says nothing about how much
+    /// typing room a *reply* is worth. Left at 44 the resting reply box came out at roughly one
+    /// line of prose over a chip row — a box that looked like it wanted a sentence, in a place
+    /// people write paragraphs.
+    ///
+    /// Stated in lines rather than as a constant so it stays right when the conversation's font
+    /// or size changes; the chrome and the row are added on top by `updateHeight`.
+    private var restingHeight: CGFloat {
+        guard showsFooterRow else { return minimumHeight }
+        let line = Design.FontRole.body.resolved(in: fontSurface).boundingRectForFont.height
+        let text = (line * PromptViewDefaults.restingLines).rounded()
+        return max(
+            minimumHeight,
+            text + verticalInset * 2 + Design.Size.chipHeight + contentStack.spacing
+        )
     }
 
     /// Resolves the user's setting against this composer's own default, at the keystroke.
@@ -441,7 +558,7 @@ final class PromptView: NSView, ThemedComponent {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
 
-        textView.onSubmit = { [weak self] in self?.submit() }
+        textView.onSubmit = { [weak self] intent in self?.submit(intent: intent) }
         textView.onCompletionKey = { [weak self] event in
             self?.handleCompletionKey(event) ?? false
         }
@@ -510,7 +627,7 @@ final class PromptView: NSView, ThemedComponent {
         textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     }
 
-    /// The owner's controls on the box's bottom row, under `SubmitPlacement.footer`.
+    /// The owner's controls on the box's bottom row.
     ///
     /// `leading` reads as what the message will be sent *with* — model, effort, speed — and
     /// `trailing` as what it has cost so far, beside the send. Both are the owner's own views:
@@ -518,9 +635,14 @@ final class PromptView: NSView, ThemedComponent {
     ///
     /// A hidden control is detached rather than left as a gap, so a provider offering no
     /// choices at all leaves the row to the send glyph rather than to a row of holes.
+    ///
+    /// Calling this is what gives a box its row, whatever `submitPlacement` says: the brief
+    /// keeps its controls where the reply has them while its send stays outside the box.
     func setFooterControls(leading: [NSView], trailing: [NSView]) {
+        hasFooterControls = !leading.isEmpty || !trailing.isEmpty
+
         for view in footerRow.arrangedSubviews
-        where view !== footerSpacer && view !== submitButton {
+        where view !== footerSpacer && view !== submitButton && view !== scheduleChevron {
             footerRow.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
@@ -538,8 +660,9 @@ final class PromptView: NSView, ThemedComponent {
             footerRow.insertArrangedSubview(view, at: spacerIndex + 1 + offset)
         }
 
-        needsLayout = true
-        updateHeight()
+        // The row may have just appeared under a box that has no send in it, which also changes
+        // how that box is padded.
+        applySubmitPlacement()
     }
 
     /// Adds files through the same path used by paste and drop.
@@ -636,7 +759,20 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func handleCompletionKey(_ event: NSEvent) -> Bool {
-        guard completionPresenter.isVisible, !completionSuggestions.isEmpty else { return false }
+        // Esc stops the agent, but only once it has nothing nearer to dismiss. An open
+        // completion list owns it first, which is why this is decided here rather than in
+        // `keyDown`: the list is the thing the key was most recently made to mean.
+        guard completionPresenter.isVisible, !completionSuggestions.isEmpty else {
+            switch event.keyCode {
+            case PromptViewDefaults.escapeKeyCode where composerMode.canStop:
+                onStop?()
+                return true
+            case PromptViewDefaults.upArrowKeyCode where textView.string.isEmpty:
+                return onRecallPrevious?() ?? false
+            default:
+                return false
+            }
+        }
 
         switch event.keyCode {
         case PromptViewDefaults.escapeKeyCode:
@@ -744,7 +880,35 @@ final class PromptView: NSView, ThemedComponent {
     /// owner: it has to submit *this* prompt's value, attachments included, rather than reading
     /// `stringValue` and quietly dropping the images.
     @objc func submit() {
+        submit(intent: .standard)
+    }
+
+    /// What the glyph does, which is not always send.
+    ///
+    /// One control rather than two, because a send and a stop are never both meaningful and a
+    /// second button is a second thing to aim at. The glyph is already reparented between
+    /// placements, so it has the seam for this.
+    @objc private func primaryAction() {
+        if composerMode.canStop {
+            onStop?()
+            return
+        }
+        submit(intent: .standard)
+    }
+
+    private func submit(intent: PromptSubmitIntent) {
         guard isSubmissionEnabled else { return }
+
+        // ⌘Return joins the running turn where the transport allows it. Everywhere else it is an
+        // ordinary send — which, while a turn is in flight, the owner reads as "queue this".
+        if intent == .immediate, composerMode.canSteer, onSteer != nil {
+            let value = submissionValue
+            guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !contextAttachments.isEmpty else { return }
+            onSteer?(value)
+            return
+        }
+
         onSubmit?(submissionValue)
     }
 
@@ -884,16 +1048,138 @@ final class PromptView: NSView, ThemedComponent {
 
     /// The submit control brightens once there is something to send, which is the only cue
     /// that Return will do anything.
+    ///
+    /// While a turn is running and the transport can stop it, the same control is a Stop and its
+    /// rules invert: it is live whether or not anything is typed, because what it acts on is the
+    /// agent rather than the box, and it is always tinted — a Stop the eye has to hunt for is a
+    /// Stop nobody finds when they need it.
     private func updateSubmitState() {
-        let hasText = !textView.string
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
-        let hasContent = hasText || !attachments.isEmpty || !contextAttachments.isEmpty
+        let hasContent = hasSubmittableContent
+        let isStop = composerMode.canStop
 
-        submitButton.isEnabled = hasContent && isSubmissionEnabled
-        submitButton.contentTintColor = hasContent && isSubmissionEnabled
+        submitButton.image = NSImage(
+            systemSymbolName: isStop ? DesignSymbols.stop : DesignSymbols.submit,
+            accessibilityDescription: isStop
+                ? L10n.string("Stop")
+                : L10n.string("Start session")
+        )
+        submitButton.isEnabled = isStop || (hasContent && isSubmissionEnabled)
+        submitButton.contentTintColor = isStop || (hasContent && isSubmissionEnabled)
             ? Design.Surface.accent
             : Design.Text.tertiary
+        refreshSubmitTitle()
+        updateScheduleChevron(hasContent: hasContent, isStop: isStop)
+    }
+
+    /// Shows the chevron only where scheduling is both offered and meaningful.
+    ///
+    /// Three conditions, and each is a different sentence: there has to be somewhere for a
+    /// scheduled message to go (`scheduleMenuProvider`), something to schedule (`hasContent`),
+    /// and a send to hang it off — never a Stop.
+    private func updateScheduleChevron(hasContent: Bool, isStop: Bool) {
+        let offered = scheduleMenuProvider != nil && !isStop && submitPlacement != .outside
+
+        guard offered else {
+            if scheduleChevron.superview != nil {
+                NSLayoutConstraint.deactivate(scheduleInlineConstraints)
+                if footerRow.arrangedSubviews.contains(scheduleChevron) {
+                    footerRow.removeArrangedSubview(scheduleChevron)
+                }
+                scheduleChevron.removeFromSuperview()
+                contentTrailingBesideChevron?.isActive = false
+                contentTrailingBesideSubmit?.isActive = submitPlacement == .inside
+            }
+            return
+        }
+
+        if submitPlacement == .footer {
+            NSLayoutConstraint.deactivate(scheduleInlineConstraints)
+            contentTrailingBesideChevron?.isActive = false
+            contentTrailingBesideSubmit?.isActive = false
+            if scheduleChevron.superview !== footerRow {
+                scheduleChevron.removeFromSuperview()
+                let submitIndex = footerRow.arrangedSubviews.firstIndex(of: submitButton)
+                    ?? footerRow.arrangedSubviews.count
+                footerRow.insertArrangedSubview(scheduleChevron, at: submitIndex)
+            }
+        } else if scheduleChevron.superview !== self {
+            if footerRow.arrangedSubviews.contains(scheduleChevron) {
+                footerRow.removeArrangedSubview(scheduleChevron)
+            }
+            scheduleChevron.removeFromSuperview()
+            addSubview(scheduleChevron)
+            if scheduleInlineConstraints.isEmpty {
+                let trailing = contentStack.trailingAnchor.constraint(
+                    equalTo: scheduleChevron.leadingAnchor,
+                    constant: -Design.Spacing.inset
+                )
+                contentTrailingBesideChevron = trailing
+                scheduleInlineConstraints = [
+                    scheduleChevron.trailingAnchor.constraint(
+                    equalTo: submitButton.leadingAnchor,
+                    constant: -Design.Spacing.tight
+                ),
+                    scheduleChevron.centerYAnchor.constraint(equalTo: submitButton.centerYAnchor)
+                ]
+            }
+            NSLayoutConstraint.activate(scheduleInlineConstraints)
+            // The text has to clear the chevron as well as the send, or a long line runs
+            // underneath it. Swapped rather than added, since only one trailing edge may hold.
+            contentTrailingBesideSubmit?.isActive = false
+            contentTrailingBesideChevron?.isActive = true
+        }
+
+        scheduleChevron.isEnabled = hasContent && isSubmissionEnabled
+    }
+
+    private var hasSubmittableContent: Bool {
+        !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !attachments.isEmpty
+            || !contextAttachments.isEmpty
+    }
+
+    private func presentScheduleMenu() {
+        guard let entries = scheduleMenuProvider?(), !entries.isEmpty else { return }
+        ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 0),
+            from: scheduleChevron,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: {}
+        )
+    }
+
+    /// The glyph names **the key that sends it**, which is the setting's answer for this box and
+    /// not a constant.
+    ///
+    /// A tooltip is the only name a glyph has, so it is also the accessible one — and a send
+    /// that fires on a key its own label does not name is the defect this exists to prevent. It
+    /// shipped in the opposite direction: a composer sending on Return while its glyph promised
+    /// ⌘Return. Recomputed here rather than stored because `AppSettings.promptReturnKey` is read
+    /// at the keystroke, and this is called on every edit, every enable change and every
+    /// placement change — so the words follow the setting without observing it.
+    private func refreshSubmitTitle() {
+        submitButton.toolTip = submissionDisabledReason ?? submitTitle
+    }
+
+    /// The glyph's own name, which changes with what it will do.
+    ///
+    /// Every reading names its chord, because a glyph has no face to write one on. The queueing
+    /// reading matters most: a Return that adds to a list instead of sending is a different
+    /// promise, and leaving it saying "Send" is how somebody comes to believe a queued message
+    /// was handed over.
+    private var submitTitle: String {
+        if composerMode.canStop { return PromptViewDefaults.stopTitle }
+
+        let returnKey = submitsOnReturn()
+            ? PromptViewDefaults.returnSubmitTitle
+            : PromptViewDefaults.submitTitle
+
+        guard composerMode.isWorking else { return returnKey }
+
+        return composerMode.canSteer
+            ? PromptViewDefaults.queueWithSteerTitle
+            : PromptViewDefaults.queueTitle
     }
 
     private func updateSurface() {
@@ -934,7 +1220,13 @@ final class PromptView: NSView, ThemedComponent {
         // must not shrink the field they are typing in, while the row is the box's own chrome
         // and is present from the first keystroke. Adding it instead opened an empty reply box
         // at a hundred points — a paragraph of height asking for one line.
-        let textFloor = max(0, minimumHeight - footerHeight)
+        //
+        // What that left behind was a floor *below a single line*: 44 − 36 = 8, so the resting
+        // height of a box with a control row was decided entirely by how tall one line of body
+        // text happens to be, and nothing stated how much room a reply is worth. `restingLines`
+        // states it. The row still comes out of the total — the arithmetic is unchanged — it is
+        // the minimum the row is subtracted from that now knows there is a row.
+        let textFloor = max(0, restingHeight - footerHeight)
         let cap = max(Design.Size.inputMaxHeight - footerHeight, textFloor)
         let textFitted = min(max(textHeight + chrome, textFloor), cap)
 
@@ -949,6 +1241,20 @@ final class PromptView: NSView, ThemedComponent {
         let needsScroller = textFitted >= cap
         if scrollView.hasVerticalScroller != needsScroller {
             scrollView.hasVerticalScroller = needsScroller
+        }
+
+        // Growth is a preference; the resting size is the promise. AppKit derives a window's
+        // minimum content size from the constraints at `windowSizeStayPut` (500) and above, so a
+        // box held at its cap by a long draft sits below that line and a box at rest does not —
+        // otherwise typing is what decides how short a window may be dragged. The composer is
+        // where this shows: chips, box and an action row asked for 316 points inside a window
+        // the app lets the user drag to `WindowDefaults.minHeight`, and the window stopped 16
+        // points above its own floor as soon as there was a draft in the box.
+        let priority: NSLayoutConstraint.Priority = fitted > restingHeight
+            ? PromptViewDefaults.grownHeightPriority
+            : .defaultHigh
+        if heightConstraint?.priority != priority {
+            heightConstraint?.priority = priority
         }
 
         guard heightConstraint?.constant != fitted else { return }
@@ -1342,7 +1648,7 @@ private final class PromptTextView: ThemedTextView {
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
     /// Return, without a modifier — or ⌘Return, always.
-    var onSubmit: (() -> Void)?
+    var onSubmit: ((PromptSubmitIntent) -> Void)?
 
     /// Gives the owning composer first refusal for navigation/acceptance while a completion
     /// panel is visible. Marked text bypasses this hook so IME candidate selection remains
@@ -1465,7 +1771,7 @@ private final class PromptTextView: ThemedTextView {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if modifiers.contains(.command) {
-            onSubmit?()
+            onSubmit?(.immediate)
             return
         }
 
@@ -1478,7 +1784,7 @@ private final class PromptTextView: ThemedTextView {
             return
         }
 
-        onSubmit?()
+        onSubmit?(.standard)
     }
 
     // MARK: - Drag and Paste
@@ -1526,12 +1832,22 @@ enum PromptAttachment {
     /// The one rename: a pasted screenshot is written under a generated name, which is right for
     /// a file that only has to outlive the turn and unreadable as a row someone is scanning. A
     /// dropped file keeps the name it already had.
+    ///
+    /// The rows are handed back for the caller that has something to do with the file *as an
+    /// attachment* the moment it is one — the attachments pane, where a picture dropped onto a
+    /// row is filed and then compared against that row. Discardable, because every other caller
+    /// is simply filing what the user sent.
     @MainActor
-    static func record(paths: [String], sessionID: SessionID, projectRoot: URL) {
-        for path in paths {
+    @discardableResult
+    static func record(
+        paths: [String],
+        sessionID: SessionID,
+        projectRoot: URL
+    ) -> [SessionAttachment] {
+        paths.compactMap { path in
             let url = URL(fileURLWithPath: path)
             let isGenerated = url.lastPathComponent.hasPrefix(PromptViewDefaults.attachmentPrefix)
-            SessionAttachmentStore.shared.record(
+            return SessionAttachmentStore.shared.record(
                 declared: url,
                 sessionID: sessionID,
                 projectRoot: projectRoot,
@@ -1589,18 +1905,108 @@ enum PromptAttachment {
     }
 }
 
+// MARK: - Composer Mode
+
+/// What the composer's controls mean right now.
+///
+/// Deliberately two cases and not three booleans. The owner resolves the transport's capabilities
+/// into this before handing it over, so `PromptView` never asks who the provider is — the whole
+/// reason a fourth runtime can be added without touching the box.
+enum PromptComposerMode: Equatable {
+    /// Nothing is running. The glyph sends and Return hands the turn over.
+    case ready
+
+    /// A turn is in flight.
+    ///
+    /// - `canStop`: the glyph becomes a Stop. False where the transport cannot interrupt, in
+    ///   which case the glyph stays a send and the message queues — a Stop that does nothing is
+    ///   worse than no Stop.
+    /// - `canSteer`: ⌘Return adds the message to the running turn instead of queueing it. False
+    ///   where the transport has no steering primitive, and then the chord is simply an ordinary
+    ///   send, which queues. Nothing here promises what the wire cannot do.
+    case working(canStop: Bool, canSteer: Bool)
+
+    var isWorking: Bool {
+        if case .working = self { return true }
+        return false
+    }
+
+    var canStop: Bool {
+        if case .working(let canStop, _) = self { return canStop }
+        return false
+    }
+
+    var canSteer: Bool {
+        if case .working(_, let canSteer) = self { return canSteer }
+        return false
+    }
+}
+
+/// Which of a composer's two affirmatives was asked for.
+///
+/// ⌘Return has one meaning across this app: **the more committed of two**. `ContextCommentAlert`
+/// established it — Return parks the comment beside the prompt, ⌘Return hands it over now — and
+/// the composer reuses it rather than inventing a second idea for the same chord.
+enum PromptSubmitIntent: Equatable {
+    /// A bare Return, or the send glyph.
+    case standard
+
+    /// ⌘Return.
+    case immediate
+}
+
 // MARK: - Prompt View Defaults
 
 enum PromptViewDefaults {
-    static let submitSize: CGFloat = 18
+    static let submitSize = Design.Size.compactSubmitHeight
+
+    /// The chevron beside the send. Deliberately narrower than the glyph it sits next to: the
+    /// press is the point of the pair and the chevron is the day the answer is different, which
+    /// is the same ranking `SplitIconButtonView` draws with `Design.Size.splitMenuWidth`.
+    static let scheduleChevronWidth = Design.Size.compactSplitMenuWidth
+
+    static let scheduleChevronSymbol = "chevron.down"
 
     /// What the send glyph says when it is asked, and the only name it has.
     ///
-    /// A glyph has no face to write a chord on — which is the one thing the titled button that
-    /// used to sit outside the session composer could do — so the tooltip carries `⌘Return`
-    /// instead. It doubles as the control's accessible name: `ThemedButton` reads the tooltip
-    /// for a button with no title, and an unnamed send is unusable from VoiceOver.
+    /// A glyph has no face to write a chord on — which is the one thing a titled button beside
+    /// the box can do — so the tooltip carries the chord instead. It doubles as the control's
+    /// accessible name: `ThemedButton` reads the tooltip for a button with no title, and an
+    /// unnamed send is unusable from VoiceOver.
+    ///
+    /// Two of them, because the key that sends is the box's own answer: naming the chord in a
+    /// box where a bare Return also sends is how a composer came to send on a key nothing in
+    /// front of the user mentioned. See `PromptView.refreshSubmitTitle`.
     static var submitTitle: String { L10n.string("Send · ⌘Return") }
+
+    static var returnSubmitTitle: String { L10n.string("Send · Return") }
+
+    /// What the same glyph says once it is a Stop. The chord matches both CLIs.
+    static var stopTitle: String { L10n.string("Stop · Esc") }
+
+    /// While a turn is running on a transport that cannot take additions.
+    static var queueTitle: String { L10n.string("Add to queue · Return") }
+
+    /// While a turn is running on one that can. Both chords, because a pair nobody can see is a
+    /// pair nobody finds — the same rule `ThemedAlert.resolvedChords` follows.
+    static var queueWithSteerTitle: String {
+        L10n.string("Add to queue · Return   Send to this turn · ⌘Return")
+    }
+
+    /// How many lines of prose a box with a control row stands open at.
+    ///
+    /// Two, not one. A box that opens at a single line reads as a search field — it says a
+    /// sentence is expected, in the place people write paragraphs — and the resting height was
+    /// not chosen at all before this: it fell out of `Design.Size.inputHeight` minus the row,
+    /// leaving a text floor of eight points, below one line.
+    ///
+    /// Two rather than three, deliberately. Three is where this stops being a taller box and
+    /// starts being the hundred-point one the control row was moved *out of* the minimum to
+    /// avoid — the note on `updateHeight` records that regression. Two adds exactly one line.
+    ///
+    /// It is only a resting size: `Design.Size.inputMaxHeight` is still the ceiling and the box
+    /// grows between them, so nothing here costs anyone room to read the conversation.
+    static let restingLines: CGFloat = 2
 
     /// Keeps a one-line prompt vertically centred in `Design.Size.inputHeight`.
     static let verticalInset: CGFloat = 13
@@ -1612,6 +2018,14 @@ enum PromptViewDefaults {
     /// under that line: kept, it padded the text by a line's worth of air at the top and left
     /// the row crowding the bottom edge. A panel's own step reads as one box holding two rows.
     static let footerVerticalInset: CGFloat = Design.Spacing.medium
+
+    /// What the box's height asks for once its content has grown it past `minimumHeight`.
+    ///
+    /// Under `NSLayoutConstraint.Priority.windowSizeStayPut` (500), which is the line AppKit
+    /// derives a window's minimum content size from: above it a height is part of what the
+    /// window must be able to show, below it a preference the window may leave unmet. Growth
+    /// belongs on the second side of that line — see `updateHeight`.
+    static let grownHeightPriority = NSLayoutConstraint.Priority(490)
 
     static let returnKeyCode: UInt16 = 36
     static let keypadEnterKeyCode: UInt16 = 76

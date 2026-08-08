@@ -1,0 +1,290 @@
+import AppKit
+import XCTest
+@testable import Threading
+
+/// Draws the Usage Windows page and the diagram on it, light and dark.
+///
+/// This page carries an argument rather than a list of switches, and an argument can be correct
+/// and still not land. Whether the two rows read as the *same day* twice, whether the faint block
+/// before the working day reads as "already open" rather than as a rendering fault, whether the
+/// hour it gains is legible beside the row that gained it: none of that is assertable, and all of
+/// it decides whether anyone believes the feature enough to turn it on.
+///
+/// The assertions cover what a picture cannot: that the honest sentences are present, that the
+/// diagram says the same thing to a screen reader, and that its two lanes actually differ.
+final class UsageWindowSettingsRenderTests: XCTestCase {
+
+    private enum Render {
+        /// The width the pane gives a settings page, and a squeezed pane — the explanation and
+        /// the footnote are the longest prose on the page and wrap first.
+        static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
+        static let height: CGFloat = 1400
+
+        static var directory: URL {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }
+    }
+
+    private let windowLength = UsageDefaults.fiveHourSeconds
+    private let burn: TimeInterval = 3 * 3600
+
+    private var workday: DateInterval {
+        let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(9 * 3600)
+        return DateInterval(start: start, duration: 9 * 3600)
+    }
+
+    // MARK: - Content
+
+    /// The page states what the feature does not do, in the place someone deciding whether to
+    /// switch it on will read it.
+    ///
+    /// This is a settings page for something that spends money, so the caveats are load-bearing
+    /// copy rather than a disclaimer: it raises no limit, it draws on the weekly cap, and it is
+    /// offered on one runtime for a stated reason. A future edit that trims the footnote for
+    /// length would quietly turn an honest page into a sales pitch.
+    @MainActor
+    func testThePageSaysWhatThePokeDoesNotDo() {
+        let controller = UsageWindowPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+
+        let text = Self.labels(in: controller.view).joined(separator: "\n")
+
+        XCTAssertTrue(text.contains(L10n.string("Usage Windows")))
+        XCTAssertTrue(
+            text.contains("raises no limit"),
+            "the page has to say the poke raises nothing"
+        )
+        XCTAssertTrue(
+            text.contains("weekly cap"),
+            "the page has to say where the extra window is paid from"
+        )
+        XCTAssertTrue(
+            text.contains("Claude only"),
+            "the page has to say which runtimes this is offered on"
+        )
+    }
+
+    /// Every control the schedule is made of reaches the page. The plan row matters most: it is
+    /// the one that turns a derived lead into a time the reader can check against their own day.
+    @MainActor
+    func testTheScheduleAndItsDerivedPlanAreOnThePage() {
+        let controller = UsageWindowPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+
+        let labels = Self.labels(in: controller.view)
+
+        for title in [
+            L10n.string("Open a window before I start"),
+            L10n.string("I start at"),
+            L10n.string("I stop at"),
+            L10n.string("Days"),
+            L10n.string("Today's plan")
+        ] {
+            XCTAssertTrue(labels.contains(title), "\(title) has no row on the page")
+        }
+    }
+
+    // MARK: - The Diagram
+
+    /// The picture and the screen reader say the same thing.
+    ///
+    /// The whole argument is carried by fill and by one extra boundary, neither of which survives
+    /// being read aloud, so the label states the counts and the totals outright.
+    @MainActor
+    func testTheDiagramDescribesBothLanesWithoutColour() throws {
+        let grid = UsageWindowGridView()
+        grid.show(workday: workday, burn: burn, windowLength: windowLength)
+
+        let description = try XCTUnwrap(grid.accessibilityLabel())
+
+        XCTAssertTrue(description.contains(L10n.string("Without a poke")))
+        XCTAssertTrue(
+            description.contains("3"),
+            "the poked lane uses three windows and the label has to say so: \(description)"
+        )
+        XCTAssertTrue(
+            description.contains("2"),
+            "the unpoked lane uses two: \(description)"
+        )
+    }
+
+    /// A diagram with two identical rows is a diagram making no point. This is the render-side
+    /// guard on the claim `UsageWindowPlanTests` proves arithmetically.
+    @MainActor
+    func testTheTwoLanesActuallyDiffer() {
+        let comparison = UsageWindowPlan.comparison(
+            workday: workday,
+            burn: burn,
+            windowLength: windowLength
+        )
+
+        XCTAssertGreaterThan(
+            comparison.poked.productiveTime,
+            comparison.unpoked.productiveTime,
+            "the picture would show two identical rows"
+        )
+    }
+
+    // MARK: - Rendering
+
+    @MainActor
+    func testRendersUsageWindowSettingsToImages() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var written: [String] = []
+
+        for width in Render.widths {
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                let url = directory.appendingPathComponent(
+                    "usage-windows-\(Int(width))-\(name).png"
+                )
+                let data = try XCTUnwrap(
+                    pageImage(width: width, appearance: appearance),
+                    "Failed to render the usage windows page at \(width)pt in \(name)"
+                )
+                try data.write(to: url)
+                written.append(url.lastPathComponent)
+            }
+        }
+
+        print("Rendered \(written.count) usage window pages to \(directory.path)")
+        XCTAssertEqual(written.count, Render.widths.count * 2)
+    }
+
+    /// The diagram alone, under two deliberately different app themes, because it is the one
+    /// surface here that draws its own fills rather than composing themed components — the shape
+    /// most likely to keep a previous theme's accent after a live switch.
+    @MainActor
+    func testRendersTheDiagramUnderSeveralThemes() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let original = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(original) }
+
+        var written = 0
+        for theme in Self.renderThemes {
+            AppThemeLibrary.apply(theme)
+
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                guard let data = diagramImage(appearance: appearance) else {
+                    XCTFail("Failed to render the diagram under \(theme.id) in \(name)")
+                    continue
+                }
+                try data.write(
+                    to: directory.appendingPathComponent(
+                        "usage-window-grid-\(theme.id)-\(name).png"
+                    )
+                )
+                written += 1
+            }
+        }
+
+        print("Rendered \(written) usage window diagrams to \(directory.path)")
+        XCTAssertEqual(written, Self.renderThemes.count * 2)
+    }
+
+    /// System, a theme whose accent is nowhere near it (which is what makes a stale colour
+    /// visible at all), and the two period materials the blocks have to answer: Platinum bevels
+    /// its troughs, and Win98 is the one theme that fills a progress bar with chunks instead of a
+    /// smooth bar. The last is the whole reason the blocks are drawn through `ThemedSurface`
+    /// rather than with a radius this file picked.
+    private static let renderThemes: [AppTheme] = [
+        .system,
+        AppThemeStyles.cyberpunk,
+        AppThemeStyles.platinum,
+        AppThemeStyles.win98
+    ]
+
+    // MARK: - Helpers
+
+    private static func labels(in view: NSView) -> Set<String> {
+        var found: Set<String> = []
+        if let field = view as? NSTextField { found.insert(field.stringValue) }
+        for subview in view.subviews {
+            found.formUnion(labels(in: subview))
+        }
+        return found
+    }
+
+    @MainActor
+    private func pageImage(width: CGFloat, appearance name: NSAppearance.Name) -> Data? {
+        let appearance = NSAppearance(named: name)
+
+        var data: Data?
+        appearance?.performAsCurrentDrawingAppearance {
+            let controller = UsageWindowPreferencesViewController()
+            let host = self.laidOut(controller.view, width: width, height: Render.height)
+            host.appearance = appearance
+            controller.view.appearance = appearance
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+            data = self.png(of: host)
+        }
+        return data
+    }
+
+    @MainActor
+    private func diagramImage(appearance name: NSAppearance.Name) -> Data? {
+        let appearance = NSAppearance(named: name)
+
+        var data: Data?
+        appearance?.performAsCurrentDrawingAppearance {
+            let grid = UsageWindowGridView()
+            grid.show(workday: self.workday, burn: self.burn, windowLength: self.windowLength)
+
+            let host = self.laidOut(
+                grid,
+                width: SettingsUIDefaults.pageWidth,
+                height: UsageWindowGridDefaults.height
+            )
+            host.appearance = appearance
+            grid.appearance = appearance
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+            data = self.png(of: host)
+        }
+        return data
+    }
+
+    @MainActor
+    @discardableResult
+    private func laidOut(
+        _ view: NSView,
+        width: CGFloat,
+        height: CGFloat = Render.height
+    ) -> NSView {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(view)
+
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+
+        host.layoutSubtreeIfNeeded()
+        return host
+    }
+
+    @MainActor
+    private func png(of host: NSView) -> Data? {
+        guard host.bounds.height > 1,
+              let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+
+        // The page paints no ground of its own, so one is painted here or every label draws
+        // onto transparency.
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        host.cacheDisplay(in: host.bounds, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+}

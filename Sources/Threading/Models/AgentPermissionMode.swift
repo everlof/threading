@@ -162,7 +162,43 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
     /// Grok exposes the same six permission modes. Its manual/default mode is the one spelling
     /// that differs; every other external value is identical to Claude's.
     var grokFlagValue: String {
-        self == .manual ? "default" : rawValue
+        self == .manual ? AgentDefaults.agentInternalManualMode : rawValue
+    }
+
+    // MARK: - Reading a Runtime's Own Value
+
+    /// The mode a runtime's own value names, or nil when it names none of the six.
+    ///
+    /// The inverse of the flag values above, and placed beside them for the reason
+    /// `launchFlags(for:)` is: the two directions have to agree about every spelling, and one
+    /// that differs in only one direction is the bug this adjacency exists to prevent.
+    ///
+    /// Both `manual` and `default` read as Manual. The second is the spelling the CLIs hand
+    /// *back* — see `AgentDefaults.agentInternalManualMode` — so a reader that took only the
+    /// external one would report "unknown" for the most common posture there is.
+    ///
+    /// Codex answers nil by construction rather than by omission: its posture is two axes, so
+    /// no single value it emits can name one of these, and a reader would have to be given the
+    /// pair. OpenCode has no shared vocabulary to read at all.
+    ///
+    /// Unrecognised is nil rather than a fallback. A newer CLI writing a seventh mode, or a
+    /// record this app has never seen, has to read as "we do not know" and leave the surfaces
+    /// that ask silent — naming the wrong posture is worse than naming none, and the whole
+    /// point of reading an observed value is that it is not a guess.
+    init?(externalValue: String, for kind: AgentKind) {
+        switch kind {
+        case .claude, .grok:
+            if let mode = AgentPermissionMode(rawValue: externalValue) {
+                self = mode
+            } else if externalValue == AgentDefaults.agentInternalManualMode {
+                self = .manual
+            } else {
+                return nil
+            }
+
+        case .codex, .openCode:
+            return nil
+        }
     }
 
     // MARK: - Codex

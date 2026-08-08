@@ -53,6 +53,19 @@ launches on, while the chip names it as though it had been chosen. `preferredAcc
 standard login while it is on, else the first that is; `preferred(among:)` is the same rule as a
 pure function, so it can be tested without a home directory to scan.
 
+**Who a session runs as is one decision, so the composer's identity menu is one list.** It used
+to be two sections — the selected runtime's logins, a separator, then the other runtimes — which
+made every login of every *other* runtime two trips away: one to change runtime, another to pick
+the login inside it, with a moment in between where the composer was pointed at that runtime's
+preferred account rather than the one being aimed for. `identityItems()` now emits every login of
+every runtime one row deep, and a runtime appears as a row of its own only where it offers no
+login to name (it routes no accounts, or none were discovered). A row's represented value is a
+`ComposerIdentity` — runtime *and* handle together — rather than one or the other: a menu that
+returned a bare handle would let a Codex login set a Claude session's account, which is the shape
+of bug the two-section menu could not have and this one could. Choosing any row resets the model
+and the reasoning effort, whether or not the runtime changed, because both are properties of a
+catalog the new login may not publish.
+
 Two invariants matter:
 
 - **The account sticks to the session.** Conversations are stored per account, so a resume
@@ -378,22 +391,50 @@ changes a decision; the pill speaks only after the session exists. Twice over, a
 resolutions:
 
 - `AccountUsageMenu` writes each login's reading onto its item in the composer's **identity**
-  chip menu — the logins section above the runtimes — so the accounts are compared *before* one
-  is picked. It shows the *cached* value and
+  chip menu — every runtime's logins, in one flat list — so the accounts are compared *before*
+  one is picked. It shows the *cached* value and
   starts a refresh — a menu is built synchronously and a fetch is a network round trip, so
   the alternative to what is known is nothing at all. `prefetch()` is therefore called where
   the surface *appears* (launch, and each time the composer is shown) rather than where the
-  menu opens, which is already too late for that open.
+  menu opens, which is already too late for that open. Warming **every** runtime's logins, not
+  the selected one's, is what a list spanning all four needs.
 
-  It also carries a **ring** (`UsageRingImage`), because the text alone did not scale to the
-  decision it exists for: `5h 0% · 7d 90%` is four numbers and two window names per account,
-  so comparing three logins means reading twelve of them and holding the comparison in your
-  head. A ring compares without arithmetic — the fullest one is the busiest account — and its
-  tint says whether that matters. It shows the **peak** window rather than the first, since an
-  account at `5h 0% · 7d 90%` is nearly out and a ring drawn from the 5-hour window would say
-  the opposite. Drawn rather than composed from views, because `NSMenuItem` takes an image and
-  no view at all — the same constraint that produced `ThemeSwatchImage`. The numbers stay: the
-  ring is the glance, the text is the precise answer.
+  It also carries a **gauge**, because the text alone did not scale to the decision it exists
+  for: `5h 0% · 7d 90%` is four numbers and two window names per account, so comparing three
+  logins means reading twelve of them and holding the comparison in your head. It compares
+  without arithmetic — the fuller one is the busier account — and its tint says whether that
+  matters. It shows the **peak** window rather than the first, since an account at
+  `5h 0% · 7d 90%` is nearly out and a gauge drawn from the 5-hour window would say the
+  opposite. Drawn rather than composed from views, because a menu row takes an image and no
+  view at all — the same constraint that produced `ThemeSwatchImage`. The numbers stay: the
+  gauge is the glance, the text is the precise answer.
+
+  **Which gauge depends on whether the row has to name its runtime.** A menu row has exactly
+  one image slot. Where the runtime is a foregone conclusion the slot holds `UsageRingImage`,
+  as it always did. In the composer's identity menu it holds `AccountMarkImage` instead — the
+  runtime's brand mark with the same reading as a meter underneath it — because a flat list of
+  Claude, Codex, Grok and OpenCode logins is unreadable if a row cannot say which of them it
+  belongs to. Composing the two (the mark drawn *inside* the ring) was tried first and rejected
+  on the render: at 14pt the enclosed mark is a coloured smudge that identifies nothing, which
+  is the one job it was added for. Underlining keeps both legible.
+
+  The runtime is also **written**, leading that row's subtitle — `Claude Code · Max · 5h 7% · …`.
+  The mark answers the glance, but one person's logins are frequently named the same thing on
+  two runtimes, and two rows reading `Everlof` separated only by a silhouette is a coin toss. It
+  leads rather than trails because the eye finds the start of a line, and because it is the one
+  segment that survives a login with no reading at all.
+
+  The line itself is **toned rather than printed in one grey**. The row draws it as
+  `ThemedMenuSubtitleSegment` runs — window names, separators and the reset clause at the muted
+  tier, values in the subtitle's own ink until their window passes the warning threshold and in
+  its severity colour after — which is the pill's grammar transplanted to the menus (both of
+  them: the model rows tint the same way). It exists for the same reason the gauge does:
+  comparing three logins is twelve numbers, and printed in one ink the twelve hide the one the
+  decision turns on. The tint is a second signal, never the only one — the numbers say the same
+  thing in any ink. `AccountUsage.readings` is the shared structured source (name, value,
+  severity per window, the stale-value rule decided once for the pill, the menus and the plain
+  joins), and `AccountUsageMenu.summarySegments`/`identitySegments` are asserted directly, plus
+  drawn by the dropdown render sweep with data chosen to hit every tone.
 - The composer's own reading is **one line inside the prompt box**, on the row that carries
   what the session will run with. It is `AccountUsage.compactSummary` metered by the model the
   session would launch on, which is the same string the toolbar pill draws once the session
@@ -428,3 +469,127 @@ say how much is left.
 travel is also the accessibility branch — and it lands the value synchronously rather than
 costing a frame to arrive at what the caller is entitled to have now. A bar outside a window,
 or one leaving it mid-travel, lands for the same reason: the display link retains the view.
+
+
+## Usage Windows
+
+The short window is **anchored**: it opens on the account's first message and resets a fixed
+span later, rather than sliding continuously. That single fact is the whole premise of the
+Usage Windows page, because it means the *phase* of the window grid belongs to whoever sends
+that first message.
+
+`AgentCapabilities.anchoredUsageWindow` states it, and Claude is the only claimant. The evidence
+is `ClaudeUsageFetcher`'s own readings: `resetsAt` stands still through a session and jumps by
+exactly five hours when a new window opens, which is an anchor. Codex reports a five-hour window
+too, shared between local messages and cloud chats, but whether its reset is anchored or sliding
+is unpublished, and the two are indistinguishable until an account goes quiet across a boundary.
+So the flag stays off there until it can be measured from an account's own history — the honest
+order, and the reason `AgentLauncher.usageWindowPokeCommand` already has the Codex branch written
+behind the gate. Grok and OpenCode report no windows here at all, and xAI's acceptable-use policy
+forbids scripted access outright, so neither is a candidate whatever it starts reporting.
+
+Nothing in the feature is provider-named below that flag. The window it moves is
+`AccountUsage.anchoredWindow`, chosen as the **shortest window the provider reports** rather than
+by matching `5h`, and its length comes from the provider's own `windowDuration`. A runtime that
+meters on four hours needs no change here.
+
+### The arithmetic
+
+`UsageWindowPlan` is pure, which is what makes a feature that spends someone's rate limit
+reviewable at all. Two numbers drive it:
+
+- **Burn** (`UsageWindowBurn`): how long this account takes to spend one window *while actually
+  working*. Deliberately not "time from window start to exhaustion" — a window anchored at 07:00
+  and exhausted at 15:00 did not take eight hours of work if two of them were lunch. Idle
+  stretches are dropped and what is measured is the rate during movement, inverted. Nobody is
+  asked for this number; `UsageHistoryStore` has been collecting the readings it comes from since
+  long before this page existed.
+- **Lead** = `windowLength - burn`. When the window opens exactly `burn` before the working day
+  starts, it is drained at the moment it resets: nothing wasted in front of it, and no wait
+  behind it. Lead too short and the morning ends capped; lead too long and the window expires
+  before the first message, which is identical to not poking. That is why it is derived rather
+  than typed into a box.
+
+Measured against a nine-hour day at a three-hour burn: two windows and six productive hours
+without a poke, three windows and seven with one. `UsageWindowPlanTests` asserts exactly that,
+and the settings diagram draws it.
+
+**It raises no limit.** The same window holds the same allowance and the weekly cap does not move
+at all, so the extra window is a week spent faster. `weeklyAheadOfPace` is the consequence: when
+the weekly window is running ahead of the clock (`fraction` past `elapsedFraction`, the same pace
+comparison the bars draw), the poke stands down.
+
+### Why it is not a cron line
+
+Claude Code ships schedulers of its own, and a 07:00 job that sends `.` is three minutes of work.
+What a cron line cannot do is **look first**. It fires whether or not a window is already open, so
+on every day the user started early it spends a message to achieve nothing, and it can never
+notice that yesterday's window is still open. Every rule worth having reads state only the app
+holds: the reading, the burn history, whether a session is busy right now. `UsageWindowPoker`
+gathers those and `UsageWindowPlan` decides; the runner itself is deliberately thin.
+
+The rule that reopens a window expiring at lunchtime is not a rule. It falls out of "no window
+open, inside the working day, past the poke time" — and the reason it does not then fire at every
+boundary of a working afternoon is the `working` hold: a busy account opens its own window with
+whatever it sends next, so poking it would pay for something that was about to be free.
+
+### The guards, and why each exists
+
+| Hold | What it prevents |
+|---|---|
+| `usageUnknown` | Poking blind. Without a reading, whether a window is open is a guess |
+| `windowOpen` | Spending a message on a window that is already open |
+| `working` | Paying for what the user's own next keystroke does for nothing |
+| `settling` | The next tick reading the same stale reading and poking again |
+| `neverExhausts` | Firing daily for someone who never reaches the short limit |
+| `tailTooShort` | A window opened with an hour of day left, four hours of which expire overnight |
+| `weeklyAheadOfPace` | Winning a morning by spending the week |
+| `dailyLimitReached` | A defect in any rule above turning this into a poller |
+
+The daily limit is not a tuning knob. It is enforced below the rules, and three is one more than
+a nine-hour day needs.
+
+### The run itself
+
+One message, on the named account, through the official CLI. `usageWindowPokeCommand` routes with
+the account's own environment key (a window belongs to a login, so poking the default one buys
+the named one nothing), asks for the cheapest model, and carries no context at all: no MCP
+servers, no tools, and a scratch working directory, so nothing loads a `CLAUDE.md` or a tool
+catalogue whose input tokens would be charged to the weekly limit the feature exists to protect.
+The reply is discarded unread; only the timestamp was ever wanted.
+
+Two locks keep it out of a test run. `UsageWindowSettings` writes through `PreferenceStore`, which
+redirects to a scratch suite under a hosted test bundle, and `UsageWindowPoker.start()` refuses
+outright when `XCTestCase` exists. One would do; the consequence of neither — a background process
+spending the developer's own weekly limit every morning — is worth two.
+
+### The page
+
+`UsageWindowPreferencesViewController` puts the explanation and the picture above the controls,
+which is the opposite of every other settings page here and deliberate: this one configures a
+consequence of how a subscription meters time, and it sounds like a trick until it is drawn.
+`UsageWindowGridView` draws the same day twice, anchored where the first message would land and
+anchored where the poke puts it: a block per window, the gaps between them the resets, the
+productive stretch filled, and the hour gained in the accent colour beside the second lane.
+
+**Every surface in it is drawn by `ThemedSurface`.** A window block is a trough in whatever the
+current material says a trough is — flat with a hairline edge on the modern themes, a sunken
+bevel under Platinum, and filled with chunks rather than a smooth bar under Win98, whose
+`progressStyle` is `.segmented`. That last case is why `ThemedProgressDrawing.drawSegments` was
+split out of `drawSegmented`: a surface drawing its own trough still has to fill it the way the
+theme fills a progress bar. The first version drew its own 1pt border at its own corner radius,
+which is how a diagram ends up looking like it came from a different app.
+
+Three things the renders caught that no assertion would have.
+
+- The day-start rule ran the full height of the view and struck through the lane titles. Moving
+  the titles into a **left column** fixed the cause rather than the symptom: with the plot a clean
+  rectangle, one rule serves both lanes and crosses nothing.
+- Blocks carried three states (before you sat down, working, waiting), and the faint one was
+  fighting the empty one. There are two now. Which state an empty stretch *is* comes from which
+  side of the rule it sits on, which is what the rule is for.
+- Platinum's caption is a taller face than the system one, and the axis label drawn on the floor
+  of its band lost its descenders off the bottom of the view. It is centred in the band now.
+
+The accessibility label states both lanes' window counts and totals outright, because the whole
+argument is carried by fill and by one extra break, and neither survives being read aloud.

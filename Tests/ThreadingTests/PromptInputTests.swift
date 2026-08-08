@@ -72,6 +72,18 @@ final class PromptInputTests: XCTestCase {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 
+    /// Every control a composer owns, whether or not it is currently drawn.
+    ///
+    /// An `NSStackView` with `detachesHiddenViews` takes a hidden arranged view **out of the
+    /// view hierarchy**, so a plain subview walk cannot find a control that is merely switched
+    /// off — the usage line before a reading has arrived, a chip a runtime does not offer.
+    private func controls(in view: NSView) -> [NSView] {
+        let subtree = [view] + descendants(of: view)
+        return subtree + subtree
+            .compactMap { $0 as? NSStackView }
+            .flatMap(\.arrangedSubviews)
+    }
+
     /// The two halves of every image fixture, named once so the generated files remain visually
     /// recognisable in rendered-state tests.
     private enum FixtureSwatch {
@@ -828,10 +840,72 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
-    /// The row is the box's own chrome, so it comes out of the box's minimum height rather than
-    /// adding to it. Added, an empty reply box opened at a hundred points — a paragraph of
-    /// height asking for one line — and every composer without a row would have had to be
-    /// re-measured to compensate.
+    /// The row belongs to the *controls*, not to the send.
+    ///
+    /// A brief hands its send to a button under the box — Return is a paragraph break there — and
+    /// still carries what the session will be run with on the box's own row. `applySubmitPlacement`
+    /// read "the send is not in this box" as "this box has no row", so `setFooterControls` handed
+    /// five controls to a row that was hidden the moment the placement was applied, and the
+    /// session composer shipped as an empty box with a project and an account floating over it.
+    ///
+    /// Nothing failed. Ancestry, ordering and frames — everything the row was already asserted
+    /// on — hold exactly as well for a row nobody can see, which is why this test asks the one
+    /// question those could not: is it *drawn*.
+    func testControlsGivenToABoxWhoseSendIsOutsideAreStillDrawnOnItsRow() throws {
+        let prompt = PromptView()
+        prompt.submitPlacement = .outside
+        _ = makeWindow(hosting: prompt)
+        prompt.layoutSubtreeIfNeeded()
+        let bare = prompt.frame.height
+
+        let model = ChipView()
+        model.configure(symbolName: "cpu", title: "Opus · 1M")
+        let usage = NSTextField(labelWithString: "5h 43% · 7d 73%")
+
+        prompt.setFooterControls(leading: [model], trailing: [usage])
+        prompt.layoutSubtreeIfNeeded()
+
+        for control in [model, usage] as [NSView] {
+            // Qualified: this class has its own `type(_:in:)` helper, which shadows `type(of:)`.
+            let name = "\(Swift.type(of: control))"
+            XCTAssertFalse(
+                control.isHiddenOrHasHiddenAncestor,
+                "\(name) was handed to the box and never drawn"
+            )
+            // A stack that detaches hidden views takes the whole row out of the hierarchy, so a
+            // row switched off costs its contents their ancestry as well as their pixels.
+            XCTAssertTrue(control.isDescendant(of: prompt), "\(name) left the box's own hierarchy")
+
+            let frame = control.convert(control.bounds, to: prompt)
+            XCTAssertGreaterThan(frame.width, 0, "\(name) was laid out with nothing to draw")
+            XCTAssertTrue(
+                prompt.bounds.insetBy(dx: -1, dy: -1).contains(frame),
+                "\(name) was placed outside the box's own bounds"
+            )
+        }
+
+        XCTAssertTrue(
+            try inlineSubmitButton(in: prompt).isHidden,
+            "the row arrived and brought a second send into the box with it"
+        )
+        XCTAssertGreaterThan(
+            prompt.frame.height,
+            bare,
+            "the row has to be visible in the box's height rather than laid over its text"
+        )
+    }
+
+    /// A box with a control row stands open at two lines of prose plus its chrome, and a box
+    /// without one still opens at exactly one input.
+    ///
+    /// The row remains the box's own chrome and still comes *out of* the resting height rather
+    /// than adding to it — the arithmetic in `updateHeight` is unchanged. What changed is the
+    /// number it comes out of: `Design.Size.inputHeight` centres a single line and says nothing
+    /// about a panel with a row under its text, and using it left a text floor of eight points,
+    /// below one line. `PromptViewDefaults.restingLines` states the answer instead.
+    ///
+    /// The upper bound is the point of the second half: three lines would be the hundred-point
+    /// box the original arrangement was built to avoid.
     func testTheControlRowFitsInsideTheBoxsRestingHeightRatherThanOnTopOfIt() throws {
         let plain = PromptView()
         let withRow = PromptView()
@@ -854,10 +928,21 @@ final class PromptInputTests: XCTestCase {
             plain.frame.height,
             "The row has to be visible in the box's height"
         )
+
+        let line = Design.FontRole.body.resolved(in: .chrome).boundingRectForFont.height
+        XCTAssertEqual(
+            withRow.frame.height,
+            (line * PromptViewDefaults.restingLines).rounded()
+                + PromptViewDefaults.footerVerticalInset * 2
+                + Design.Size.chipHeight
+                + Design.Spacing.medium,
+            accuracy: 1,
+            "The resting reply box is two lines of prose over its control row"
+        )
         XCTAssertLessThan(
-            withRow.frame.height - plain.frame.height,
-            Design.Size.chipHeight + Design.Spacing.medium,
-            "The row cost more than the row"
+            withRow.frame.height,
+            100,
+            "The resting box grew back into the paragraph-tall composer this rule exists to avoid"
         )
 
         // And the cap still means the same thing: the *box* stops at `inputMaxHeight`, so the
@@ -952,6 +1037,45 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
+    /// The glyph names the key that actually sends it.
+    ///
+    /// The tooltip is the only name a glyph has — it is the accessible name too — so a box that
+    /// sends on Return while its tooltip says ⌘Return teaches a chord and then fires on a key it
+    /// never mentioned. That is how a Return-send goes unnoticed until it launches something.
+    func testTheSendGlyphNamesWhicheverKeySendsThisBox() throws {
+        let reply = PromptView()
+        _ = makeWindow(hosting: reply)
+        XCTAssertEqual(try inlineSubmitButton(in: reply).toolTip, "Send · Return")
+        XCTAssertEqual(
+            try inlineSubmitButton(in: reply).accessibilityLabel(),
+            "Send · Return",
+            "an unnamed send is unusable"
+        )
+
+        AppSettings.shared.promptReturnKey = .startsNewLine
+        // Any edit re-asks the setting; the tooltip is not a value cached at setup.
+        reply.stringValue = "hej"
+        XCTAssertEqual(try inlineSubmitButton(in: reply).toolTip, "Send · ⌘Return")
+
+        AppSettings.shared.promptReturnKey = .matchesComposer
+        let brief = PromptView()
+        brief.submitPlacement = .outside
+        brief.stringValue = "hej"
+        _ = makeWindow(hosting: brief)
+        XCTAssertEqual(
+            try inlineSubmitButton(in: brief).toolTip,
+            "Send · ⌘Return",
+            "a box Return does not send has to name the chord that does"
+        )
+
+        // A reason to be disabled still wins the tooltip: it is the more useful sentence, and
+        // naming a key that will not fire is worse than naming none.
+        brief.submissionDisabledReason = "Choose a project first"
+        XCTAssertEqual(try inlineSubmitButton(in: brief).toolTip, "Choose a project first")
+        brief.submissionDisabledReason = nil
+        XCTAssertEqual(try inlineSubmitButton(in: brief).toolTip, "Send · ⌘Return")
+    }
+
     /// The Settings window is open *beside* the composer while this is changed, so the answer
     /// has to be read at the keystroke. A value cached when the pane was built would leave the
     /// one composer the user is looking at as the only one still behaving the old way.
@@ -1032,15 +1156,14 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(submitted, ["hej"])
     }
 
-    /// The opening composer and the reply composer are one box, so Return sends here exactly as
-    /// it does in a reply.
+    /// The brief keeps Return for its text and sends from the button under the box.
     ///
-    /// It used to be the other way round: the placement was `.outside`, Return was a line break,
-    /// and a titled primary named `⌘↩` because a glyph could not. The concern that motivated
-    /// that — a brief is several lines, and a Return-send spends one on an accidental launch —
-    /// is answered by `PromptReturnKey` now, which is a setting the user can find rather than a
-    /// difference between two boxes they use minutes apart.
-    func testTheComposerSendsOnReturnAndOnTheChordFromInsideTheBox() throws {
+    /// This shipped the other way round for one commit: the send moved onto the box's control
+    /// row, `.footer` reads "the send is in the box" as "Return sends", and a brief started
+    /// launching on the break that was meant to be its second line — while the glyph's tooltip
+    /// went on promising ⌘Return. A send that fires on a key its own label does not name is the
+    /// defect; the button outside can write the chord on its face.
+    func testTheBriefKeepsReturnAndSendsFromTheButtonUnderTheBox() throws {
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
         composer.updatePromptCustomization(for: ProjectID())
@@ -1051,49 +1174,72 @@ final class PromptInputTests: XCTestCase {
         )
         let textView = try promptTextView(in: prompt)
 
-        let send = try inlineSubmitButton(in: prompt)
-        XCTAssertFalse(send.isHidden, "The composer has to keep its send inside the box")
-        // A glyph has no face to write a chord on, so the tooltip carries it — and is the only
-        // name the control has, since a titled button is what used to say both.
-        XCTAssertEqual(send.toolTip, "Send · ⌘Return")
-        XCTAssertEqual(send.accessibilityLabel(), "Send · ⌘Return", "an unnamed send is unusable")
-        XCTAssertNil(
+        XCTAssertTrue(
+            try inlineSubmitButton(in: prompt).isHidden,
+            "the glyph and the button under the box must not both offer the send"
+        )
+        let start = try XCTUnwrap(
             descendants(of: composer.view).first {
                 $0.accessibilityIdentifier() == "composer.session-start.submit"
-            },
-            "there is no send button beside the box any more"
+            } as? ThemedButton,
+            "the brief's send has to be a button that can name its chord"
         )
+        XCTAssertEqual(start.title, "Start session")
+        XCTAssertEqual(start.shortcut, ComposerDefaults.startShortcut)
 
         var submitted: [String] = []
         prompt.onSubmit = { submitted.append($0) }
         XCTAssertTrue(window.makeFirstResponder(textView))
 
-        // Shift-Return is the line break under every setting, which is what keeps a brief
-        // writable in a box that sends on Return.
         type("a task", in: window)
-        pressReturn(holding: .shift, in: window)
+        pressReturn(in: window)
         type("and its context", in: window)
         XCTAssertEqual(prompt.stringValue, "a task\nand its context")
-        XCTAssertTrue(submitted.isEmpty)
+        XCTAssertTrue(submitted.isEmpty, "Return launched a session that was still being written")
 
-        pressReturn(in: window)
-        XCTAssertEqual(submitted, ["a task\nand its context"], "Return did not send the brief")
-
-        // The chord belongs to the *field*, which is why it survived the button that used to
-        // name it: it is handled in `keyDown` and reaches nothing else on the way.
+        // The chord belongs to the *field* as well as to the button: it is handled in `keyDown`
+        // and reaches nothing else on the way, so it holds wherever the caret is.
         pressReturn(holding: .command, in: window)
-        XCTAssertEqual(submitted.count, 2)
+        XCTAssertEqual(submitted, ["a task\nand its context"], "⌘Return did not send the brief")
 
-        send.performClick()
-        XCTAssertEqual(submitted.count, 3, "the glyph and the keys have to send the same thing")
+        start.performClick()
+        XCTAssertEqual(submitted.count, 2, "the button and the chord have to send the same thing")
         XCTAssertEqual(submitted.last, "a task\nand its context")
     }
 
-    /// The other half of the setting, in the composer that used to have this behaviour by
-    /// construction: a user who writes long briefs says so once, on the Keyboard page, and
-    /// Return goes back to being a line break in every box.
-    func testTheSettingGivesReturnBackToTheBriefInTheComposer() throws {
-        AppSettings.shared.promptReturnKey = .startsNewLine
+    /// The send being outside costs the box nothing else: what the session will be *run with*
+    /// stays on the box's own control row, which is where the reply composer has it.
+    func testTheBriefKeepsItsControlRowWithTheSendOutside() throws {
+        let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
+        _ = composer.view
+        composer.updatePromptCustomization(for: ProjectID())
+
+        _ = makeWindow(hosting: composer.view)
+        composer.view.layoutSubtreeIfNeeded()
+
+        let prompt = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? PromptView }.first
+        )
+        for identifier in [
+            "composer.session-start.model",
+            "composer.session-start.mode",
+            "composer.session-start.effort",
+            "composer.session-start.surface"
+        ] {
+            let chip = try XCTUnwrap(
+                controls(in: composer.view).first {
+                    $0.accessibilityIdentifier() == identifier
+                },
+                "\(identifier) is not in the composer at all"
+            )
+            XCTAssertTrue(chip.isDescendant(of: prompt), "\(identifier) left the box it belongs in")
+        }
+    }
+
+    /// The other half of the setting: a user who wants one answer everywhere says so once on the
+    /// Keyboard page, and Return sends the brief too.
+    func testTheSettingCanMakeReturnSendTheBriefInTheComposer() throws {
+        AppSettings.shared.promptReturnKey = .sends
 
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
@@ -1111,55 +1257,55 @@ final class PromptInputTests: XCTestCase {
 
         type("a task", in: window)
         pressReturn(in: window)
-        type("and its context", in: window)
-        XCTAssertEqual(prompt.stringValue, "a task\nand its context")
-        XCTAssertTrue(submitted.isEmpty, "Return launched a session the setting said to keep editing")
+        XCTAssertEqual(submitted, ["a task"], "the setting did not reach the brief")
 
-        pressReturn(holding: .command, in: window)
-        XCTAssertEqual(submitted, ["a task\nand its context"], "⌘Return has to send under every setting")
+        prompt.stringValue = ""
 
-        XCTAssertFalse(
-            try inlineSubmitButton(in: prompt).isHidden,
-            "the setting decides the key, not where the send control lives"
-        )
+        // And the escape hatch survives it, or a brief cannot hold two lines at all.
+        type("one", in: window)
+        pressReturn(holding: .shift, in: window)
+        type("two", in: window)
+        XCTAssertEqual(prompt.stringValue, "one\ntwo")
+        XCTAssertEqual(submitted.count, 1, "Shift-Return sent a brief that was still being written")
     }
 
     /// The composer's column, drawn.
     ///
     /// What matters is a *relationship* — chips above the box, the choices and the reading on the
-    /// box's own row, one quiet offer underneath — and a relationship between neighbouring shapes
-    /// is visible in a picture and in no assertion anyone would write. The import button is put
-    /// into the state discovery gives it rather than mocked: same hidden flag, same counted title.
-    func testComposerRendersItsChoicesInsideTheBoxAndImportQuietlyUnderIt() throws {
+    /// box's own row, the action and the quiet offer on the row underneath — and a relationship
+    /// between neighbouring shapes is visible in a picture and in no assertion anyone would
+    /// write. The import button is put into the state discovery gives it rather than mocked:
+    /// same hidden flag, same counted title.
+    func testComposerRendersItsChoicesInsideTheBoxAndItsActionsUnderIt() throws {
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
         composer.updatePromptCustomization(for: ProjectID())
 
         let window = makeWindow(hosting: composer.view)
 
-        // Looked up through `arrangedSubviews` as well as the tree: a stack with
-        // `detachesHiddenViews` takes a hidden arranged view **out of the hierarchy**, and both
-        // the import row and the usage reading start switched off.
-        let subtree = [composer.view] + descendants(of: composer.view)
-        let arranged = subtree.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews)
-        let controls = subtree + arranged
-
-        // The row carries the offer's visibility, not the button: a hidden view keeps its
-        // constraints, so a button hidden inside a shown row leaves the column ending in a gap.
-        let importRow = try XCTUnwrap(
-            controls.first { $0.accessibilityIdentifier() == "composer.session-start.import-row" }
+        // The button carries the offer's visibility now, not the row: the row holds the send as
+        // well, so it stands whatever discovery answers.
+        let actionRow = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.actions"
+            }
         )
         let importButton = try XCTUnwrap(
-            descendants(of: importRow)
+            descendants(of: actionRow)
                 .compactMap { $0 as? ThemedButton }
                 .first { $0.toolTip == "Import conversation" }
         )
-        importRow.isHidden = false
+        let startButton = try XCTUnwrap(
+            descendants(of: actionRow).first {
+                $0.accessibilityIdentifier() == "composer.session-start.submit"
+            } as? ThemedButton
+        )
+        XCTAssertFalse(actionRow.isHidden, "the send has to stand with nothing to import")
         importButton.isHidden = false
         importButton.title = ComposerDefaults.importTitle(count: 90)
 
         let usage = try XCTUnwrap(
-            controls.first {
+            controls(in: composer.view).first {
                 $0.accessibilityIdentifier() == "composer.session-start.usage"
             } as? NSTextField
         )
@@ -1175,6 +1321,7 @@ final class PromptInputTests: XCTestCase {
 
         // Converted into the composer's own space, which is unflipped: below means *less* y.
         let importBox = composer.view.convert(importButton.bounds, from: importButton)
+        let startBox = composer.view.convert(startButton.bounds, from: startButton)
         let promptBox = composer.view.convert(prompt.bounds, from: prompt)
         XCTAssertLessThan(
             importBox.maxY,
@@ -1182,6 +1329,17 @@ final class PromptInputTests: XCTestCase {
             "the import offer has to sit under the box"
         )
         XCTAssertEqual(importButton.emphasis, .tertiary, "the quietest tier there is")
+
+        // One at each edge, the loud one where the box ends: the action is the last thing on the
+        // way down the column, and the offer beside it is the alternative to taking it.
+        XCTAssertEqual(startButton.emphasis, .primary, "the one action this screen is for")
+        XCTAssertLessThan(importBox.maxX, startBox.minX)
+        XCTAssertEqual(
+            startBox.maxX,
+            promptBox.maxX,
+            accuracy: 1,
+            "the send has to finish on the edge the box finishes on"
+        )
     }
 
     func testComposerCapabilityResolverKeepsOpaqueArgumentsAndAcceptsAliases() throws {

@@ -132,6 +132,13 @@ struct AccountUsage: Equatable {
 
     let source: Source
 
+    /// Every window this account has, account-wide and model-scoped alike.
+    ///
+    /// For callers that need to *find a named window* rather than rank pressure — a scheduled
+    /// send re-reading the reset it was aimed at. The two lists stay separate everywhere the
+    /// distinction matters (see `modelWindows`); this is only for lookup by id.
+    var allWindows: [Window] { windows + modelWindows }
+
     /// The window closest to its limit, which is the one worth a glance in the toolbar.
     ///
     /// Expired windows are skipped: their percentage describes the previous window, and

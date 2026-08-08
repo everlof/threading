@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
@@ -86,9 +87,15 @@ enum AttentionAlertPolicy {
             return .post(.unread)
         case .idle where old == .working && !appIsActive && reportsOwnTurns:
             return .post(.finished)
-        case .idle, .working, .dormant:
+        case .idle, .working, .dormant, .limitReached:
             // Whatever this session had delivered described `old`; the edge makes it stale.
             // `idle` is in the list because a `.finished` alert leaves the session idle.
+            //
+            // A limit stop posts nothing of its own, deliberately. Every alert here is a
+            // *change the user can act on* — answer this, read that — and there is no action
+            // behind this one: the window resets when it resets. It clears a stale alert and
+            // then says its piece on the row, where the user is already looking when they
+            // wonder where a session went.
             let couldHaveAlert = old == .awaitingUser || old == .needsAttention || old == .idle
             return couldHaveAlert ? .clear : .none
         }
@@ -243,6 +250,67 @@ final class AttentionAlertCenter: NSObject {
         }
     }
 
+    /// Posts one update the user explicitly asked an agent to send.
+    ///
+    /// Requested updates use unique request identifiers: step three must not replace step two.
+    /// The destination is a closed Threading route encoded as scalar notification metadata, never
+    /// an agent-authored URL or path.
+    @discardableResult
+    func postRequestedUpdate(
+        eventID: String,
+        sessionID: SessionID,
+        title: String?,
+        body: String,
+        destination: RemoteNotificationDestinationDTO
+    ) -> Bool {
+        guard isStarted, destination.isValid,
+              AppSettings.shared.notifiesOnAttention,
+              !AttentionAlertScope.isMuted(sessionID: sessionID) else {
+            return false
+        }
+
+        let content = UNMutableNotificationContent()
+        let session = ProjectStore.shared.session(withID: sessionID)
+        let project = ProjectStore.shared.project(forSessionID: sessionID)
+        content.title = title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? session?.displayTitle
+            ?? "Threading session"
+        if let project { content.subtitle = project.name }
+        content.body = body
+        content.sound = AppSettings.shared.playsAttentionAlertSound ? .default : nil
+        content.userInfo = AttentionAlertDefaults.userInfo(
+            sessionID: sessionID,
+            destination: destination
+        )
+        if let project { content.threadIdentifier = project.id.uuidString }
+        if let icon = project?.icon,
+           let png = ProjectIconStore.pngData(for: icon),
+           let attachment = AttentionAlertIcon.attachment(iconPNGData: png) {
+            content.attachments = [attachment]
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "requested-\(eventID)",
+            content: content,
+            trigger: nil
+        )
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    guard granted else { return }
+                    center.add(request)
+                }
+            case .denied:
+                break
+            default:
+                center.add(request)
+            }
+        }
+        return true
+    }
+
     // MARK: - Private Methods
 
     private func activityChanged(for sessionID: SessionID) {
@@ -357,14 +425,20 @@ final class AttentionAlertCenter: NSObject {
 
 extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
 
-    /// Called only while the app is frontmost, where the sidebar mark and the permission card
-    /// already carry the message — so nothing is presented.
+    /// Ordinary state alerts stay quiet while their session UI is already available. Explicit
+    /// milestone notifications still present: the user asked for those even if Threading happens
+    /// to be frontmost, and their inspection target may be in a different chat or pane.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        let userInfo = notification.request.content.userInfo
+        if userInfo[AttentionAlertDefaults.destinationKindKey] != nil {
+            completionHandler([.banner, .list, .sound])
+        } else {
+            completionHandler([])
+        }
     }
 
     /// Clicking the notification opens the session it is about.
@@ -373,14 +447,18 @@ extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let raw = response.notification.request.content
-            .userInfo[AttentionAlertDefaults.sessionKey] as? String
+        let userInfo = response.notification.request.content.userInfo
+        let raw = userInfo[AttentionAlertDefaults.sessionKey] as? String
+        let destination = AttentionAlertDefaults.destination(from: userInfo) ?? .session
         completionHandler()
         Task { @MainActor in
             if let raw, let sessionID = SessionID(uuidString: raw) {
                 NSApp.activate(ignoringOtherApps: true)
                 NotificationCenter.default.post(
-                    SessionNotificationOpened(sessionID: sessionID)
+                    SessionNotificationOpened(
+                        sessionID: sessionID,
+                        destination: destination
+                    )
                 )
             }
         }
@@ -392,4 +470,45 @@ extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
 enum AttentionAlertDefaults {
     /// The `userInfo` key carrying the session a notification is about.
     static let sessionKey = "sessionID"
+    static let destinationKindKey = "destinationKind"
+    static let attachmentIDKey = "attachmentID"
+    static let browserTabIDKey = "browserTabID"
+    static let extensionIdentifierKey = "extensionIdentifier"
+    static let extensionPanelIDKey = "extensionPanelID"
+
+    static func userInfo(
+        sessionID: SessionID,
+        destination: RemoteNotificationDestinationDTO
+    ) -> [String: String] {
+        var result = [
+            sessionKey: sessionID.uuidString,
+            destinationKindKey: destination.kind.rawValue,
+        ]
+        result[attachmentIDKey] = destination.attachmentID
+        result[browserTabIDKey] = destination.browserTabID
+        result[extensionIdentifierKey] = destination.extensionIdentifier
+        result[extensionPanelIDKey] = destination.extensionPanelID
+        return result
+    }
+
+    static func destination(
+        from userInfo: [AnyHashable: Any]
+    ) -> RemoteNotificationDestinationDTO? {
+        guard let rawKind = userInfo[destinationKindKey] as? String,
+              let kind = RemoteNotificationDestinationDTO.Kind(rawValue: rawKind) else {
+            return nil
+        }
+        let destination = RemoteNotificationDestinationDTO(
+            kind: kind,
+            attachmentID: userInfo[attachmentIDKey] as? String,
+            browserTabID: userInfo[browserTabIDKey] as? String,
+            extensionIdentifier: userInfo[extensionIdentifierKey] as? String,
+            extensionPanelID: userInfo[extensionPanelIDKey] as? String
+        )
+        return destination.isValid ? destination : nil
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

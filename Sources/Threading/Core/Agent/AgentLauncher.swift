@@ -133,6 +133,8 @@ enum AgentLauncher {
         in project: Project,
         initialPrompt: String? = nil
     ) -> AgentLaunchPlan {
+        var executionProject = project
+        executionProject.folderPath = session.workingDirectory(in: project)
         let command: ShellCommand
         let resumeState: ResumeState
 
@@ -140,7 +142,7 @@ enum AgentLauncher {
         case .claude:
             (command, resumeState) = claudeCommand(
                 for: session,
-                in: project,
+                in: executionProject,
                 prompt: initialPrompt
             )
         case .codex:
@@ -153,7 +155,7 @@ enum AgentLauncher {
 
         return launchPlan(
             command: routed(command, for: session),
-            in: project.folderPath,
+            in: executionProject.folderPath,
             resumeState: resumeState
         )
     }
@@ -167,13 +169,15 @@ enum AgentLauncher {
     /// No `initialPrompt`: the first turn is sent over the stream like every other, so the
     /// opening message needs no special path.
     static func streamPlan(for session: AgentSession, in project: Project) -> AgentLaunchPlan {
+        var executionProject = project
+        executionProject.folderPath = session.workingDirectory(in: project)
         switch session.kind {
         case .claude:
-            return claudeStreamPlan(for: session, in: project)
+            return claudeStreamPlan(for: session, in: executionProject)
         case .codex:
-            return codexStreamPlan(for: session, in: project)
+            return codexStreamPlan(for: session, in: executionProject)
         case .grok:
-            return grokStreamPlan(for: session, in: project)
+            return grokStreamPlan(for: session, in: executionProject)
         case .openCode:
             preconditionFailure("OpenCode does not yet expose a Threading native conversation transport")
         }
@@ -192,6 +196,51 @@ enum AgentLauncher {
         return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
     }
 
+    /// Whether this launch explicitly starts in Fast or Standard, or leaves speed to the CLI.
+    ///
+    /// Resolution is conversation override, then the app-wide default for this runtime, then
+    /// nil. Nil is load-bearing: Claude may persist `fastMode` and Codex may configure a service
+    /// tier, so omission is the only way to preserve the provider-owned answer. An explicit
+    /// Standard therefore remains `false` all the way to the launch instead of collapsing into
+    /// omission and inheriting Fast again.
+    static func fastModeAtStartup(for session: AgentSession) -> Bool? {
+        fastModeAtStartup(
+            for: session,
+            defaultSpeed: AppSettings.shared.startupSpeed(for: session.kind)
+        )
+    }
+
+    /// Pure resolution seam for tests and callers that already hold a settings snapshot.
+    static func fastModeAtStartup(
+        for session: AgentSession,
+        defaultSpeed: AgentStartupSpeed
+    ) -> Bool? {
+        guard session.kind.supports(.liveFastModeControl)
+            || session.kind.supports(.serviceTierFastMode)
+        else { return nil }
+
+        guard let fast = session.fastMode ?? defaultSpeed.fastModeOverride else { return nil }
+
+        // Claude's settings-layer switch can move an explicitly selected non-Opus model onto
+        // Opus. A speed default must not silently replace a model choice, so a known unsupported
+        // model is explicitly kept Standard. Nil remains eligible: it means the CLI's default
+        // could not be named, and choosing Fast is the user's instruction for that case.
+        if fast, session.kind.supports(.liveFastModeControl) {
+            let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+            )
+            if let model = session.model ?? AgentModels.defaultModel(
+                for: session.kind,
+                account: account
+            ), !AgentModels.claudeSupportsFastMode(model) {
+                return false
+            }
+        }
+
+        return fast
+    }
+
     /// The silenced status line this terminal launch writes, or nil to leave the account's
     /// line exactly as the user configured it.
     ///
@@ -199,7 +248,7 @@ enum AgentLauncher {
     /// command: an account with no status line has nothing to silence, and writing an override
     /// for it would add a key where the user has none. The account's own command is kept
     /// running inside the wrapper because these commands are commonly bridges with side
-    /// effects the app itself relies on — see `ClaudeStatusLineCoverage.silencedCommand`.
+    /// effects the app itself relies on — see `ClaudeStatusLineSettings.silencedCommand`.
     ///
     /// Terminal launches only. A native conversation runs `--print`, where the CLI never
     /// draws a status line, so its settings file has nothing to say about one.
@@ -209,13 +258,13 @@ enum AgentLauncher {
                   for: session.kind,
                   handle: session.accountHandle
               ),
-              let command = ClaudeStatusLineCoverage.resolvedCommand(
+              let command = ClaudeStatusLineSettings.resolvedCommand(
                   account: account,
                   projectDirectory: project.folderPath
               )
         else { return nil }
 
-        return ClaudeStatusLineCoverage.silencedCommand(wrapping: command)
+        return ClaudeStatusLineSettings.silencedCommand(wrapping: command)
     }
 
     /// The permission posture this launch states, or nil to state none.
@@ -288,7 +337,8 @@ enum AgentLauncher {
             for: session.id,
             brokersPermissions: true,
             reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
-            remoteControl: remoteControlAtStartup(for: session)
+            remoteControl: remoteControlAtStartup(for: session),
+            fastMode: fastModeAtStartup(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }
@@ -494,6 +544,76 @@ enum AgentLauncher {
         return command
     }
 
+    /// The poke as something runnable: `usageWindowPokeCommand` inside a login shell, in a
+    /// scratch directory so no project's instructions or MCP configuration is loaded into a run
+    /// whose entire purpose is to be as small as possible.
+    static func usageWindowPokePlan(
+        kind: AgentKind,
+        account: AgentAccount,
+        in folder: String = FileManager.default.temporaryDirectory.path
+    ) -> AgentLaunchPlan? {
+        guard let command = usageWindowPokeCommand(kind: kind, account: account) else {
+            return nil
+        }
+        return launchPlan(command: command, in: folder, resumeState: .unavailable)
+    }
+
+    /// Builds the one-shot run that opens an account's usage window: the smallest legal message
+    /// this runtime can be asked to answer, on the account the user named.
+    ///
+    /// Three properties matter and each is a flag here. It runs on the **named account**, not
+    /// the default one, because a window belongs to a login and poking the wrong one buys
+    /// nothing. It carries **no context**: no MCP servers, no tools, and a working directory the
+    /// caller sets to a scratch path, so nothing loads a `CLAUDE.md` or a tool catalogue whose
+    /// input tokens would be charged to the weekly limit this feature exists to protect. And it
+    /// asks for the **cheapest model**, since the reply is discarded and only the timestamp is
+    /// wanted.
+    ///
+    /// Nil unless the runtime claims `.anchoredUsageWindow`. That is the whole provider gate:
+    /// the day Codex's window is measured to be anchored, granting the flag turns this on there
+    /// with the branch below already written.
+    static func usageWindowPokeCommand(
+        kind: AgentKind,
+        account: AgentAccount
+    ) -> ShellCommand? {
+        guard kind.supports(.anchoredUsageWindow), account.provider == kind else { return nil }
+
+        var command = ShellCommand()
+        command.append(word: "env")
+        if account.isDefault {
+            command.append(flag: "-u", value: kind.accountEnvironmentKey)
+        } else {
+            command.append(word: "\(kind.accountEnvironmentKey)=\(account.configPath)")
+        }
+
+        switch kind {
+        case .claude:
+            command.append(word: AgentDefaults.claudeExecutable)
+            command.append(flag: AgentDefaults.claudeModelFlag, value: AgentDefaults.claudePokeModel)
+            command.append(flag: "--print")
+            // The research run's own posture, minus the one MCP server it needed: a poke reads
+            // nothing, so every tool it could reach is a tool it would be charged to describe.
+            command.append(flag: "--tools", value: "")
+            command.append(flag: "--strict-mcp-config")
+
+        case .codex:
+            command.append(word: AgentDefaults.codexExecutable)
+            command.append(
+                flag: AgentDefaults.codexSandboxFlag,
+                value: AgentDefaults.codexSandboxReadOnly
+            )
+            command.append(word: "exec")
+            command.append(flag: AgentDefaults.codexSkipGitRepoCheckFlag)
+
+        case .grok, .openCode:
+            // `.anchoredUsageWindow` is not granted here; the guard above already refused.
+            return nil
+        }
+
+        command.append(operand: AgentDefaults.usageWindowPokePrompt)
+        return command
+    }
+
     /// Appends flags registering Threading's own MCP server when one is available.
     ///
     /// Each launch receives a URL carrying the session's token — that URL is what lets a tool
@@ -645,27 +765,56 @@ enum AgentLauncher {
     /// Codex needs this: its `hooks.json` is shared by every session under an account, so the
     /// routing cannot live in the file. Claude is given the same variables even though its
     /// per-session settings file already embeds them, because a user's *own* hooks then work
-    /// the same way under both agents.
+    /// the same way under both agents. While the hook integration is enabled, the pre-rename
+    /// aliases keep already-approved Codex commands runnable without rewriting their text and
+    /// invalidating Codex's trust hash.
     private static func appendHookEnvironment(
         for session: AgentSession,
         brokersPermissions: Bool,
         to command: inout ShellCommand
     ) {
-        guard session.kind.supportsThreadingBridge else { return }
         guard let port = MCPServer.shared.port else { return }
+        for word in hookEnvironmentWords(
+            for: session,
+            brokersPermissions: brokersPermissions,
+            port: port,
+            includesLegacyAliases: AppSettings.shared.installsCodexHooks
+        ) {
+            command.append(word: word)
+        }
+    }
 
-        command.append(word: "\(MCPDefaults.portEnvironmentKey)=\(port)")
-        command.append(
-            word: "\(MCPDefaults.sessionTokenEnvironmentKey)="
-                + MCPSessionRegistry.token(for: session.id)
-        )
+    /// The environment words shared by the terminal and native launch paths.
+    ///
+    /// Internal so the compatibility contract can be pinned without starting the singleton
+    /// listener in a unit test; production reaches it only through `appendHookEnvironment`.
+    static func hookEnvironmentWords(
+        for session: AgentSession,
+        brokersPermissions: Bool,
+        port: UInt16,
+        includesLegacyAliases: Bool
+    ) -> [String] {
+        guard session.kind.supportsThreadingBridge else { return [] }
+        let token = MCPSessionRegistry.token(for: session.id)
+        var words = [
+            "\(MCPDefaults.portEnvironmentKey)=\(port)",
+            "\(MCPDefaults.sessionTokenEnvironmentKey)=\(token)"
+        ]
+        if includesLegacyAliases {
+            words.append("\(MCPDefaults.legacyPortEnvironmentKey)=\(port)")
+            words.append("\(MCPDefaults.legacySessionTokenEnvironmentKey)=\(token)")
+        }
 
         // Exported only for the surface that needs brokering, which is what scopes Codex's
         // shared `hooks.json` to a single surface. Absent, its `PreToolUse` entry says nothing
         // and Codex's own approval flow runs untouched.
         if brokersPermissions {
-            command.append(word: "\(MCPDefaults.brokerEnvironmentKey)=1")
+            words.append("\(MCPDefaults.brokerEnvironmentKey)=1")
+            if includesLegacyAliases {
+                words.append("\(MCPDefaults.legacyBrokerEnvironmentKey)=1")
+            }
         }
+        return words
     }
 
     // MARK: - Private Methods
@@ -697,6 +846,7 @@ enum AgentLauncher {
             brokersPermissions: false,
             reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
             remoteControl: remoteControlAtStartup(for: session),
+            fastMode: fastModeAtStartup(for: session),
             statusLineOverride: statusLineOverride(for: session, in: project)
         ) {
             command.append(flag: "--settings", value: settingsPath)
@@ -946,7 +1096,7 @@ enum AgentLauncher {
     ) {
         appendReasoningEffort(for: session, to: &command)
 
-        guard let fastMode = session.fastMode else { return }
+        guard let fastMode = fastModeAtStartup(for: session) else { return }
 
         if fastMode {
             let account = AgentAccountDiscovery.account(
@@ -998,7 +1148,10 @@ enum AgentLauncher {
     ) {
         guard AppSettings.shared.installsCodexHooks else { return }
 
-        if let account = AgentAccountDiscovery.account(
+        // Hosted tests run inside the shipping app and can build real launch plans. They must
+        // not turn that read-only exercise into a write to the developer's own CODEX_HOME.
+        if mayMaintainCodexHookConfiguration,
+           let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
         ) {
@@ -1008,6 +1161,13 @@ enum AgentLauncher {
         if AppSettings.shared.bypassesCodexHookTrust {
             command.append(flag: AgentDefaults.codexBypassHookTrustFlag)
         }
+    }
+
+    /// Hosted unit tests build real plans inside the shipping app and therefore resolve the
+    /// developer's real accounts. They may inspect a plan but never maintain that account's
+    /// persistent hook file.
+    static var mayMaintainCodexHookConfiguration: Bool {
+        NSClassFromString("XCTestCase") == nil
     }
 
     /// Wraps a command invocation in the login-shell source shared by every launch surface.

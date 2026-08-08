@@ -287,10 +287,87 @@ final class AgentPermissionModeTests: XCTestCase {
         XCTAssertEqual(Self.choices(in: composerRows), Self.choices(in: expected))
         XCTAssertEqual(Self.choices(in: replyRows), Self.choices(in: expected))
 
-        // The inherit row names the default rather than saying only "default", on all three.
+        // The default is named on the mode it *is*, rather than a second time above the list.
         XCTAssertEqual(
             expected.first?.item?.title,
-            L10n.format("Use Default (%@)", AgentPermissionMode.dontAsk.displayName)
+            AgentPermissionMode.manual.displayName,
+            "the list leads with the first mode; the default no longer has a row of its own"
+        )
+    }
+
+    /// The app-wide default is marked where it already stands, and appears once.
+    ///
+    /// The menu used to open with "Use Default (Auto)" above a list that then named Auto again:
+    /// seven rows for six postures, whose duplicated pair were the two hardest to tell apart and
+    /// meant subtly different things — one followed Settings, the other pinned today's value of
+    /// it. The marked row is the inherit row, so it answers nil and nothing is pinned by
+    /// choosing the mode the app already defaults to.
+    func testTheAppDefaultIsMarkedOnItsModeRatherThanRepeatedAboveTheList() throws {
+        var chosen: AgentPermissionMode??
+        let rows = PermissionModePresentation.rows(
+            for: .claude,
+            selected: nil,
+            inherited: .auto,
+            timing: .whenTheSessionStarts,
+            onChoose: { chosen = $0 }
+        )
+        let items = rows.compactMap(\.item)
+
+        XCTAssertEqual(
+            items.count,
+            AgentPermissionMode.allCases.count,
+            "one row per mode, and no row above them repeating one of them"
+        )
+        XCTAssertEqual(
+            items.map(\.title).filter { $0.hasPrefix(AgentPermissionMode.auto.displayName) },
+            ["\(AgentPermissionMode.auto.displayName)\(PermissionModePresentation.defaultSuffix)"],
+            "the default is marked in place, once"
+        )
+
+        let marked = try XCTUnwrap(items.first { $0.isSelected })
+        XCTAssertTrue(
+            marked.title.hasPrefix(AgentPermissionMode.auto.displayName),
+            "a session that has chosen nothing runs the default, so that is the checked row"
+        )
+        XCTAssertNil(
+            marked.representedValue,
+            "the marked row is the inherit row: choosing it follows Settings rather than pinning"
+        )
+        marked.onChoose?()
+        XCTAssertEqual(chosen, .some(nil))
+
+        // A session that recorded the mode the default happens to name reads the same, because
+        // it runs the same thing — one checked row, not two rows the user must tell apart.
+        let pinned = PermissionModePresentation.rows(
+            for: .claude,
+            selected: .auto,
+            inherited: .auto,
+            timing: .whenTheSessionStarts
+        ).compactMap(\.item).filter(\.isSelected)
+        XCTAssertEqual(pinned.count, 1)
+        XCTAssertEqual(
+            pinned.first?.title,
+            "\(AgentPermissionMode.auto.displayName)\(PermissionModePresentation.defaultSuffix)"
+        )
+    }
+
+    /// With no app-wide default the deferring row comes back, and duplicates nothing: the
+    /// agent's own setting is not one of the six, and Threading cannot read it to name it.
+    func testWithNoAppDefaultTheMenuStillOffersTheAgentsOwnSetting() throws {
+        let items = PermissionModePresentation.rows(
+            for: .claude,
+            selected: nil,
+            inherited: nil,
+            timing: .whenTheSessionStarts
+        ).compactMap(\.item)
+
+        XCTAssertEqual(items.count, AgentPermissionMode.allCases.count + 1)
+        let first = try XCTUnwrap(items.first)
+        XCTAssertEqual(first.title, PermissionModePresentation.agentSettingRowTitle)
+        XCTAssertTrue(first.isSelected)
+        XCTAssertFalse(
+            items.dropFirst().contains { $0.title.contains(PermissionModePresentation.defaultSuffix) },
+            "nothing is marked as the default when nothing here has set one"
         )
     }
 

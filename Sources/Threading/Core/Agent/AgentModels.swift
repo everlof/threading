@@ -123,10 +123,10 @@ enum AgentModels {
     static func options(for kind: AgentKind, account: AgentAccount?) -> [AgentModelOption] {
         switch kind {
         case .claude:
-            // The documented aliases first: they track the latest of each family, so they stay
-            // right as new versions ship and are what a user recognises. Anything the CLI has
-            // cached for *this login* is appended, which is the only way a model no alias names
-            // — `claude-fable-5[1m]` today, an org's grant tomorrow — reaches the menu at all.
+            // The documented aliases: they track the latest of each tier, so they stay right as
+            // new versions ship and are what a user recognises. Anything the CLI has cached for
+            // *this login* joins them, which is the only way a model no alias names —
+            // `claude-fable-5[1m]` today, an org's grant tomorrow — reaches the menu at all.
             let aliases = AgentDefaults.claudeModels.map { identifier in
                 claudeOption(
                     identifier: identifier,
@@ -134,8 +134,9 @@ enum AgentModels {
                 )
             }
             let known = Set(aliases.map(\.identifier))
-            return aliases + claudeAdditionalModels(account: account)
+            let cached = claudeAdditionalModels(account: account)
                 .filter { !known.contains($0.identifier) }
+            return byCapability(aliases + cached, aliases: known)
         case .codex:
             let catalog = codexCatalog(account: account)
             if !catalog.isEmpty { return catalog }
@@ -158,6 +159,36 @@ enum AgentModels {
             // composer leaves `--model` unset and the runtime's TUI/config chooses honestly.
             return []
         }
+    }
+
+    /// The catalog, with `identifier` in it whether or not the catalog knew about it.
+    ///
+    /// For the menu of a conversation that is *already pinned* to something: a session started
+    /// on a model this login's catalog no longer lists — a dated id from a transcript, a grant
+    /// since revoked — must still show its own model, or the menu would offer no row matching
+    /// what is running and read as though nothing were selected.
+    ///
+    /// Added through the same ordering as everything else rather than pushed to the front, so a
+    /// stranger lands in its tier instead of above the most capable model on offer.
+    static func options(
+        for kind: AgentKind,
+        account: AgentAccount?,
+        including identifier: String?
+    ) -> [AgentModelOption] {
+        let catalog = options(for: kind, account: account)
+        guard let identifier,
+              !identifier.isEmpty,
+              !catalog.contains(where: { $0.identifier == identifier })
+        else { return catalog }
+
+        let pinned = option(identifier: identifier, for: kind, account: account)
+            ?? AgentModelOption(
+                identifier: identifier,
+                displayName: ModelName.display(for: identifier),
+                fastServiceTier: nil,
+                defaultServiceTier: nil
+            )
+        return byCapability(catalog + [pinned], aliases: aliasIdentifiers(for: kind))
     }
 
     /// What "leave it to the CLI" resolves to for one conversation, and which source answered.
@@ -339,17 +370,19 @@ enum AgentModels {
     /// The Fast setting a conversation will actually run with, or nil where "whatever the
     /// account defaults to" is the only honest answer.
     ///
-    /// Three sources in the order the user set them, the same shape as `effectiveEffort`: the
-    /// conversation's own choice, then the account or catalog tier, and finally what *unset*
-    /// means for this runtime. A live control-channel flag starts off until Threading sends it,
-    /// so unset is a known `false`; an unreadable service tier stays nil rather than claiming
-    /// Standard.
+    /// Four sources in the order the user set them, the same shape as `effectiveEffort`: the
+    /// conversation's own choice, the app-wide startup policy, the account or catalog tier, and
+    /// finally what *unset* means for this runtime. A live control-channel flag starts off until
+    /// Threading or its settings layer sends it, so unset is a known `false`; an unreadable
+    /// service tier stays nil rather than claiming Standard.
     static func effectiveFastMode(
         for session: AgentSession,
         model: String?,
-        account: AgentAccount?
+        account: AgentAccount?,
+        startupSpeed: AgentStartupSpeed = .agentSetting
     ) -> Bool? {
         if let chosen = session.fastMode { return chosen }
+        if let appDefault = startupSpeed.fastModeOverride { return appDefault }
         if let inherited = defaultFastMode(for: session.kind, model: model, account: account) {
             return inherited
         }
@@ -398,6 +431,59 @@ enum AgentModels {
     }
 
     // MARK: - Private Methods
+
+    /// The menu's order: most capable tier first, and inside a tier the alias before the
+    /// variants it stands for.
+    ///
+    /// The list used to be "whatever `claudeModels` was written in, then whatever the CLI cached
+    /// after it", which is two orderings glued together and neither of them the one being read
+    /// for. A model picker is a ladder — the question at it is "how much model do I want for
+    /// this" — so the row a user reaches for first should be the most capable one the login can
+    /// run, and the rest should descend from there. `ModelName.Tier` holds that ranking, checked
+    /// against the published tiers rather than invented here.
+    ///
+    /// The alias leads its tier because it tracks that tier's latest: `Fable` before
+    /// `Fable 5 · 1M` states the ordinary choice first and the long-context variant as the
+    /// deliberate one. A model in no tier keeps its place at the end, in the order its source
+    /// listed it — see `ModelName.tier(of:)` for why it is not guessed into one.
+    ///
+    /// Sorted on an explicit index rather than by `sort`'s own doing: `sort(by:)` is not stable,
+    /// so equal keys would otherwise be free to shuffle between two calls and a menu could
+    /// reorder itself between openings with nothing having changed.
+    private static func byCapability(
+        _ options: [AgentModelOption],
+        aliases: Set<String>
+    ) -> [AgentModelOption] {
+        options.enumerated()
+            .map { (key: capabilityKey($0.element, at: $0.offset, aliases: aliases), option: $0.element) }
+            .sorted { $0.key < $1.key }
+            .map(\.option)
+    }
+
+    /// The identifiers that stand for a whole tier rather than one version of it. A switch, not
+    /// a capability: this is the same per-runtime catalog knowledge the rest of this file holds,
+    /// and the compiler makes a fifth runtime a build error here.
+    private static func aliasIdentifiers(for kind: AgentKind) -> Set<String> {
+        switch kind {
+        case .claude: return Set(AgentDefaults.claudeModels)
+        // Codex publishes dated slugs and no aliases; Grok and OpenCode publish no host catalog
+        // at all. Nothing to lift, so every model sorts on its tier and its source's order.
+        case .codex, .grok, .openCode: return []
+        }
+    }
+
+    private static func capabilityKey(
+        _ option: AgentModelOption,
+        at offset: Int,
+        aliases: Set<String>
+    ) -> (tier: Int, variant: Int, offset: Int) {
+        (
+            // An unranked model sorts past every ranked one, whatever tiers exist.
+            ModelName.tier(of: option.identifier)?.rawValue ?? ModelName.Tier.allCases.count,
+            aliases.contains(option.identifier) ? 0 : 1,
+            offset
+        )
+    }
 
     /// Reads `"model"` from the account's `settings.json`, then the organisation's default.
     ///

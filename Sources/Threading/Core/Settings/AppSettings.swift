@@ -9,13 +9,33 @@ final class AppSettings {
 
     // MARK: - Singleton
 
-    static let shared = AppSettings()
+    static let shared = AppSettings(
+        legacyPreferences: legacyPreferencesForSharedProcess
+    )
+
+    /// A hosted XCTest bundle runs inside the shipping app and sees the developer's real
+    /// defaults domains. Reading is necessary for behavioural-setting tests, but a one-time
+    /// migration is a write on the developer's behalf, so only the real app process imports.
+    private static var legacyPreferencesForSharedProcess: [String: Any] {
+        guard importsLegacyPreferencesForSharedProcess else { return [:] }
+        return UserDefaults.standard.persistentDomain(
+            forName: LegacyAppPreferenceDefaults.domainName
+        ) ?? [:]
+    }
+
+    static var importsLegacyPreferencesForSharedProcess: Bool {
+        NSClassFromString("XCTestCase") == nil
+    }
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        legacyPreferences: [String: Any] = [:]
+    ) {
         self.defaults = defaults
         registerDefaults()
+        migrateLegacyCodexHookPreferences(from: legacyPreferences)
         migrateClosingConfirmation()
     }
 
@@ -406,10 +426,34 @@ final class AppSettings {
 
     /// How a project's sessions are arranged in the sidebar. Pinned sessions are hoisted
     /// first under every order; this decides the order among equals.
+    ///
+    /// Choosing a *different* order lands on that order's natural direction. A direction is a
+    /// statement about one order's field — "Z to A" is about names — so carrying it into the
+    /// next order chosen is a reversal nobody asked for. Enforced here rather than at the menu
+    /// so every route to the setting keeps the invariant.
     var sidebarSessionOrder: SidebarSessionOrder {
         get { Self.sidebarSessionOrder }
         set {
+            if newValue != Self.sidebarSessionOrder {
+                defaults.set(false, forKey: Keys.sidebarSessionOrderIsReversed)
+            }
             defaults.set(newValue.rawValue, forKey: Keys.sidebarSessionOrder)
+            notifyChanged()
+        }
+    }
+
+    /// Same access pattern; an absent key reads as `false`, which is the natural direction of
+    /// whichever order is chosen.
+    nonisolated static var sidebarSessionOrderIsReversed: Bool {
+        UserDefaults.standard.bool(forKey: Keys.sidebarSessionOrderIsReversed)
+    }
+
+    /// Whether the chosen order runs backwards: newest added first, least recently active
+    /// first, Z to A. Pinned sessions still lead — reversing reverses the sort, not the list.
+    var sidebarSessionOrderIsReversed: Bool {
+        get { Self.sidebarSessionOrderIsReversed }
+        set {
+            defaults.set(newValue, forKey: Keys.sidebarSessionOrderIsReversed)
             notifyChanged()
         }
     }
@@ -774,6 +818,28 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Conversation Speed
+
+    /// How sessions for one runtime start before a conversation makes its own choice.
+    ///
+    /// The shipped default is `.agentSetting`, which preserves the CLI's own configuration.
+    /// Standard and Fast are explicit overrides, kept separate per runtime because the two
+    /// providers have independent accounts, availability and usage costs. A session-level
+    /// `AgentSession.fastMode` remains more specific and wins at launch.
+    func startupSpeed(for kind: AgentKind) -> AgentStartupSpeed {
+        guard let key = startupSpeedKey(for: kind),
+              let raw = defaults.string(forKey: key),
+              let speed = AgentStartupSpeed(rawValue: raw)
+        else { return .agentSetting }
+        return speed
+    }
+
+    func setStartupSpeed(_ speed: AgentStartupSpeed, for kind: AgentKind) {
+        guard let key = startupSpeedKey(for: kind) else { return }
+        defaults.set(speed.rawValue, forKey: key)
+        notifyChanged()
+    }
+
     // MARK: - Permission Mode
 
     /// How much a **new** session may do before it has to ask.
@@ -908,6 +974,33 @@ final class AppSettings {
 
     // MARK: - Private Methods
 
+    /// Carries the pre-rename choices that together made an already-installed integration run.
+    ///
+    /// Codex hooks are opt-in because they edit a user-owned file. Before the bundle-id rename,
+    /// that choice lived in `se.mjukis.Skalman`; losing it leaves the old `SKALMAN_*` hooks on
+    /// disk while Threading launches with `THREADING_*`, so no lifecycle report can pass its
+    /// guard and ordinary model-thinking gaps read as finished turns. A stored current value
+    /// always wins — including an explicit `false`. Only legacy `true` values are carried,
+    /// because `false` is already the current default and writing it would distinguish nothing.
+    ///
+    /// The trust bypass is security-sensitive, but carrying it does not lower a new boundary:
+    /// it restores the exact launch posture the same user explicitly chose for the same hooks
+    /// before the bundle-id rename. It is carried only while hook installation itself remains
+    /// enabled; a current choice to turn installation off also keeps the bypass off.
+    /// This remains a narrow migration rather than a wholesale preferences import.
+    private func migrateLegacyCodexHookPreferences(from legacyPreferences: [String: Any]) {
+        if defaults.object(forKey: Keys.installsCodexHooks) == nil,
+           legacyPreferences[Keys.installsCodexHooks] as? Bool == true {
+            defaults.set(true, forKey: Keys.installsCodexHooks)
+        }
+
+        if defaults.bool(forKey: Keys.installsCodexHooks),
+           defaults.object(forKey: Keys.bypassesCodexHookTrust) == nil,
+           legacyPreferences[Keys.bypassesCodexHookTrust] as? Bool == true {
+            defaults.set(true, forKey: Keys.bypassesCodexHookTrust)
+        }
+    }
+
     /// Opt-in settings default to off; the rest are seeded so first launch behaves sensibly.
     private func registerDefaults() {
         defaults.register(defaults: Self.seeds)
@@ -998,6 +1091,17 @@ final class AppSettings {
         }
     }
 
+    /// The setting is intentionally defined only for runtimes with a measured Fast mechanism.
+    /// An exhaustive switch keeps adding a new runtime from silently borrowing another one's
+    /// preference key.
+    private func startupSpeedKey(for kind: AgentKind) -> String? {
+        switch kind {
+        case .claude: return Keys.claudeStartupSpeed
+        case .codex: return Keys.codexStartupSpeed
+        case .grok, .openCode: return nil
+        }
+    }
+
     // MARK: - Keys
 
     private enum Keys {
@@ -1016,6 +1120,9 @@ final class AppSettings {
         static let compactsSidebarTree = "compactsSidebarTree"
         static let followsCheckoutBranch = "followsCheckoutBranch"
         static let sidebarSessionOrder = "sidebarSessionOrder"
+        /// Unseeded on purpose: `bool(forKey:)` answering `false` for an absent key is exactly
+        /// each order's natural direction.
+        static let sidebarSessionOrderIsReversed = "sidebarSessionOrderIsReversed"
         static let promptReturnKey = "promptReturnKey"
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
@@ -1039,6 +1146,8 @@ final class AppSettings {
         static let suppressesClaudeStatusLine = "suppressesClaudeStatusLine"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
         static let claudeRemoteControl = "claudeRemoteControl"
+        static let claudeStartupSpeed = "claudeStartupSpeed"
+        static let codexStartupSpeed = "codexStartupSpeed"
         static let defaultPermissionMode = "defaultPermissionMode"
         static let remoteAccessEnabled = "remoteAccessEnabled"
         static let remoteAccessConnectionMode = "remoteAccessConnectionMode"
@@ -1054,6 +1163,43 @@ final class AppSettings {
         static let conversationFontFamily = "conversationFontFamily"
         static let appTextSize = "appTextSize"
     }
+}
+
+// MARK: - Agent Startup Speed
+
+/// The app-wide speed posture for sessions that have no per-conversation override.
+///
+/// Three states rather than a toggle because omission has provider-owned meaning: Claude may
+/// persist `fastMode` in its settings and Codex may set `service_tier` in `config.toml`. Only
+/// `.agentSetting` leaves those untouched; Standard must travel as an explicit `false`/`default`
+/// to turn off an account configured for Fast.
+enum AgentStartupSpeed: String, CaseIterable {
+    case agentSetting
+    case standard
+    case fast
+
+    var fastModeOverride: Bool? {
+        switch self {
+        case .agentSetting: nil
+        case .standard: false
+        case .fast: true
+        }
+    }
+
+    var settingsTitle: String {
+        switch self {
+        case .agentSetting: L10n.string("Agent's Setting")
+        case .standard: L10n.string("Standard")
+        case .fast: L10n.string("Fast")
+        }
+    }
+}
+
+// MARK: - Legacy App Preferences
+
+enum LegacyAppPreferenceDefaults {
+    /// The preferences domain used before the product and bundle identifier were renamed.
+    static let domainName = "se.mjukis.Skalman"
 }
 
 // MARK: - App Text Size
@@ -1212,6 +1358,26 @@ enum SidebarSessionOrder: String, CaseIterable {
         case .manual: L10n.string("Sort by Order Added")
         case .recentActivity: L10n.string("Sort by Recent Activity")
         case .name: L10n.string("Sort by Name")
+        }
+    }
+
+    /// What this order's forward direction is called. "Ascending" says nothing about a list of
+    /// sessions, so each order names its own ends: the field decides whether "first" means the
+    /// oldest, the most recent, or A.
+    var naturalDirectionTitle: String {
+        switch self {
+        case .manual: L10n.string("Oldest First")
+        case .recentActivity: L10n.string("Most Recent First")
+        case .name: L10n.string("A to Z")
+        }
+    }
+
+    /// The same end of the same field, read from the other side.
+    var reversedDirectionTitle: String {
+        switch self {
+        case .manual: L10n.string("Newest First")
+        case .recentActivity: L10n.string("Least Recent First")
+        case .name: L10n.string("Z to A")
         }
     }
 }

@@ -90,9 +90,13 @@ final class UsageBarView: NSView {
     override var intrinsicContentSize: NSSize {
         NSSize(
             width: NSView.noIntrinsicMetric,
-            height: usesClassicProgress
-                ? ThemedProgressDrawing.classicHeight
-                : UsageBarDefaults.height
+            height: usesWorkbenchProgress
+                ? ThemedProgressDrawing.workbenchHeight
+                : (usesIRIXProgress
+                    ? ThemedProgressDrawing.irixHeight
+                    : (usesClassicProgress
+                        ? ThemedProgressDrawing.classicHeight
+                        : UsageBarDefaults.height))
         )
     }
 
@@ -237,7 +241,7 @@ final class UsageBarView: NSView {
     override func layout() {
         super.layout()
 
-        if usesClassicProgress {
+        if usesHistoricalProgress {
             layer?.cornerRadius = 0
             layer?.backgroundColor = nil
             fillView.isHidden = true
@@ -249,12 +253,25 @@ final class UsageBarView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard usesClassicProgress else { return }
-        ThemedProgressDrawing.drawSegmented(
-            in: bounds,
-            fraction: displayedFraction,
-            tint: fillColor()
-        )
+        if usesWorkbenchProgress {
+            ThemedProgressDrawing.drawWorkbench(
+                in: bounds,
+                fraction: displayedFraction,
+                tint: workbenchProgressBlue
+            )
+        } else if usesIRIXProgress {
+            ThemedProgressDrawing.drawIRIX(
+                in: bounds,
+                fraction: displayedFraction,
+                tint: Design.Surface.accent
+            )
+        } else if usesClassicProgress {
+            ThemedProgressDrawing.drawSegmented(
+                in: bounds,
+                fraction: displayedFraction,
+                tint: fillColor()
+            )
+        }
     }
 
     private func layoutContinuousFill() {
@@ -275,7 +292,7 @@ final class UsageBarView: NSView {
         if let timeMark {
             let markWidth = UsageBarDefaults.timeMarkWidth
             let markCentre = bounds.width * min(max(timeMark, 0), 1)
-            let verticalInset: CGFloat = usesClassicProgress ? 2 : 0
+            let verticalInset: CGFloat = usesHistoricalProgress ? 2 : 0
             markView.frame = NSRect(
                 x: min(max(markCentre - markWidth / 2, 0), bounds.width - markWidth),
                 y: verticalInset,
@@ -283,7 +300,7 @@ final class UsageBarView: NSView {
                 height: max(0, bounds.height - verticalInset * 2)
             )
             markView.layer?.cornerCurve = .continuous
-            markView.layer?.cornerRadius = usesClassicProgress ? 0 : markWidth / 2
+            markView.layer?.cornerRadius = usesHistoricalProgress ? 0 : markWidth / 2
             // labelColor adapts to light/dark, so the mark reads against both the track and any
             // tint fill it overlaps.
             markView.applyLayerBackground(
@@ -297,6 +314,23 @@ final class UsageBarView: NSView {
 
     private var usesClassicProgress: Bool {
         AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .segmented
+    }
+
+    private var usesWorkbenchProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .amiga
+    }
+
+    private var usesIRIXProgress: Bool {
+        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .irix
+    }
+
+    private var usesHistoricalProgress: Bool {
+        usesClassicProgress || usesWorkbenchProgress || usesIRIXProgress
+    }
+
+    private var workbenchProgressBlue: NSColor {
+        WindowChromeAppearance.resolve()?.activeGradient.colors.first
+            ?? Design.Surface.accent
     }
 
     /// The fill's colour for this pass: `tint` itself while idle, a blend along the crossfade
