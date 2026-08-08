@@ -113,6 +113,13 @@ class ThemedTextView: NSTextView, ThemedComponent {
         selectedTextAttributes = ThemedTextSelection.attributes(over: self)
         themeRedraw = ThemeRedraw(self)
 
+        // NSTextView is editable by default but, surprisingly, does not record edits with an
+        // undo manager by default. That leaves the application's ordinary Edit ▸ Undo command
+        // correctly routed to this view with no operation to perform. User-authored text is the
+        // default for this component (prompt drafts and longer form fields), so undo belongs at
+        // the same boundary; read-only specializations can still opt out after initialization.
+        allowsUndo = true
+
         // **`isVerticallyResizable` alone does not let a text view grow.** `minSize` and `maxSize`
         // default to the *initializer's* frame — `.zero` for every view built here — and the
         // scroll view then hands the document view the clip's size, which becomes the cap. The

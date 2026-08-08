@@ -531,6 +531,36 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.stringValue, "hej")
     }
 
+    /// NSTextView is editable while leaving undo disabled by default. The Edit menu still routes
+    /// ⌘Z to its undo manager in that state, but typing registered no operation there, so the
+    /// command appeared to do nothing in every prompt draft. Exercise the text system rather than
+    /// assigning `stringValue`: only user edits are supposed to enter its undo history.
+    func testPromptTypingCanBeUndoneAndRedone() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+        var observedDrafts: [String] = []
+        prompt.onChange = { observedDrafts.append($0) }
+
+        XCTAssertTrue(window.makeFirstResponder(textView), "The prompt has to take focus")
+        type("draft", in: window)
+
+        let undoManager = try XCTUnwrap(textView.undoManager)
+        XCTAssertTrue(textView.allowsUndo)
+        XCTAssertTrue(undoManager.canUndo, "Typing has to register the operation that ⌘Z invokes")
+
+        undoManager.undo()
+
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertEqual(observedDrafts.last, "", "Undo has to persist the restored draft too")
+        XCTAssertTrue(undoManager.canRedo)
+
+        undoManager.redo()
+
+        XCTAssertEqual(prompt.stringValue, "draft")
+        XCTAssertEqual(observedDrafts.last, "draft", "Redo has to persist the restored draft too")
+    }
+
     /// The prompt sizes itself to its text through the layout manager, so a missing network
     /// also froze the box at one line no matter how much was typed into it.
     func testPromptGrowsWithItsText() throws {
