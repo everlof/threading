@@ -82,10 +82,19 @@ final class SidebarRowRenderTests: XCTestCase {
             selected: true
         )
 
+        // Working on the selected ground — the spinner must invert with the title instead of
+        // retaining the accent that the row itself uses as its fill.
+        written += try write(
+            story: "08-working-and-selected",
+            activity: .working,
+            hovered: false,
+            selected: true
+        )
+
         // Pinning changes the row's order under every sort, and the filled pin beside the title
         // makes that durable state visible even when the row would have led the list anyway.
         written += try write(
-            story: "08-pinned-at-rest",
+            story: "09-pinned-at-rest",
             activity: .idle,
             hovered: false,
             pinned: true
@@ -94,14 +103,14 @@ final class SidebarRowRenderTests: XCTestCase {
         // On a selected row the pin must use the selection's ink rather than disappearing into
         // the same accent that fills the row.
         written += try write(
-            story: "09-pinned-and-selected",
+            story: "10-pinned-and-selected",
             activity: .idle,
             hovered: false,
             selected: true,
             pinned: true
         )
 
-        XCTAssertEqual(written, 18, "Every story should render in both appearances")
+        XCTAssertEqual(written, 20, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -331,7 +340,7 @@ final class SidebarRowRenderTests: XCTestCase {
             try withTheme(theme) {
                 for row in Self.selectableRows {
                     let fill = Design.Surface.selectionFill
-                    let drawn = try strongestTrailingControlInk(
+                    let drawn = try strongestRowInk(
                         of: row.build(),
                         identified: row.controls,
                         over: fill
@@ -355,6 +364,43 @@ final class SidebarRowRenderTests: XCTestCase {
                         "\(theme.name): a selected \(row.name)'s actions should ink from its fill"
                     )
                 }
+            }
+        }
+    }
+
+    /// The status slot sits on the same selected ground as the title and trailing controls. The
+    /// spinner's ordinary accent is that selection fill itself, which made the loader disappear.
+    /// Swept through the real session row so the component and its host wiring are both exercised.
+    func testASelectedWorkingRowsSpinnerReadsAgainstItsSelectionFill() throws {
+        for theme in AppThemeLibrary.stock {
+            try withTheme(theme) {
+                let row = SessionRowView(customizationLookup: { _ in .empty })
+                row.translatesAutoresizingMaskIntoConstraints = false
+                row.configure(
+                    with: AgentSession(kind: .claude, title: "Selected status"),
+                    activity: .working
+                )
+
+                let fill = Design.Surface.selectionFill
+                let drawn = try strongestRowInk(
+                    of: row,
+                    identified: "sidebar.session.status",
+                    over: fill
+                )
+                let selected = distance(
+                    drawn,
+                    Design.Ink.selection.label.composited(over: fill)
+                )
+                let ordinary = distance(
+                    drawn,
+                    Design.Surface.accent.composited(over: fill)
+                )
+
+                XCTAssertLessThanOrEqual(
+                    selected,
+                    ordinary,
+                    "\(theme.name): a selected row's spinner did not ink from its fill"
+                )
             }
         }
     }
@@ -451,7 +497,7 @@ final class SidebarRowRenderTests: XCTestCase {
     /// centre carries the colour that was chosen, and a half-covered pixel carries half of it.
     /// Scanned across the controls' whole column so the probe need not know where inside a `⋯`
     /// the dots fall.
-    private func strongestTrailingControlInk(
+    private func strongestRowInk(
         of row: NSTableCellView,
         identified identifier: String,
         over dynamicFill: NSColor

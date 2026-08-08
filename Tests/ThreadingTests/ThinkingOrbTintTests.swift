@@ -1,5 +1,5 @@
 import XCTest
-import ThinkingOrbs
+@testable import ThinkingOrbs
 @testable import Threading
 
 /// The tint seam added to the ThinkingOrbs fork, and the wrapper that drives it
@@ -51,6 +51,29 @@ final class ThinkingOrbTintTests: XCTestCase {
         for c in ink {
             XCTAssertGreaterThanOrEqual(c.redComponent + 0.001, c.greenComponent, "green-dominant ink under a red tint")
             XCTAssertGreaterThanOrEqual(c.redComponent + 0.001, c.blueComponent, "blue-dominant ink under a red tint")
+        }
+    }
+
+    /// Connecting is the one mode with stroked edges as well as dots. Both
+    /// passes must travel through Threading's tint seam; grayscale lines over
+    /// accent nodes would leak the dependency's palette into themed UI.
+    func testConnectingTintsLinesAndDotsTogether() {
+        let orb = ThinkingOrbView(state: .connecting, orbSize: .px64)
+        orb.tint = CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+
+        let ink = inkPixels(render(orb))
+        XCTAssertFalse(ink.isEmpty, "the connecting orb painted nothing to sample")
+        for color in ink {
+            XCTAssertGreaterThanOrEqual(
+                color.redComponent + 0.001,
+                color.greenComponent,
+                "a connecting edge escaped the red tint"
+            )
+            XCTAssertGreaterThanOrEqual(
+                color.redComponent + 0.001,
+                color.blueComponent,
+                "a connecting edge escaped the red tint"
+            )
         }
     }
 
@@ -124,8 +147,74 @@ final class ThinkingOrbTintTests: XCTestCase {
 
     func testWrapperCanDisplayEveryVariant() {
         XCTAssertEqual(
+            OrbState.allCases.map(\.rawValue),
+            [
+                "working", "searching", "solving", "listening", "connecting",
+                "weaving", "composing", "breathing", "shaping"
+            ],
+            "the Swift port no longer matches upstream's nine-state contract"
+        )
+        XCTAssertEqual(
             OrbState.allCases.map { WorkingOrbView(state: $0).state },
             OrbState.allCases
+        )
+    }
+
+    func testEveryVariantRendersAtBothTunedSizes() {
+        for state in OrbState.allCases {
+            for size in OrbSize.allCases {
+                let orb = ThinkingOrbView(state: state, orbSize: size, theme: .dark)
+                let side = CGFloat(size.rawValue)
+                let ink = inkPixels(render(orb, size: side))
+                XCTAssertFalse(
+                    ink.isEmpty,
+                    "\(state.rawValue) painted nothing at \(size.rawValue)pt"
+                )
+            }
+        }
+    }
+
+    /// Hidden is not the same thing as off screen. The component gallery keeps all nine variants
+    /// in one long document: none is hidden, but eight or nine of their 60 Hz draw loops are
+    /// outside the clip view at any moment. The orb follows the clip and runs only after its own
+    /// drawing area enters the viewport.
+    func testOrbTreatsAClippedDrawingAreaAsOffscreen() {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 2_000))
+        scroll.documentView = document
+
+        let orb = ThinkingOrbView(state: .working, orbSize: .px20)
+        orb.frame = NSRect(x: 20, y: 1_600, width: 20, height: 20)
+        document.addSubview(orb)
+        scroll.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            scroll.contentView.postsBoundsChangedNotifications,
+            "the orb will not hear a scroll that moves it into or out of view"
+        )
+        XCTAssertFalse(orb.hasVisibleDrawingArea)
+
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 1_500))
+        scroll.reflectScrolledClipView(scroll.contentView)
+
+        XCTAssertTrue(orb.hasVisibleDrawingArea)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: scroll
+        )
+        XCTAssertTrue(
+            orb.isSuppressedForLiveScroll,
+            "the visible orb kept its display link active during a scroll gesture"
+        )
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: scroll
+        )
+        XCTAssertFalse(
+            orb.isSuppressedForLiveScroll,
+            "the orb did not resume after scroll momentum ended"
         )
     }
 
@@ -140,6 +229,19 @@ final class ThinkingOrbTintTests: XCTestCase {
         // first entry therefore proves consecutive turns cannot repeat.
         orb.selectRandomVariant(choosingIndex: { _ in 0 })
         XCTAssertNotEqual(orb.state, first)
+    }
+
+    func testRandomVariantPoolContainsEveryUpstreamState() {
+        var selected = Set<OrbState>()
+        for index in OrbState.allCases.indices {
+            let orb = WorkingOrbView()
+            orb.selectRandomVariant(choosingIndex: { candidates in
+                XCTAssertEqual(candidates, OrbState.allCases.indices)
+                return index
+            })
+            selected.insert(orb.state)
+        }
+        XCTAssertEqual(selected, Set(OrbState.allCases))
     }
 
     func testEveryFixedOrbPreferenceSelectsItsMatchingVariant() {
@@ -160,9 +262,9 @@ final class ThinkingOrbTintTests: XCTestCase {
         XCTAssertEqual(settings.workingOrbStyle, .random)
         XCTAssertEqual(settings.chatNameMorphStyle, .shapeMorph)
 
-        settings.workingOrbStyle = .shaping
+        settings.workingOrbStyle = .breathing
         settings.chatNameMorphStyle = .scramble
-        XCTAssertEqual(settings.workingOrbStyle, .shaping)
+        XCTAssertEqual(settings.workingOrbStyle, .breathing)
         XCTAssertEqual(settings.chatNameMorphStyle, .scramble)
     }
 

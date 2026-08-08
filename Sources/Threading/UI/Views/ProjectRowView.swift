@@ -623,6 +623,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        // Not through the receipt floating over the list — see `NSView.isPointerCovered(at:)`.
+        guard !isPointerCovered(at: event.locationInWindow) else { return }
+
         isHovered = true
         setHoverButtonVisible(true, animated: true)
 

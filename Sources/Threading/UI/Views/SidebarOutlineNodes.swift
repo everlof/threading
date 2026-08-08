@@ -257,10 +257,11 @@ enum SidebarTreeBuilder {
             let node = ProjectNode(projectID: project.id)
             // Archived sessions are gathered separately, below the projects.
             let order = AppSettings.sidebarSessionOrder
+            let isReversed = AppSettings.sidebarSessionOrderIsReversed
             let activeSessions = project.sessions
                 .filter { !$0.isArchived }
                 .enumerated()
-                .sorted { precedes($0, $1, order: order) }
+                .sorted { precedes($0, $1, order: order, isReversed: isReversed) }
                 .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
             let terminals = terminalsByDisplayProject[project.id] ?? []
@@ -352,16 +353,23 @@ enum SidebarTreeBuilder {
         (node as? any SidebarOutlineNode)?.sidebarChildren ?? []
     }
 
-    /// Whether `lhs` sorts ahead of `rhs` under the chosen order.
+    /// Whether `lhs` sorts ahead of `rhs` under the chosen order and direction.
     ///
     /// Pinned sessions are hoisted first under every order — pinning is a stronger statement
-    /// than any sort. The store offset breaks every tie, so orders built on fields that can
-    /// collide (two untouched sessions share a `lastActiveAt` second, two prompts start with
-    /// the same line) stay stable instead of jittering between rebuilds.
+    /// than any sort, and than any direction: reversing reverses the sort, not the list. The
+    /// store offset breaks every tie, so orders built on fields that can collide (two untouched
+    /// sessions share a `lastActiveAt` second, two prompts start with the same line) stay stable
+    /// instead of jittering between rebuilds.
+    ///
+    /// That tie-break stays forward under a reversed order, because it is there to stop jitter
+    /// rather than to sort: flipping it would swap two sessions the user cannot tell apart by
+    /// the field they are sorting on. The one exception is `.manual`, where the offset *is* the
+    /// sort — there the flip has to reach it, and no tie is left for the fallthrough to break.
     private static func precedes(
         _ lhs: (offset: Int, element: AgentSession),
         _ rhs: (offset: Int, element: AgentSession),
-        order: SidebarSessionOrder
+        order: SidebarSessionOrder,
+        isReversed: Bool
     ) -> Bool {
         if lhs.element.isPinned != rhs.element.isPinned {
             return lhs.element.isPinned
@@ -369,16 +377,20 @@ enum SidebarTreeBuilder {
 
         switch order {
         case .manual:
-            break
+            if lhs.offset != rhs.offset {
+                return isReversed ? lhs.offset > rhs.offset : lhs.offset < rhs.offset
+            }
         case .recentActivity:
             if lhs.element.lastActiveAt != rhs.element.lastActiveAt {
-                return lhs.element.lastActiveAt > rhs.element.lastActiveAt
+                let isNewer = lhs.element.lastActiveAt > rhs.element.lastActiveAt
+                return isReversed ? !isNewer : isNewer
             }
         case .name:
             let comparison = lhs.element.displayTitle
                 .localizedCaseInsensitiveCompare(rhs.element.displayTitle)
             if comparison != .orderedSame {
-                return comparison == .orderedAscending
+                let isEarlier = comparison == .orderedAscending
+                return isReversed ? !isEarlier : isEarlier
             }
         }
 

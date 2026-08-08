@@ -207,6 +207,46 @@ final class ComposerWindowFitTests: XCTestCase {
         XCTAssertEqual(window.constrainFrameRect(fits, to: screen), fits)
     }
 
+    // MARK: - The Column Fills Its Pane
+
+    /// The column takes the width the pane leaves it, up to `ComposerDefaults.contentWidth`.
+    ///
+    /// It measured itself against the pane at priority 240 and hugged its own content at the
+    /// stack view's default 250, because the hugging was set through `setContentHuggingPriority`
+    /// — an `NSView` property a stack view does not lay out by. So the measurement never
+    /// applied: in a 1454-point pane the box drew 415 points wide, sized by whichever row inside
+    /// it happened to be widest, with the choices on its footer crushed against each other and
+    /// the pane empty on both sides of them.
+    func testTheColumnFillsThePaneUpToItsCap() throws {
+        let composer = SessionComposerViewController()
+        let widePane = host(composer, size: NSSize(width: 1454, height: 700))
+        composer.show(projectID: nil)
+        widePane.layoutSubtreeIfNeeded()
+
+        let box = try XCTUnwrap(promptView(in: composer.view))
+        XCTAssertEqual(
+            box.frame.width,
+            ComposerDefaults.contentWidth,
+            accuracy: 1,
+            "the column hugged its content instead of filling the pane"
+        )
+
+        // And it is a cap, not a width: a pane narrower than 720 still gets a column that fills
+        // it, or the composer would draw outside the pane it hangs in.
+        let narrow = SessionComposerViewController()
+        let narrowHost = host(narrow, size: NSSize(width: 560, height: 700))
+        narrow.show(projectID: nil)
+        narrowHost.layoutSubtreeIfNeeded()
+
+        let narrowBox = try XCTUnwrap(promptView(in: narrow.view))
+        XCTAssertEqual(
+            narrowBox.frame.width,
+            560 - Design.Spacing.pane * 2,
+            accuracy: 1,
+            "a narrow pane left the column at a width the pane does not have"
+        )
+    }
+
     // MARK: - Fixtures
 
     /// An unshown window holding the composer as its content — the arrangement that grows, since
@@ -226,7 +266,11 @@ final class ComposerWindowFitTests: XCTestCase {
     /// A pane the composer cannot resize: the split view holds it to the window's, and this
     /// holds it to a number, which is the same answer arrived at without a window.
     private func host(_ composer: SessionComposerViewController, height: CGFloat) -> NSView {
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: Fixture.size.width, height: height))
+        host(composer, size: NSSize(width: Fixture.size.width, height: height))
+    }
+
+    private func host(_ composer: SessionComposerViewController, size: NSSize) -> NSView {
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
         let view = composer.view
         view.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(view)

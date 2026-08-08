@@ -32,9 +32,26 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
         }
     }
 
+    /// A demotion is believed only if the list this row is in asks for one — which is what keeps
+    /// the accent under the row a click just selected, after that click hands focus to the
+    /// session it opened. This is the reported defect's last line of defence; see
+    /// `ListSelectionStrength` for the rule and why the draw was the wrong place for it.
+    override var isEmphasized: Bool {
+        get { super.isEmphasized }
+        set { super.isEmphasized = listSelectionStrength(insteadOf: newValue) }
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        adoptListSelectionStrength()
+    }
+
     private var trackingArea: NSTrackingArea?
 
-    private var isMouseInside = false {
+    /// Whether the row is drawing its hover wash. Readable so a row that declines the pointer can
+    /// be asserted where it declines it, rather than by reading a picture for ink that is 6% of
+    /// the ground it lies on.
+    private(set) var isMouseInside = false {
         didSet { needsDisplay = true }
     }
 
@@ -54,10 +71,23 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
         )
         addTrackingArea(area)
         trackingArea = area
+
+        // The list scrolls and reloads under a still pointer, and a receipt rises over it — none
+        // of the three delivers an exit. See `NSView.hoverIsStale` for the first two and
+        // `NSView.isPointerCovered` for the third, which is asked here rather than shared because
+        // a row washed under a card and a chip lit under a menu are not the same case.
+        if hoverIsStale(isMouseInside) || (isMouseInside && isPointerCovered) {
+            isMouseInside = false
+        }
     }
 
+    /// Lit only where the pointer is actually on the row.
+    ///
+    /// A tracking area reports crossings of a *rectangle*, so the row under the sidebar's
+    /// floating receipt is told the pointer arrived while the band is what it is resting on —
+    /// see `NSView.isPointerCovered(at:)`.
     override func mouseEntered(with event: NSEvent) {
-        isMouseInside = isHoverEnabled
+        isMouseInside = isHoverEnabled && !isPointerCovered(at: event.locationInWindow)
     }
 
     override func mouseExited(with event: NSEvent) {

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Picks a conversation found on disk to adopt into a project.
+/// Picks conversations found on disk to adopt into a project.
 ///
 /// Presented as a sheet rather than a chip menu: a busy project has hundreds of past
 /// conversations, which is far past what a menu can be scanned in, so the list is searchable
@@ -15,14 +15,35 @@ final class SessionImportViewController: NSViewController {
     /// The trimmed query the visible rows were built for, so a row can show what it was found on.
     private var query = ""
 
+    /// What will be adopted, by `ImportableSession.id`, held apart from the table's own
+    /// selection because it has to outlive a search.
+    ///
+    /// Picking several conversations out of hundreds means searching, taking what matched,
+    /// searching again — and a selection that lived on the table would be discarded by each of
+    /// those searches, since `reloadData` selects nothing. So the ids are the truth and the
+    /// table mirrors them: what is chosen and out of view is still chosen, and the Import
+    /// button carries the count so that is never a surprise.
+    private var selection: Set<String> = []
+
+    /// Set while the list is being rebuilt or its selection written to match `selection`, so the
+    /// delegate callbacks that causes are not read back as the user's own choice.
+    ///
+    /// `reloadData` is inside this and not only `selectRowIndexes`: reloading *clears* the
+    /// table's selection and says so through the same delegate method, which read as the user
+    /// deselecting everything the new query still shows — one keystroke into a search, the rows
+    /// that matched were quietly dropped from what would be adopted.
+    private var isRewritingList = false
+
     private let headingLabel = NSTextField(labelWithString: ImportStrings.heading)
     private let subheadingLabel = NSTextField(labelWithString: "")
     private let searchField = ThemedSearchField()
     private let tableView = ThemedTableView()
     private let importButton = ThemedButton()
 
-    /// Called with the chosen conversation, or nil when the sheet is dismissed.
-    var onPick: ((ImportableSession?) -> Void)?
+    /// Called with the chosen conversations, newest first, or empty when the sheet is
+    /// dismissed without adopting anything. Import cannot send an empty list: the button is
+    /// disabled while nothing is chosen.
+    var onPick: (([ImportableSession]) -> Void)?
 
     private static let relativeDate: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -53,6 +74,11 @@ final class SessionImportViewController: NSViewController {
         ))
         setupViews()
         updateSubheading()
+        rewritingList {
+            tableView.reloadData()
+            restoreSelection()
+        }
+        refreshImportButton()
     }
 
     override func viewDidAppear() {
@@ -61,7 +87,6 @@ final class SessionImportViewController: NSViewController {
         // Typing should narrow the list straight away, which is the only thing to do here
         // when the list is long.
         view.window?.makeFirstResponder(searchField)
-        selectFirstRow()
     }
 
     // MARK: - Setup
@@ -117,6 +142,10 @@ final class SessionImportViewController: NSViewController {
         tableView.style = .inset
         tableView.doubleAction = #selector(confirm)
         tableView.target = self
+        // Adopting conversations is the plural job: a project that has lost track of its
+        // history offers hundreds at once, and one round trip through this sheet per
+        // conversation is not a way to get them back.
+        tableView.allowsMultipleSelection = true
         tableView.addTableColumn(NSTableColumn(identifier: ImportColumn.session))
 
         let scrollView = ThemedScrollView()
@@ -139,7 +168,7 @@ final class SessionImportViewController: NSViewController {
     }
 
     private func makeFooter() -> NSView {
-        importButton.title = ImportStrings.importTitle
+        importButton.title = ImportStrings.importTitle(count: 0)
         importButton.isProminent = true
         importButton.keyEquivalent = "\r"
         importButton.target = self
@@ -176,6 +205,36 @@ final class SessionImportViewController: NSViewController {
         visible.map(\.agentSessionID.rawValue)
     }
 
+    /// The conversations Import would adopt, newest first — including any the current search
+    /// has hidden.
+    var selectedSessions: [ImportableSession] {
+        sessions.filter { selection.contains($0.id) }
+    }
+
+    /// Chooses rows the way a click does, for tests and for anything driving the sheet other
+    /// than the pointer.
+    func selectSessions(withIDs identifiers: [String]) {
+        let wanted = Set(identifiers)
+        selection = Set(sessions.filter { wanted.contains($0.agentSessionID.rawValue) }.map(\.id))
+        rewritingList { restoreSelection() }
+        refreshImportButton()
+    }
+
+    /// What the Import button reads, so a test asserts on the sheet's own answer rather than
+    /// re-deriving the count beside it.
+    var importButtonTitleForTesting: String { importButton.title }
+
+    /// What the *table* believes is chosen, and how each of those rows is drawn. Held choices
+    /// that nothing marks on screen would be the whole bug this selection model could have, so
+    /// a test asks the list rather than only asking the controller.
+    func drawnSelectionForTesting() -> (rows: IndexSet, marked: [Bool]) {
+        let rows = tableView.selectedRowIndexes
+        let marked = rows.map { row in
+            tableView.rowView(atRow: row, makeIfNecessary: true)?.isSelected ?? false
+        }
+        return (rows, marked)
+    }
+
     /// The view a row builds, so a test asserts on what a row *says* rather than on what the
     /// list happens to hold — the two came apart once already, in a sidebar row whose buttons
     /// were unreachable in the container they shipped in.
@@ -205,32 +264,61 @@ final class SessionImportViewController: NSViewController {
                 || $0.agentSessionID.rawValue.localizedCaseInsensitiveContains(query)
         }
 
-        tableView.reloadData()
-        updateSubheading()
-        selectFirstRow()
+        rewritingList {
+            tableView.reloadData()
+            updateSubheading()
+            restoreSelection()
+        }
+        refreshImportButton()
     }
 
-    @objc private func confirm() {
-        let row = tableView.selectedRow
-        guard row >= 0, row < visible.count else { return }
-        onPick?(visible[row])
+    /// Not private: the two answers this sheet exists to give, asserted by
+    /// `SessionImportActivityTests` through the same path the button and Return take.
+    @objc func confirm() {
+        let chosen = selectedSessions
+        guard !chosen.isEmpty else { return }
+        onPick?(chosen)
     }
 
-    @objc private func cancel() {
-        onPick?(nil)
+    @objc func cancel() {
+        onPick?([])
     }
 
     // MARK: - Private Methods
 
-    /// Keeps a row selected so Return always has something to act on.
-    private func selectFirstRow() {
-        guard !visible.isEmpty else {
-            importButton.isEnabled = false
-            return
+    /// Puts the table's selection back where `selection` says it is, and starts one on the
+    /// first row when there is none — Return always has something to act on, and a search that
+    /// narrows to the row somebody was looking for can be taken with the keyboard alone.
+    private func restoreSelection() {
+        if selection.isEmpty, let first = visible.first {
+            selection.insert(first.id)
         }
 
-        tableView.selectRowIndexes([0], byExtendingSelection: false)
-        importButton.isEnabled = true
+        let rows = visible.indices.filter { selection.contains(visible[$0].id) }
+        tableView.selectRowIndexes(IndexSet(rows), byExtendingSelection: false)
+    }
+
+    /// Runs a rebuild of the list, ignoring the selection changes it causes.
+    private func rewritingList(_ work: () -> Void) {
+        isRewritingList = true
+        work()
+        isRewritingList = false
+    }
+
+    /// Takes the table's selection as the user's answer *for the rows it can see*, leaving
+    /// choices the search has hidden alone.
+    private func readSelectionFromTable() {
+        let shown = Set(visible.map(\.id))
+        let chosen = Set(tableView.selectedRowIndexes.compactMap { row in
+            visible.indices.contains(row) ? visible[row].id : nil
+        })
+
+        selection = selection.subtracting(shown).union(chosen)
+    }
+
+    private func refreshImportButton() {
+        importButton.isEnabled = !selection.isEmpty
+        importButton.title = ImportStrings.importTitle(count: selection.count)
     }
 
     private func updateSubheading() {
@@ -268,7 +356,10 @@ extension SessionImportViewController: NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        importButton.isEnabled = tableView.selectedRow >= 0
+        guard !isRewritingList else { return }
+
+        readSelectionFromTable()
+        refreshImportButton()
     }
 
     /// A row shows the agent it belongs to, what the conversation was about, when it was last
@@ -379,8 +470,18 @@ enum ImportLayout {
 enum ImportStrings {
     static var heading: String { L10n.string("Import Conversation") }
     static var searchPlaceholder: String { L10n.string("Search conversations or paste an ID") }
-    static var importTitle: String { L10n.string("Import") }
     static var cancelTitle: String { L10n.string("Cancel") }
+
+    /// Counted past one, because the count is the only thing that says a choice the search has
+    /// scrolled or filtered out of sight is still going to be adopted. The bare word stands
+    /// while nothing is chosen, where a number would be noise.
+    static func importTitle(count: Int) -> String {
+        switch count {
+        case ...0: return L10n.string("Import")
+        case 1: return L10n.string("Import 1 conversation")
+        default: return L10n.format("Import %lld conversations", Int64(count))
+        }
+    }
 
     /// Not localized: a single ellipsis, standing for the characters of an identifier that are
     /// in front of the ones the row is showing.

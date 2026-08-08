@@ -1,4 +1,5 @@
 import Foundation
+import NativeDiffCore
 
 // MARK: - Changed Files Tree
 
@@ -158,10 +159,86 @@ struct ChangedFilesTree: Equatable {
     }
 }
 
+// MARK: - Changed File Diff Preview
+
+/// One changed file's diff as the card keeps it, for the preview a file row shows under the
+/// pointer.
+///
+/// **Bounded when it is captured, not when it is drawn.** The card is retained for as long as
+/// the conversation it sits in, so holding each turn's whole diff would pin every line of every
+/// file a session ever touched — a wide sweep is thousands of lines, and there is one card per
+/// turn. The cap is spent in hunk order and what it could not cover is *counted*, so a preview
+/// that stops early says so rather than ending mid-file.
+struct ChangedFileDiffPreview: Equatable {
+    let path: String
+    let added: Int
+    let removed: Int
+
+    /// Hunks in order, the last one possibly cut short by the cap.
+    let hunks: [GitHunk]
+
+    /// Lines the cap left out.
+    let omittedLines: Int
+
+    /// Whether there is anything to draw: a binary file, or one git reported without hunks,
+    /// has no preview to show and its row raises none.
+    var isEmpty: Bool { hunks.allSatisfy { $0.lines.isEmpty } }
+
+    /// Every file's bounded diff, keyed by path — what a card is built with.
+    static func previews(
+        from files: [GitFileDiff],
+        lineCap: Int = ChangedFilesDefaults.previewLineCap
+    ) -> [String: ChangedFileDiffPreview] {
+        var previews: [String: ChangedFileDiffPreview] = [:]
+        for file in files {
+            previews[file.path] = preview(of: file, lineCap: lineCap)
+        }
+        return previews
+    }
+
+    static func preview(
+        of file: GitFileDiff,
+        lineCap: Int = ChangedFilesDefaults.previewLineCap
+    ) -> ChangedFileDiffPreview {
+        var remaining = max(lineCap, 0)
+        var kept: [GitHunk] = []
+        var omitted = 0
+
+        for hunk in file.hunks {
+            if hunk.lines.count <= remaining {
+                kept.append(hunk)
+                remaining -= hunk.lines.count
+            } else {
+                if remaining > 0 {
+                    kept.append(GitHunk(
+                        header: hunk.header,
+                        lines: Array(hunk.lines.prefix(remaining))
+                    ))
+                }
+                omitted += hunk.lines.count - remaining
+                remaining = 0
+            }
+        }
+
+        return ChangedFileDiffPreview(
+            path: file.path,
+            added: file.added,
+            removed: file.removed,
+            hunks: kept,
+            omittedLines: omitted
+        )
+    }
+}
+
 // MARK: - Changed Files Defaults
 
 enum ChangedFilesDefaults {
     /// A turn changing at most this many files and lines opens its tree outright.
     static let autoExpandFileCap = 5
     static let autoExpandLineCap = 200
+
+    /// How much of one file's diff a card keeps for its hover preview. Deep enough that a
+    /// normal edit is shown whole, shallow enough that a generated file does not ride along
+    /// in memory for the rest of the session.
+    static let previewLineCap = 400
 }

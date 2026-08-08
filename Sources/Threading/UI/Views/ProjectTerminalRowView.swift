@@ -130,6 +130,8 @@ final class ProjectTerminalRowView: NSTableCellView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        // Not through the receipt floating over the list — see `NSView.isPointerCovered(at:)`.
+        guard !isPointerCovered(at: event.locationInWindow) else { return }
         setActionVisible(true, animated: true)
     }
 

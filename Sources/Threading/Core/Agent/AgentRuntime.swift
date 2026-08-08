@@ -17,6 +17,14 @@ final class AgentRuntime {
 
     private var controllers: [SessionID: AgentSessionViewController] = [:]
 
+#if DEBUG
+    /// Per-session launch seams for deterministic whole-app tests.
+    ///
+    /// The key is the containment: a fixture can replace one process only, and only before its
+    /// controller exists. Shipping identity and capability policy remain `AgentKind`'s job.
+    private var fixtureLaunchPlanProviders: [SessionID: AgentLaunchPlanProvider] = [:]
+#endif
+
     /// Live conversation controllers, for sessions Threading renders itself.
     ///
     /// Kept separate from `controllers` rather than behind a shared protocol: the two drive
@@ -51,13 +59,41 @@ final class AgentRuntime {
             return existing
         }
 
+#if DEBUG
+        let fixtureLaunchPlanProvider = fixtureLaunchPlanProviders[agentSession.id]
+#else
+        let fixtureLaunchPlanProvider: AgentLaunchPlanProvider? = nil
+#endif
         let controller = AgentSessionViewController(
             agentSession: agentSession,
-            subagentState: subagentState(for: agentSession.id)
+            subagentState: subagentState(for: agentSession.id),
+            launchPlanProvider: fixtureLaunchPlanProvider
         )
         controllers[agentSession.id] = controller
         return controller
     }
+
+#if DEBUG
+    /// Installs a deterministic process for one not-yet-materialized session.
+    ///
+    /// Returning false instead of replacing a live controller keeps the seam from changing the
+    /// meaning of an already-running session halfway through a test.
+    @discardableResult
+    func installFixtureLaunchPlan(
+        for sessionID: SessionID,
+        provider: @escaping AgentLaunchPlanProvider
+    ) -> Bool {
+        guard controllers[sessionID] == nil, conversations[sessionID] == nil else {
+            return false
+        }
+        fixtureLaunchPlanProviders[sessionID] = provider
+        return true
+    }
+
+    func removeFixtureLaunchPlan(for sessionID: SessionID) {
+        fixtureLaunchPlanProviders.removeValue(forKey: sessionID)
+    }
+#endif
 
     /// Whether the session's agent process is currently running.
     func isRunning(sessionID: SessionID) -> Bool {
@@ -429,6 +465,9 @@ final class AgentRuntime {
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID) {
+#if DEBUG
+        fixtureLaunchPlanProviders.removeValue(forKey: sessionID)
+#endif
         // No notification exists for a discarded controller, so the mirror is told explicitly:
         // a remote watcher must learn the session ended rather than wait on a dead socket.
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
@@ -461,6 +500,9 @@ final class AgentRuntime {
 
     /// Tears down every live session, used on application exit.
     func terminateAll() {
+#if DEBUG
+        fixtureLaunchPlanProviders.removeAll()
+#endif
         for sessionID in controllers.keys {
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
             controllers[sessionID]?.terminate()

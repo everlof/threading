@@ -19,10 +19,17 @@ Five guards keep it honest:
   caused. Suppression blocks a session *entering* `working`, but deliberately keeps an
   already-working session's timer alive — otherwise resizing mid-task would report it as
   finished.
-- A **scroll quiet period** (`noteScrollForwarded`). When a program tracks the mouse, wheel
-  events are forwarded to it (see the fork's `MacTerminalView.scrollWheel`) and it answers
-  each one by repainting its content — the same we-caused-it output as a resize, extended by
-  every event so a momentum gesture stays covered.
+- A **pointer quiet period** (`noteMouseReportForwarded`). When a program tracks the mouse, the
+  wheel *and the pointer itself* are forwarded to it (see the fork's `MacTerminalView.scrollWheel`
+  and `mouseMoved`) and it answers each report by repainting — the same we-caused-it output as a
+  resize, extended by every event so a momentum gesture or a pointer sweep stays covered.
+  Motion is the loud half: Claude Code turns on any-event tracking (`\e[?1003h`, pinned by
+  `TerminalThemeBoundaryTests`), so moving the pointer across the terminal reports every cell it
+  crosses and the CLI redraws the row under each one — a few cells of travel is already over the
+  byte threshold. Before this covered motion, moving the mouse over a *finished* turn started
+  the spinner, and on a session that reports its own turns it did the more specific damage of
+  looking like the burst below: a hover highlight read as the user having answered a question
+  where they stood.
 - An **unattended-launch grace** (`noteUnattendedLaunch`). The startup relaunch (see
   [`sessions.md`](sessions.md)) boots sessions with nobody looking, where every earlier
   launch was a selection — so the tracker could assume boot output happens on screen, where
@@ -38,6 +45,16 @@ Five guards keep it honest:
 `needsAttention` is only raised when work finishes in a session that is *not* on screen;
 `AgentRuntime.setVisibleSession` tracks which that is. A terminal bell raises it directly.
 
+**`limitReached` is the one state nothing here can infer.** A provider that refuses a turn over a
+rate limit raises no hook — no turn began, none ended — and the CLI answers by printing a sentence
+into its TUI, which this file's machinery sees as bytes and reads as work. The state is raised
+from the session's own transcript instead, and everything about it — the reader, the tracker's
+`limitPark`, the mark, and what may and may not lower it — lives in
+[`limit-recovery.md`](limit-recovery.md). What belongs here is the boundary: it is the only
+activity in this vocabulary that is not derived from output, hooks or visibility, and the only one
+that is *evidence-cleared* rather than guess-cleared — being looked at lowers `awaitsUser` and
+deliberately does not lower this.
+
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
@@ -48,14 +65,16 @@ pretend that its repaint traffic has Claude/Codex's structured turn semantics.
 **An agent that reports its own turns is believed instead.** All of the above is a proxy, and
 the guards exist because it cannot tell thinking from repainting. When
 `AppSettings.reportsClaudeLifecycleEvents` is on, `AgentLauncher.claudeCommand` writes a
-per-session `--settings` file for *terminal* sessions too — lifecycle hooks only, no
-`PreToolUse`, because a terminal session raises the CLI's own permission prompt and intercepting
-it would replace a working prompt with a second one. `UserPromptSubmit`, `Stop`, `Notification`,
-`SessionStart`, `SubagentStart`, and
+per-session `--settings` file for *terminal* sessions too — lifecycle hooks only, and no
+*brokering* `PreToolUse`, because a terminal session raises the CLI's own permission prompt and
+intercepting it would replace a working prompt with a second one. `UserPromptSubmit`, `Stop`,
+`Notification`, `SessionStart`, `SubagentStart`, and
 `SubagentStop` curl back to the listener
 (`MCPDefaults.lifecyclePathPrefix`), and `HookLifecycleRelay` hands each report to the session's
 tracker. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
-carrying the prompt text.
+carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, observational*
+`PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
+'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
 
 Reporting is on by default to preserve the richer terminal state, but it is observational and
 optional. Off with no Remote Control override means no Claude settings file at all; off with an
@@ -155,6 +174,67 @@ Three consequences worth knowing before changing any of it:
   installed extension already switches on, so both map to `needs-attention` rather than handing
   every extension a value it has no branch for.
 
+**A runtime's own "I am waiting" is late, vague and losable — so the tools that ask are named
+instead.** The split above says a question inside an open turn is `awaitingUser`, and for a whole
+release the sidebar still spun a loader at sessions that had stopped dead on a question. Three
+things had to be true at once, and they were:
+
+- **`Stop` never fires.** `AskUserQuestion` is a tool call *inside* the turn, so the turn really
+  is open, and `settle()` reporting `working` was correct about the only fact it held.
+- **The output heuristic is off.** The session latched `reportsOwnActivity` on its first hook, by
+  design — so twenty seconds of a silent PTY no longer end anything.
+- **The one signal left arrives late, if at all.** Claude reports a question through
+  `Notification`, and in CLI 2.1.222 that notice is fired on a 6-second poll gated on
+  `Date.now() - lastUserActivity >= 6000` — the *keyboard*, not the agent. Reading the question
+  or arrowing through its options resets the clock, so the report a user is most likely to be in
+  front of is the one that never comes. The bell would not have covered it either: Threading sets
+  `TERM_PROGRAM=Threading`, which resolves Claude's notification channel to `no_method_available`,
+  so nothing rings.
+
+Measured by driving a real 2.1.222 through a PTY with every hook logging its payload. A question
+left open produced **one** hook — `PreToolUse`, `AskUserQuestion`, at the moment it was called —
+then nothing for as long as it stood, with `Notification` arriving late and typed
+`permission_prompt`. Answering produced `PostToolUse` carrying the *same* `tool_use_id` as the
+`PreToolUse`, and only then `Stop`. Both halves of the fix below are that trace.
+
+And even when the notice did arrive, the session being *looked at* lowered it — correctly, for
+what that flag means. `Notification` cannot say what it is waiting for, so answering a CLI's own
+permission prompt, which happens in the terminal and raises no hook, is only visible as "the user
+is here" or "output resumed". Both rules then fire on a question: the box repaints when it is
+drawn and again on every arrow key.
+
+So a second, narrower fact was added rather than weakening the first. `TurnBlockingTools` names
+the tools whose *result is the user's answer* — `AskUserQuestion` and `ExitPlanMode` for Claude —
+and `blockingAskOpened`/`blockingAskClosed` report the call itself through `PreToolUse` and
+`PostToolUse`. That fact is exact, so it obeys neither of the guesses: `openAsks` is settled ahead
+of `awaitsUser` and is cleared only by the call ending. Four things about it are load-bearing:
+
+- **It is observational, on the hook a broker also uses.** A terminal session raises the CLI's own
+  permission prompt, and this must not become a second one — so the entry is scoped by a
+  `matcher` to the asking tools, points at the lifecycle endpoint (which answers `.accepted`
+  before it parses), and ends in `>/dev/null 2>&1 || true`. Claude reads a `PreToolUse` hook's
+  exit status as a permission decision; the `|| true` is what keeps this one silent. A native
+  session brokers on the same key, so `appendHooks` **accumulates** entries per hook name — the
+  assignment it replaced would have dropped one of the two. Both surfaces register the pair, like
+  every other lifecycle hook: `applyLifecycle`'s tracker guard stays the single place that decides
+  who consumes a report, and a rendered conversation — which reads the tool out of its own stream
+  and has no tracker — drops these exactly as it already drops `Stop`.
+- **`PostToolUseFailure` is registered beside `PostToolUse`.** Escape is reported as an interrupt
+  and fires nothing else; a session listening only for the answer would keep the blocked mark for
+  the rest of the turn while the agent worked on. The two hooks carry the same `tool_use_id` as
+  the `PreToolUse` that opened the ask, which is what closes an ask with its own call rather than
+  with the next tool of the same name.
+- **The turn boundaries still outrank it.** `Stop` and the next `UserPromptSubmit` clear
+  `openAsks`, so a lost close ends with its turn instead of stranding the mark. Duplicate and
+  orphaned reports converge because it is a set: inserting twice is one entry, removing something
+  absent is nothing.
+- **A runtime that names no asking tool installs no hook.** `HookRegistration.matched` returns
+  `.unsupported` for an empty tool list rather than writing an unmatched entry — one would report
+  every `Read` and every `Bash` as a turn stopped on the user. Codex 0.144.6, Grok and OpenCode
+  name none today: each approves a *command* mid-work, which is the other kind of ask. Adding one
+  is a line in `TurnBlockingTools` and its hook names in `codexRegistration`; nothing downstream
+  needs to learn about it.
+
 **A `Stop` is the end of a turn, not the end of the session — and the agent says which.** An
 agent that backgrounds a test run ends its turn at once ("queued; will report when it lands"),
 and the CLI wakes it a minute later by submitting the task's completion as a prompt of its own.
@@ -186,25 +266,52 @@ in-flight work keeps the session out of `idle` — is right for a test run and w
 server: a process that lives for hours would hold *every* later turn open behind it and silence
 the session for as long as it ran. But "will this speak again" is true of everything in the
 list, because both CLIs wake a session when a background task ends, so it separates nothing.
-What separates them is **when the work appeared**:
+Two facts do, and **the kind is asked first**:
 
-- Work the agent started **in the turn that just ended** is the reason that turn ended early.
-  That is the pause.
-- Work **carried over** from an earlier turn is parked. The turn really did hand back.
+- **Delegated work always pauses.** A subagent or a workflow is bounded by construction and its
+  result re-enters the conversation, so a turn that ends while one runs has handed nothing to
+  the user — however many turns ago it was started.
+- **Standing work pauses only when it is new.** A shell or a monitor may stand indefinitely and
+  nothing in the payload says which. So work the agent started **in the turn that just ended**
+  is the reason that turn ended early, and that is the pause; work **carried over** from an
+  earlier turn is parked, and the turn really did hand back.
 
-So the ledger keeps the ids that were already in flight at the previous boundary, and only a
-boundary that brings something new pauses the session. Both surfaces carry identities rather
-than counts for exactly this — `background_tasks[].id` on the hook, `tasks[].task_id` on the
-stream — and both hold their own ledger, reset with the process. Traced against the transcript
-that started this: three consecutive turns each queued a *new* task, so all three paused
-correctly; a fourth turn with only the old task still running would not have.
+So the ledger keeps the ids of the *standing* work that was already in flight at the previous
+boundary, and a boundary pauses the session when it carries delegated work or brings new
+standing work. Both surfaces carry identities and kinds for exactly this —
+`background_tasks[].id`/`type` on the hook, `tasks[].task_id`/`task_type` on the stream — and
+both hold their own ledger, reset with the process. Traced against the transcript that started
+this: three consecutive turns each queued a *new* task, so all three paused correctly; a fourth
+turn with only the old task still running would not have.
+
+**Age alone was the first rule, and it went blind on exactly the work it most needed to see.** A
+background subagent is in flight at every boundary until it finishes, so by age it is new once
+and carried over forever after: the session showed `working` for the first turn after the child
+was spawned and `idle` for every turn after that, while the child worked on. Reported as "no
+progress circle, but a sub agent working", and measured on CLI 2.1.224 in a session that spent
+13 minutes that way — `turn_duration` records at 20:04, 20:12, 20:15 and 20:17 each carrying
+`pendingBackgroundAgentCount: 1`, the same child in `background_tasks` at all four Stops, and
+only the first raising the mark. It is worse off screen, where the same boundary also hands the
+session an unread mark and a *Finished its turn* notification for a turn whose child has not
+reported. The app knew the whole time: `SubagentSessionState` held that child at `working` from
+its `SubagentStart`, and by design that never reaches the tracker.
+
+`BackgroundWorkKind` reads the kind, and **it knows both spellings** because the two surfaces
+disagree: the hook sends the friendly label from Claude's own schema (`subagent`, `shell`) and
+the stream sends the raw discriminant (`local_agent`, `local_bash`). That is the same thing
+`ToolIdentity` does for tool names — the behaviour is ours, the spelling is the provider's.
+Anything unrecognised reads as standing, which is the safe direction: a kind wrongly called
+delegated holds `working` for as long as it runs, while one wrongly left standing is judged by
+age, exactly as everything was before kinds were read at all. So a task type a later CLI invents
+behaves no worse than it does today.
 
 Classifying the command instead (`npm run dev` is long-lived, `npm test` is not) was the
 obvious alternative and is worse. It is a name-matching guess where an exact fact is already in
 the payload, it covers only `shell` tasks and not subagents or monitors, and being wrong in the
-long-lived direction re-opens the very bug this closes.
+long-lived direction re-opens the very bug this closes. Reading the task *type* is not that
+guess: it is the same payload, one key over from the id.
 
-What it still holds open is a turn that starts long-lived work and is never followed by another
+What it still holds open is a turn that starts standing work and is never followed by another
 turn. Nothing further happens in that session to notify about, so what remains is a working
 mark beside a session that does in fact still have something running — which is what the CLI's
 own footer says for exactly as long.
@@ -222,6 +329,16 @@ spend the ledger's judgement on a turn that never ended.
 `--settings` **layers rather than replaces** (measured: with one `SessionStart` in the file, two
 `SessionStart` hooks fire — ours and the user's own), so this does not disable whatever the user
 already has wired into their agents.
+
+**The activity states also feed the composer's ambient beam.** `AgentWorkloadMonitor`
+(started from the real app startup like the alert center below) recomputes one aggregate on
+every `SessionActivityDidChange` — how many sessions are in `.working`, and whether any of
+them runs at the top of its provider's announced reasoning ladder — and posts
+`AgentWorkloadDidChange` only on a real change. `.working` alone counts: a session waiting on
+the user is not work in progress, and counting it would hold the beam lit for exactly the
+sessions where the user is the reason nothing is happening. The drawing side is
+`AgentActivityBeamView`; see [`design-system.md`](design-system.md) and
+[`dependencies.md`](dependencies.md).
 
 **The activity states also feed macOS notifications** (`AttentionAlerts.swift`), and the
 split above is what makes them worth having: `awaitingUser` posts with sound (a turn stopped
@@ -304,6 +421,18 @@ hooks, and the payload is Claude's apart from the spelling — `session_id`, `tu
   `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
   `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a
   nicety.
+- **The pre-rename marker is ours too, but a known old command is not rewritten.** The product
+  rename changed the launch environment from `SKALMAN_*` to `THREADING_*` and the marker from
+  `# skalman-lifecycle` to `# threading-lifecycle`. Codex trusts the hash of the command text,
+  so replacing a working old command would revoke the approval needed to fix the activity bug.
+  Launches with the integration enabled export both vocabularies with identical values instead;
+  the installer recognises the exact commands the old release generated and leaves them
+  byte-for-byte intact. An unknown
+  command carrying the old marker is still replaced, and uninstall removes either generation.
+  `AppSettings` carries the old install opt-in only when the current domain has no choice. It
+  also carries an old trust-bypass `true` while installation remains enabled: that is the same
+  explicit launch posture the user chose before the bundle-id rename, not a new default. Any
+  current value wins.
 - **The command guards on the token** (`[ -n "$THREADING_SESSION_TOKEN" ]`), because the file is
   read by every Codex run under that account, including the ones the user starts themselves.
 
@@ -312,6 +441,8 @@ Both halves are opt-in and separate (`AppSettings.installsCodexHooks`,
 file the user owns, while `--dangerously-bypass-hook-trust` un-gates *every* hook in that folder
 rather than only ours — and an agent can write to `hooks.json`. The safe path is one manual
 approval in the Codex TUI, which the stable-text rule is what makes viable.
+The hosted XCTest process never runs the installer against a discovered account: launch-plan
+tests run inside the shipping app and otherwise inherit the developer's real `CODEX_HOME`.
 
 `SessionStart` also **replaces `CodexSessionDiscovery`'s job**: it hands over `session_id`
 already attributed by the token in the URL, where discovery watches the rollout directory and
@@ -443,60 +574,44 @@ component's effects and renders into a `<Text>` in that tree, so a native conver
 runs `--print --output-format stream-json` and mounts no TUI — never invokes the command at all.
 (The guards inside the runner itself are `disableAllHooks` and workspace trust; the print-mode
 answer comes from the component never mounting, not from a check in the runner.) So a terminal
-pane may already be showing the user facts, while a native pane never is. `ClaudeStatusLineCoverage` answers which facts those are, so the session's status
-card (see [`git.md`](git.md)) can add the rest instead of printing them twice.
+pane may already be showing the user facts a native pane never is.
 
-**Coverage cannot be read off the configuration.** The command is the user's own program with the
-user's own authority. The status line on the machine this was written against ignored the
-`total_lines_added` and `rate_limits` handed to it and printed `+1699 -331` and `5h 0%` instead,
-because it shells out to `git -C "$cwd" diff --numstat` and reads usage from its own cache and a
-`curl`. Its output is not a function of its input, so the only honest way to learn what it prints
-is to run it and read the result. Verified by feeding it a payload whose numbers it contradicted.
+**Threading does not ask what the line prints, and that is the current decision rather than an
+omission.** `ClaudeStatusLineCoverage` used to run the account's own command with a truthful
+payload and search the output for values the app already held, so the session's status card
+(see [`git.md`](git.md)) could add only the facts the line left out. It worked, and it was not
+worth what it cost: a subprocess per unseen command on a surface that refreshes on every session
+switch, a `UserDefaults` cache keyed on the command and the CLI version, a payload document kept
+in step with the CLI's schema, and a match rule whose *only* failure direction was hiding a fact
+the user had asked to see — a script that abbreviated "Opus 5" past recognition duplicated it,
+and one that printed something unrelated containing the branch name erased the branch. What it
+bought was one fact appearing twice inside one pane. **The card now shows every fact it can
+extract, always**, and duplication is accepted as the cheap outcome. `ClaudeStatusLineSettings`
+is what is left: settings resolution, which reads files and runs nothing.
 
-**The payload carries only truth.** Every field is either a real value or absent — `cost` and
-`rate_limits` are omitted rather than zeroed, because Threading cannot observe the former and must
-not invent the latter. A status line is commonly a *caching bridge*: the one here writes
-`~/Library/Application Support/Claudex/ClaudeStatus/<profile>.json`, which is the file
-`ClaudeUsageCache` reads back for the account's usage. An earlier design probed by substituting
-sentinel values to see which were echoed; against a bridge that would have cached Threading's own
-fiction and fed it back as the account's usage. Passing only truth makes the run
-indistinguishable from Claude's, which is also why it needs no consent the launch did not already
-have.
+Two findings from that work are worth keeping, because they constrain anyone who reaches for a
+probe again. **Coverage could not be read off the configuration** — the command is the user's own
+program with the user's own authority, and the line on the machine this was written against
+ignored the `total_lines_added` and `rate_limits` handed to it, printing `+1699 -331` and `5h 0%`
+from its own `git diff --numstat` and `curl` instead. And **a status line is commonly a caching
+bridge**: the one here writes `~/Library/Application Support/Claudex/ClaudeStatus/<profile>.json`,
+which is the file `ClaudeUsageCache` reads back for the account's usage. An early design probed by
+substituting sentinel values to see which were echoed; against a bridge that would have cached
+Threading's own fiction and fed it back as the account's usage. Anything that runs the user's
+status line passes only truth.
 
-The rule was then checked against that bridge rather than left as prudence: its `writeCache` opens
-with `guard let rateLimits = status.rateLimits, rateLimits.containsValue else { return }`, so a
-payload with no `rate_limits` cannot touch the usage cache. It does append a
-`<profile>.heartbeat.json` entry recording `rate_limits_present: false` — a separate file nothing
-here reads, and the only trace a coverage run leaves.
-
-**Coverage is a search for values we already hold, not a parse.** If the output contains "Opus 5"
-the model is covered. A script that abbreviates it to something unrecognised reads as *not*
-covered and the card shows the model a second time — duplicating a fact is the safe direction for
-a guess, and hiding one the user asked for is not. Two consequences worth keeping: fast mode is
-only ever recognised when it is **on**, because "off" and "not shown" are the same absence; and
-the line counts are matched as the `+N`/`N` pair a numstat summary prints, so a token total of
-`1699` cannot pass for a diff stat.
-
-**The line can be suppressed instead of complemented** (`suppressesClaudeStatusLine`, off by
-default, on the General page beside the hook switches). The override rides the same per-session
-`--settings` file as the hooks, which was *verified* to outrank every writable layer for this
-key — and it must be shaped `type: "command"`, because `type: "none"` fails the CLI's schema
-and a failing settings file is skipped **whole**, permission hooks included. The account's own
-command keeps running inside `ClaudeStatusLineCoverage.silencedCommand`'s wrapper with both
-streams discarded: these commands are commonly the caching bridges described above, and hiding
-the line must not starve what they feed (verified — the wrapped bridge still wrote its
-heartbeat while printing nothing). With suppression on, the status card skips the coverage run
-entirely and shows every fact: there is no line to defer to, and the coverage cache would be
-describing one the user can no longer see. Terminal launches only — a native pane never mounts
-the component, so its settings file says nothing about it.
+**The line can be suppressed** (`suppressesClaudeStatusLine`, off by default, on the General page
+beside the hook switches). The override rides the same per-session `--settings` file as the hooks,
+which was *verified* to outrank every writable layer for this key — and it must be shaped
+`type: "command"`, because `type: "none"` fails the CLI's schema and a failing settings file is
+skipped **whole**, permission hooks included. The account's own command keeps running inside
+`ClaudeStatusLineSettings.silencedCommand`'s wrapper with both streams discarded: these commands
+are commonly the caching bridges described above, and hiding the line must not starve what they
+feed (verified — the wrapped bridge still wrote its heartbeat while printing nothing). Terminal
+launches only — a native pane never mounts the component, so its settings file says nothing
+about it.
 
 Precedence follows the CLI's, which for this key is **not** a merge: a managed policy replaces the
 user's `statusLine` outright, and below that `.claude/settings.local.json`,
-`.claude/settings.json` and the account's `settings.json` override most-specific-first. The answer
-is cached against the resolved command and the CLI version rather than against the account,
-because coverage is a property of the program — two accounts pointing at one script share it, and
-a newer CLI may hand that script a field it starts printing.
-
-The same stdin rule as the hooks above applies in reverse here: the payload is written and the
-handle **closed** before the output pipe is drained, because these commands open with
-`input=$(cat)` and write nothing until they have EOF.
+`.claude/settings.json` and the account's `settings.json` override most-specific-first. Only
+`type: "command"` resolves; any other shape draws nothing, so there is nothing to silence.

@@ -78,6 +78,14 @@ final class ProjectTerminalViewController: NSViewController {
     }
 
     func startIfNeeded() {
+        // A standalone terminal is a shell, not an agent, and recovery starts neither: the pane
+        // opens nothing, and the same guard the two agent surfaces carry belongs here so a
+        // terminal cannot be the one surface that came up.
+        guard !RecoveryMode.isActive else {
+            RecoveryMode.refuse("a project terminal start")
+            return
+        }
+
         guard !session.isRunning,
               let terminal = ProjectStore.shared.terminal(withID: terminalID),
               let home = ProjectStore.shared.homeProject(forTerminalID: terminalID)

@@ -6,16 +6,37 @@ import AppKit
 /// Running-versus-dormant is conveyed by the row's text colour rather than a permanent dot,
 /// so the indicator is reserved for states that actually warrant attention.
 ///
-/// **The two marks are ranked by what they cost.** A session blocked on a question has stopped
+/// **The two dots are ranked by what they cost.** A session blocked on a question has stopped
 /// until it is answered, so it takes the filled warning dot; one that merely finished off screen
 /// is unread, not stuck, so it takes a hollow accent ring. Filled-versus-hollow carries the
 /// distinction on its own, which is what keeps it legible under Differentiate Without Colour.
+///
+/// **A stop the user cannot answer leaves that ranking entirely** and takes a triangle. A session
+/// refused for a spent usage limit is not waiting on anybody: no dot fits it, and the state it
+/// used to wear instead — a spinner, because no hook fires for a refused turn — said the opposite
+/// of what had happened for as long as the session was left alone. See
+/// [`limit-recovery.md`](../../../../docs/architecture/limit-recovery.md).
 final class SessionStatusIndicator: NSView {
 
     // MARK: - Properties
 
     private let spinner = ThemedSpinner()
     private let attentionDot = NSView()
+    private let limitMark = ThemedWarningMark()
+
+    /// A ground the containing row paints over the sidebar surface.
+    ///
+    /// Status colours are meaningful on the ordinary row, but an emphasized selection replaces
+    /// that ground with the accent itself. The marks keep their distinct silhouettes and take the
+    /// selection's legible ink while they are inside it.
+    var hostGround: InkSource? {
+        didSet {
+            guard hostGround != oldValue else { return }
+            spinner.hostGround = hostGround
+            limitMark.hostGround = hostGround
+            applyDotSurface()
+        }
+    }
 
     /// Which of the two marks the dot is currently drawn as.
     private enum DotStyle {
@@ -61,8 +82,13 @@ final class SessionStatusIndicator: NSView {
         attentionDot.setAccessibilityRole(.staticText)
         attentionDot.setAccessibilityLabel(L10n.string("Session needs attention"))
 
+        limitMark.isHidden = true
+        limitMark.translatesAutoresizingMaskIntoConstraints = false
+        limitMark.setAccessibilityLabel(L10n.string("Session stopped at its usage limit"))
+
         addSubview(spinner)
         addSubview(attentionDot)
+        addSubview(limitMark)
 
         NSLayoutConstraint.activate([
             spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -73,7 +99,12 @@ final class SessionStatusIndicator: NSView {
             attentionDot.centerXAnchor.constraint(equalTo: centerXAnchor),
             attentionDot.centerYAnchor.constraint(equalTo: centerYAnchor),
             attentionDot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize),
-            attentionDot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize)
+            attentionDot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize),
+
+            limitMark.centerXAnchor.constraint(equalTo: centerXAnchor),
+            limitMark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            limitMark.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
+            limitMark.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size)
         ])
     }
 
@@ -93,17 +124,27 @@ final class SessionStatusIndicator: NSView {
         // "work is pending" without adding a second competing status glyph to the row.
         if isLoading {
             attentionDot.isHidden = true
+            limitMark.isHidden = true
             spinner.setAccessibilityLabel(L10n.string("Loading session"))
             spinner.isAnimating = true
             return
         }
 
         spinner.setAccessibilityLabel(L10n.string("Session working"))
+        limitMark.isHidden = activity != .limitReached
 
         switch activity {
         case .working:
             attentionDot.isHidden = true
             spinner.isAnimating = true
+
+        case .limitReached:
+            // No fade. The other two marks are faded in because they mean something *just*
+            // happened and the eye should catch it; this one is read minutes or hours later,
+            // when the user comes back wondering why a session went quiet.
+            spinner.isAnimating = false
+            attentionDot.isHidden = true
+            limitMark.alphaValue = 1
 
         case .awaitingUser, .needsAttention:
             spinner.isAnimating = false
@@ -130,15 +171,19 @@ final class SessionStatusIndicator: NSView {
     /// and the mark would keep the previous theme's colour until the session changed state.
     private func applyDotSurface() {
         let radius = SurfaceRadius.fixed(StatusIndicatorDefaults.dotSize / 2)
+        let hostInk = hostGround?.ink.label
 
         switch dotStyle {
         case .blocked:
-            attentionDot.applySurface(fill: Design.Status.warning, radius: radius)
+            attentionDot.applySurface(
+                fill: hostInk ?? Design.Status.warning,
+                radius: radius
+            )
         case .unread:
             attentionDot.applySurface(
                 fill: .clear,
                 radius: radius,
-                border: Design.Surface.accent
+                border: hostInk ?? Design.Surface.accent
             )
         }
     }

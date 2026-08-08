@@ -22,8 +22,23 @@ final class SessionComposerRenderTests: XCTestCase {
         }
     }
 
+    /// Which runtime a new session starts on is a *user's* choice, and `AppSettings` is a
+    /// behavioural store — under a hosted test bundle that is the developer's own
+    /// `UserDefaults.standard`. A test that picks an agent to assert what its chips offer has to
+    /// put the old one back, or the app they run next opens on a runtime they never chose.
+    private var savedAgentKind: AgentKind?
+
+    override func setUp() {
+        super.setUp()
+        savedAgentKind = AppSettings.shared.defaultAgentKind
+    }
+
     override func tearDown() {
         AppThemePalette.set(.system)
+        if let savedAgentKind {
+            AppSettings.shared.defaultAgentKind = savedAgentKind
+        }
+        savedAgentKind = nil
         super.tearDown()
     }
 
@@ -89,19 +104,22 @@ final class SessionComposerRenderTests: XCTestCase {
         let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
         let mode = try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
         let effort = try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
+        let speed = try XCTUnwrap(chip(named: "composer.session-start.speed", in: composer.view))
         let surface = try XCTUnwrap(chip(named: "composer.session-start.surface", in: composer.view))
         let usage = try XCTUnwrap(usageLabel(in: composer.view))
 
         model.configure(symbolName: "cpu", title: "Fable 5 · 1M")
         mode.configure(symbolName: "hand.raised", title: "Ask")
         effort.configure(symbolName: "brain", title: "Extra High")
+        speed.configure(symbolName: "bolt.fill", title: "Standard")
+        speed.isHidden = false
         surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Terminal")
         usage.stringValue = "5h 43% · 7d 73%"
         usage.isHidden = false
         host.layoutSubtreeIfNeeded()
 
         // Every one of them is drawn inside the box rather than on the pane beside it.
-        for control in [model, mode, effort, surface, usage] as [NSView] {
+        for control in [model, mode, effort, speed, surface, usage] as [NSView] {
             XCTAssertTrue(
                 control.isDescendant(of: prompt),
                 "\(Swift.type(of: control)) stayed outside the box it belongs to"
@@ -116,12 +134,13 @@ final class SessionComposerRenderTests: XCTestCase {
 
         XCTAssertLessThan(inBox(model).maxX, inBox(mode).minX, "model leads the row, then mode")
         XCTAssertLessThan(inBox(mode).maxX, inBox(effort).minX, "mode leads effort")
-        XCTAssertLessThan(inBox(effort).maxX, inBox(usage).minX)
+        XCTAssertLessThan(inBox(effort).maxX, inBox(speed).minX, "effort leads speed")
+        XCTAssertLessThan(inBox(speed).maxX, inBox(usage).minX)
         XCTAssertLessThan(inBox(usage).maxX, inBox(surface).minX, "the reading precedes the surface")
 
         // The trailing group reaches the box's own edge rather than trailing the leading one.
         XCTAssertGreaterThan(
-            inBox(usage).minX - inBox(effort).maxX,
+            inBox(usage).minX - inBox(speed).maxX,
             inBox(mode).minX - inBox(model).maxX,
             "nothing pushed the reading and the surface to the trailing edge"
         )
@@ -130,6 +149,71 @@ final class SessionComposerRenderTests: XCTestCase {
             Design.Spacing.large,
             "the row has to finish on the box's own edge"
         )
+    }
+
+    /// The row the composer *configures* is the row the user *sees*.
+    ///
+    /// The test above hands the chips their titles and then asks where they sit, which is a
+    /// question about arrangement and answers nothing about whether the arrangement is on screen:
+    /// for one commit (`d58252e`, which moved the send out of the box and back onto a button
+    /// under it) the whole row was hidden, and every assertion up there went on passing against
+    /// five controls nobody could see. This one goes through `show`, the way the pane reaches
+    /// this screen, and asks the one thing that was false.
+    ///
+    /// Mode and surface only. What the machine can offer of the other three depends on which
+    /// logins exist and which models a provider publishes; these two are decided by
+    /// `AgentKind.capabilities` and nothing else, so they are the pair a fixture can state.
+    func testTheChoicesTheRuntimeOffersAreDrawnAndNotMerelyConfigured() throws {
+        let offered = ["composer.session-start.mode", "composer.session-start.surface"]
+
+        AppSettings.shared.defaultAgentKind = .claude
+        let composer = SessionComposerViewController()
+        let offering = host(composer, size: Render.tall)
+        composer.show(projectID: nil)
+        offering.layoutSubtreeIfNeeded()
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        for identifier in offered {
+            let control = try XCTUnwrap(
+                chip(named: identifier, in: composer.view),
+                "\(identifier) is not in the composer at all"
+            )
+            XCTAssertFalse(
+                control.isHiddenOrHasHiddenAncestor,
+                "\(identifier) names a choice this runtime offers and was never drawn"
+            )
+            // A stack that detaches hidden views takes the row out of the hierarchy along with
+            // everything on it, so the box loses the chip as an ancestor too.
+            XCTAssertTrue(
+                control.isDescendant(of: prompt),
+                "\(identifier) was detached from the box it belongs in"
+            )
+
+            let frame = control.convert(control.bounds, to: prompt)
+            XCTAssertGreaterThan(frame.width, 0, "\(identifier) was laid out with nothing to draw")
+            XCTAssertTrue(
+                prompt.bounds.insetBy(dx: -1, dy: -1).contains(frame),
+                "\(identifier) was placed outside the box's own bounds"
+            )
+        }
+
+        // And the same question of a runtime that offers neither, or the assertion above would
+        // hold just as well for a row that shows everything unconditionally — which is the other
+        // way for this screen to be wrong. A fresh composer, because `show` re-reads the default
+        // agent only when it is being pointed somewhere new.
+        AppSettings.shared.defaultAgentKind = .openCode
+        let plain = SessionComposerViewController()
+        let plainHost = host(plain, size: Render.tall)
+        plain.show(projectID: nil)
+        plainHost.layoutSubtreeIfNeeded()
+
+        for identifier in offered {
+            let control = try XCTUnwrap(chip(named: identifier, in: plain.view))
+            XCTAssertTrue(
+                control.isHiddenOrHasHiddenAncestor,
+                "\(identifier) offered a choice this runtime does not have"
+            )
+        }
     }
 
     /// The chip row above the box answers where and who — two questions, two chips. It held
@@ -161,6 +245,7 @@ final class SessionComposerRenderTests: XCTestCase {
                 "composer.session-start.model",
                 "composer.session-start.mode",
                 "composer.session-start.effort",
+                "composer.session-start.speed",
                 "composer.session-start.surface"
             ],
             "what the session runs with belongs on the box's own row"
@@ -203,6 +288,68 @@ final class SessionComposerRenderTests: XCTestCase {
         )
     }
 
+    /// One list, one decision. The identity menu was the selected runtime's logins, a separator,
+    /// then the other runtimes — so reaching another runtime's login cost two passes through the
+    /// menu with a wrong-account moment in between. Every login of every runtime is now one row
+    /// deep, and choosing one answers both halves at once.
+    ///
+    /// Asserted on the menu's shape rather than on named rows: logins are discovered from the
+    /// developer's own config directories, so which accounts exist is the machine's business.
+    /// What must hold on any machine is that every runtime is reachable, no row is a section
+    /// heading, and each one carries a mark saying which runtime it belongs to.
+    func testTheIdentityMenuIsOneFlatListOfEveryRuntimesLogins() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        composer.show(projectID: nil)
+
+        let chip = try XCTUnwrap(chip(named: "composer.session-start.identity", in: composer.view))
+        let presentation = try XCTUnwrap(chip.preparedPresentation())
+
+        XCTAssertFalse(
+            presentation.entries.contains { if case .separator = $0 { return true } else { return false } },
+            "a separator would restore the sections this menu exists to collapse"
+        )
+
+        let items = presentation.entries.compactMap(\.item)
+        XCTAssertGreaterThanOrEqual(
+            items.count,
+            AgentKind.allCases.count,
+            "every runtime contributes at least one row — its logins, or itself"
+        )
+        XCTAssertTrue(
+            items.allSatisfy { $0.image != nil },
+            "a row in a cross-runtime list with no mark is a login with no provider"
+        )
+        XCTAssertTrue(
+            items.allSatisfy { item in
+                AgentKind.allCases.contains { kind in
+                    item.title == kind.displayName
+                        || item.subtitle?.hasPrefix(kind.displayName) == true
+                }
+            },
+            """
+            every row names its runtime in words as well as drawing it — the same person's \
+            logins on two runtimes are often named the same thing, and a 14pt silhouette is \
+            the only other thing telling them apart
+            """
+        )
+        XCTAssertEqual(
+            items.filter(\.isSelected).count,
+            1,
+            "exactly one row is who this session runs as"
+        )
+
+        // A runtime that offers no login is still reachable, by name.
+        for kind in AgentKind.allCases {
+            let accounts = kind.supportsAccounts ? AgentAccountDiscovery.accounts(for: kind) : []
+            guard accounts.isEmpty else { continue }
+            XCTAssertTrue(
+                items.contains { $0.title == kind.displayName },
+                "\(kind.displayName) has no logins and no row of its own — it is unreachable"
+            )
+        }
+    }
+
     /// The live chip, against a real checkout on disk: the repository leads, the branch
     /// follows, and the tooltip carries the folder the truncated title cannot.
     func testTheLocationChipReadsTheRepositoryThenTheCheckout() throws {
@@ -236,6 +383,219 @@ final class SessionComposerRenderTests: XCTestCase {
         composer.show(projectID: nil)
         XCTAssertEqual(chip.accessibilityTitle(), "Choose a project…")
         XCTAssertNil(chip.toolTip, "there is no folder to name yet")
+    }
+
+    /// Isolation is one explicit decision. Until it is made, none of the choices beneath it
+    /// exist in the draft hierarchy; turning it back off removes them again and sends nil over
+    /// the start boundary.
+    func testManagedWorkspaceSettingsExistOnlyWhileOptedIn() throws {
+        let sessionToolsWereEnabled = AppSettings.shared.isToolGroupEnabled(
+            MCPToolCatalog.session.id
+        )
+        AppSettings.shared.setToolGroup(MCPToolCatalog.session.id, enabled: true)
+        AppSettings.shared.defaultAgentKind = .claude
+        defer {
+            AppSettings.shared.setToolGroup(
+                MCPToolCatalog.session.id,
+                enabled: sessionToolsWereEnabled
+            )
+        }
+
+        let repository = try gitFixture(branch: "master")
+        defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: repository)
+        defer { store.removeProject(id: project.id) }
+
+        let composer = SessionComposerViewController()
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        let host = host(composer, size: Render.short)
+        composer.show(projectID: project.id)
+
+        let checkbox = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace"
+            } as? ThemedCheckbox
+        )
+        XCTAssertEqual(checkbox.state, .off)
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view),
+            "dependent settings must not remain in an ordinary draft's hierarchy"
+        )
+
+        XCTAssertTrue(checkbox.accessibilityPerformPress())
+        let delivery = try XCTUnwrap(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
+        XCTAssertEqual(delivery.accessibilityTitle(), "Finish: Merge and clean up")
+        XCTAssertNil(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace.publish"
+            },
+            "a repository without a supported forge should not offer publication settings"
+        )
+
+        composer.promptView.stringValue = "Build the isolated feature"
+        composer.startTapped()
+        XCTAssertEqual(recorder.managedWorkspacePlans.last!, ManagedWorkspacePlan())
+
+        // A failed start keeps the composer around, which is also the useful state for proving
+        // that switching the opt-in off removes the subordinate row again.
+        recorder.starts = false
+        XCTAssertTrue(checkbox.accessibilityPerformPress())
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
+        composer.promptView.stringValue = "Use the normal checkout"
+        composer.startTapped()
+        XCTAssertNil(recorder.managedWorkspacePlans.last!)
+    }
+
+    /// Review publication is a second, nested decision. Its mode replaces the incompatible
+    /// local-delivery choice only while selected, and neither control exists before isolation.
+    func testManagedWorkspacePublicationIsNestedAndOptIn() throws {
+        let sessionToolsWereEnabled = AppSettings.shared.isToolGroupEnabled(
+            MCPToolCatalog.session.id
+        )
+        AppSettings.shared.setToolGroup(MCPToolCatalog.session.id, enabled: true)
+        AppSettings.shared.defaultAgentKind = .claude
+        defer {
+            AppSettings.shared.setToolGroup(
+                MCPToolCatalog.session.id,
+                enabled: sessionToolsWereEnabled
+            )
+        }
+
+        let repository = try gitFixture(branch: "main")
+        defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
+        try """
+        [remote "origin"]
+            url = git@github.com:team/app.git
+
+        """.write(
+            to: repository.appendingPathComponent(".git/config"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: repository)
+        defer { store.removeProject(id: project.id) }
+
+        let composer = SessionComposerViewController()
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        _ = composer.view
+        composer.show(projectID: project.id)
+
+        let workspace = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace"
+            } as? ThemedCheckbox
+        )
+        XCTAssertNil(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace.publish"
+            }
+        )
+        XCTAssertTrue(workspace.accessibilityPerformPress())
+
+        let publish = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace.publish"
+            } as? ThemedCheckbox
+        )
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.publication", in: composer.view)
+        )
+        XCTAssertNotNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
+
+        XCTAssertTrue(publish.accessibilityPerformPress())
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view),
+            "remote publication and local merge are mutually exclusive outcomes"
+        )
+        let publication = try XCTUnwrap(
+            chip(named: "composer.session-start.managed-workspace.publication", in: composer.view)
+        )
+        XCTAssertEqual(publication.accessibilityTitle(), "Review: Draft pull request")
+        choose(titled: "Review: Ready pull request", on: publication)
+
+        composer.promptView.stringValue = "Publish the isolated feature"
+        composer.startTapped()
+        XCTAssertEqual(
+            recorder.managedWorkspacePlans.last!,
+            ManagedWorkspacePlan(publication: .ready)
+        )
+
+        XCTAssertTrue(publish.accessibilityPerformPress())
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.publication", in: composer.view)
+        )
+        XCTAssertNotNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
+    }
+
+    func testManagedWorkspaceOptInIsDisabledOutsideGit() throws {
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: fixtureFolder())
+        defer { store.removeProject(id: project.id) }
+
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        composer.show(projectID: project.id)
+
+        let checkbox = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace"
+            } as? ThemedCheckbox
+        )
+        XCTAssertFalse(checkbox.isEnabled)
+        XCTAssertEqual(checkbox.state, .off)
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
+    }
+
+    func testManagedWorkspaceOptInIsDisabledWithoutTheFinishHandshake() throws {
+        let sessionToolsWereEnabled = AppSettings.shared.isToolGroupEnabled(
+            MCPToolCatalog.session.id
+        )
+        AppSettings.shared.setToolGroup(MCPToolCatalog.session.id, enabled: true)
+        AppSettings.shared.defaultAgentKind = .openCode
+        defer {
+            AppSettings.shared.setToolGroup(
+                MCPToolCatalog.session.id,
+                enabled: sessionToolsWereEnabled
+            )
+        }
+
+        let repository = try gitFixture(branch: "master")
+        defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: repository)
+        defer { store.removeProject(id: project.id) }
+
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        composer.show(projectID: project.id)
+
+        let checkbox = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.managed-workspace"
+            } as? ThemedCheckbox
+        )
+        XCTAssertFalse(checkbox.isEnabled)
+        XCTAssertEqual(checkbox.state, .off)
+        XCTAssertNil(
+            chip(named: "composer.session-start.managed-workspace.delivery", in: composer.view)
+        )
     }
 
     /// One menu, two verbs, kept in two sections. Choosing a checkout routes *this* session and
@@ -316,42 +676,36 @@ final class SessionComposerRenderTests: XCTestCase {
     /// Who the session runs as: the logins of the agent it is on, then the other runtimes. The
     /// selected agent has no row — the chip is showing it, and it would be the one row in the
     /// section that changed nothing.
-    func testTheIdentityMenuOffersTheLoginsThenTheOtherAgents() throws {
+    /// One row, both halves. The win this menu was flattened for: from a runtime with no logins
+    /// of its own, a single click lands on another runtime *and* the login inside it — where the
+    /// two-section menu needed one pass to change runtime and a second to pick the account, and
+    /// pointed the composer at the wrong one in between.
+    ///
+    /// Driven by row position rather than by title, since which logins exist is the machine's
+    /// business: the first row is the first runtime's first offer, whether that is a login or the
+    /// runtime itself.
+    func testChoosingOneRowSetsBothTheRuntimeAndTheLogin() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
         composer.show(projectID: nil)
 
         let chip = try XCTUnwrap(chip(named: "composer.session-start.identity", in: composer.view))
-        let selected = AppSettings.shared.defaultAgentKind
-        let others = AgentKind.allCases.filter { $0 != selected }.map(\.displayName)
-        let entries = try XCTUnwrap(chip.preparedPresentation()).entries
-        let titles = entries.compactMap(\.item).map(\.title)
 
-        XCTAssertEqual(Array(titles.suffix(others.count)), others, "the runtimes close the menu")
-        XCTAssertFalse(titles.contains(selected.displayName), "the chip is already showing it")
-
-        // Whichever this machine has: two or more logins put the accounts first under one
-        // separator, and a single login makes the menu the runtimes alone.
-        let accounts = AgentAccountDiscovery.accounts(for: selected)
-        let separators = entries.filter { !$0.isItem }.count
-        if accounts.count >= 2 {
-            XCTAssertEqual(titles.count, accounts.count + others.count)
-            XCTAssertEqual(separators, 1, "one line between the logins and the runtimes")
-        } else {
-            XCTAssertEqual(titles, others)
-            XCTAssertEqual(separators, 0, "a menu of one login is noise")
-        }
-
-        // The deterministic half of the same rule: OpenCode owns its provider login in its own
-        // TUI, so it has no accounts on any machine.
+        // OpenCode owns its provider login in its own TUI, so it has no accounts on any machine
+        // — the deterministic runtime row to start from.
         choose(titled: AgentKind.openCode.displayName, on: chip)
         XCTAssertEqual(chip.accessibilityTitle(), AgentKind.openCode.displayName)
-        let single = try XCTUnwrap(chip.preparedPresentation()).entries
+
+        let first = try XCTUnwrap(AgentKind.allCases.first)
+        chooseItem(at: 0, on: chip)
         XCTAssertEqual(
-            single.compactMap(\.item).map(\.title),
-            AgentKind.allCases.filter { $0 != .openCode }.map(\.displayName)
+            chip.accessibilityTitle()?.hasPrefix(first.displayName),
+            true,
+            """
+            one click from OpenCode to \(first.displayName) — the chip names the runtime the \
+            chosen row belongs to, and its login where there is a choice of one
+            """
         )
-        XCTAssertTrue(single.allSatisfy(\.isItem), "nothing to separate the runtimes from")
     }
 
     func testEffortFollowsTheSelectedModelsCatalogAndCrossesTheStartBoundary() throws {
@@ -397,6 +751,67 @@ final class SessionComposerRenderTests: XCTestCase {
         prompt.stringValue = "Use provider defaults"
         try startButton(in: composer.view).performClick()
         XCTAssertNil(recorder.reasoningEfforts.last!)
+    }
+
+    func testSpeedOffersInheritanceStandardAndFastAndCrossesTheStartBoundary() throws {
+        let oldKind = AppSettings.shared.defaultAgentKind
+        let oldSpeed = AppSettings.shared.startupSpeed(for: .claude)
+        defer {
+            AppSettings.shared.defaultAgentKind = oldKind
+            AppSettings.shared.setStartupSpeed(oldSpeed, for: .claude)
+        }
+        AppSettings.shared.defaultAgentKind = .claude
+        AppSettings.shared.setStartupSpeed(.standard, for: .claude)
+
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: fixtureFolder())
+        defer { store.removeProject(id: project.id) }
+
+        let composer = SessionComposerViewController()
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        let speedRenderHost = host(composer, size: Render.short)
+        composer.show(projectID: project.id)
+
+        let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
+        choose(titled: "Opus", on: model)
+
+        let speed = try XCTUnwrap(chip(named: "composer.session-start.speed", in: composer.view))
+        XCTAssertFalse(speed.isHidden)
+        XCTAssertEqual(
+            try XCTUnwrap(speed.preparedPresentation()).entries
+                .compactMap(\.item)
+                .compactMap { $0.representedValue as? ConversationSpeedChoice },
+            ConversationSpeedChoice.allCases
+        )
+
+        // The narrow supported composer still draws the fourth leading chip wholly inside the
+        // box. Keep one literal render too: the broad theme matrix follows the account's current
+        // default model, which may not support Fast and therefore cannot prove this state exists.
+        speedRenderHost.layoutSubtreeIfNeeded()
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let speedFrame = speed.convert(speed.bounds, to: prompt)
+        XCTAssertTrue(prompt.bounds.insetBy(dx: -1, dy: -1).contains(speedFrame))
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let rep = try XCTUnwrap(
+            speedRenderHost.bitmapImageRepForCachingDisplay(in: speedRenderHost.bounds)
+        )
+        speedRenderHost.cacheDisplay(in: speedRenderHost.bounds, to: rep)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(
+            to: directory.appendingPathComponent("composer-system-light-speed.png")
+        )
+
+        choose(titled: "Fast", on: speed)
+        prompt.stringValue = "Start quickly"
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(recorder.fastModes, [true])
+
+        choose(titled: "Follow General Setting", on: speed)
+        prompt.stringValue = "Follow my default"
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(recorder.fastModes.count, 2)
+        XCTAssertNil(recorder.fastModes[1])
     }
 
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {
@@ -725,6 +1140,16 @@ final class SessionComposerRenderTests: XCTestCase {
         return folder
     }
 
+    /// Picks a row by position, for a menu whose titles depend on the machine's own logins.
+    private func chooseItem(at index: Int, on chip: ChipView) {
+        chip.menuPresentationOverride = { presentation in
+            let items = presentation.entries.compactMap(\.item)
+            return items.indices.contains(index) ? items[index] : nil
+        }
+        _ = chip.accessibilityPerformShowMenu()
+        chip.menuPresentationOverride = nil
+    }
+
     /// Picks a row by title without putting a menu on screen, the way a click would.
     private func choose(titled title: String, on chip: ChipView) {
         chip.menuPresentationOverride = { presentation in
@@ -772,21 +1197,23 @@ final class SessionComposerRenderTests: XCTestCase {
         projectID: ProjectID?
     ) -> Data? {
         let composer = SessionComposerViewController()
-        let host = host(composer, size: size)
-        host.appearance = appearance
+        let renderHost = host(composer, size: size)
+        renderHost.appearance = appearance
         // The box's surface froze its layer colours in whatever appearance the process had
         // when the composer was built; in the app the attach path repaints recorded surfaces,
         // and offscreen the fixture must do the same or the light pass keeps dark colours —
         // which drew white-at-5% on a white ground, and the box vanished from the light PNGs
         // while every non-layer control beside it rendered correctly.
-        AppThemeRefresh.repaint(host)
+        AppThemeRefresh.repaint(renderHost)
         composer.show(projectID: projectID)
-        host.layoutSubtreeIfNeeded()
+        renderHost.layoutSubtreeIfNeeded()
 
-        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
-        host.wantsLayer = true
-        host.layer?.backgroundColor = theme.resolved(.ground, appearance: appearance).cgColor
-        host.cacheDisplay(in: host.bounds, to: rep)
+        guard let rep = renderHost.bitmapImageRepForCachingDisplay(in: renderHost.bounds) else {
+            return nil
+        }
+        renderHost.wantsLayer = true
+        renderHost.layer?.backgroundColor = theme.resolved(.ground, appearance: appearance).cgColor
+        renderHost.cacheDisplay(in: renderHost.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
 
@@ -881,6 +1308,8 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
     var starts = true
     private(set) var prompts: [String] = []
     private(set) var reasoningEfforts: [String?] = []
+    private(set) var fastModes: [Bool?] = []
+    private(set) var managedWorkspacePlans: [ManagedWorkspacePlan?] = []
 
     /// The images sent with each opening prompt, as they crossed the boundary rather than as
     /// they read inside the sentence: the session does not exist yet, so this is the only form
@@ -894,14 +1323,18 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
+        managedWorkspacePlan: ManagedWorkspacePlan?,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool {
         prompts.append(prompt)
         reasoningEfforts.append(reasoningEffort)
+        fastModes.append(fastMode)
+        managedWorkspacePlans.append(managedWorkspacePlan)
         self.attachmentPaths.append(attachmentPaths)
         return starts
     }
@@ -914,7 +1347,7 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
 
     func sessionComposer(
         _ composer: SessionComposerViewController,
-        importSession session: ImportableSession,
+        importSessions sessions: [ImportableSession],
         into projectID: ProjectID
     ) {}
 

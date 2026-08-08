@@ -39,6 +39,10 @@ final class FileActivityMapView: NSView {
     private(set) var map = FileActivityMap(files: [])
     private(set) var workPresentation: AgentWorkPresentation?
     private var workTarget: AgentWorkTarget?
+    /// Whether this instance is a store-backed projection rather than a standalone detail map.
+    /// A nil target is still a valid bound state for a sidebar row with no project yet, and that
+    /// three-point rail must remain decorative while the row is being configured.
+    private var isStoreBound = false
 
     /// The clock heat is measured against, injectable so a render harness can draw the same
     /// moment twice.
@@ -87,6 +91,7 @@ final class FileActivityMapView: NSView {
 
     /// Replaces the whole map — how a harness hands over a pre-built state.
     func setMap(_ map: FileActivityMap) {
+        isStoreBound = false
         workTarget = nil
         workPresentation = nil
         self.map = map
@@ -114,6 +119,7 @@ final class FileActivityMapView: NSView {
     /// Binds a sidebar rail or detail atlas to the store. The first read is an O(1) cache
     /// lookup; repository enumeration and projection happen asynchronously on a utility queue.
     func bind(to target: AgentWorkTarget?) {
+        isStoreBound = true
         guard target != workTarget else {
             refreshBoundPresentation()
             return
@@ -126,6 +132,7 @@ final class FileActivityMapView: NSView {
 
     /// Direct injection for render tests and the Component Gallery.
     func setWorkPresentation(_ presentation: AgentWorkPresentation?) {
+        isStoreBound = false
         workTarget = nil
         workPresentation = presentation
         hoverIndex = nil
@@ -477,7 +484,12 @@ final class FileActivityMapView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if let workPresentation, !workPresentation.isDetailed { return nil }
+        // A sidebar rail is decorative from the moment it is bound, including while its
+        // asynchronous atlas projection is still loading. Keying this only off the completed
+        // presentation left a short (and, in a hosted row, deterministic) interval where the
+        // three-point strip stole clicks from the row and its trailing buttons.
+        if isStoreBound && workTarget?.isDetailed != true { return nil }
+        if workPresentation?.isDetailed == false { return nil }
         return super.hitTest(point)
     }
 

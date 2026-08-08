@@ -1,6 +1,6 @@
 # Dependencies
 
-The three local Swift packages plus one remote one of ours, and the seams in each that are
+The four local Swift packages plus one remote one of ours, and the seams in each that are
 ours.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
@@ -130,13 +130,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
     CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package
     but the app touches none of it, so the app itself stays AppKit-only.
+  - The fork tracks upstream's nine tuned states at both 64pt and 20pt: working/orbits,
+    searching/globe, solving/rubik, listening/wave, connecting/web, weaving/braid,
+    composing/ribbon, breathing/ring, and shaping/morph. Threading exposes all nine as fixed
+    Motion choices and includes all nine in the no-immediate-repeat Random pool.
   - **The `tint` seam is ours.** The stock engine draws grayscale ink keyed off a `dark: Bool`,
-    so it follows macOS light/dark but knows nothing of Threading's accent. `paint` gained an
-    optional `tint`: when set, depth rides on opacity instead of luminance (a dot's visibility
-    is `1 - white` on either substrate), so a tinted orb reads identically in light and dark,
-    only in the accent's hue. `WorkingOrbView` (in `UI/Design/`) is the theme boundary that
-    drives it from `Design.Surface.accent`, re-resolved on a live theme switch and an
-    appearance change.
+    so it follows macOS light/dark but knows nothing of Threading's accent. `paint` and the
+    connecting mode's `paintLines` gained an optional `tint`: when set, depth rides on opacity
+    instead of luminance (an ink mark's visibility is `1 - white` on either substrate), so a
+    tinted orb reads identically in light and dark, only in the accent's hue. `WorkingOrbView`
+    (in `UI/Design/`) is the theme boundary that drives it from `Design.Surface.accent`,
+    re-resolved on a live theme switch and an appearance change.
 
 - **LabelMorph** (local fork): the single-line label that morphs a name character by
   character when it changes, used for every session, project and checkout name the app shows.
@@ -212,6 +216,35 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `SidebarTreeBuilderTests` drives 5,000 sessions through 120 width ticks from 220 to 600
     points and back. On the profiling machine this moved resize p95 from 10.9–12.5 ms to
     6.0–6.4 ms, and total resize work from 400–453 ms to 282–300 ms.
+
+- **BorderBeamKit** (local fork): the breathing agent-activity ring over both composers,
+  extracted from the author's own verified SwiftUI port.
+  - Location: `./BorderBeamKit/` (git submodule), a local Swift package like the other two.
+  - Upstream: https://github.com/Jakubantalik/border-beam — the `ports/ios/BorderBeamKit`
+    tree of the MIT-licensed web library, extracted into a standalone package with a macOS
+    demo app (`Demo/run.sh`) replicating the site's playground. **Ours to modify directly.**
+    All visual data decodes from the bundled `beam-spec.json` generated from the web source;
+    the package's snapshot suite renders the full 40-combination matrix through the real
+    SwiftUI + Metal pipeline and fails on any blank frame, which is what pins the pixels —
+    app-side tests deliberately assert judgement, not beam pixels.
+  - **The AppKit seam is ours** (`BorderBeamHostView`). The rendering is SwiftUI Shader API,
+    which the app must never touch (ThinkingOrbs' containment): the package exposes an
+    `NSView` that is decorative by contract — `hitTest` answers nil, no accessibility
+    elements — and whose `rendersStatically` pins the internal frozen-time environment. That
+    pin now also *pauses* the driving `TimelineView` (t and fade are both constants there),
+    so the Reduce Motion mode is a genuinely static picture rather than 60 identical frames
+    a second.
+  - **The platform floor is ours.** The Shader APIs need macOS 14 but Threading deploys to
+    13, so the package declares `.macOS(.v13)` and every SwiftUI view carries
+    `@available(macOS 14.0, *)`. `AgentActivityBeamView` (in `UI/Design/`) is the theme
+    boundary that embeds the host behind a runtime availability check — on macOS 13 the
+    ring simply does not exist. It also owns the whole visual policy: the count-to-strength
+    curve, the mono-to-colorful escalation at top ladder effort, and the System-theme-only
+    gate (re-read on `AppThemeDidChange`; a styled theme removes the ring outright rather
+    than letting the beam's own half-second fade trail the one-pass theme sweep).
+  - The `.metal` shader is compiled by Xcode's build system only — a plain `swift build` of
+    the package leaves it uncompiled and the beam invisible, which is why the package's
+    scripts all go through `xcodebuild`.
 
 - **NativeDiffKit** (remote, ours): the diff *rendering* — line layout, syntax highlighting,
   wrapping, sizing — shared between this app's AppKit views and a UIKit sibling.

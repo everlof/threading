@@ -99,4 +99,72 @@ final class ChangedFilesTreeTests: XCTestCase {
         XCTAssertFalse(tree.nodes[0].isDirectory)
         XCTAssertEqual(tree.nodes[0].depth, 0)
     }
+
+    // MARK: - Hover Preview
+
+    private func makeFile(
+        path: String,
+        hunks: [Int],
+        added: Int = 1,
+        removed: Int = 0
+    ) -> GitFileDiff {
+        GitFileDiff(
+            path: path,
+            change: .modified,
+            hunks: hunks.enumerated().map { index, lines in
+                GitHunk(
+                    header: "@@ hunk \(index) @@",
+                    lines: (0..<lines).map {
+                        GitDiffLine(kind: .added, text: "line \($0)", newNumber: $0 + 1)
+                    }
+                )
+            },
+            added: added,
+            removed: removed
+        )
+    }
+
+    func testAShortFileIsKeptWhole() {
+        let preview = ChangedFileDiffPreview.preview(
+            of: makeFile(path: "a.swift", hunks: [3, 4]),
+            lineCap: 400
+        )
+
+        XCTAssertEqual(preview.hunks.map(\.lines.count), [3, 4])
+        XCTAssertEqual(preview.omittedLines, 0)
+        XCTAssertFalse(preview.isEmpty)
+    }
+
+    func testTheCapIsSpentInHunkOrderAndWhatItMissesIsCounted() {
+        // The card outlives its turn, so the diff it keeps is bounded when it is captured.
+        // A hunk the cap runs out inside is kept as far as it reaches — a preview that stops
+        // mid-file still shows the change it started on.
+        let preview = ChangedFileDiffPreview.preview(
+            of: makeFile(path: "generated.swift", hunks: [4, 10, 6]),
+            lineCap: 8
+        )
+
+        XCTAssertEqual(preview.hunks.map(\.lines.count), [4, 4])
+        XCTAssertEqual(preview.omittedLines, 12)
+    }
+
+    func testAFileWithNothingToDrawHasNoPreview() {
+        // A binary file, or one git reported without hunks: the row raises nothing.
+        let preview = ChangedFileDiffPreview.preview(
+            of: GitFileDiff(path: "icon.png", change: .binary, hunks: [], added: 0, removed: 0)
+        )
+
+        XCTAssertTrue(preview.isEmpty)
+        XCTAssertEqual(preview.omittedLines, 0)
+    }
+
+    func testPreviewsAreKeyedByPath() {
+        let previews = ChangedFileDiffPreview.previews(from: [
+            makeFile(path: "src/a.swift", hunks: [2], added: 2),
+            makeFile(path: "src/b.swift", hunks: [3], added: 3)
+        ])
+
+        XCTAssertEqual(Set(previews.keys), ["src/a.swift", "src/b.swift"])
+        XCTAssertEqual(previews["src/b.swift"]?.added, 3)
+    }
 }

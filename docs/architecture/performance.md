@@ -79,13 +79,227 @@ It persists both current callbacks and Apple's `pastPayloads`/`pastDiagnosticPay
 so absence of a payload is not evidence that a run was healthy. The immediate recorder and
 MetricKit are complements.
 
+## Implementation-time scaling gate
+
+Profiling should confirm an architecture, not be the first time its scaling boundary is named.
+Before building a UI or callback, classify both axes:
+
+| Axis | Bounded case | Scaling case |
+|---|---|---|
+| Cardinality | a fixed schema with a stated small maximum | files, turns, tools, sessions, accounts, extensions, processes, browser records, provider data |
+| Frequency | explicit navigation or an occasional settings action | layout, resize, scroll, pointer movement, streaming, polling, filesystem/provider notifications |
+
+If either axis can grow, write its expected and stress values into the implementation or fixture.
+If both can grow, the path must be O(visible), O(changed), or explicitly background work; it may
+not synchronously rebuild or relayout total content on the main actor. Unknown means scaling, not
+"probably short."
+
+### Risk patterns
+
+- **Retained external collections.** Converting every model to an `NSView`, attributed document,
+  decoded image, constraint set, or layer makes first paint, layout, theme changes, and memory
+  proportional to total content. Keep value rows and let a table, collection, or outline own the
+  viewport.
+- **One giant virtual row.** A virtual table does not help if one cell contains every credential,
+  extension field, changed file, diff hunk, or recursive node. Virtualization has to reach the
+  repeating unit.
+- **Cosmetic laziness.** Building all detail rows and then passing only a prefix, hiding them, or
+  placing them behind a collapsed disclosure still pays their construction and often retains
+  them. Cap, page, or branch before materialization. Release content that is no longer needed.
+- **Whole-subtree replacement.** Clearing a page or stack and recreating it for one toggle,
+  disclosure, appended event, or status change multiplies view construction and Auto Layout.
+  Stable identities should support insert/remove/reconfigure of the changed run.
+- **Total-content work in hot callbacks.** Layout, resize, scroll, pointer and stream callbacks
+  execute at frame or token frequency. They may read cached geometry and touch visible/changed
+  rows; they may not enumerate total rows, discover files, decode images, invoke child processes,
+  or rebuild documents.
+- **Offscreen animation.** A retained view is not active merely because it is unhidden and its
+  window is visible. Display links and frame-rate timers must also stop while the view is clipped
+  outside every enclosing scroll viewport; otherwise a long document can redraw every animated
+  sample on each frame even though only one viewport can contribute pixels. Expensive decorative
+  animation should also pause for live and momentum scrolling, then repaint once and resume.
+- **Main-actor discovery.** Directory walks, file reads, parsing, image decoding and process waits
+  make opening or interacting with an otherwise virtual surface jagged. Prepare immutable model
+  data off-main, then mount a bounded viewport on-main.
+- **Per-item bounds mistaken for a global bound.** Keeping 400 lines for each of 1,000 files is
+  still 400,000 lines. Bound count × retained payload × simultaneous surfaces, not each term in
+  isolation. A transport/security maximum can be much larger than a reasonable eager-render cap.
+- **Gesture retargeting.** A nested scrollable or interactive component beneath a stationary
+  pointer can receive the momentum tail after content moves. Route the entire phased gesture on
+  the axis chosen at its beginning; never return from `scrollWheel` in a way that silently drops
+  vertical momentum meant for an ancestor.
+- **Debounce as camouflage.** Coalescing is correct for redundant events only after one operation
+  is bounded. It does not repair a resize tick that still reflows hidden history or invalidates
+  every row.
+
+The heuristic is cardinality × row richness × mutation frequency. If two are non-trivial, use a
+value model, viewport ownership, stable identity, and a stress fixture by default. A small
+fixed-schema form remains free to use a retained stack and wholesale rebuild; recycled-cell
+cleanup and one-controller-for-another lifecycle replacement are also not findings by themselves.
+
+### Scaling audit, 2026-08-08
+
+The Tools page prompted a repository sweep for the patterns above. This is a risk inventory, not a
+claim that every item is already user-visible at ordinary scale. Priorities reflect how directly
+external data reaches eager AppKit work.
+
+| Priority | Surface | Concrete risk |
+|---|---|---|
+| High | `ChangedFilesCardView` | A turn's complete flattened file tree is converted to retained row views before large trees are collapsed. The card itself is retained in the conversation model, and the 400-line preview cap applies per file rather than to the aggregate turn. |
+| High | Extension panels | `ExtensionPanel` accepts 500 semantic nodes / 1,000 rendered elements; `ExtensionNodeRenderer` turns the whole recursive value into stacks, and `ExtensionPanelViewController.render()` replaces the whole tree after updates. The validation cap is a transport/safety bound, not an eager-render budget. |
+| High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
+| Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
+| High | Browser baseline library | Up to a couple hundred rich rows are rebuilt in one stack, with every thumbnail synchronously loaded through `NSImage(contentsOf:)`. The explicit cap makes the work finite but not frame-cheap. |
+| High | File pane refresh | The outline virtualizes cells, but directory enumeration, resource-value reads, natural sorting, and reconciliation remain synchronous in `refresh()`. The existing 20,000-entry fixture measures about 200–230 ms for the correct refresh, already above a frame and near the stall threshold. |
+| Medium | Archived settings | `reload()` maps every archived session to an AppKit row and only then takes the recent prefix. The "Older" fold currently reduces visible rows but not cold construction. |
+| Medium | Tools dynamic sections | Tool rows and extension-contributed settings are virtualized at their repeating unit. Browser Sign-In and Website Access remain one coarse table row each, so a large credential or origin inventory can still defeat the outer table's bound. |
+| Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
+| Medium | Git Review during live resize | Each meaningful width change calls `noteHeightOfRows` for the complete file table so offscreen wrapping estimates and scrollbar extent stay correct. That is correctness-preserving but total-row work at resize frequency; add a large-index live-resize phase before changing it. |
+| Medium | Account settings cold discovery | `AgentAccountDiscovery` is `@MainActor`; an expired cache reads the home directory, login markers and shell aliases synchronously, then Accounts constructs every row. Account counts are normally small, but cold filesystem latency is externally controlled. |
+
+The same sweep found bounded uses that should not be "fixed" merely because they match a text
+search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
+branches before constructing collapsed command detail; Usage caps its checkout/model/ledger rows;
+File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
+and cell hosts removing old subviews during reuse is the intended ownership boundary.
+
+The stress sweep below replaced that risk-only ordering with measurements. Extension settings were
+the first repair, followed in the outstanding queue by the changed-files card and browser baseline
+library; maximum-contract extension panels are measurable but smaller. Archived settings remains
+the smallest proof case for the cosmetic-laziness rule. Git Review resize and Account discovery
+still need a focused measurement before a rewrite; their correctness/caching constraints make an
+unmeasured "optimization" more likely to move the cost or show stale data than remove it.
+
+### Scaling-audit stress baselines
+
+Three opt-in fixtures now exercise the high-risk surfaces through their production controllers and
+renderers. Each scale/theme point runs in a fresh XCTest process, keeping cold footprint and
+construction results independent. Fixture manufacture is reported separately and excluded from
+the UI times. The 2026-08-08 Debug sweep used the local Apple-silicon Mac:
+
+| Surface and valid scale | Cold UI | Mutation / viewport | Retained result |
+|---|---:|---:|---:|
+| Changed-files card, 1,000 files, collapsed | 184–189 ms construction + 1,676–1,679 ms layout | Expand all: 244–249 ms | 1 visible of 1,001 row views; 5,016 descendants; 245–246 MB |
+| Changed-files previews, 174 files × 400 retained lines | 42–46 ms construction + 103–107 ms layout | Preview derivation: 0.9 ms | 13.6–13.7 MB model + 20.8 MB views |
+| Extension panel, 500 semantic nodes | 29 ms render + 232–245 ms layout | Generation replacement: 261–275 ms; draw: 55–58 ms/frame | 707 descendants; 51–67 MB |
+| Extension settings, one 128-field extension | 63–77 ms render + 941–945 ms layout | Draw: 30–35 ms/frame | 1,169 descendants; 54–61 MB |
+| Extension settings, four 128-field extensions | 211–215 ms render + **56,841–61,485 ms layout** | Draw: 47 ms System / 121 ms Neo Brutalism | 4,640 descendants; 292–307 MB |
+| Browser baseline library, 200 records | 170–178 ms render + 507–559 ms layout | One permission toggle: 679–742 ms; draw: 24 ms System / **544 ms Neo Brutalism** | 2,411 descendants; 119 MB System / 217 MB Neo Brutalism |
+
+The extension-settings result is a superlinear Auto Layout cliff, not just 512 moderately expensive
+rows: increasing the aggregate from 128 to 512 fields multiplies layout by roughly sixty. The
+production boundary permits 128 fields per extension, while a built-in host page may aggregate
+several extensions, so the 512-field point is a valid system-wide load rather than an invalid
+single-extension manifest. The repeating field must become the virtual row; splitting the same
+retained controls into four sections does not bound the page.
+
+#### Extension-settings repair
+
+`ExtensionSettingsListView` now owns one grouped table across built-in and contributed sections.
+Fixed-schema built-in sections remain coarse rows; each extension caption and field is a cheap
+presentation-row identity. Only a visible field constructs its control and constraints, and that
+recycled row owns the control's action target for exactly its lifetime. A contributed section is
+never a giant virtual row. `ToolsPreferencesViewController` flattens the same section models into
+its existing table, rather than nesting a second scroll view or retaining the section in one cell.
+The grouped table also discovers and draws only visible divider boundaries.
+
+The identical fresh-process Debug matrix after the repair measured:
+
+| Valid aggregate | Cold UI | Forced cross-document position | Live result after traversal |
+|---|---:|---:|---:|
+| 128 fields | 12–13 ms construction + 56–62 ms layout | 4.35–4.36 ms layout; 15–19 ms draw | 11 of 129 rows; 133 descendants; 23 MB |
+| 512 fields | 13 ms construction + 55–61 ms layout | 16.8–16.9 ms layout; 18–21 ms draw | 11 of 516 rows; 133 descendants; 70–72 MB |
+
+At 512 fields, cold layout fell from **56.8–61.5 seconds to 55–61 ms** and the hierarchy from
+4,640 descendants to 133. The 48-position scroll fixture deliberately jumps far enough to replace
+the complete viewport at every sample, so its 512-field layout number is a pessimistic row-mount
+stress rather than the cost of a smooth one-row scroll. It remains independent of total retained
+views; the higher post-traversal footprint is allocator high-water after visiting all fields, not
+a 512-row view hierarchy. A production-host regression also mounts 128 contributed fields through
+the real Tools controller, reaches the final field, and verifies its recycled control still owns a
+live target.
+
+The changed-files card demonstrates cosmetic laziness directly. A 1,000-file turn shows one row
+but constructs and retains all 1,001, so collapse removes neither cold layout nor its quarter-GB
+footprint. The preview cap is effective per file but not in aggregate: 174 ordinary capped previews
+still retain about 14 MB before any views. The eventual row-model design must therefore bound both
+tree materialization and aggregate preview residency.
+
+The baseline library's synchronous image-backed rich rows make both cold mount and a one-record
+change total-content operations. Its authored-theme draw gap needs an Animation Hitches/Time
+Profiler capture before changing paint code, but list virtualization is independently justified by
+the 2,411-view hierarchy and 0.7-second full rebuild. The maximum extension panel is a smaller but
+still visible whole-tree replacement; give it stable node identities or a virtual flat row model
+before raising its public contract ceiling.
+
+### The payloads are read back into the support report
+
+For a long time nothing read that directory. The blobs were write-only sediment: a crash from the
+previous launch arrived on the next one, was written, pruned, and never looked at, while the
+support report — which already carries `previousLaunchClean` — knew nothing about it.
+`MetricKitDiagnosticReader` closes that. `MacSupportReportDetails` gains three fields, assembled
+once in `AppDelegate.writeSupportReport`:
+
+| Field | Example |
+|---|---|
+| `metricKitDiagnostics` | `payloads=4 crash=2 hang=3 cpu=1 diskWrite=0 unreadable=1 skipped=0` |
+| `metricKitWindow` | `2026-07-30..2026-08-05` |
+| `metricKitLastCrash` | `version=1.4.2 build=311 exception=1 code=0 signal=11 reason=Namespace-SIGNAL-Code-0xb` |
+
+**Counts and a window, never the payloads.** `previousLaunchClean` answers whether *this app* came
+back; MetricKit answers whether the *system* recorded a crash or a hang for it, over a longer
+window than one launch. What a support conversation needs from a crash payload is whether MetricKit
+saw the crash and which build it hit — not a call tree. `callStackTree` and
+`virtualMemoryRegionInfo` are therefore not decoded at all, which is the cheapest redaction there
+is: the field that was never read. Every string that does survive is reduced by the reader to one
+bounded, path-free token, so no consumer can pass an OS-authored sentence through untouched. The
+window is whole days in UTC — neither the hour a Mac crashed nor its time zone is anyone's
+business, and `MacSupportReportDetailsTests` asserts no field carries a path, an address or a
+space.
+
+**Four answers, not two.** `MetricKitDiagnosticReading` is `noDirectory` / `empty` / `read` /
+`unreadable(payloadFiles:)`. "MetricKit has never delivered here", "it delivered and recorded
+nothing" and "there are payloads on disk this build could not parse" are different facts about the
+machine, and a reader that returned an empty result for the third would make a support report say
+*no crash was seen* about a Mac that crashed. A damaged file beside readable ones costs that file
+and not the answer, counted as `unreadable=`. A directory that exists and cannot be listed is
+`unreadable(payloadFiles: 0)` rather than empty.
+
+**Payloads on disk were written by whatever macOS version ran**, so parsing is defensive.
+`exceptionType` has appeared as a number and as a string; a strict decode would throw *inside* the
+payload and discard a perfectly readable crash over a field nobody needed, so every scalar is read
+leniently. Unknown keys are ignored. But a blob carrying none of the recognised keys is refused
+rather than accepted as an empty payload — that is what separates a truncated file from a healthy
+machine. Timestamps are read from the payload in the three formats MetricKit has used, falling back
+to the writer's own `<beginEpoch>-<endEpoch>.json` file name, which no macOS release can reformat.
+`MetricKitStorage` names that directory layout once so the two sides cannot drift apart.
+
+**The budget is stated on the reading side too** (`MetricKitReadBudget`: 24 files, 4 MB each,
+48-character tokens). The writer already prunes to 20, so in the ordinary case none of it binds —
+but a budget enforced only by the other side of a boundary is not a budget, and a corrupted cap or
+a directory someone copied files into must not turn a menu command into an unbounded read. Files
+past the file budget are reported as `skipped=`, kept apart from `unreadable=` because one is a
+budget and the other is damage.
+
 ## Command-line workflow
 
 `scripts/profile_threading.sh` never launches the Instruments UI:
 
 ```bash
-# Deterministic Git Review file-index workload.
+# Deterministic Git Review file-index workloads, including 9k expanded generated files.
 scripts/profile_threading.sh git-stress
+
+# Deterministic Tools settings cold open, disclosure, full expansion, and rendered scroll.
+scripts/profile_threading.sh tools-settings-stress
+
+# Changed-files card at 10–1,000 files, with collapsed trees and aggregate capped previews.
+scripts/profile_threading.sh changed-files-stress
+
+# Extension panels at 50–500 nodes and aggregate Settings pages at 32–512 fields.
+scripts/profile_threading.sh extension-ui-stress
+
+# Browser baseline library at 10–200 rich image-backed records.
+scripts/profile_threading.sh baseline-library-stress
 
 # Deterministic native-conversation replay, jump, append, fold, and streaming workloads.
 scripts/profile_threading.sh conversation-stress
@@ -142,8 +356,9 @@ scripts/profile_threading.sh ios-device-full 15 DEVICE_UDID
 # Time Profiler, Animation Hitches, and Allocations.
 scripts/profile_threading.sh full 15 Threading
 
-# Release/investigation sweep: full plus massive, unresolved-turn and multi-conversation workloads,
-# CPU Profiler, File Activity, Leaks, Swift Concurrency, System Trace, and Power Profiler.
+# Release/investigation sweep: full plus the three scaling-audit sweeps above, massive,
+# unresolved-turn and multi-conversation workloads, CPU Profiler, File Activity, Leaks,
+# Swift Concurrency, System Trace, and Power Profiler.
 scripts/profile_threading.sh full+ 15 Threading
 
 # Locate recent CLI and built-in artifacts.
@@ -155,6 +370,13 @@ same pane action during each capture. Output defaults to `/tmp/threading-profile
 `THREADING_PROFILE_OUTPUT` to retain it elsewhere. Command-line Instruments can still require
 macOS Developer Tools authorization the first time, but it requires no interactive Instruments
 launch or template setup.
+
+The three scaling-audit commands run System and Neo Brutalism by default and accept their printed
+`THREADING_*` variables as one-point overrides. Extension-settings virtualization removed the
+former roughly two-minute 512-field cliff from `full+`; the 200-record authored-theme baseline
+draw pass still takes about 26 seconds, and the changed-files cases deliberately mount up to 1,000
+records. They stay out of routine `full` because those specialist edge sweeps remain materially
+slower than the ordinary interaction fixtures.
 
 The simulator command makes an isolated Release build, installs and launches it, and uses
 `/usr/bin/sample` against the resulting simulator process. It defaults to the booted iOS simulator;
@@ -458,6 +680,34 @@ re-enumerating TextKit fragments on every scroll frame.
 The same retained run keeps the 1,000-file index at 20.4 ms, the deep jump at 19.5 ms, and the
 two-line exact disclosure at 3.3 ms. Text-file state now defaults to expanded, but virtualization
 is still the construction boundary: offscreen expanded files are model booleans, not TextKit views.
+
+The next reported case was not a large file but a generated **large index**: 8,985 expanded files
+with 80,865 added lines. A production trace of the real 8,984-file checkout showed the outer
+`git.review.render` taking 43–295 ms every time the watcher fired, while `render-files` itself was
+mostly 15–22 ms. `show` was tearing down the table, clearing every height, and rebuilding the
+visible TextKit rows even when the file identities had not changed. It also restored a raw y
+coordinate, so files inserted above the reader changed which path that coordinate named.
+
+`testStressMassiveExpandedFileIndexWhenEnabled` now carries that shape in `git-stress`. A 2026-08-08
+Debug run at 620×760 measured:
+
+| 8,985 files / 80,865 added lines | Result |
+|---|---:|
+| Cold model-to-table render | 17.1 ms |
+| Initial layout | 30.2 ms |
+| Height-discovery document drift | 0 pt |
+| Continuous 24-viewport sweep, forced bitmap p95 | 14.7 ms/frame |
+| Full-index 120-step sweep, forced bitmap p95 | 33.4 ms/frame |
+| Insert 12 paths before viewport + anchored refresh | 35.1 ms |
+| Rows instantiated after both sweeps | 437 / 8,985 |
+
+The full-index sweep deliberately jumps about 75 expanded files per frame and is closer to dragging
+the scroller thumb through the whole document than trackpad reading; it remains a useful red limit.
+The continuous workload stays inside a 60 Hz frame while also forcing software bitmap capture.
+More importantly, neither a watcher refresh nor exact-height discovery is allowed to land during
+live momentum: both coalesce until `didEndLiveScroll`, which protects velocity independently of
+their eventual resting cost. The refresh span is `git.review.refresh-files` and reports inserted,
+removed, compared, changed and reordered path counts.
 
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
@@ -890,3 +1140,78 @@ roughly 225 ms and 18–21 ms now, but the important refresh result is correctne
 all 20,100 rows remain addressable for about 220 ms. Remaining time is the intended work of reading
 and naturally sorting every open directory; changing that boundary means filesystem observation or
 incremental directory deltas, not another view-layer tweak.
+
+## Tools settings stress target
+
+`SettingsDisclosureRenderTests.testStressToolsPreferencesWhenEnabled` exercises the production
+Tools settings page without opening the app or Instruments: cold construction and layout, expansion
+and collapse of the largest tool group, all-group expansion, and 48 rendered scroll positions.
+`scripts/profile_threading.sh tools-settings-stress` builds an isolated test product and runs the
+fixture under System and Neo Brutalism. Set `THREADING_TOOLS_SETTINGS_STRESS_THEME` to one theme ID
+for a focused run. The baseline catalog had 12 groups and 66 tools; the post-change tree has 67.
+Browser is the largest group in both at 34 tools.
+
+Two fresh-process Debug runs per theme, with `NSApplication` initialized as it is before an in-app
+settings navigation and the page attached to an offscreen `NSWindow`, measured:
+
+| Workload | Theme | View construction | Layout | Live descendants |
+|---|---|---:|---:|---:|
+| Cold collapsed page | System | 28–32 ms | 59–74 ms | 223 |
+| Cold collapsed page | Neo Brutalism | 27–33 ms | 54–65 ms | 223 |
+| Expand Browser | System | 63–95 ms | 91–121 ms | 631 |
+| Expand Browser | Neo Brutalism | 62–94 ms | 97–104 ms | 631 |
+| Expand all groups, aggregate | System | 965–1,019 ms | 1,571–1,625 ms | 1,015 |
+| Expand all groups, aggregate | Neo Brutalism | 947–1,031 ms | 1,636–1,658 ms | 1,015 |
+
+Catalog discovery itself took 0.2–0.5 ms, so provider enumeration is not the cold-open owner. On the
+fully expanded 5,014pt document, moving the clip view is cheap and does not relayout the settled
+tree: a forced rendered scroll position cost 0.08–0.12 ms in layout. Synchronous drawing cost
+19–22 ms in System and 59–74 ms in Neo Brutalism. This deliberately forces `cacheDisplay` and is a
+paint stress number, not a literal animation-frame time: a live layer-backed window can composite
+already-rendered layers. It does expose the relative authored-theme cost. A Neo sample placed 894
+of 917 draw samples in recursive `CALayer.renderInContext`; visible leaf work included repeated
+template glyph and text rendering. Virtualizing the page reduces that layer tree too, while any
+separate glyph-cache change should be justified by a live Animation Hitches trace.
+
+An earlier off-window fixture reported roughly 100 ms of layout per position because AppKit
+attached a temporary constraint engine for every forced draw; keeping the window in the fixture is
+load-bearing.
+
+The expensive real path is disclosure. Expanding Browser from the collapsed page takes roughly
+154–215 ms. Expanding all 12 groups in sequence takes 2.5–2.7 seconds because each click rebuilds
+and lays out the increasingly large page again. A command-line `sample` capture found 841 sampled
+stacks in the explicit layout following a disclosure, 770 in constraint updates, 717 walking the
+view subtree, and 335 in `NSStackView.updateConstraints`; 305 of those reached constraint insertion.
+The render side separately showed `ThemedDisclosureRow.performPrimaryAction` calling
+`ToolsPreferencesViewController.render()`, then reconstructing the group and tool rows.
+
+The architectural boundary was therefore the retained nested stack and whole-page replacement, not
+tool data loading. The repair keeps a cheap presentation-row model in
+`ToolsPreferencesViewController` and hands visible rows to `ThemedGroupedTableView`. The table draws
+one continuous themed card behind each group range, so virtualization does not change the settings
+shape. A disclosure inserts or removes only that group's tool rows; a group switch reloads only its
+header and tool run; account/browser mutations rebuild the cheap model and ask the table to recycle
+the visible cells. The fixed `SettingsPageView` and its scroll view survive all of them.
+
+Two fresh runs after that change measured:
+
+| Workload | Theme | Mutation / construction | Layout | Live shape |
+|---|---|---:|---:|---:|
+| Cold collapsed page | System | 11–13 ms | 45–52 ms | 144 descendants |
+| Cold collapsed page | Neo Brutalism | 12 ms | 44–48 ms | 144 descendants |
+| Expand Browser | System | 19–29 ms | 0.73–0.76 ms | viewport rows only |
+| Expand Browser | Neo Brutalism | 18–20 ms | 0.70–0.75 ms | viewport rows only |
+| Expand all groups, aggregate | System | 29–39 ms | 1.39–1.46 ms | 9 of 83 rows materialized |
+| Expand all groups, aggregate | Neo Brutalism | 29 ms | 1.29–1.37 ms | 9 of 83 rows materialized |
+
+Browser disclosure is now roughly **5–10× faster**, and the all-group sequence roughly **60–90×
+faster**. The settled retained tree fell from 1,015 descendants to 137 in the expanded fixture.
+Scrolling now intentionally pays 3.5–5.1 ms of layout per forced position to mount the new visible
+rows rather than keeping all 83 mounted; it remains inside one frame. System forced drawing stays at
+21–22 ms because its visible paint was already the whole cost, while Neo falls from 59–74 ms to
+18–19 ms because its offscreen authored layers no longer participate in the recursive render.
+
+These boundaries are load-bearing: do not replace the table with a stack, wrap its scroll view in
+`SettingsUI.page(_:)`, or turn disclosure back into `render()`. Extension-contributed Tools fields
+must remain individual rows in that same table; do not regress them to opaque section rows, nest a
+second table/scroll view, or hide a total-content rebuild behind a debounce.

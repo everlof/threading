@@ -49,12 +49,23 @@ enum PermissionModePresentation {
     /// Threading cannot read and must not claim to know.
     static var agentSettingTitle: String { L10n.string("Agent's Setting") }
 
-    /// The inherit row's wording, given the app-wide default. It names the inherited answer
-    /// where there is one and defers where there is not, so choosing the default explicitly and
-    /// leaving it alone are visibly the same thing.
-    static func inheritedTitle(_ inherited: AgentPermissionMode?) -> String {
-        guard let inherited else { return L10n.string("Use Agent's Setting") }
-        return L10n.format("Use Default (%@)", inherited.displayName)
+    /// The row offered when nothing here and nothing in Settings has chosen. It defers to the
+    /// CLI's own configuration, which Threading cannot read, so it names where the decision is
+    /// made rather than a mode.
+    static var agentSettingRowTitle: String { L10n.string("Use Agent's Setting") }
+
+    /// Marks the mode a session falls back to when it chooses nothing of its own.
+    ///
+    /// It replaces a row: the menu used to open with "Use Default (Auto)" above a list that
+    /// then named Auto again, so the same posture appeared twice and the two rows meant subtly
+    /// different things — one followed Settings, the other pinned today's value. Marking the
+    /// mode where it already stands says both, in one place, in the same glance that reads what
+    /// the mode does.
+    static var defaultSuffix: String { L10n.string("  (default)") }
+
+    /// The title of the row that carries `mode`, marked where it is the inherited answer.
+    static func rowTitle(_ mode: AgentPermissionMode, inherited: AgentPermissionMode?) -> String {
+        mode == inherited ? "\(mode.displayName)\(defaultSuffix)" : mode.displayName
     }
 
     /// Names the mode that will actually apply, not only the one chosen on this surface: with
@@ -106,8 +117,16 @@ enum PermissionModePresentation {
         )
     }
 
-    /// The rows every surface offers: the inherit item naming the app-wide default, then each
-    /// mode with what it does and what it costs on this agent.
+    /// The rows every surface offers: each mode once, with what it does and what it costs on
+    /// this agent, and the app-wide default marked where it stands in that list.
+    ///
+    /// The inherited answer is *not* a row of its own. It was, and it named a mode the list
+    /// then repeated — a menu of seven items for six postures, in which the pair that named the
+    /// same mode were the two rows hardest to tell apart. The marked row answers `nil`, which is
+    /// what the row above it used to answer: choosing it leaves the session following Settings
+    /// rather than pinning a copy of what Settings says today. Only where there is no app-wide
+    /// default does a separate row appear, and then it duplicates nothing — "Agent's Setting" is
+    /// not one of the six.
     ///
     /// Both `representedValue` and `onChoose` are filled, because the two kinds of caller read
     /// the answer differently — a `ChipView` reads the value back through its own `onSelect`,
@@ -120,26 +139,33 @@ enum PermissionModePresentation {
         timing: Timing,
         onChoose: ((AgentPermissionMode?) -> Void)? = nil
     ) -> [ThemedMenuEntry] {
-        var rows: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: inheritedTitle(inherited),
+        var rows: [ThemedMenuEntry] = []
+
+        if inherited == nil {
+            rows.append(.item(ThemedMenuItem(
+                title: agentSettingRowTitle,
                 representedValue: nil,
                 isSelected: selected == nil,
                 onChoose: onChoose.map { choose in { choose(nil) } }
-            ))
-        ]
+            )))
+        }
 
         for mode in AgentPermissionMode.allCases {
+            // The marked row *is* the inherit row, so it answers nil and takes the checkmark
+            // for a session that has chosen nothing as well as for one that chose this mode —
+            // both run it, and a menu that marked only one of them would be reporting a
+            // difference the session cannot act on.
+            let isDefault = mode == inherited
             // The description rides as the subtitle rather than a hover tooltip, so what a
             // mode actually permits is read in the same glance that chooses it.
             rows.append(.item(ThemedMenuItem(
-                title: mode.displayName,
+                title: rowTitle(mode, inherited: inherited),
                 subtitle: [mode.menuDescription, mode.caveat(for: kind)]
                     .compactMap { $0 }
                     .joined(separator: " "),
-                representedValue: mode,
-                isSelected: mode == selected,
-                onChoose: onChoose.map { choose in { choose(mode) } }
+                representedValue: isDefault ? nil : mode,
+                isSelected: isDefault ? (selected == nil || selected == mode) : mode == selected,
+                onChoose: onChoose.map { choose in { choose(isDefault ? nil : mode) } }
             )))
         }
 
@@ -151,6 +177,112 @@ enum PermissionModePresentation {
         }
 
         return rows
+    }
+}
+
+// MARK: - Conversation Speed Presentation
+
+/// The per-conversation speed choice shared by the opening and reply composers.
+///
+/// A typed choice rather than a `Bool?` in a menu: nil is a real answer (follow General), and
+/// `representedValue` cannot otherwise distinguish that row from one with no value at all.
+enum ConversationSpeedChoice: CaseIterable, Equatable {
+    case followGeneral
+    case standard
+    case fast
+
+    var fastMode: Bool? {
+        switch self {
+        case .followGeneral: nil
+        case .standard: false
+        case .fast: true
+        }
+    }
+}
+
+/// One vocabulary and one set of rows for speed before and after a conversation exists.
+enum ConversationSpeedPresentation {
+    static let symbol = "bolt.fill"
+
+    static var followGeneralTitle: String { L10n.string("Follow General Setting") }
+    static var followGeneralDetail: String {
+        L10n.string("Uses the Conversation Speed choice in General settings.")
+    }
+    static var standardTitle: String { L10n.string("Standard") }
+    static var fastTitle: String { L10n.string("Fast") }
+    static var standardDetail: String { L10n.string("Normal speed and usage") }
+    static var fastDetail: String { L10n.string("1.5× speed, increased usage") }
+
+    /// Whether choosing inheritance can be applied to the process on this surface.
+    enum Timing: Equatable {
+        case whenTheSessionStarts
+        case whileRunning
+    }
+
+    /// What the chip says the session will use. A provider setting is named only when it can
+    /// be read locally; otherwise the honest answer is Agent's Setting.
+    @MainActor
+    static func chipTitle(
+        selected: Bool?,
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?
+    ) -> String {
+        let startup = AppSettings.shared.startupSpeed(for: kind)
+        let effective = selected
+            ?? startup.fastModeOverride
+            ?? AgentModels.defaultFastMode(for: kind, model: model, account: account)
+        switch effective {
+        case true: return fastTitle
+        case false: return standardTitle
+        case nil: return L10n.string("Agent's Setting")
+        }
+    }
+
+    /// Three rows because all three answers remain meaningfully different even when General
+    /// currently says Standard or Fast: following General should follow a later change, while
+    /// an explicit conversation override should not.
+    @MainActor
+    static func rows(
+        selected: Bool?,
+        kind: AgentKind,
+        timing: Timing
+    ) -> [ThemedMenuEntry] {
+        var followDetail = followGeneralDetail
+        if timing == .whileRunning,
+           AppSettings.shared.startupSpeed(for: kind) == .agentSetting {
+            followDetail += " " + L10n.string("Applies the next time this chat starts.")
+        }
+
+        return [
+            .item(ThemedMenuItem(
+                title: followGeneralTitle,
+                subtitle: followDetail,
+                representedValue: ConversationSpeedChoice.followGeneral,
+                isSelected: selected == nil
+            )),
+            .item(ThemedMenuItem(
+                title: standardTitle,
+                subtitle: standardDetail,
+                representedValue: ConversationSpeedChoice.standard,
+                isSelected: selected == false
+            )),
+            .item(ThemedMenuItem(
+                title: fastTitle,
+                subtitle: fastDetail,
+                representedValue: ConversationSpeedChoice.fast,
+                isSelected: selected == true
+            ))
+        ]
+    }
+
+    /// A provider-owned setting has no generic live reset request. Record inheritance now and
+    /// state when it can become true instead of making the running process appear to change.
+    static var inheritRecordedOnly: String {
+        L10n.string(
+            "This chat keeps the speed it is running with. "
+                + "The agent's own setting applies the next time it starts."
+        )
     }
 }
 
@@ -454,7 +586,7 @@ extension ProjectSidebarViewController {
         // A session's folder is its project's checkout, so this is the same offer the project
         // row makes, made where the user already is. It leads the identity group because it is
         // the one item here that leaves the app.
-        if let project = projectStore.project(forSessionID: sessionID),
+        if let project = projectStore.executionProject(forSessionID: sessionID),
            let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
             entries.append(openIn)
         }
@@ -471,7 +603,7 @@ extension ProjectSidebarViewController {
         }
         // Everything about this chat that is needed *elsewhere* — an id to resume by, a path
         // to grep — folded behind one Copy item; see `sessionCopyEntry`.
-        let copyProject = projectStore.project(forSessionID: sessionID)
+        let copyProject = projectStore.executionProject(forSessionID: sessionID)
         entries.append(sessionCopyEntry(
             for: session,
             project: copyProject,
@@ -744,7 +876,7 @@ extension ProjectSidebarViewController {
     }
 
     private func moveToAccountEntry(for session: AgentSession) -> ThemedMenuEntry? {
-        guard let project = projectStore.project(forSessionID: session.id),
+        guard let project = projectStore.executionProject(forSessionID: session.id),
               SessionMigration.canMigrate(session, in: project) else { return nil }
 
         let rows: [ThemedMenuEntry] = SessionMigration.destinations(for: session).map { account in
@@ -760,7 +892,7 @@ extension ProjectSidebarViewController {
     /// transcript and can be reversed; Continue creates a new session whose first turn reads a
     /// provider-neutral handoff snapshot through MCP, while the original stays where it is.
     private func continueWithProviderEntry(for session: AgentSession) -> ThemedMenuEntry? {
-        guard let project = projectStore.project(forSessionID: session.id),
+        guard let project = projectStore.executionProject(forSessionID: session.id),
               ConversationContinuation.canContinue(session, in: project) else { return nil }
 
         let destinations = ConversationContinuation.destinations(for: session)

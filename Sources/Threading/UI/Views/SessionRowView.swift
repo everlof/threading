@@ -492,6 +492,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        // Not through the receipt floating over the list: the row would show its actions and open
+        // its popover for a session the pointer is nowhere near, on top of the band somebody is
+        // reaching across. See `NSView.isPointerCovered(at:)`.
+        guard !isPointerCovered(at: event.locationInWindow) else { return }
+
         isHovered = true
         setActionVisible(true, animated: true)
         popoverScheduler.pointerEntered()
@@ -689,11 +694,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         applyAgentIcon(for: session, account: account)
         applyTextColors()
 
-        if let project = ProjectStore.shared.project(forSessionID: session.id) {
+        if let project = ProjectStore.shared.project(forSessionID: session.id),
+           let root = ProjectStore.shared.workingDirectory(forSessionID: session.id) {
             workprint.bind(to: .session(
                 projectID: project.id,
                 sessionID: session.id,
-                rootPath: project.folderPath,
+                rootPath: root,
                 detailed: false
             ))
         } else {
@@ -974,6 +980,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
+        statusIndicator.hostGround = ground
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
     }

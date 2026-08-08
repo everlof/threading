@@ -876,8 +876,10 @@ extension ProjectSidebarViewController {
 
         // The clear button answers with the empty string, which is what the callers already
         // read as "drop the custom name" — the field's contents are beside the point.
+        // A rename asks for no accelerated affirmative, so `.immediate` cannot arrive — and if
+        // one were ever added, what was typed is still what was typed.
         switch TextPromptAlert.ask(request) {
-        case .text(let typed): completion(typed)
+        case .text(let typed), .immediate(let typed): completion(typed)
         case .cleared: completion("")
         case nil: return
         }
@@ -1684,6 +1686,19 @@ private extension ProjectSidebarViewController {
         ))
     }
 
+    /// One direction as a checkable row, worded for the order it applies to — a second radio
+    /// group under the orders rather than a modifier on each of them, so three sorts stay three
+    /// rows instead of six. The wording follows the chosen order because "Descending" describes
+    /// a comparator, not a list of sessions.
+    private func directionEntry(isReversed: Bool) -> ThemedMenuEntry {
+        let order = AppSettings.shared.sidebarSessionOrder
+        return .item(ThemedMenuItem(
+            title: isReversed ? order.reversedDirectionTitle : order.naturalDirectionTitle,
+            isSelected: AppSettings.shared.sidebarSessionOrderIsReversed == isReversed,
+            onChoose: { [weak self] in self?.sessionOrderDirectionChosen(isReversed) }
+        ))
+    }
+
     @objc private func toggleBranchGroupingClicked() {
         AppSettings.shared.groupsSessionsByBranch.toggle()
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
@@ -1704,6 +1719,11 @@ private extension ProjectSidebarViewController {
 
     private func sessionOrderChosen(_ order: SidebarSessionOrder) {
         AppSettings.shared.sidebarSessionOrder = order
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    private func sessionOrderDirectionChosen(_ isReversed: Bool) {
+        AppSettings.shared.sidebarSessionOrderIsReversed = isReversed
         NotificationCenter.default.post(ProjectsDidChange())
     }
 }
@@ -2461,6 +2481,9 @@ extension ProjectSidebarViewController {
         for order in SidebarSessionOrder.allCases {
             entries.append(orderEntry(order))
         }
+        entries.append(.separator)
+        entries.append(directionEntry(isReversed: false))
+        entries.append(directionEntry(isReversed: true))
         return entries
     }
 }

@@ -34,8 +34,42 @@ final class SessionComposerViewController: NSViewController {
 
     private let modelChip = ChipView()
     private let effortChip = ChipView()
+    private let speedChip = ChipView()
     private let surfaceChip = ChipView()
     private let modeChip = ChipView()
+
+    /// The only managed-workspace control present until the feature is explicitly enabled.
+    /// Its dependent controls are inserted into, and removed from, the stack rather than merely
+    /// hidden so an ordinary draft has no workspace settings in its view or accessibility tree.
+    lazy var managedWorkspaceCheckbox = ThemedCheckbox(
+        title: L10n.string("Run in an isolated managed worktree"),
+        changed: { [weak self] state in
+            self?.setManagedWorkspaceEnabled(state == .on)
+        }
+    )
+    private let managedWorkspaceDeliveryChip = ChipView()
+    private lazy var managedWorkspacePublicationCheckbox = ThemedCheckbox(
+        title: L10n.string("Open a pull request when finished"),
+        changed: { [weak self] state in
+            self?.setManagedWorkspacePublicationEnabled(state == .on)
+        }
+    )
+    private let managedWorkspacePublicationChip = ChipView()
+    private lazy var managedWorkspaceOutcomeRow: NSStackView = {
+        let row = NSStackView(views: [managedWorkspaceDeliveryChip])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.small
+        return row
+    }()
+    private lazy var managedWorkspaceOptions: NSStackView = {
+        let column = NSStackView(views: [managedWorkspaceOutcomeRow])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        column.setAccessibilityIdentifier("composer.session-start.managed-workspace.options")
+        return column
+    }()
     private lazy var importButton = ThemedButton(
         symbol: ComposerDefaults.importSymbol,
         accessibility: L10n.string("Import conversation"),
@@ -82,8 +116,18 @@ final class SessionComposerViewController: NSViewController {
         row.setAccessibilityIdentifier("composer.session-start.actions")
         importButton.translatesAutoresizingMaskIntoConstraints = false
         startButton.translatesAutoresizingMaskIntoConstraints = false
+        scheduleButton.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(importButton)
+        row.addSubview(scheduleButton)
         row.addSubview(startButton)
+
+        // "The offer yields first" — stated in the constraint below and, until now, only there.
+        // A `lessThanOrEqualTo` says the import button *may* stop short of what is beside it; it
+        // does not say the button's own title is what gives when the row runs out of room, so
+        // the row simply grew past the pane instead. The rule bit once a third control joined
+        // the row and the fixture had a project to discover conversations in — which is why it
+        // only ever failed in a full suite, where earlier tests leave projects behind.
+        importButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let inset = importButton.opticalHorizontalInset
         NSLayoutConstraint.activate([
@@ -101,8 +145,21 @@ final class SessionComposerViewController: NSViewController {
             // The offer yields first: it is one line of quiet text, and the action beside it is
             // the thing that must stay readable when the pane is narrow.
             importButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: startButton.leadingAnchor,
+                lessThanOrEqualTo: scheduleButton.leadingAnchor,
                 constant: -Design.Spacing.medium
+            ),
+
+            scheduleButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            // `small`, where everything else on this row is `medium` apart. The two are one
+            // decision offered two ways — send it now, send it later — and the tighter gap is
+            // how that is said without a plate around them, which is the same ranking
+            // `SplitIconButtonView` draws for the pair it welds. It is also what keeps the row
+            // inside a 560-point pane: at `medium` the row's minimum ran three points past what
+            // `ComposerWindowFitTests` allows the column, and an icon button's width is a
+            // required constraint that no compression priority will yield.
+            scheduleButton.trailingAnchor.constraint(
+                equalTo: startButton.leadingAnchor,
+                constant: -Design.Spacing.small
             ),
 
             startButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
@@ -112,6 +169,41 @@ final class SessionComposerViewController: NSViewController {
         return row
     }()
 
+    /// Start it later: the same offers the reply box's chevron makes, one message earlier.
+    ///
+    /// Disabled with its reason on the tooltip when there is nothing to schedule — and when
+    /// images are attached, because a pasted screenshot is a file in a temporary directory and a
+    /// path recorded now can name nothing by Monday. `DraftStore` already refuses to draft them
+    /// for that reason; scheduling is the same hazard with a longer fuse.
+    /// Deliberately an icon button rather than a `ChipView`.
+    ///
+    /// A chip out here would join the row above the box in the one test that counts them, and
+    /// that row answers *where* and *who* and nothing else. In the box's own footer it would
+    /// claim to be something the session runs *with*, which scheduling is not. An icon that
+    /// opens a menu is the same gesture the reply box's chevron makes, in the place the send
+    /// already is — which is where a decision about sending belongs.
+    lazy var scheduleButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: ComposerDefaults.scheduleSymbol,
+            accessibility: L10n.string("Start this session later"),
+            target: .besidePrimary
+        )
+        button.presentsMenu = true
+        button.onPress = { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.presentScheduleMenu(from: button)
+        }
+        // Never a reason for the column to be wider than the pane. The row it joins is measured
+        // against the composer's own width, and a member that resisted compression there is how
+        // an addition to this row becomes a failure in `ComposerWindowFitTests`.
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.setAccessibilityIdentifier("composer.session-start.schedule")
+        return button
+    }()
+
+    /// What is already waiting to start in this project.
+    lazy var scheduledStrip = ScheduledMessageStripView()
+
     /// Conversations found on disk for the current project, once discovery has finished.
     ///
     /// Scanning a busy project takes a couple of seconds, so it runs when the composer is
@@ -120,9 +212,10 @@ final class SessionComposerViewController: NSViewController {
 
     /// Whether the next session is rendered by Threading rather than shown as a terminal.
     /// Experimental, and offered only for agents with a structured headless transport.
-    private var usesNativeUI = false
-    private let promptView = PromptView()
+    var usesNativeUI = false
+    let promptView = PromptView()
     private lazy var promptContentContainer = ComponentContentContainer(defaultContent: promptView)
+    private lazy var activityBeamView = AgentActivityBeamView()
     private lazy var promptCustomizationHost = ComponentCustomizationHost(
         target: .sessionStartComposer(),
         contentContainer: promptContentContainer,
@@ -160,15 +253,21 @@ final class SessionComposerViewController: NSViewController {
     private let stack = NSStackView()
     private let appEvents = AppEventObservations()
 
-    private var selectedAgent: AgentKind = AgentDefaults.defaultKind
-    private var selectedAccountHandle: AccountHandle = .standard
-    private var selectedModel: String?
-    private var selectedReasoningEffort: String?
-    private var selectedBranch: String?
+    // Not private: `SessionComposerScheduling` freezes exactly these decisions into a
+    // `ScheduledSessionPlan`. A start that happens later has to be the start that was
+    // chosen, so the plan is a copy of this state rather than a second reading of it.
+    var selectedAgent: AgentKind = AgentDefaults.defaultKind
+    var selectedAccountHandle: AccountHandle = .standard
+    var selectedModel: String?
+    var selectedReasoningEffort: String?
+    /// Nil follows General, while false and true pin Standard or Fast for this conversation.
+    var selectedFastMode: Bool?
+    var selectedBranch: String?
 
     /// How much the session may do before it has to ask. Nil follows
     /// `AppSettings.defaultPermissionMode`, and the CLI's own configuration beyond that.
-    private var selectedPermissionMode: AgentPermissionMode?
+    var selectedPermissionMode: AgentPermissionMode?
+    var selectedManagedWorkspacePlan: ManagedWorkspacePlan?
 
     weak var delegate: SessionComposerViewControllerDelegate?
 
@@ -245,6 +344,18 @@ final class SessionComposerViewController: NSViewController {
 
         locationChip.setAccessibilityIdentifier("composer.session-start.location")
         identityChip.setAccessibilityIdentifier("composer.session-start.identity")
+        managedWorkspaceCheckbox.setAccessibilityIdentifier(
+            "composer.session-start.managed-workspace"
+        )
+        managedWorkspaceDeliveryChip.setAccessibilityIdentifier(
+            "composer.session-start.managed-workspace.delivery"
+        )
+        managedWorkspacePublicationCheckbox.setAccessibilityIdentifier(
+            "composer.session-start.managed-workspace.publish"
+        )
+        managedWorkspacePublicationChip.setAccessibilityIdentifier(
+            "composer.session-start.managed-workspace.publication"
+        )
 
         // Chips shrink their labels to fit a tight row, which left a row of bare icons naming
         // nothing. They hold their size here and the row stays short.
@@ -267,11 +378,15 @@ final class SessionComposerViewController: NSViewController {
 
         wirePrompt()
         setupPromptCustomization()
+        wireManagedWorkspace()
 
         // Three things, evenly spaced: where this runs, what to say, and what to do about it.
         // The column used to need two different steps because it held a usage block as well;
         // with that folded into the box there is one rhythm to keep.
-        stack.setViews([chips, promptContentContainer, actionRow], in: .leading)
+        stack.setViews(
+            [chips, managedWorkspaceCheckbox, promptContentContainer, actionRow],
+            in: .leading
+        )
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
@@ -352,6 +467,7 @@ final class SessionComposerViewController: NSViewController {
 
         wireChips()
         observeUsage()
+        installActivityBeam()
         // Nothing has been discovered yet, so the offer starts absent rather than as an
         // untitled button holding a row open until the first scan comes back.
         refreshImportOffer()
@@ -378,6 +494,23 @@ final class SessionComposerViewController: NSViewController {
         promptContentContainer.setAccessibilityIdentifier("composer.session-start.content")
         // A family-wide patch must not appear before the composer has a real project context.
         promptCustomizationHost.deactivate()
+    }
+
+    /// Rings the prompt with the ambient agent-activity beam. A sibling pinned over the
+    /// container rather than a subview of it, so an extension swapping the composed content
+    /// cannot take the ring with it; the view is decorative and swallows no events.
+    private func installActivityBeam() {
+        view.addSubview(activityBeamView)
+        NSLayoutConstraint.activate([
+            activityBeamView.leadingAnchor.constraint(equalTo: promptContentContainer.leadingAnchor),
+            activityBeamView.trailingAnchor.constraint(equalTo: promptContentContainer.trailingAnchor),
+            activityBeamView.topAnchor.constraint(equalTo: promptContentContainer.topAnchor),
+            activityBeamView.bottomAnchor.constraint(equalTo: promptContentContainer.bottomAnchor)
+        ])
+        activityBeamView.update(workload: AgentWorkloadMonitor.shared.workload)
+        appEvents.observe(AgentWorkloadDidChange.self) { [weak self] event in
+            self?.activityBeamView.update(workload: event.workload)
+        }
     }
 
     /// A reading arriving after the composer is on screen redraws the line in place, rather
@@ -407,19 +540,25 @@ final class SessionComposerViewController: NSViewController {
         // window is tightest, which is the part that decides anything.
         usageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        for chip in [modelChip, modeChip, effortChip, surfaceChip] {
+        for chip in [modelChip, modeChip, effortChip, speedChip, surfaceChip] {
             chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         modelChip.setAccessibilityIdentifier("composer.session-start.model")
         modeChip.setAccessibilityIdentifier("composer.session-start.mode")
         effortChip.setAccessibilityIdentifier("composer.session-start.effort")
+        speedChip.setAccessibilityIdentifier("composer.session-start.speed")
         surfaceChip.setAccessibilityIdentifier("composer.session-start.surface")
 
         // What the session will be run *with* on the leading side, what it has left to spend on
         // the trailing side beside the send — the reply composer's arrangement, because it is
         // the same question asked one message earlier.
+        // The schedule offer sits **inside the box**, on the row that already carries what the
+        // session will be sent with. Two reasons, and the second is the stronger: the row above
+        // the box answers where and who and nothing else — a third chip there would be a third
+        // question in a place that deliberately asks two — and *when this goes* belongs to the
+        // message, exactly as the reply box's own chevron does. Beside the send either way.
         promptView.setFooterControls(
-            leading: [modelChip, modeChip, effortChip],
+            leading: [modelChip, modeChip, effortChip, speedChip],
             trailing: [usageLabel, surfaceChip]
         )
 
@@ -433,7 +572,25 @@ final class SessionComposerViewController: NSViewController {
         promptView.onChange = { [weak self] text in
             guard let self, let projectID = self.projectID else { return }
             DraftStore.shared.setDraft(text, for: projectID)
+            // The chip's own menu is rebuilt on open, but whether it is *usable* changes with
+            // every keystroke — an empty brief has nothing to schedule.
+            self.refreshScheduleChip()
         }
+
+        wireScheduledStrip()
+        appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
+            self?.refreshScheduledStrip()
+        }
+        refreshScheduleChip()
+        refreshScheduledStrip()
+    }
+
+    /// Whether the chip may be pressed at all, with its reason on the tooltip rather than left
+    /// to be discovered by pressing it.
+    func refreshScheduleChip() {
+        let refusal = scheduleRefusalReason()
+        scheduleButton.isEnabled = refusal == nil
+        scheduleButton.toolTip = refusal ?? L10n.string("Start this session later")
     }
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
@@ -473,22 +630,21 @@ final class SessionComposerViewController: NSViewController {
 
         identityChip.itemsProvider = { [weak self] in self?.identityItems() ?? [] }
         identityChip.onSelect = { [weak self] item in
-            guard let self else { return }
-            switch item.representedValue {
-            case let handle as AccountHandle:
-                // The agent is unchanged, so only what the *login* decided is reset: a model
-                // pinned on one account is not necessarily offered on another.
-                self.selectedAccountHandle = handle
-                self.selectedModel = nil
-                self.selectedReasoningEffort = nil
-            case let kind as AgentKind:
-                self.selectedAgent = kind
-                self.selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: kind)
-                self.selectedModel = nil
-                self.selectedReasoningEffort = nil
-            default:
-                break
+            guard let self, let identity = item.representedValue as? ComposerIdentity else {
+                return
             }
+            self.selectedAgent = identity.agent
+            // A runtime row names no login, so it takes the one that runtime prefers — which is
+            // not necessarily the standard handle, since that may be the account the user
+            // switched off.
+            self.selectedAccountHandle = identity.account
+                ?? AgentAccountDiscovery.preferredHandle(for: identity.agent)
+            // Everything the login decided is reset, whether or not the runtime changed: a model
+            // pinned on one account is not necessarily offered on another, and an effort is a
+            // property of the model's own published catalog.
+            self.selectedModel = nil
+            self.selectedReasoningEffort = nil
+            self.selectedFastMode = nil
             self.refreshChips()
         }
 
@@ -497,6 +653,7 @@ final class SessionComposerViewController: NSViewController {
             guard let self else { return }
             self.selectedModel = item.representedValue as? String
             self.discardUnsupportedEffort()
+            self.discardUnsupportedFastMode()
             self.refreshChips()
         }
 
@@ -507,10 +664,18 @@ final class SessionComposerViewController: NSViewController {
             self?.refreshChips()
         }
 
+        speedChip.itemsProvider = { [weak self] in self?.speedItems() ?? [] }
+        speedChip.onSelect = { [weak self] item in
+            guard let choice = item.representedValue as? ConversationSpeedChoice else { return }
+            self?.selectedFastMode = choice.fastMode
+            self?.refreshChips()
+        }
+
         modeChip.itemsProvider = { [weak self] in self?.permissionModeItems() ?? [] }
         modeChip.onSelect = { [weak self] item in
-            // Nil is a real answer here — the first item — so this reads "not a mode" as
-            // inherit rather than falling back to one.
+            // Nil is a real answer here — the row marked as the default, or Use Agent's
+            // Setting where there is none — so this reads "not a mode" as inherit rather than
+            // falling back to one.
             self?.selectedPermissionMode = item.representedValue as? AgentPermissionMode
             self?.refreshChips()
         }
@@ -520,6 +685,33 @@ final class SessionComposerViewController: NSViewController {
             self?.usesNativeUI = (item.representedValue as? Bool) ?? false
             self?.refreshChips()
         }
+    }
+
+    private func wireManagedWorkspace() {
+        managedWorkspaceDeliveryChip.itemsProvider = { [weak self] in
+            self?.managedWorkspaceDeliveryItems() ?? []
+        }
+        managedWorkspaceDeliveryChip.onSelect = { [weak self] item in
+            guard let self,
+                  let delivery = item.representedValue as? ManagedWorkspaceDelivery else { return }
+            guard var plan = self.selectedManagedWorkspacePlan else { return }
+            plan.delivery = delivery
+            self.selectedManagedWorkspacePlan = plan
+            self.refreshManagedWorkspaceControls()
+        }
+        managedWorkspacePublicationChip.itemsProvider = { [weak self] in
+            self?.managedWorkspacePublicationItems() ?? []
+        }
+        managedWorkspacePublicationChip.onSelect = { [weak self] item in
+            guard let self,
+                  var plan = self.selectedManagedWorkspacePlan,
+                  let publication = item.representedValue as? ManagedWorkspacePublication
+            else { return }
+            plan.publication = publication
+            self.selectedManagedWorkspacePlan = plan
+            self.refreshManagedWorkspaceControls()
+        }
+        refreshManagedWorkspaceControls()
     }
 
     // MARK: - Public Methods
@@ -555,8 +747,12 @@ final class SessionComposerViewController: NSViewController {
         selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: selectedAgent)
         selectedModel = nil
         selectedReasoningEffort = nil
+        selectedFastMode = nil
         selectedBranch = nil
         selectedPermissionMode = nil
+        selectedManagedWorkspacePlan = nil
+        managedWorkspaceCheckbox.state = .off
+        setManagedWorkspaceOptionsAttached(false)
 
         promptView.clearAttachments()
 
@@ -665,7 +861,23 @@ final class SessionComposerViewController: NSViewController {
 
     // MARK: - Chip State
 
-    private func refreshChips() {
+    /// Puts the scheduled strip into the column, or takes it out again.
+    ///
+    /// See `refreshScheduledStrip` for why it leaves rather than hides: the column's width is
+    /// measured against the pane, and a member with nothing in it still took part in that.
+    func setScheduledStripAttached(_ isAttached: Bool) {
+        let isPresent = stack.arrangedSubviews.contains(scheduledStrip)
+        guard isAttached != isPresent else { return }
+
+        if isAttached {
+            stack.insertArrangedSubview(scheduledStrip, at: 1)
+        } else {
+            stack.removeArrangedSubview(scheduledStrip)
+            scheduledStrip.removeFromSuperview()
+        }
+    }
+
+    func refreshChips() {
         let project = projectID.flatMap { ProjectStore.shared.project(withID: $0) }
         let checkout = project.flatMap(checkoutBranch(of:))
 
@@ -731,6 +943,25 @@ final class SessionComposerViewController: NSViewController {
             )
         )
 
+        // Speed is offered only where the selected model publishes a usable Fast mechanism.
+        // Standard and Fast remain per-conversation values; nil follows the provider-specific
+        // startup choice in General.
+        discardUnsupportedFastMode(account: account)
+        speedChip.isHidden = !AgentModels.supportsFastMode(
+            kind: selectedAgent,
+            model: model,
+            account: account
+        )
+        speedChip.configure(
+            symbolName: ConversationSpeedPresentation.symbol,
+            title: ConversationSpeedPresentation.chipTitle(
+                selected: selectedFastMode,
+                kind: selectedAgent,
+                model: model,
+                account: account
+            )
+        )
+
         // Names the mode that will actually apply, not only the one chosen here: with no
         // choice of its own the chip shows the app-wide default, and falls back to naming
         // where the decision goes when there is no default either.
@@ -753,6 +984,149 @@ final class SessionComposerViewController: NSViewController {
         )
 
         refreshUsage(account: account)
+        refreshManagedWorkspaceControls(project: project)
+    }
+
+    /// Turns the isolated path on without inventing a name or publishing anything. Turning it
+    /// off discards every subordinate choice and removes the options row altogether.
+    private func setManagedWorkspaceEnabled(_ enabled: Bool) {
+        if enabled {
+            selectedManagedWorkspacePlan = selectedManagedWorkspacePlan ?? ManagedWorkspacePlan()
+        } else {
+            selectedManagedWorkspacePlan = nil
+        }
+        refreshManagedWorkspaceControls()
+    }
+
+    private func setManagedWorkspacePublicationEnabled(_ enabled: Bool) {
+        guard var plan = selectedManagedWorkspacePlan else { return }
+        plan.publication = enabled ? (plan.publication ?? .draft) : nil
+        selectedManagedWorkspacePlan = plan
+        refreshManagedWorkspaceControls()
+    }
+
+    private func refreshManagedWorkspaceControls(project: Project? = nil) {
+        guard isViewLoaded else { return }
+        let resolvedProject = project
+            ?? projectID.flatMap { ProjectStore.shared.project(withID: $0) }
+        let isGitProject = resolvedProject.map(ManagedGitWorkspace.canProvision(from:)) ?? false
+        let supportsFinish = ManagedWorkspaceEligibility.supportsFinishHandshake(
+            kind: selectedAgent,
+            usesNativeUI: usesNativeUI
+        )
+        let isAvailable = isGitProject && supportsFinish
+        let supportsPublication = isAvailable
+            && (resolvedProject.map(ManagedWorkspaceEligibility.supportsPublication(from:)) ?? false)
+
+        managedWorkspaceCheckbox.isEnabled = isAvailable
+        if !isGitProject {
+            managedWorkspaceCheckbox.toolTip = L10n.string(
+                "Managed workspaces require a Git project."
+            )
+        } else if !supportsFinish {
+            managedWorkspaceCheckbox.toolTip = L10n.string(
+                "Managed workspaces require an agent surface with Threading session tools."
+            )
+        } else {
+            managedWorkspaceCheckbox.toolTip = L10n.string(
+                "Run in an isolated managed worktree"
+            )
+        }
+
+        if !isAvailable {
+            selectedManagedWorkspacePlan = nil
+            managedWorkspaceCheckbox.state = .off
+        } else {
+            if !supportsPublication, selectedManagedWorkspacePlan?.publication != nil {
+                selectedManagedWorkspacePlan?.publication = nil
+            }
+            managedWorkspaceCheckbox.state = selectedManagedWorkspacePlan == nil ? .off : .on
+        }
+
+        let delivery = selectedManagedWorkspacePlan?.delivery ?? .mergeAndCleanUp
+        managedWorkspaceDeliveryChip.configure(
+            symbolName: ComposerDefaults.managedWorkspaceSymbol,
+            title: ComposerDefaults.managedWorkspaceDeliveryTitle(delivery)
+        )
+        let publication = selectedManagedWorkspacePlan?.publication
+        managedWorkspacePublicationCheckbox.state = publication == nil ? .off : .on
+        managedWorkspacePublicationChip.configure(
+            symbolName: ComposerDefaults.managedWorkspacePublicationSymbol,
+            title: ComposerDefaults.managedWorkspacePublicationTitle(publication ?? .draft)
+        )
+        setManagedWorkspacePublicationOfferAttached(supportsPublication)
+        setManagedWorkspaceOutcome(isPublication: publication != nil)
+        setManagedWorkspaceOptionsAttached(selectedManagedWorkspacePlan != nil && isAvailable)
+    }
+
+    /// Local delivery and remote publication are two different outcomes. Only the chosen one's
+    /// settings belong to the hierarchy; showing both would falsely promise a merge before a PR.
+    private func setManagedWorkspaceOutcome(isPublication: Bool) {
+        let desired = isPublication
+            ? managedWorkspacePublicationChip
+            : managedWorkspaceDeliveryChip
+        for view in managedWorkspaceOutcomeRow.arrangedSubviews where view !== desired {
+            managedWorkspaceOutcomeRow.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        guard !managedWorkspaceOutcomeRow.arrangedSubviews.contains(desired) else { return }
+        managedWorkspaceOutcomeRow.addArrangedSubview(desired)
+    }
+
+    private func setManagedWorkspacePublicationOfferAttached(_ attached: Bool) {
+        let present = managedWorkspaceOptions.arrangedSubviews.contains(
+            managedWorkspacePublicationCheckbox
+        )
+        guard attached != present else { return }
+        if attached {
+            // The publication choice owns the Draft/Ready setting, so it must read before the
+            // setting it reveals. Local delivery occupies the same outcome row while this is
+            // off; turning it on swaps that row in place below the checkbox.
+            managedWorkspaceOptions.insertArrangedSubview(
+                managedWorkspacePublicationCheckbox,
+                at: 0
+            )
+        } else {
+            managedWorkspaceOptions.removeArrangedSubview(managedWorkspacePublicationCheckbox)
+            managedWorkspacePublicationCheckbox.removeFromSuperview()
+        }
+    }
+
+    /// Dynamic options leave the hierarchy when isolation is off. `isHidden` would still leave
+    /// a managed-workspace surface discoverable to hierarchy and accessibility inspection.
+    private func setManagedWorkspaceOptionsAttached(_ attached: Bool) {
+        let present = stack.arrangedSubviews.contains(managedWorkspaceOptions)
+        guard attached != present else { return }
+        if attached {
+            guard let checkboxIndex = stack.arrangedSubviews.firstIndex(of: managedWorkspaceCheckbox)
+            else { return }
+            stack.insertArrangedSubview(managedWorkspaceOptions, at: checkboxIndex + 1)
+        } else {
+            stack.removeArrangedSubview(managedWorkspaceOptions)
+            managedWorkspaceOptions.removeFromSuperview()
+        }
+    }
+
+    private func managedWorkspaceDeliveryItems() -> [ThemedMenuEntry] {
+        let selected = selectedManagedWorkspacePlan?.delivery ?? .mergeAndCleanUp
+        return ManagedWorkspaceDelivery.allCases.map { delivery in
+            .item(ThemedMenuItem(
+                title: ComposerDefaults.managedWorkspaceDeliveryTitle(delivery),
+                representedValue: delivery,
+                isSelected: delivery == selected
+            ))
+        }
+    }
+
+    private func managedWorkspacePublicationItems() -> [ThemedMenuEntry] {
+        let selected = selectedManagedWorkspacePlan?.publication ?? .draft
+        return ManagedWorkspacePublication.allCases.map { publication in
+            .item(ThemedMenuItem(
+                title: ComposerDefaults.managedWorkspacePublicationTitle(publication),
+                representedValue: publication,
+                isSelected: publication == selected
+            ))
+        }
     }
 
     /// The logins this agent offers, and none at all for a runtime without account routing
@@ -814,7 +1188,10 @@ final class SessionComposerViewController: NSViewController {
 
         let now = Date()
         guard let usage = AccountUsageService.shared.usage(for: account),
-              let reading = usage.compactSummary(at: now, metering: modelToLaunch(on: account))
+              let reading = usage.compactSummary(
+                at: now,
+                metering: modelToLaunch(on: account, for: selectedAgent)
+              )
         else {
             clearUsage()
             return
@@ -948,32 +1325,40 @@ final class SessionComposerViewController: NSViewController {
         return items
     }
 
-    /// Who this session runs as: which login, then which runtime.
+    /// Who this session runs as: every login of every runtime, in one list.
     ///
-    /// The logins lead because they are the finer choice, and because switching agent is the
-    /// coarser move that resets what the login decided. The selected agent has no row of its
-    /// own — the chip is already showing it, and it would be the one row in the section that
-    /// changed nothing.
+    /// This was two sections — the selected runtime's logins, then the other runtimes — and
+    /// reaching another runtime's login therefore cost two trips through the menu: one to change
+    /// runtime, another to pick the login inside it, with a launch-on-the-wrong-account moment in
+    /// between. There is only one decision here ("who does this session run as"), so there is one
+    /// list, and a row answers it completely.
+    ///
+    /// A runtime appears as a row of its own only where it offers no login to name — one that
+    /// routes no accounts at all, or one whose accounts have not been discovered yet. Otherwise
+    /// its name is carried by its logins' marks (`AccountMarkImage`), which is what lets the list
+    /// stay flat without a header per runtime.
     ///
     /// The readings on the account rows are the cached ones. `show(projectID:)` warms them as
     /// the composer appears (`AccountUsageMenu.prefetch`) for every agent's logins, not only
-    /// the selected one, which is what keeps this menu warm across a change of agent too: a
+    /// the selected one — which is exactly what a list spanning every runtime needs, since a
     /// fetch started when a menu opens lands after that menu has been read and dismissed.
     private func identityItems() -> [ThemedMenuEntry] {
-        var items: [ThemedMenuEntry] = []
-
-        // A menu of one login is noise, which is the same threshold the chip's title keeps.
-        if availableAccounts.count >= 2 {
-            items += accountItems()
-            items.append(.separator)
+        AgentKind.allCases.flatMap { kind -> [ThemedMenuEntry] in
+            let accounts = kind.supportsAccounts ? AgentAccountDiscovery.accounts(for: kind) : []
+            guard !accounts.isEmpty else { return [.item(runtimeItem(for: kind))] }
+            return accountItems(for: kind, accounts: accounts)
         }
+    }
 
-        items += AgentKind.allCases
-            .filter { $0 != selectedAgent }
-            .map { kind in
-                .item(ThemedMenuItem(title: kind.displayName, representedValue: kind))
-            }
-        return items
+    /// A runtime with no login to offer: the whole row *is* the choice, so it carries the plain
+    /// mark rather than one metered against a window nothing here reports.
+    private func runtimeItem(for kind: AgentKind) -> ThemedMenuItem {
+        ThemedMenuItem(
+            title: kind.displayName,
+            image: AccountMarkImage.make(for: kind),
+            representedValue: ComposerIdentity(agent: kind, account: nil),
+            isSelected: kind == selectedAgent
+        )
     }
 
     /// Every project, then the two ways to bring a new one in. The composer can swap projects
@@ -1012,25 +1397,30 @@ final class SessionComposerViewController: NSViewController {
         return items
     }
 
-    /// The selected agent's logins, each carrying what is left of it. The identity menu's first
-    /// section; see `identityItems()`.
-    private func accountItems() -> [ThemedMenuEntry] {
-        availableAccounts.map { account in
+    /// One runtime's logins, each carrying its mark and what is left of it. See
+    /// `identityItems()` for why they are not filed under a heading.
+    private func accountItems(for kind: AgentKind, accounts: [AgentAccount]) -> [ThemedMenuEntry] {
+        accounts.map { account in
             let name = AccountName.display(for: account)
             var item = ThemedMenuItem(
                 // The emoji when the account has one: it is how the same login is identified in
                 // the sidebar, and a menu that names it differently makes the user learn it
                 // twice.
                 title: account.emoji.map { "\($0)  \(name)" } ?? name,
-                representedValue: account.handle,
-                isSelected: account.handle == selectedAccountHandle
+                representedValue: ComposerIdentity(agent: kind, account: account.handle),
+                isSelected: kind == selectedAgent && account.handle == selectedAccountHandle
             )
 
             // Which login to start on is decided here, so this is where what is left of each
             // one belongs — not only in the toolbar, which speaks after the choice is made.
             // Read against the model this session will run, since the account's own windows are
             // not the whole story when the plan meters that model separately.
-            AccountUsageMenu.decorate(&item, for: account, metering: modelToLaunch(on: account))
+            AccountUsageMenu.decorate(
+                &item,
+                for: account,
+                metering: modelToLaunch(on: account, for: kind),
+                markedAs: kind
+            )
             return .item(item)
         }
     }
@@ -1038,12 +1428,18 @@ final class SessionComposerViewController: NSViewController {
     /// The model a session started now would run on `account`: an explicit choice, else what
     /// that account is configured to use. Resolved per account, because the configured default
     /// is the account's own setting rather than a global one.
-    private func modelToLaunch(on account: AgentAccount) -> String? {
-        selectedModel ?? AgentModels.defaultModel(for: selectedAgent, account: account)
+    ///
+    /// `kind` is the account's runtime rather than the selected one, because the identity menu
+    /// meters logins the composer is *not* currently on. A model pinned here belongs to the
+    /// selected runtime alone — reading another runtime's login against it would charge that
+    /// login's window for a model it could not run.
+    private func modelToLaunch(on account: AgentAccount, for kind: AgentKind) -> String? {
+        let pinned = kind == selectedAgent ? selectedModel : nil
+        return pinned ?? AgentModels.defaultModel(for: kind, account: account)
     }
 
     /// The model whose catalog governs controls that are set before a session exists.
-    private func modelIdentifierToLaunch(on account: AgentAccount?) -> String? {
+    func modelIdentifierToLaunch(on account: AgentAccount?) -> String? {
         selectedModel ?? resolvedDefaultModel(for: account).identifier
     }
 
@@ -1060,6 +1456,21 @@ final class SessionComposerViewController: NSViewController {
         )
         if option?.supports(reasoningEffort: selectedReasoningEffort) != true {
             self.selectedReasoningEffort = nil
+        }
+    }
+
+    /// Do not leave a hidden Fast choice waiting to return after the model changes back. An
+    /// explicit Standard is retained so it can still override an account configured for Fast.
+    private func discardUnsupportedFastMode(account: AgentAccount? = nil) {
+        guard selectedFastMode == true else { return }
+        let resolvedAccount = account
+            ?? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+        if !AgentModels.supportsFastMode(
+            kind: selectedAgent,
+            model: modelIdentifierToLaunch(on: resolvedAccount),
+            account: resolvedAccount
+        ) {
+            selectedFastMode = false
         }
     }
 
@@ -1096,33 +1507,51 @@ final class SessionComposerViewController: NSViewController {
     private func modelItems() -> [ThemedMenuEntry] {
         let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
         let resolved = resolvedDefaultModel(for: account)
+        let models = AgentModels.available(for: selectedAgent, account: account)
 
-        // The first item is "leave it to the CLI", so it names what the CLI would pick rather
-        // than leaving the user to find out by starting a session.
-        let defaultTitle = resolved.identifier.map {
-            "\(ModelName.display(for: $0))\(ComposerDefaults.suffix(for: resolved.source))"
-        } ?? ComposerDefaults.defaultModelTitle
+        // "Leave it to the CLI" is marked on the model it would pick rather than named again
+        // above the list. It used to lead with a row of its own, which put the same model on
+        // screen twice — and the two rows were not the same choice, since one followed the
+        // account's setting and the other pinned today's value of it. Marked in place, the row
+        // that says which model this starts on *is* the row that leaves the choice alone.
+        let markedInList = resolved.identifier.map(models.contains) ?? false
+
+        // A model named as the one this session starts on unless something else is chosen, with
+        // where that came from — a setting on the account, or what it last ran.
+        func markedTitle(_ model: String) -> String {
+            "\(ModelName.display(for: model))\(ComposerDefaults.suffix(for: resolved.source))"
+        }
+
+        var items: [ThemedMenuEntry] = []
+
+        // Kept for the two cases the list cannot mark: an account that names no model at all,
+        // and one whose model this catalog does not carry.
+        if !markedInList {
+            var defaultItem = ThemedMenuItem(
+                title: resolved.identifier.map(markedTitle) ?? ComposerDefaults.defaultModelTitle,
+                representedValue: nil,
+                isSelected: selectedModel == nil
+            )
+            // On an account that names no default there is no model to meter by, and the
+            // account's own windows are the answer.
+            if let account {
+                AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
+            }
+            items.append(.item(defaultItem))
+        }
 
         // Where a scoped limit is finally actionable: a spent Fable window is escaped by
         // picking another model, and this is the menu that does it. Every row states what a
-        // session on it would be measured against, this one included — on an account that names
-        // no default there is no model to meter by, and the account's own windows are the answer.
-        var defaultItem = ThemedMenuItem(
-            title: defaultTitle,
-            representedValue: nil,
-            isSelected: selectedModel == nil
-        )
-        if let account {
-            AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
-        }
-
-        var items: [ThemedMenuEntry] = [.item(defaultItem)]
-
-        items += AgentModels.available(for: selectedAgent, account: account).map { model in
+        // session on it would be measured against — the marked one included, which is a row
+        // naming a model like any other and is metered as one.
+        items += models.map { model in
+            let isDefault = markedInList && model == resolved.identifier
             var item = ThemedMenuItem(
-                title: ModelName.display(for: model),
-                representedValue: model,
-                isSelected: model == selectedModel
+                title: isDefault ? markedTitle(model) : ModelName.display(for: model),
+                representedValue: isDefault ? nil : model,
+                isSelected: isDefault
+                    ? (selectedModel == nil || selectedModel == model)
+                    : model == selectedModel
             )
             if let account {
                 AccountUsageMenu.decorate(&item, forModel: model, on: account)
@@ -1144,6 +1573,14 @@ final class SessionComposerViewController: NSViewController {
         )
     }
 
+    private func speedItems() -> [ThemedMenuEntry] {
+        ConversationSpeedPresentation.rows(
+            selected: selectedFastMode,
+            kind: selectedAgent,
+            timing: .whenTheSessionStarts
+        )
+    }
+
     // MARK: - Actions
 
     private func start(with prompt: String) {
@@ -1161,9 +1598,11 @@ final class SessionComposerViewController: NSViewController {
             accountHandle: selectedAccountHandle,
             model: selectedModel,
             reasoningEffort: selectedReasoningEffort,
+            fastMode: selectedFastMode,
             branch: selectedBranch,
             usesNativeUI: usesNativeUI,
             permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
+            managedWorkspacePlan: selectedManagedWorkspacePlan,
             prompt: prompt,
             attachmentPaths: attachmentPaths
         ) ?? false
@@ -1206,7 +1645,7 @@ final class SessionComposerViewController: NSViewController {
         }
     }
 
-    /// Offers the conversations found on disk, adopting whichever is chosen.
+    /// Offers the conversations found on disk, adopting whichever are chosen.
     private func presentImportPicker() {
         guard let projectID, !importable.isEmpty else { return }
 
@@ -1215,14 +1654,15 @@ final class SessionComposerViewController: NSViewController {
             guard let self, let picker else { return }
             self.dismiss(picker)
 
-            guard let chosen else { return }
+            guard !chosen.isEmpty else { return }
 
-            // Dropped from the list as well as adopted: the project now tracks it, and
-            // offering it again would only be refused as a duplicate.
-            self.importable.removeAll { $0.id == chosen.id }
+            // Dropped from the list as well as adopted: the project now tracks them, and
+            // offering them again would only be refused as duplicates.
+            let adopted = Set(chosen.map(\.id))
+            self.importable.removeAll { adopted.contains($0.id) }
             self.refreshImportOffer()
 
-            self.delegate?.sessionComposer(self, importSession: chosen, into: projectID)
+            self.delegate?.sessionComposer(self, importSessions: chosen, into: projectID)
         }
 
         presentAsSheet(picker)
@@ -1235,7 +1675,7 @@ final class SessionComposerViewController: NSViewController {
     /// Sent through the box rather than read off it, so the button, ⌘Return and the box's own
     /// rules stay one path: the attachments go with the words, and a submission the box has
     /// disabled stays disabled however it was asked.
-    @objc private func startTapped() {
+    @objc func startTapped() {
         promptView.submit()
     }
 
@@ -1308,9 +1748,11 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
+        managedWorkspacePlan: ManagedWorkspacePlan?,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool
@@ -1321,9 +1763,12 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         branch: String
     )
 
+    /// Conversations the import sheet chose, newest first. Plural because the sheet is: a
+    /// project rebuilding its history adopts a search's worth at a time, and one round trip
+    /// each would be the whole cost of it.
     func sessionComposer(
         _ composer: SessionComposerViewController,
-        importSession session: ImportableSession,
+        importSessions sessions: [ImportableSession],
         into projectID: ProjectID
     )
 
@@ -1347,6 +1792,21 @@ private enum ProjectAction {
     case createNew
 }
 
+// MARK: - Composer Identity
+
+/// Who a session runs as, as one value: the runtime and the login inside it.
+///
+/// One value rather than two menu cases, because the identity menu now offers every runtime's
+/// logins in one flat list and a row there answers *both* halves at once. Carrying only the
+/// handle would leave a Codex login setting a Claude session's account, which is how the
+/// two-section menu could not go wrong and this one could.
+///
+/// `account` is nil for a runtime that offered no login to choose — the row is the runtime.
+private struct ComposerIdentity: Equatable {
+    let agent: AgentKind
+    let account: AccountHandle?
+}
+
 // MARK: - Checkout Selection
 
 /// What the location menu's first section offers: a place to run, or the action that makes one.
@@ -1366,6 +1826,29 @@ private enum CheckoutSelection {
 
 /// Only what is specific to this screen. Everything visual comes from `Design`.
 enum ComposerDefaults {
+    static let managedWorkspaceSymbol = "arrow.triangle.branch"
+    static let managedWorkspacePublicationSymbol = "arrow.up.right.square"
+
+    static func managedWorkspaceDeliveryTitle(_ delivery: ManagedWorkspaceDelivery) -> String {
+        switch delivery {
+        case .mergeAndCleanUp: return L10n.string("Finish: Merge and clean up")
+        case .keepForReview: return L10n.string("Finish: Keep workspace for review")
+        }
+    }
+
+    static func managedWorkspacePublicationTitle(
+        _ publication: ManagedWorkspacePublication
+    ) -> String {
+        switch publication {
+        case .draft: return L10n.string("Review: Draft pull request")
+        case .ready: return L10n.string("Review: Ready pull request")
+        }
+    }
+
+    /// The mark on the chip that starts this session later. A clock rather than a calendar: the
+    /// offers behind it are times of day and window resets, not dates.
+    static let scheduleSymbol = "clock"
+
     /// The hero's mark: larger than the sidebar's 24 because it stands alone over a greeting,
     /// smaller than an app icon because it is a flourish, not the content.
     static let heroMarkSide: CGFloat = 40

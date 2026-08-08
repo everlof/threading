@@ -12,6 +12,17 @@ final class TerminalContainerViewController: NSViewController {
     private let placeholderView = SessionPlaceholderView()
     private let appEvents = AppEventObservations()
 
+    /// Whether this pane opens nothing.
+    ///
+    /// Taken at construction rather than read from `RecoveryMode` at each site, so a test drives
+    /// the pane's recovery behaviour by building one rather than by moving a process-wide answer
+    /// out from under whatever else is running.
+    private let isRecovery: Bool
+
+    /// The recovery surface, built once and shown wherever the pane would otherwise be empty or
+    /// would otherwise open something.
+    private var recoveryView: RecoveryModeView?
+
     /// Shown when a project rather than a session is selected.
     let composerViewController = SessionComposerViewController()
 
@@ -24,6 +35,25 @@ final class TerminalContainerViewController: NSViewController {
     /// chat or is a standalone project terminal.
     var activeTerminalSession: TerminalSession? {
         currentProjectTerminal?.session ?? currentChild?.session
+    }
+
+    /// Whether a natively rendered conversation is on screen, which is what the turn and step
+    /// commands need in order to validate themselves on or off.
+    var isShowingConversation: Bool { currentConversation != nil }
+
+    /// Moves the showing conversation by one exchange, or by one tool call inside one.
+    ///
+    /// A narrow forwarding pair rather than an exposed controller: the menu needs to move the
+    /// conversation, not to hold it, and everything else that reaches through here has gone the
+    /// same way.
+    @discardableResult
+    func moveConversation(byTurn forward: Bool) -> Bool {
+        currentConversation?.goToAdjacentTurn(forward: forward) ?? false
+    }
+
+    @discardableResult
+    func moveConversation(byStep forward: Bool) -> Bool {
+        currentConversation?.goToAdjacentStep(forward: forward) ?? false
     }
 
     /// The one authoritative answer to which session is on screen.
@@ -67,7 +97,7 @@ final class TerminalContainerViewController: NSViewController {
     /// shows, exactly as the display panel does.
     private(set) lazy var drawerHostController = DrawerHostViewController(
         directoryProvider: { sessionID in
-            guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+            guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
                 return nil
             }
             return AgentRuntime.shared.controller(for: sessionID)?.session
@@ -121,7 +151,7 @@ final class TerminalContainerViewController: NSViewController {
     weak var delegate: TerminalContainerViewControllerDelegate?
 
     /// The pane's header strip. See `setupHeader`.
-    private let headerHost = NSView()
+    private let headerHost = PaneHeaderView(margin: .paneEdge)
     private var headerLeadingConstraint: NSLayoutConstraint?
 
     /// Where the pane's content begins — below the header rather than below the toolbar.
@@ -130,7 +160,24 @@ final class TerminalContainerViewController: NSViewController {
     /// What every surface in this pane pins its top to.
     var contentTopAnchor: NSLayoutYAxisAnchor { contentGuide.topAnchor }
 
+    /// What the content guide currently hangs from — the header, or a notice band under it.
+    private var contentTopConstraint: NSLayoutConstraint?
+
+    /// The band standing between the header and the content, when there is one. Readable so a
+    /// test can ask whether the pane is carrying a notice rather than search its subviews.
+    private(set) var noticeView: NSView?
+
     // MARK: - Lifecycle
+
+    init(recovery: Bool = RecoveryMode.isActive) {
+        isRecovery = recovery
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func loadView() {
         view = NSView()
@@ -164,7 +211,8 @@ final class TerminalContainerViewController: NSViewController {
         // The card's agent line reads the *stored* session, and this event fires for content edits
         // as well as structural ones. Without it a model chosen for the session on screen sat
         // stale on the card until the selection moved away and came back. Cheap to repeat: the
-        // status-line coverage behind it answers from cache once the account's command is known.
+        // refresh reads memory, and the two transcript revalidations behind it are gated on the
+        // file having grown and answer off the main thread.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.refreshGitStatusOverlayModel()
         }
@@ -256,10 +304,10 @@ final class TerminalContainerViewController: NSViewController {
             equalTo: view.safeAreaLayoutGuide.topAnchor
         )
         // AppKit briefly reports a zero-height safe area while the full-size-content window is
-        // being attached. Let the 40pt floor win for that one layout pass; once the toolbar has
-        // established its inset, both constraints agree. Keeping this equality just below
-        // required avoids a launch-time unsatisfiable-constraints warning without changing the
-        // settled geometry.
+        // being attached. Let the header's own floor win for that one layout pass; once the
+        // toolbar has established its inset, both constraints agree. Keeping this equality just
+        // below required avoids a launch-time unsatisfiable-constraints warning without changing
+        // the settled geometry.
         headerBottom.priority = .init(999)
 
         NSLayoutConstraint.activate([
@@ -271,19 +319,52 @@ final class TerminalContainerViewController: NSViewController {
             headerBottom,
             headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            // A floor, not the height: the strip is the toolbar's to size, and this only keeps
-            // the row sane where there is no window to inset it — a fixture, or a test.
-            headerHost.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: PaneHeaderDefaults.height
-            ),
-
-            // Everything else in the pane hangs off this rather than off the safe area directly,
-            // so the header is the only place that knows where the pane's content begins.
-            contentGuide.topAnchor.constraint(equalTo: headerHost.bottomAnchor),
             contentGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             contentGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             contentGuide.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        // Everything else in the pane hangs off this rather than off the safe area directly, so
+        // the header is the only place that knows where the pane's content begins — and, when a
+        // notice band is standing between the two, the only place that knows it moved.
+        pinContentTop(to: headerHost.bottomAnchor)
+    }
+
+    // MARK: - Notice Band
+
+    /// Puts a band across the pane between the header and the content.
+    ///
+    /// It **pushes** rather than covers: the content guide is re-pinned under the band, so every
+    /// surface in the pane moves down with it and nothing the notice says is said over something
+    /// being read. One band at a time — a second replaces the first, because two stacked strips
+    /// about different things read as chrome rather than as news.
+    func showNotice(_ notice: NSView) {
+        dismissNotice()
+
+        notice.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(notice)
+        NSLayoutConstraint.activate([
+            notice.topAnchor.constraint(equalTo: headerHost.bottomAnchor),
+            notice.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            notice.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        noticeView = notice
+        pinContentTop(to: notice.bottomAnchor)
+    }
+
+    /// Takes the band away and hands the pane's top edge back to the header.
+    func dismissNotice() {
+        guard let noticeView else { return }
+        noticeView.removeFromSuperview()
+        self.noticeView = nil
+        pinContentTop(to: headerHost.bottomAnchor)
+    }
+
+    private func pinContentTop(to anchor: NSLayoutYAxisAnchor) {
+        contentTopConstraint?.isActive = false
+        let constraint = contentGuide.topAnchor.constraint(equalTo: anchor)
+        constraint.isActive = true
+        contentTopConstraint = constraint
     }
 
     /// Puts the window controller's header content into the strip. The controller owns those
@@ -304,7 +385,7 @@ final class TerminalContainerViewController: NSViewController {
                 equalTo: headerHost.trailingAnchor,
                 constant: -PaneHeaderDefaults.inset
             ),
-            content.centerYAnchor.constraint(equalTo: headerHost.centerYAnchor)
+            content.centerYAnchor.constraint(equalTo: headerHost.contentCenterYAnchor)
         ])
     }
 
@@ -347,6 +428,16 @@ final class TerminalContainerViewController: NSViewController {
     /// the user is in the middle of making. The rule lives in `SessionComposerViewController`,
     /// which is what every route here goes through.
     func showComposer(projectID: ProjectID?) {
+        // The composer is a form whose one button starts a session, so in recovery it is the
+        // surface that gets shown instead — a form that cannot submit is a worse answer than the
+        // screen saying why.
+        if isRecovery {
+            currentSessionID = nil
+            currentTerminalID = nil
+            showRecoverySurface()
+            return
+        }
+
         consumeComposerHandoff(for: nil)
         detachCurrentChild()
         currentComposerProjectID = projectID
@@ -401,6 +492,14 @@ final class TerminalContainerViewController: NSViewController {
         install(settings: controller, repaint: cached != nil)
         controller.begin(query: query)
         return controller
+    }
+
+    /// Re-shows the AI search surface with whatever it last held, without starting a run —
+    /// the Back path into suggestions the user navigated away from.
+    func reshowSettingsAISearch() {
+        guard let controller = settingsAISearch else { return }
+        currentSettingsPageID = nil
+        install(settings: controller, repaint: true)
     }
 
     /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by
@@ -496,9 +595,9 @@ final class TerminalContainerViewController: NSViewController {
             equalTo: drawerHost.bottomAnchor
         )
         // Closed means the host is exactly zero high, while the reusable controller retains a
-        // real 40pt tab-strip constraint. Let the clipped child keep that intrinsic floor for
-        // the closed pass instead of asking Auto Layout to break a required constraint. The
-        // equality becomes satisfiable—and therefore exact—the moment the drawer opens.
+        // real theme-dependent tab-strip constraint. Let the clipped child keep that intrinsic
+        // floor for the closed pass instead of asking Auto Layout to break a required constraint.
+        // The equality becomes satisfiable—and therefore exact—the moment the drawer opens.
         drawerContentBottom.priority = .init(999)
         NSLayoutConstraint.activate([
             drawerHostController.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
@@ -680,6 +779,16 @@ final class TerminalContainerViewController: NSViewController {
     /// Selecting a dormant session is the "reopen" gesture: it resumes the prior
     /// conversation by identifier rather than starting a fresh one.
     func show(sessionID: SessionID?, initialPrompt: String? = nil) {
+        // Recovery lists and selects but opens nothing: the sidebar is the evidence somebody in a
+        // crash loop came for, and a row that could not be clicked would be a list pretending to
+        // be a picture. The pane says so in words instead. This is the *visible* refusal; the
+        // load-bearing one is at each surface's own `launch`, which every other route crosses.
+        if isRecovery {
+            currentSessionID = sessionID
+            showRecoveryState(for: sessionID)
+            return
+        }
+
         // Spent before the early return as well, so a selection that changes nothing on screen
         // cannot leave a mark standing for some later attach to animate.
         let handsOverTheBox = consumeComposerHandoff(for: sessionID)
@@ -715,7 +824,7 @@ final class TerminalContainerViewController: NSViewController {
         // must still support it — a session flagged native for an agent since disabled falls
         // back to the terminal rather than launching a mode it should no longer use.
         if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
-           let project = ProjectStore.shared.project(forSessionID: sessionID) {
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
             showConversation(
                 agentSession,
                 in: project,
@@ -742,6 +851,12 @@ final class TerminalContainerViewController: NSViewController {
     /// Shows a first-class project terminal, starting a fresh shell only when no process is
     /// currently retained for it.
     func show(terminalID: TerminalID) {
+        if isRecovery {
+            currentTerminalID = terminalID
+            showRecoveryState(for: nil)
+            return
+        }
+
         consumeComposerHandoff(for: nil)
         guard terminalID != currentTerminalID || settingsPage != nil else { return }
 
@@ -776,16 +891,34 @@ final class TerminalContainerViewController: NSViewController {
     /// gate would pass and `forkpty` would take that as the winsize — the agent's TUI boots
     /// into a two-column window and renders garbage until something resizes it. The frame is
     /// this pane's own bounds where possible, so the eventual attach is not even a resize.
-    func launchInBackground(sessionID: SessionID) {
+    /// `initialPrompt` is a message the caller wants this launch to carry — a scheduled send
+    /// waking a session that had gone dormant. It takes precedence over the session's own
+    /// continuation opening, which is the only prompt a relaunch used to have.
+    ///
+    /// **What it does with it differs by surface, and the difference is not cosmetic.** A native
+    /// conversation is handed it over the stream, where an unready transport parks it in the
+    /// visible outbox and sends it when the turn opens. A terminal is handed it as a launch
+    /// argument, which only works for a session that has never run: `AgentLauncher` deliberately
+    /// omits the prompt on `--resume`, and the alternative — typing into the TUI after it boots
+    /// — is how a scheduled message ends up answering Claude's "summarise or read in full"
+    /// question instead of being sent. `SessionCoordinator` is what decides a resumed terminal
+    /// never gets one; this method simply cannot deliver it safely and does not pretend to.
+    @discardableResult
+    func launchInBackground(sessionID: SessionID, initialPrompt: String? = nil) -> Bool {
+        guard !isRecovery else {
+            RecoveryMode.refuse("a background session launch")
+            return false
+        }
         guard let agentSession = ProjectStore.shared.session(withID: sessionID),
               !agentSession.isArchived,
-              !AgentRuntime.shared.hasTerminal(sessionID: sessionID) else { return }
+              !AgentRuntime.shared.hasTerminal(sessionID: sessionID) else { return false }
 
         let frame = NSRect(origin: .zero, size: backgroundLaunchSize)
-        let openingPrompt = ConversationContinuation.openingPrompt(for: agentSession)
+        let openingPrompt = initialPrompt
+            ?? ConversationContinuation.openingPrompt(for: agentSession)
 
         if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
-           let project = ProjectStore.shared.project(forSessionID: sessionID) {
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
             let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
             conversation.delegate = self
             conversation.view.frame = frame
@@ -794,7 +927,7 @@ final class TerminalContainerViewController: NSViewController {
             if let openingPrompt, !openingPrompt.isEmpty {
                 conversation.sendInitialPrompt(openingPrompt)
             }
-            return
+            return true
         }
 
         let controller = AgentRuntime.shared.makeController(for: agentSession)
@@ -805,6 +938,7 @@ final class TerminalContainerViewController: NSViewController {
         // mark every restored session unread. See the tracker for what ends the grace.
         controller.activityTracker.noteUnattendedLaunch()
         controller.launch(initialPrompt: openingPrompt)
+        return true
     }
 
     /// The size a background-launched surface is laid out at before its process starts:
@@ -864,7 +998,10 @@ final class TerminalContainerViewController: NSViewController {
     private func attach(_ controller: AgentSessionViewController) {
         addChild(controller)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(controller.view, positioned: .below, relativeTo: gitStatusOverlay)
+        // Below the *divider*, not merely below the overlay: the surface's bottom edge and the
+        // divider occupy the same 5pt band, so a surface inserted above it covers the drawer's
+        // seam and takes its drags. The divider precedes the overlay, so this keeps both above.
+        view.addSubview(controller.view, positioned: .below, relativeTo: drawerDivider)
 
         // Pinned to the safe area, which the toolbar insets for us.
         NSLayoutConstraint.activate([
@@ -890,7 +1027,8 @@ final class TerminalContainerViewController: NSViewController {
     private func attachProjectTerminal(_ controller: ProjectTerminalViewController) {
         addChild(controller)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(controller.view, positioned: .below, relativeTo: gitStatusOverlay)
+        // Same slot as `attach`: under the pane's own chrome, divider included.
+        view.addSubview(controller.view, positioned: .below, relativeTo: drawerDivider)
         NSLayoutConstraint.activate([
             controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
             controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -987,10 +1125,16 @@ final class TerminalContainerViewController: NSViewController {
         }
     }
 
-    private func attachConversation(_ conversation: ConversationViewController) {
+    /// Internal rather than private, like the divider's drag seams: the seam-visibility test
+    /// attaches a real conversation through the production insertion without launching its
+    /// agent, which the public route — `show(sessionID:)` — always does.
+    func attachConversation(_ conversation: ConversationViewController) {
         addChild(conversation)
         conversation.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(conversation.view, positioned: .below, relativeTo: gitStatusOverlay)
+        // Below the *divider*, not merely below the overlay — see `attach`. This shipped the
+        // other way: every surface covered the drawer's seam, which made the one rule between
+        // a conversation and its shell invisible and the grab strip under it undraggable.
+        view.addSubview(conversation.view, positioned: .below, relativeTo: drawerDivider)
 
         NSLayoutConstraint.activate([
             // The conversation draws its own top inset, so it pinned to the pane's own top and
@@ -1095,6 +1239,13 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func showEmptyState() {
+        // In recovery the empty pane is where the surface lives: this is the state the launch
+        // opens into, and the screen explaining the launch is what belongs in it.
+        guard !isRecovery else {
+            showRecoverySurface()
+            return
+        }
+
         // With no projects at all, the empty pane *is* the way in: the composer in its
         // choose-a-project mode, not a placeholder describing where else to click.
         guard !ProjectStore.shared.projects.isEmpty else {
@@ -1122,6 +1273,71 @@ final class TerminalContainerViewController: NSViewController {
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestNewSession(self)
         }
+    }
+
+    // MARK: - Recovery
+
+    /// Installs the surface this pane shows for the rest of a recovery launch.
+    ///
+    /// Held rather than rebuilt on every selection: it carries a button whose title is a state
+    /// ("Extensions Will Stay Off Next Launch"), and a surface rebuilt under the user would lose
+    /// what they had just pressed.
+    func installRecoverySurface(_ surface: RecoveryModeView) {
+        recoveryView?.removeFromSuperview()
+        recoveryView = surface
+
+        view.addSubview(surface, positioned: .below, relativeTo: drawerDivider)
+        NSLayoutConstraint.activate([
+            surface.topAnchor.constraint(equalTo: contentTopAnchor),
+            surface.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        showRecoverySurface()
+    }
+
+    /// Brings the surface back to the front of the pane — the band's "Show Options".
+    func showRecoverySurface() {
+        guard let recoveryView else { return }
+        detachCurrentChild()
+        currentComposerProjectID = nil
+        currentSettingsPageID = nil
+        composerViewController.view.isHidden = true
+        placeholderView.isHidden = true
+        recoveryView.isHidden = false
+        applyPaneBackground(.chrome)
+    }
+
+    /// Takes the surface off the pane without ending recovery.
+    func dismissRecoverySurface() {
+        recoveryView?.isHidden = true
+        showRecoveryState(for: currentSessionID)
+    }
+
+    /// What a selected session or terminal looks like when nothing will be opened for it.
+    ///
+    /// The placeholder rather than the surface: the surface answers "why is the app like this",
+    /// which the band above already says, and repeating it on every click would bury the one
+    /// sentence this moment needs. No action button — there is nothing here to press.
+    private func showRecoveryState(for sessionID: SessionID?) {
+        recoveryView?.isHidden = true
+        composerViewController.view.isHidden = true
+        placeholderView.isHidden = false
+        currentComposerProjectID = nil
+        currentSettingsPageID = nil
+        applyPaneBackground(.chrome)
+
+        let title = sessionID
+            .flatMap { ProjectStore.shared.session(withID: $0)?.title }
+            ?? L10n.string("Recovery Mode")
+        placeholderView.configure(
+            symbolName: "pause.circle",
+            title: title,
+            detail: L10n.string(
+                "This session stays closed until Threading starts normally."
+            )
+        )
+        placeholderView.onAction = nil
     }
 
     private func showDormantTerminalState(for terminalID: TerminalID) {
@@ -1274,7 +1490,7 @@ private extension TerminalContainerViewController {
         refreshGitStatusOverlayAudience()
 
         guard let sessionID = currentSessionID,
-              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return }
 
         gitStatusLoadingSessionID = sessionID
         delegate?.terminalContainer(self, gitStatusLoadingDidChange: true, for: sessionID)
@@ -1370,24 +1586,28 @@ private extension TerminalContainerViewController {
     /// speed as chips directly above the composer, so the card would be saying them a second time
     /// in the same view — the rule the run spinner already follows.
     ///
-    /// **A terminal session shows what its CLI does not.** Claude draws a status line in its TUI,
-    /// and for three of four logins on the machine this was written against that line is usage and
-    /// nothing else — no model. `ClaudeStatusLineCoverage` runs the account's own command and
-    /// reports which facts it prints; whatever is left is what the card owes the user. The card is
-    /// only told the answer, so a Claude-specific rule stays out of a Git-shaped view.
+    /// **A terminal session shows every fact this pane can extract**, whether or not the user's own
+    /// Claude status line already prints one of them. Threading used to run the account's
+    /// `statusLine` command and drop whichever facts it found in the output. That is gone: the
+    /// probe was a subprocess per unseen command, a cache keyed on it, and a match rule whose only
+    /// failure direction was hiding a fact the user asked for — bought against a fact appearing
+    /// twice in one pane, which is the cheap outcome. See `ClaudeStatusLineSettings`.
     ///
-    /// Two facts are deliberately withheld rather than guessed. Fast mode is a reading only where
+    /// One fact is deliberately withheld rather than guessed. Fast mode is a reading only where
     /// Threading sets it: `appendCodexConversationOverrides` is Codex-only, and Claude's own
     /// fast-mode state belongs to its print transport (`AgentModels.defaultFastMode` returns nil
     /// for Claude and says why), so a Claude *terminal* session has no honest speed to report.
     /// Effort for a Claude terminal session is the account's configured value — what the CLI will
     /// inherit, which is the best answer available and goes stale the moment the user types
-    /// `/effort`. When their status line prints effort we hide ours, which is also the case where
-    /// staleness would have shown.
+    /// `/effort`.
+    ///
+    /// **The permission mode is the one fact taken only from observation.** The launch record is
+    /// not consulted at all — `ObservedPermissionMode` says why — so a runtime that records
+    /// nothing, and a session that has not started, show no posture rather than a stale one.
     func refreshGitStatusOverlayModel() {
         guard let sessionID = currentSessionID,
               let session = ProjectStore.shared.session(withID: sessionID),
-              let project = ProjectStore.shared.project(forSessionID: sessionID),
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
               currentConversation == nil
         else {
             gitStatusOverlay.updateModel(nil)
@@ -1426,6 +1646,7 @@ private extension TerminalContainerViewController {
 
         let reading = GitStatusOverlayView.ModelReading(
             name: model.map { ModelName.display(for: $0) },
+            mode: ObservedPermissionMode.known(for: session, in: project)?.displayName,
             effort: effort.map {
                 AgentReasoningLevel(effort: $0, description: "").displayName
             },
@@ -1444,39 +1665,17 @@ private extension TerminalContainerViewController {
             }
         }
 
-        // Only Claude runs a status line, so a Codex terminal has nothing to complement — and
-        // a suppressed one prints nothing by construction, so there is no line to defer to
-        // and the card owes every fact. Skipping the probe also skips its cached answer,
-        // which describes a line the user is no longer shown.
-        guard session.kind.supports(.statusLine),
-              !AppSettings.shared.suppressesClaudeStatusLine
-        else {
-            gitStatusOverlay.updateModel(reading)
-            return
-        }
-
-        var facts = ClaudeStatusLineCoverage.Facts(
-            workingDirectory: project.folderURL.path,
-            projectDirectory: project.folderURL.path
-        )
-        facts.modelIdentifier = model
-        facts.modelDisplayName = reading.name
-        facts.effort = effort
-        facts.sessionID = session.resumeState.transcriptID?.rawValue
-        facts.branch = session.branch
-
-        // Set inside the completion rather than before it: `resolve` answers immediately when the
-        // account has no status line or the command is already known, and the row appearing with
-        // every fact and then dropping the covered ones would be a visible flinch on first paint.
-        ClaudeStatusLineCoverage.resolve(account: account, facts: facts) { [weak self] coverage in
+        // The posture has no configured source to fall back to, so unlike the model this asks
+        // every time rather than only when nothing else could answer — the transcript is the
+        // only thing that knows. The same three properties keep that affordable: the read is off
+        // the main thread, capped, gated on the file having grown, and silent unless the answer
+        // moved. A runtime that records no posture returns before any of that happens.
+        ObservedPermissionMode.revalidate(for: session, in: project) { [weak self] _ in
             guard let self, self.currentSessionID == sessionID else { return }
-
-            var filtered = reading
-            if coverage.model { filtered.name = nil }
-            if coverage.effort { filtered.effort = nil }
-            if coverage.fastMode { filtered.isFast = false }
-            self.gitStatusOverlay.updateModel(filtered)
+            self.refreshGitStatusOverlayModel()
         }
+
+        gitStatusOverlay.updateModel(reading)
     }
 
     /// The transcript whose records can name the model this session ran, or nil where none can.
@@ -1859,11 +2058,12 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
 // MARK: - Pane Header Defaults
 
 /// The strip at the top of the content pane, holding what used to be toolbar items.
+@MainActor
 enum PaneHeaderDefaults {
     /// Deep enough for the tab and the icon buttons beside it, with air above and below.
     /// Read from `PaneHeaderView` so this strip and the sidebar's header band keep one
     /// silhouette: their hairlines land on the same line across the split.
-    static let height: CGFloat = PaneHeaderView.bandHeight
+    static var height: CGFloat { PaneHeaderView.bandHeight }
 
     /// From the pane's own edges. The leading one is what makes the tab start where the sidebar
     /// ends, which is the whole reason the header lives in the pane.

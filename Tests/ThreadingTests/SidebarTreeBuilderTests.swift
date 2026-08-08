@@ -77,6 +77,16 @@ final class SidebarTreeBuilderTests: XCTestCase {
         try run()
     }
 
+    /// One order, read backwards — the two keys the tree builder consults for that.
+    private func withReversedOrder(
+        _ order: SidebarSessionOrder,
+        run: () throws -> Void
+    ) rethrows {
+        try withDefault(order.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(true, forKey: "sidebarSessionOrderIsReversed", run: run)
+        }
+    }
+
     // MARK: - Earning a level
 
     /// One checkout is a plain project row. The repository level exists to tell *several*
@@ -399,6 +409,74 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 node.sessionNodes.map(\.sessionID),
                 [apple.id, banana.id, cherry.id]
             )
+        }
+    }
+
+    /// Reversed, the same field is read from the other end: the stalest session leads.
+    func testReversedRecentActivityPutsTheLeastRecentFirst() throws {
+        try withReversedOrder(.recentActivity) {
+            let stale = session("stale", lastActiveAt: Date(timeIntervalSinceReferenceDate: 100))
+            let fresh = session("fresh", lastActiveAt: Date(timeIntervalSinceReferenceDate: 200))
+
+            let roots = SidebarTreeBuilder.rootNodes(from: [project("p", sessions: [stale, fresh])])
+            let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+            XCTAssertEqual(node.sessionNodes.map(\.sessionID), [stale.id, fresh.id])
+        }
+    }
+
+    /// Order Added has no field of its own — the store offset *is* the sort — so reversing has
+    /// to reach the offset rather than leaving it as an untouched tie-break.
+    func testReversedOrderAddedPutsTheNewestFirst() throws {
+        try withReversedOrder(.manual) {
+            let first = session("first")
+            let second = session("second")
+            let third = session("third")
+
+            let roots = SidebarTreeBuilder.rootNodes(
+                from: [project("p", sessions: [first, second, third])]
+            )
+            let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+            XCTAssertEqual(node.sessionNodes.map(\.sessionID), [third.id, second.id, first.id])
+        }
+    }
+
+    func testReversedNameOrderRunsZToA() throws {
+        try withReversedOrder(.name) {
+            let banana = session("banana")
+            let apple = session("Apple")
+            let cherry = session("cherry")
+
+            let roots = SidebarTreeBuilder.rootNodes(
+                from: [project("p", sessions: [banana, apple, cherry])]
+            )
+            let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+            XCTAssertEqual(
+                node.sessionNodes.map(\.sessionID),
+                [cherry.id, banana.id, apple.id]
+            )
+        }
+    }
+
+    /// Reversing reverses the sort, not the list: pinning outranks a direction the same way it
+    /// outranks an order, so a pinned session leads rather than sinking to the bottom.
+    func testPinnedSessionsStillLeadAReversedOrder() throws {
+        try withReversedOrder(.recentActivity) {
+            let stale = session("stale", lastActiveAt: Date(timeIntervalSinceReferenceDate: 100))
+            let pinnedFresh = session(
+                "pinned",
+                isPinned: true,
+                lastActiveAt: Date(timeIntervalSinceReferenceDate: 200)
+            )
+
+            let roots = SidebarTreeBuilder.rootNodes(
+                from: [project("p", sessions: [stale, pinnedFresh])]
+            )
+            let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+            XCTAssertEqual(node.sessionNodes.map(\.sessionID), [pinnedFresh.id, stale.id])
         }
     }
 
