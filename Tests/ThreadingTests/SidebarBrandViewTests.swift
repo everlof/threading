@@ -64,10 +64,7 @@ final class SidebarBrandViewTests: XCTestCase {
         mark.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
         mark.layoutSubtreeIfNeeded()
 
-        let container = try XCTUnwrap(
-            mark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
-        )
-        let dots = try XCTUnwrap(container.sublayers)
+        let (_, _, dots) = try particleLayers(in: mark)
         XCTAssertEqual(dots.count, 49, "the compact mark should keep its measured density")
         XCTAssertTrue(dots.allSatisfy { $0 is CAShapeLayer && ($0 as? CAShapeLayer)?.fillColor != nil })
 
@@ -85,10 +82,7 @@ final class SidebarBrandViewTests: XCTestCase {
         Design.Motion.reduceMotionOverrideForTesting = false
         mark.layoutSubtreeIfNeeded()
 
-        let container = try XCTUnwrap(
-            mark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
-        )
-        let dots = try XCTUnwrap(container.sublayers)
+        let (container, field, dots) = try particleLayers(in: mark)
         mark.setHovered(true)
         XCTAssertEqual(container.opacity, 1)
         XCTAssertTrue(
@@ -97,6 +91,10 @@ final class SidebarBrandViewTests: XCTestCase {
         )
         mark.playPress()
         XCTAssertNotNil(container.animation(forKey: "press"))
+        XCTAssertNil(
+            field.animation(forKey: "press"),
+            "the field must stay free to rotate while its outer container handles the click"
+        )
         XCTAssertEqual(
             dots.filter { $0.animation(forKey: "pressPulse") != nil }.count,
             dots.count,
@@ -105,6 +103,70 @@ final class SidebarBrandViewTests: XCTestCase {
 
         mark.setHovered(false)
         XCTAssertEqual(container.opacity, 0)
+        XCTAssertNil(field.animation(forKey: "particle.orbit"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
+        XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
+    }
+
+    /// A pass across the brand only weaves. Holding it turns the complete implied box in
+    /// perspective, on a nested layer so a click can tug it without replacing that turn.
+    @MainActor
+    func testHeldHoverAddsBoxRotationWithoutFightingThePress() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        let passing = ThreadingMarkView(particleMotion: .weave, heldHoverDelay: 60)
+        passing.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        passing.layoutSubtreeIfNeeded()
+        let (_, passingField, _) = try particleLayers(in: passing)
+        passing.setHovered(true)
+        XCTAssertNil(
+            passingField.animation(forKey: "particle.boxTurn"),
+            "rotation began before the pointer had actually held the brand"
+        )
+        passing.setHovered(false)
+
+        let held = ThreadingMarkView(particleMotion: .weave, heldHoverDelay: 0)
+        held.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        held.layoutSubtreeIfNeeded()
+        let (container, field, dots) = try particleLayers(in: held)
+        held.setHovered(true)
+
+        let boxTurn = try XCTUnwrap(
+            field.animation(forKey: "particle.boxTurn") as? CAKeyframeAnimation
+        )
+        XCTAssertEqual(boxTurn.keyPath, "transform")
+        let transforms = try XCTUnwrap(boxTurn.values as? [NSValue]).map(\.caTransform3DValue)
+        XCTAssertTrue(
+            transforms.contains {
+                abs($0.m13) > 0.001 || abs($0.m23) > 0.001
+                    || abs($0.m31) > 0.001 || abs($0.m32) > 0.001
+            },
+            "the box turn stayed in the dots' flat Z-axis plane"
+        )
+        XCTAssertTrue(
+            transforms.contains {
+                abs($0.m14) > 0.001 || abs($0.m24) > 0.001 || abs($0.m34) > 0.001
+            },
+            "the box turn carried no perspective"
+        )
+        XCTAssertNil(
+            field.animation(forKey: "particle.orbit"),
+            "the held hover reused the planar particle orbit"
+        )
+        XCTAssertTrue(
+            dots.contains { $0.animation(forKey: "particle.position") != nil },
+            "the box turn replaced Weave instead of carrying it inside"
+        )
+
+        held.playPress()
+        XCTAssertNotNil(container.animation(forKey: "press"))
+        XCTAssertNotNil(
+            field.animation(forKey: "particle.boxTurn"),
+            "clicking replaced the box turn because both motions owned one layer"
+        )
+
+        held.setHovered(false)
+        XCTAssertNil(field.animation(forKey: "particle.orbit"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
         XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
     }
 
@@ -157,6 +219,19 @@ final class SidebarBrandViewTests: XCTestCase {
 
     private func animatedLayers(of view: NSView, key: String = "drawIn") -> [CALayer] {
         (view.layer?.sublayers ?? []).filter { $0.animation(forKey: key) != nil }
+    }
+
+    @MainActor
+    private func particleLayers(
+        in mark: ThreadingMarkView
+    ) throws -> (container: CALayer, field: CALayer, dots: [CALayer]) {
+        let container = try XCTUnwrap(
+            mark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
+        )
+        let field = try XCTUnwrap(
+            container.sublayers?.first { $0.name == "ThreadingMarkParticleField" }
+        )
+        return (container, field, try XCTUnwrap(field.sublayers))
     }
 
     @MainActor
@@ -264,13 +339,11 @@ final class SidebarBrandViewTests: XCTestCase {
         for layer in try XCTUnwrap(mark.layer?.sublayers) {
             XCTAssertEqual(layer.transform.m11, 1, accuracy: 0.001)
         }
-        let container = try XCTUnwrap(
-            particleMark.layer?.sublayers?.first { $0.name == "ThreadingMarkParticles" }
-        )
+        let (container, field, dots) = try particleLayers(in: particleMark)
         XCTAssertEqual(container.opacity, 0)
-        XCTAssertTrue((container.sublayers ?? []).allSatisfy {
-            ($0.animationKeys() ?? []).isEmpty
-        })
+        XCTAssertNil(field.animation(forKey: "particle.orbit"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
+        XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
     }
 
     /// The whole row is the pointer target, not the 24pt logo alone.

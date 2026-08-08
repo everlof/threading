@@ -1962,7 +1962,9 @@ final class ComponentGalleryViewController: NSViewController {
             $0.setHovered(true)
         }
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + Design.Motion.brandParticleOrbitCycle
+            deadline: .now()
+                + Design.Motion.brandParticleHoverHold
+                + Design.Motion.brandParticleBoxTurnCycle
         ) { [weak self] in
             self?.particleMarkSamples.forEach { $0.setHovered(false) }
         }

@@ -431,10 +431,16 @@ to measure from the band's own edges instead; `PaneHeaderTests` pins the platfor
 that makes it necessary, so if the OS ever stops reserving that width the reason is gone with it.
 
 The brand row is also the mark's pointer target. `SidebarBrandView` tracks the whole row — a
-24pt logo is too small to ask a pointer to find deliberately — and drives `ThreadingMarkView`:
-a held lift on enter, and on press a turn of exactly one strand-step, which the mark's six-fold
-symmetry makes free (the model value never moves, so nothing is left rotated). The press is the
-whole action: the brand names the window and opens nothing, which is why the row stays
+24pt logo is too small to ask a pointer to find deliberately — and drives `ThreadingMarkView`.
+At rest it remains the crisp continuous vector. Hover crossfades it into the Weave particle
+presentation: independently tinted points run around the canonical shield and inward on its six
+canonical strands, so the flourish cannot drift from the application's silhouette. Leaving stops
+the cadence and removes every repeating animation; nothing runs at rest. A deliberate dwell adds
+a perspective pitch-and-yaw turn to the whole sampled box while Weave continues inside its local
+coordinates — the object rotates in place rather than its dots orbiting around the centre. Press sends an
+outer-to-core pulse through those points and turns the whole mark exactly one strand-step, which
+the mark's six-fold symmetry makes free (the model value never moves, so nothing is left rotated).
+The press is the whole action: the brand names the window and opens nothing, which is why the row stays
 `.staticText` and carries a documented `interactiveComponent` exception in
 `config/theme-boundary.json` rather than becoming a `ThemedControl` with a focus ring and an
 accessibility action for a press that does nothing.

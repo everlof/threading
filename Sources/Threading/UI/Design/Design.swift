@@ -1281,6 +1281,10 @@ enum Design {
         /// dwell, late enough that crossing the sidebar never turns the brand into ambient
         /// motion, but soon enough to reward someone inspecting the implied box.
         static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
+        /// Once that dwell is earned, the complete particle box makes one perspective turn.
+        /// It is distinct from Orbit's planar strand-step: the dots keep weaving locally while
+        /// their shared parent turns in depth.
+        static var brandParticleBoxTurnCycle: TimeInterval { reducesMotion ? 0 : 2.8 }
         /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
         /// six-fold silhouette at the end is the silhouette it had at the beginning.
         static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }

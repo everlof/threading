@@ -296,6 +296,13 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         static let strandParticlesPerPoint: CGFloat = 0.105
         static let vectorOpacityWhileParticle: Float = 0.14
         static let particleBreathInset: CGFloat = 0.1
+
+        /// A held sidebar hover turns the implied particle box in depth without ever taking
+        /// its flat sampled face edge-on. At 24pt a complete Y-axis revolution would collapse
+        /// the mark to a line twice per cycle; this smaller rigid-body turn keeps the box
+        /// legible while perspective makes it distinct from dots orbiting in their own plane.
+        static let particleBoxTurnTilt: CGFloat = .pi / 13
+        static let particleBoxPerspective: CGFloat = -1 / 80
     }
 
     /// The brand's own threads, for the identity theme. sRGB restatements of
@@ -314,10 +321,18 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     private var strands: [CAShapeLayer] = []
     private let core = CAShapeLayer()
     private var particleContainer: CALayer?
+    /// Motion local to the particle drawing. The outer container owns hover/press transforms;
+    /// keeping this nested layer separate lets a held hover turn the complete implied box in
+    /// perspective while a click tugs it and its dots keep weaving in local coordinates.
+    private var particleField: CALayer?
     private var particles: [(layer: CAShapeLayer, seed: ThreadingMarkGeometry.ParticleSeed)] = []
     private var particleBox = CGRect.zero
     private var particleDensity: (outline: Int, strand: Int)?
     private var particlePresentationPhase: CGFloat?
+    private var heldHoverWorkItem: DispatchWorkItem?
+    /// `nil` is the product cadence. Tests may collapse the dwell without changing the global
+    /// motion system or actually waiting through a human-scale hover.
+    private var heldHoverDelayOverride: TimeInterval?
     private var themeRedraw: ThemeRedraw?
     /// Whether the mark is currently held lifted, so a press knows what it is scaling from and
     /// a repeated enter does not re-trigger the core's one beat.
@@ -361,11 +376,15 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         themeRedraw = ThemeRedraw(self)
     }
 
-    convenience init(particleMotion: ThreadingMarkParticleMotion) {
+    convenience init(
+        particleMotion: ThreadingMarkParticleMotion,
+        heldHoverDelay: TimeInterval? = nil
+    ) {
         self.init(frame: .zero)
         // Property observers do not run while a convenience initializer is still completing.
         // Build explicitly here; later assignments continue to flow through `didSet`.
         self.particleMotion = particleMotion
+        heldHoverDelayOverride = heldHoverDelay
         configureParticles()
     }
 
@@ -416,6 +435,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             shape.contentsScale = scale
         }
         particleContainer?.contentsScale = scale
+        particleField?.contentsScale = scale
         for particle in particles {
             particle.layer.contentsScale = scale
         }
@@ -497,6 +517,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         particles.removeAll()
         particleContainer?.removeFromSuperlayer()
         particleContainer = nil
+        particleField = nil
         particleDensity = nil
         particlePresentationPhase = nil
 
@@ -504,16 +525,24 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         let container = CALayer()
         container.name = "ThreadingMarkParticles"
         container.opacity = 0
+        // Preserve the field as one 3D object when a held hover turns it. An ordinary CALayer
+        // flattens its descendants before its transform; CATransformLayer keeps their shared
+        // coordinate space intact for the perspective turn.
+        let field = CATransformLayer()
+        field.name = "ThreadingMarkParticleField"
+        container.addSublayer(field)
         layer?.addSublayer(container)
         particleContainer = container
+        particleField = field
         applyContentsScale()
         needsLayout = true
         needsDisplay = true
     }
 
     private func layoutParticles(in box: CGRect, side: CGFloat) {
-        guard let container = particleContainer else { return }
+        guard let container = particleContainer, let field = particleField else { return }
         container.frame = bounds
+        field.frame = container.bounds
         particleBox = box
 
         let density = (
@@ -557,8 +586,8 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     }
 
     private func rebuildParticles(outlineCount: Int, strandCount: Int) {
-        guard let container = particleContainer else { return }
-        container.sublayers?.forEach { $0.removeFromSuperlayer() }
+        guard let field = particleField else { return }
+        field.sublayers?.forEach { $0.removeFromSuperlayer() }
         particles = ThreadingMarkGeometry.particleSeeds(
             outlineCount: outlineCount,
             strandCount: strandCount
@@ -566,7 +595,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             let dot = CAShapeLayer()
             dot.name = particleName(for: seed)
             dot.contentsScale = backingScale * (isHovered ? Layout.hoverScale : 1)
-            container.addSublayer(dot)
+            field.addSublayer(dot)
             return (dot, seed)
         }
         applyParticleInk(resolvedInk())
@@ -773,7 +802,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     /// tests. Production pointer interaction uses `setHovered`; this seam lets visual review
     /// compare all three motions without racing Core Animation's wall clock.
     func setParticlePresentation(phase: CGFloat?) {
-        guard let particleContainer, particleMotion != nil else { return }
+        guard let particleContainer, let particleField, particleMotion != nil else { return }
         particlePresentationPhase = phase.map { $0 - floor($0) }
         layoutSubtreeIfNeeded()
         stopParticleMotion()
@@ -787,6 +816,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             }
             particleContainer.opacity = 1
             particleContainer.transform = CATransform3DIdentity
+            particleField.transform = CATransform3DIdentity
             applyParticleFrame(at: phase)
         } else {
             for shape in shapes {
@@ -795,6 +825,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             }
             particleContainer.opacity = 0
             particleContainer.transform = CATransform3DIdentity
+            particleField.transform = CATransform3DIdentity
             for particle in particles {
                 particle.layer.position = ThreadingMarkGeometry.particlePoint(
                     for: particle.seed,
@@ -808,7 +839,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     }
 
     private func applyParticleFrame(at phase: CGFloat) {
-        guard let particleMotion, let particleContainer else { return }
+        guard let particleMotion, let particleField else { return }
         let centre = CGPoint(x: particleBox.midX, y: particleBox.midY)
 
         switch particleMotion {
@@ -864,7 +895,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
                 )
                 particle.layer.transform = CATransform3DMakeScale(dotBeat, dotBeat, 1)
             }
-            particleContainer.transform = CATransform3DMakeRotation(
+            particleField.transform = CATransform3DMakeRotation(
                 -Layout.pressTurn * phase,
                 0, 0, 1
             )
@@ -873,7 +904,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
 
     private func startParticleMotion() {
         guard let particleMotion,
-              let particleContainer,
+              let particleField,
               !Design.Motion.reducesMotion,
               !particleBox.isEmpty,
               !particles.isEmpty else { return }
@@ -882,10 +913,11 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         switch particleMotion {
         case .weave:
             startWeaveMotion()
+            scheduleHeldHoverRotation()
         case .breathe:
             startBreathMotion()
         case .orbit:
-            startOrbitMotion(on: particleContainer)
+            startOrbitMotion(on: particleField)
         }
     }
 
@@ -955,16 +987,48 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         }
     }
 
-    private func startOrbitMotion(on container: CALayer) {
+    /// Weave is the quick acknowledgement. A pointer that stays says the user is actually
+    /// looking at the mark, so the implied box earns a second, slower idea: the whole field
+    /// turns in depth as one rigid object while the threads keep travelling inside it.
+    private func scheduleHeldHoverRotation() {
+        heldHoverWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.beginHeldHoverRotation()
+        }
+        heldHoverWorkItem = workItem
+
+        let delay = heldHoverDelayOverride ?? Design.Motion.brandParticleHoverHold
+        if delay <= 0 {
+            beginHeldHoverRotation()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
+    }
+
+    private func beginHeldHoverRotation() {
+        guard let workItem = heldHoverWorkItem,
+              !workItem.isCancelled,
+              isHovered,
+              particleMotion == .weave,
+              !Design.Motion.reducesMotion,
+              let particleField else { return }
+        heldHoverWorkItem = nil
+        startBoxTurn(on: particleField)
+    }
+
+    private func startOrbitMotion(on field: CALayer) {
         let cycle = Design.Motion.brandParticleOrbitCycle
         let now = CACurrentMediaTime()
+
+        // Orbit is deliberately the flat particle treatment: unlike the sidebar's held-hover
+        // box turn, it advances the sampled mark by one exact six-fold strand step.
         let orbit = CABasicAnimation(keyPath: "transform.rotation.z")
         orbit.fromValue = 0
         orbit.toValue = -Layout.pressTurn
         orbit.duration = cycle
         orbit.repeatCount = .infinity
         orbit.timingFunction = CAMediaTimingFunction(name: .linear)
-        container.add(orbit, forKey: "particle.orbit")
+        field.add(orbit, forKey: "particle.orbit")
 
         for particle in particles {
             addParticlePulse(
@@ -974,6 +1038,37 @@ final class ThreadingMarkView: NSView, ThemedComponent {
                 now: now
             )
         }
+    }
+
+    private func startBoxTurn(on field: CALayer) {
+        // The face never spins around Z: that is the old effect where the dots appeared to
+        // orbit. Pitch and yaw instead move the field's normal through a closed loop, so every
+        // point keeps its place inside one rotating object. Starting and ending flat avoids a
+        // jump when the dwell is earned and gives the repeating cycle an exact seam.
+        let samples = 16
+        let turn = CAKeyframeAnimation(keyPath: "transform")
+        turn.values = (0...samples).map { sample in
+            NSValue(caTransform3D: particleBoxTransform(
+                at: CGFloat(sample) / CGFloat(samples)
+            ))
+        }
+        turn.calculationMode = .linear
+        turn.duration = Design.Motion.brandParticleBoxTurnCycle
+        turn.repeatCount = .infinity
+        field.add(turn, forKey: "particle.boxTurn")
+    }
+
+    private func particleBoxTransform(at phase: CGFloat) -> CATransform3D {
+        let angle = phase * .pi * 2
+        let pitch = Layout.particleBoxTurnTilt * sin(angle)
+        // One minus cosine makes yaw travel forward and home again while pitch crosses from
+        // above to below. Together they read as a turn in volume, not a planar wobble.
+        let yaw = Layout.particleBoxTurnTilt * (1 - cos(angle))
+        var transform = CATransform3DIdentity
+        transform.m34 = Layout.particleBoxPerspective
+        transform = CATransform3DRotate(transform, pitch, 1, 0, 0)
+        transform = CATransform3DRotate(transform, yaw, 0, 1, 0)
+        return transform
     }
 
     private func addTravel(
@@ -1039,12 +1134,19 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     }
 
     private func stopParticleMotion() {
-        particleContainer?.removeAnimation(forKey: "particle.orbit")
+        heldHoverWorkItem?.cancel()
+        heldHoverWorkItem = nil
+        particleField?.removeAnimation(forKey: "particle.orbit")
+        particleField?.removeAnimation(forKey: "particle.boxTurn")
         for particle in particles {
             particle.layer.removeAnimation(forKey: "particle.position")
             particle.layer.removeAnimation(forKey: "particle.scale")
             particle.layer.removeAnimation(forKey: "pressPulse")
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        particleField?.transform = CATransform3DIdentity
+        CATransaction.commit()
     }
 
     /// One frame of a pointer animation: a scale about the mark's centre, then a turn about it.
