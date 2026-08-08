@@ -252,12 +252,28 @@ enum LegacyApplicationSupportMigration {
     }
 
     /// The database is copied by `adoptDatabase` under a different name; the lock belongs to
-    /// whichever process holds it; and a `.migrated` file is one an earlier migration already
-    /// retired, so carrying it over would only re-litter the new directory.
+    /// whichever process holds it; the journals belong to the processes that wrote them; and a
+    /// `.migrated` file is one an earlier migration already retired, so carrying it over would
+    /// only re-litter the new directory.
     private static func shouldAdopt(relativePath: String) -> Bool {
         // The lock and the database sit at the root, so they are matched by their whole relative
         // path — a file that merely shares one of those names further down is ordinary content.
         if relativePath == LegacyApplicationSupportDefaults.lockFileName { return false }
+
+        // `Logs/` is a record of what other processes did, not state the user owns, and adopting
+        // it does active harm on both counts. The launch marker is the sharp end: copied across,
+        // `EventLog` reads it seconds later as "Previous launch did not quit cleanly" and
+        // attributes it to a pid, a start time and a version belonging to the app under its old
+        // name. Measured on 30 July 2026 — the real adoption reported the pre-rename launch of
+        // the evening before as this launch's unclean exit, and matched it to a `Threading-*.ips`
+        // written by an unrelated process. The journals are the other count: this launch's own is
+        // already open for appending by the time the adoption runs, and replacing a file under an
+        // open descriptor detaches every record written after it, silently. Nothing is lost —
+        // the legacy directory is copied rather than moved, so the old journals stay readable
+        // where they were written.
+        if (relativePath as NSString).pathComponents.first == EventLogDefaults.directoryName {
+            return false
+        }
         if (relativePath as NSString).pathExtension == SQLiteDefaults.migratedSuffix {
             return false
         }

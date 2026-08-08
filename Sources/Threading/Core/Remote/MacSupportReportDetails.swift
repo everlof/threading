@@ -31,6 +31,9 @@ struct MacSupportReportDetails {
     private let companionCount: Int
     private let agentAccounts: [String: Int]
     private let previousLaunchWasClean: Bool?
+    private let crashLoopDecision: CrashLoopDecision?
+    private let launchLedgerRead: LaunchLedgerRead?
+    private let metricKitDiagnostics: MetricKitDiagnosticReading?
 
     init(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus],
@@ -42,7 +45,10 @@ struct MacSupportReportDetails {
         extensionCount: Int,
         companionCount: Int,
         agentAccounts: [String: Int],
-        previousLaunchWasClean: Bool?
+        previousLaunchWasClean: Bool?,
+        crashLoopDecision: CrashLoopDecision? = nil,
+        launchLedgerRead: LaunchLedgerRead? = nil,
+        metricKitDiagnostics: MetricKitDiagnosticReading? = nil
     ) {
         self.privacyStatuses = privacyStatuses
         self.remoteAccessEnabled = remoteAccessEnabled
@@ -54,6 +60,9 @@ struct MacSupportReportDetails {
         self.companionCount = companionCount
         self.agentAccounts = agentAccounts
         self.previousLaunchWasClean = previousLaunchWasClean
+        self.crashLoopDecision = crashLoopDecision
+        self.launchLedgerRead = launchLedgerRead
+        self.metricKitDiagnostics = metricKitDiagnostics
     }
 
     // MARK: - Output
@@ -88,6 +97,36 @@ struct MacSupportReportDetails {
             fields[.previousLaunchClean] = Self.flag(previousLaunchWasClean)
         }
 
+        // The run of launches rather than the one before this. Absent on a machine with no ledger
+        // at all, for the reason above: with nothing recorded, "normal" is not a finding, and a
+        // field claiming one would be answering a question nobody could have asked yet.
+        if let launchLedgerRead {
+            fields[.launchLedger] = launchLedgerRead.token
+            if let crashLoopDecision, launchLedgerRead != .missing {
+                fields[.crashLoopDecision] = crashLoopDecision.token
+                if let checkpoint = crashLoopDecision.lastReachedCheckpoint {
+                    fields[.lastStartupCheckpoint] = checkpoint.rawValue
+                }
+            }
+        }
+
+        // The other half of that question, from Apple's side. `previousLaunchClean` says whether
+        // *this* app came back; MetricKit says whether the system recorded a crash or a hang for
+        // it, over a longer window than one launch. Absent when the payloads were not read at all,
+        // for the same reason as above: a field is a claim, and there is nothing to claim yet.
+        if let metricKitDiagnostics {
+            fields[.metricKitDiagnostics] = Self.summary(of: metricKitDiagnostics)
+
+            if case .read(let summary) = metricKitDiagnostics {
+                if let window = Self.window(of: summary) {
+                    fields[.metricKitWindow] = window
+                }
+                if let crash = summary.mostRecentCrash, let facts = Self.facts(of: crash) {
+                    fields[.metricKitLastCrash] = facts
+                }
+            }
+        }
+
         return fields
     }
 
@@ -116,4 +155,63 @@ struct MacSupportReportDetails {
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: " ")
     }
+
+    // MARK: - MetricKit
+    //
+    // Counts and a window, never the payloads. A crash's call tree is what makes those files
+    // large and what makes them unsafe to hand over; what a support conversation needs is whether
+    // MetricKit saw the crash at all, how many, and which build it hit.
+
+    /// Every state is a distinct token, because "no payloads have ever arrived", "payloads arrived
+    /// and recorded nothing" and "payloads arrived and could not be read" are three different
+    /// facts, and only the first two are good news.
+    private static func summary(of reading: MetricKitDiagnosticReading) -> String {
+        switch reading {
+        case .noDirectory:
+            return "absent"
+        case .empty:
+            return "none"
+        case .unreadable(let payloadFiles):
+            return "unreadable payloads=\(payloadFiles)"
+        case .read(let summary):
+            return [
+                "payloads=\(summary.payloadCount)",
+                "crash=\(summary.crashCount)",
+                "hang=\(summary.hangCount)",
+                "cpu=\(summary.cpuExceptionCount)",
+                "diskWrite=\(summary.diskWriteExceptionCount)",
+                "unreadable=\(summary.unreadablePayloadCount)",
+                "skipped=\(summary.skippedPayloadCount)"
+            ].joined(separator: " ")
+        }
+    }
+
+    /// The span the payloads cover, to the day and in UTC. MetricKit aggregates a prior period,
+    /// so "crash=0" only means anything alongside the window it is a count over.
+    private static func window(of summary: MetricKitDiagnosticSummary) -> String? {
+        guard let from = summary.coveredFrom, let to = summary.coveredTo else { return nil }
+        return "\(dayFormatter.string(from: from))..\(dayFormatter.string(from: to))"
+    }
+
+    /// The identifying facts of the newest crash, each already reduced to one token by the reader.
+    private static func facts(of crash: MetricKitCrashFacts) -> String? {
+        var parts: [String] = []
+        if let value = crash.appVersion { parts.append("version=\(value)") }
+        if let value = crash.appBuildVersion { parts.append("build=\(value)") }
+        if let value = crash.exceptionType { parts.append("exception=\(value)") }
+        if let value = crash.exceptionCode { parts.append("code=\(value)") }
+        if let value = crash.signal { parts.append("signal=\(value)") }
+        if let value = crash.terminationReason { parts.append("reason=\(value)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// Days rather than instants, and UTC rather than the reporter's zone: neither the hour a Mac
+    /// crashed nor where in the world it is doing so belongs in a support field.
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }

@@ -40,10 +40,21 @@ final class MetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecke
         let values: [MXDiagnosticPayload]
     }
 
+    /// `~/Library/Application Support/Threading/Performance/MetricKit`.
+    ///
+    /// Named on the type because `MetricKitDiagnosticReader` reads the same directory from the
+    /// other side of the launch, and a path spelled out twice is a path that eventually differs.
+    static var defaultDirectory: URL {
+        AppDataLocations.supportDirectory
+            .appendingPathComponent(
+                MetricKitStorage.performanceDirectoryName,
+                isDirectory: true
+            )
+            .appendingPathComponent(MetricKitStorage.rootDirectoryName, isDirectory: true)
+    }
+
     init(directory: URL? = nil, reportLimit: Int = 20) {
-        self.directory = directory ?? AppDataLocations.supportDirectory
-            .appendingPathComponent("Performance", isDirectory: true)
-            .appendingPathComponent("MetricKit", isDirectory: true)
+        self.directory = directory ?? Self.defaultDirectory
         self.reportLimit = reportLimit
     }
 
@@ -99,24 +110,24 @@ final class MetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecke
         for payload in payloads {
             write(
                 payload.jsonRepresentation(),
-                kind: "metrics",
+                kind: MetricKitStorage.metricsDirectoryName,
                 beganAt: payload.timeStampBegin,
                 endedAt: payload.timeStampEnd
             )
         }
-        prune(kind: "metrics")
+        prune(kind: MetricKitStorage.metricsDirectoryName)
     }
 
     private func persist(diagnosticPayloads payloads: [MXDiagnosticPayload]) {
         for payload in payloads {
             write(
                 payload.jsonRepresentation(),
-                kind: "diagnostics",
+                kind: MetricKitStorage.diagnosticsDirectoryName,
                 beganAt: payload.timeStampBegin,
                 endedAt: payload.timeStampEnd
             )
         }
-        prune(kind: "diagnostics")
+        prune(kind: MetricKitStorage.diagnosticsDirectoryName)
     }
 
     private func write(_ data: Data, kind: String, beganAt: Date, endedAt: Date) {
@@ -128,7 +139,9 @@ final class MetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecke
 
         let beginning = Int64(beganAt.timeIntervalSince1970)
         let ending = Int64(endedAt.timeIntervalSince1970)
-        let url = kindDirectory.appendingPathComponent("\(beginning)-\(ending).json")
+        let url = kindDirectory.appendingPathComponent(
+            "\(beginning)-\(ending).\(MetricKitStorage.payloadExtension)"
+        )
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
 
         do {
@@ -146,7 +159,7 @@ final class MetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecke
             at: kindDirectory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ).filter({ $0.pathExtension == "json" }) else { return }
+        ).filter({ $0.pathExtension == MetricKitStorage.payloadExtension }) else { return }
 
         for url in files.sorted(by: { $0.lastPathComponent > $1.lastPathComponent })
             .dropFirst(max(reportLimit, 1)) {

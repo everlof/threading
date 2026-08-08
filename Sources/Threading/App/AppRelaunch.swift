@@ -2,7 +2,10 @@ import AppKit
 
 /// Restarts Threading, without letting the copy that is leaving write anything down.
 ///
-/// Used by the reset actions, and only by them. The two halves are both deliberate:
+/// Used by the reset actions and by the recovery surface's "Try Normal Launch Once". The two
+/// halves are both deliberate, and both apply verbatim to the third caller — recovery skipped
+/// starting subsystems, so starting them mid-process is the in-place-reset problem below in its
+/// other direction, and there is nothing it would want saved on the way out:
 ///
 /// - **A detached relauncher, not `openApplication`.** `SingleInstanceLock` is an `flock` held
 ///   for the process's lifetime, so a second instance started while this one is still exiting
@@ -16,9 +19,34 @@ import AppKit
 enum AppRelaunch {
 
     /// Relaunches and leaves immediately, writing nothing. **Does not return.**
-    static func discardingState() -> Never {
+    ///
+    /// The reason travels with the exit rather than being inferred at the next launch, because
+    /// the next launch treats the two differently: a reset restores its workspace, and a recovery
+    /// relaunch holds it back.
+    static func discardingState(reason: IntentionalExitReason = .reset) -> Never {
         spawnRelauncher(for: Bundle.main.bundleURL)
+        recordIntentionalExit(reason: reason)
         exit(EXIT_SUCCESS)
+    }
+
+    /// Says, on the way out, that this was on purpose.
+    ///
+    /// **Here rather than at the two reset call sites.** This is the only path in the app that
+    /// leaves without the quit path, so it is the only place the fact exists; a caller that had
+    /// to remember would eventually be a caller that did not, and the cost of forgetting is the
+    /// next launch calling a user-requested restart a crash — holding their workspace back and
+    /// putting a crash notice over the window they just asked for. Reset Settings did exactly
+    /// that: it leaves the support directory alone, so the launch marker survived the restart.
+    ///
+    /// **Immediately before `exit`**, and after the relauncher is already spawned, because
+    /// everything between the stamp and the exit is a window in which a genuine crash would be
+    /// reported as a deliberate restart. Two statements is as small as that window gets.
+    ///
+    /// Split out from the exit so a test can exercise it — the reason `relaunchCommand(for:)` is
+    /// also split out — since nothing can call a function that never returns and then assert.
+    static func recordIntentionalExit(reason: IntentionalExitReason = .reset) {
+        EventLog.shared.recordIntentionalExit(reason)
+        LaunchLedger.shared.endLaunch(.intentional(reason))
     }
 
     /// Split out so a test can exercise the command that gets built without the process

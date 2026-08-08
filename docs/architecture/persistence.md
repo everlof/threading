@@ -129,8 +129,8 @@ does not read as data loss, which is what made it dangerous: the app looks new r
 broken, and the next actions write over the top of an empty store while the real one goes stale
 beside it. Measured on the machine that hit it: 5 projects in `skalman.db`, 0 in `threading.db`.
 
-`LegacyApplicationSupportMigration.runIfNeeded` runs from `applicationDidFinishLaunching`,
-immediately after the single-instance lock and before any store is opened.
+`LegacyApplicationSupportMigration.runIfNeeded` runs from `applicationDidFinishLaunching`, after
+the single-instance lock and the launch marker, and before any store is opened.
 
 - **The gate is that the new store has no projects.** That is the one signal saying the new
   location has never really been used, and it is what makes adopting the old one safe: there is
@@ -154,12 +154,25 @@ immediately after the single-instance lock and before any store is opened.
   deliberately started over is not handed the old state back on the next launch. It is withheld
   when a legacy database was present but did not arrive, so a full disk gets another attempt
   rather than being recorded as a migration that happened.
-- The old lock file and any `.migrated` file an earlier migration already retired stay behind.
+- The old lock file, the old `Logs/` directory, and any `.migrated` file an earlier migration
+  already retired stay behind. The journals are a record of what *other processes* did rather
+  than state the user owns, and the launch marker among them is read by the adopting launch as
+  its own crash report — see "What the marker covers" below.
 
-**The `UserDefaults` domain is a separate orphan and is not touched here.** The bundle id went
-`se.mjukis.Skalman` → `codes.threading`, so the theme choice, custom palettes, terminal profiles
-and account preferences are still in the old domain. Overwriting live preferences is a different
-risk from adopting an unused directory, and it needs its own decision.
+**The `UserDefaults` domain is a separate orphan and is not imported wholesale here.** The bundle
+id went `se.mjukis.Skalman` → `codes.threading`, so the theme choice, custom palettes, terminal
+profiles and account preferences are still in the old domain. Overwriting live preferences is a
+different risk from adopting an unused directory, and it needs its own decision. There is one
+narrow carry: a legacy `installsCodexHooks = true` is copied only when the current domain has no
+value. That preference authorises maintenance of hooks the same product already wrote; without
+it, Codex falls back to the PTY quiet heuristic. Threading exports the old `SKALMAN_*` hook
+routing aliases beside `THREADING_*`, so an exact old hook remains runnable without rewriting
+its trusted command text. The old hook-trust bypass is carried too only when hook installation
+remains enabled: both were separate explicit choices before the rename, and current values win
+independently. No other preference is imported by this migration.
+Like every startup migration, this import is disabled in the hosted XCTest process: that bundle
+runs inside the shipping app and sees the developer's real defaults domains, so importing there
+would mutate the next real launch merely because a unit test constructed `AppSettings.shared`.
 
 ## Diagnostics and Drafts
 
@@ -196,6 +209,138 @@ A launch writes a marker that only `endLaunch` removes, so the *next* launch is 
 than a standing complaint, and it carries the path of the matching `.ips` from
 `~/Library/Logs/DiagnosticReports/`. The `Quit` record carries `runningSessions`, the count
 handed to the next launch's relaunch; see [`sessions.md`](sessions.md).
+
+**What the marker covers is decided by where `beginLaunch` sits**, since it only catches a death
+that happens after the file is written. It is now the first thing an instance does once it owns
+the state — immediately after `SingleInstanceLock.acquire()` and **ahead of** the pre-rename
+adoption, which used to run inside the blind window and is the one part of a launch that moves a
+user's database around.
+
+Two prefixes stay uncovered on purpose:
+
+- **The hosted-test bail-out.** `applicationDidFinishLaunching` returns at its first line under
+  `XCTestCase`. A test run must never write the marker: the bundle is hosted in the real app and
+  journals into the developer's own directory, so a test host writing one would leave the app's
+  next launch reporting a crash that was a `scripts/test.sh` finishing.
+- **Everything before the lock** — `main.swift`, `NSApplication` setup, the launch span. A marker
+  written before we know we own the state is a marker written *on behalf of another process*,
+  which is the hazard below. Covering it would need a per-process file, which is a different
+  mechanism from the one this file is.
+
+**Ending a launch is gated on having begun one, in `EventLog` itself.** The marker is a single
+file and more than one process reaches a quit path here: the instance that loses the
+single-instance lock puts up an alert and terminates, and the lock fails open, so two live
+instances are possible rather than impossible. Removing the file from a process that never wrote
+it would tell the *running* instance's next launch that its crash had been a clean quit — the one
+thing the marker exists to catch. So `beginLaunch` mints a per-launch token, writes it into the
+marker and holds it; `endLaunch` refuses outright without one, and removes only a file still
+carrying its own token. The lock loser's `applicationShouldTerminate` guard is still there and
+still correct; it is now a second line rather than the only one. `beginLaunch` is also once per
+process — beginning twice would read back the marker written moments earlier and report the
+running process as a crash.
+
+**Why the adoption can now follow it.** `LegacyApplicationSupportMigration` keys on three things:
+the legacy directory existing, its own `.adopted-from-skalman` marker, and the *database* in the
+new location being absent or empty. `EventLog` writes none of them, and the directory the
+adoption would otherwise have to create was already made by `SingleInstanceLock.acquire()` a few
+lines earlier — so the ordering swap cannot change what the adoption decides. What it did
+interact with was the copy: `Logs/` came across with everything else, and **that was a bug in its
+own right**. Measured on the real adoption of 30 July 2026, the legacy `Logs/launch.json` was
+copied in and read seconds later as this launch's unclean exit, reported with a pid, a start time
+and a version belonging to the app under its old name, and matched to a `Threading-*.ips` written
+by an unrelated process. The mechanical half is worse: this launch's journal is open for
+appending by the time the adoption runs, and replacing a file under an open descriptor detaches
+every record written after it, silently. `Logs/` is left behind now, which loses nothing — the
+legacy directory is copied rather than moved, so the old journals stay readable where they were
+written.
+
+**A launch that leaves without quitting is a third disposition, not a crash.** The reset flows
+`exit` rather than terminate — `AppRelaunch` above — and that leaves the marker exactly where a
+crash would. It cost nothing while the marker was only read for a support field, and it became a
+bug the moment the launch after a crash started acting on it: **Reset Settings does not move the
+support directory**, so its marker survived the restart, the next launch held the workspace back
+and put a crash notice across a window the user had just pressed a button to get back. (Reset
+Everything was accidentally fine: the directory moves and the marker goes with it.)
+`AppRelaunch.recordIntentionalExit` **stamps** the marker with a disposition instead of removing
+it — removing it would say "quit cleanly", which is what the quit path means and this is not —
+and `PreviousLaunchOutcome` grows an `.intentional(reason:)` case that restores in full and says
+nothing. The stamp is written inside `discardingState()` rather than at the two reset call sites,
+so a third caller cannot forget it, and immediately before `exit`, because everything between the
+stamp and the exit is a window in which a real crash reports as a deliberate restart.
+
+## The Launch Ledger
+
+The marker answers one question — did the last launch come back — and answers it once. What it
+cannot say is how far that launch got, or whether this is the third one in five minutes.
+`LaunchLedger` is that record: `Launch/launch-ledger.jsonl` under the support directory, a `begin`
+per launch, a line per startup checkpoint, and an ending.
+
+**Append-only over `O_APPEND`, not `RecoverableFileStore`'s atomic whole file.**
+`AgentChildLedger` takes the other shape and is right to — it describes what is running *now*, so
+rewriting the whole value costs one small file. This one describes what happened, it grows through
+a launch, and it has to survive the process dying between two of its own writes. A whole-file
+store also cannot survive a second writer, which a hosted test bundle already is and which Phase 3
+deliberately introduces. Its own directory rather than beside the journal, because `EventLog`
+prunes *any* `.jsonl` in its directory past the retention window, and a quarantined copy a
+neighbour deletes is not a quarantine.
+
+**The version is per record, not per file.** A supervisor's records will land beneath this build's
+in one file, so a record a reader cannot parse has to be skippable without the file becoming
+unreadable; `writer` says who authored each one. The enum-valued fields are stored as raw strings
+and read through typed accessors, because a checkpoint name a build has never heard of is a record
+it does not understand rather than a corrupt file, and `JSONDecoder` cannot tell those apart.
+
+**Four read outcomes, and the third is the one that had to be argued for.** Missing is missing. A
+torn *final* line is dropped and flagged — that is what dying between two writes looks like, and it
+is the signature this file exists to record. A line that failed anywhere else is damage, and damage
+is moved aside; if it cannot be, writing stops rather than continuing beside data the store has
+just proven it cannot manage. A record from a *later* Threading is none of those: the file is left
+byte for byte, counted, and the policy stands down. A later format beats damage in the same file,
+because the cost of being wrong about damage is a moved file and the cost of being wrong about a
+newer build is its history.
+
+**Tombstones are written by the successor**, because the process that died is the one that cannot
+write its own ending. At `beginLaunch` **every** `begin` lacking both an `end` and an `outcome`
+gets one: the newest takes the marker's answer, since `EventLog` is the one thing that actually
+knows how the last launch ended, and older ones are inferred `unclean` from their own missing
+`end` — that absence is the evidence and it needs no marker, which matters because the case that
+produces an older unfinished `begin` is a successor that died before it could write anything at
+all. A marker answer with **nothing unfinished to attach to writes nothing**: inventing a target,
+or hanging an outcome on a launch that already ended, would make the file say something nobody
+observed. `CrashLoopPolicy` also treats an untombstoned `begin` as an unexpected exit, so a
+missing tombstone can never hide a crash.
+
+**Eviction is by launch, never by line.** Half a launch reads as a launch that died, so a line
+budget alone would manufacture the exact fact this file exists to report. Twenty launches, with a
+512-record ceiling as the second guard, compacted at the one moment a rewrite is safe: a single
+writer, before this launch has recorded anything, and with a failure that leaves the old file to
+be appended to. Compaction moves to the supervisor in Phase 3 with `begin` and `outcome`.
+
+`CrashLoopPolicy` is a pure function from that history to a typed decision, because every
+interesting input — a second crash four minutes after the first, a clock stepped backwards between
+them, a reboot in the middle — is a situation nobody can stage on demand. It walks backwards from
+the newest launch and stops at a different build, at a launch that reached `stable`, or at a pair
+outside the five-minute window. **Never-counted is not "resets the counter"**: a clean quit, a
+logout, a reset relaunch and an ending this build cannot name are all skipped *through*, because a
+quit thirty seconds into a launch is not evidence anything was fixed. Only ten interactive minutes
+is. **The window bounds only the pairs that both reached readiness** — a launch that died before
+its first window cannot be something the user did, and an app that cannot start is not more
+startable for having been left alone overnight. Uptime within one boot session (it advances across
+sleep, which is what "five minutes of the user's time" means, and survives the clock being set),
+the wall clock across a reboot, and an unknowable or negative interval counts as *outside*: a
+clock that moved backwards must not manufacture an escalation.
+
+The lock-losing instance and the hosted test bundle are covered by construction rather than by a
+guard at each call site — `beginLaunch` sits after `SingleInstanceLock.acquire()` and below the
+`XCTestCase` bail-out, so neither ever opens a launch, and a checkpoint arriving without one is
+dropped. The ledger's URL also redirects under a hosted bundle, `AgentChildLedger`'s rule: either
+alone has been shown insufficient here.
+
+The decision is journalled, carried in the support report beside `previousLaunchClean` as counts and
+enum tokens, and picks between two sentences in the unclean-exit notice. What the app *does* about
+it — the two-step open that lets a `begin` carry the launch's mode, Recovery Mode, and the one-shot
+flags beside this file — is [`crash-recovery.md`](crash-recovery.md)'s. This file keeps the format,
+the durability and the quarantine.
 
 `DraftStore` keeps composer text per project. That text is the one thing in the app that
 exists nowhere else while it is being written: no transcript (the agent has not launched), no
@@ -328,6 +473,21 @@ file reset. That is the one intentionally non-recoverable piece: backing up live
 plain files would turn the reset folder into a credential export. A settings-only reset keeps
 pairings; a full reset is explicit authority to delete even a corrupt Keychain item that normal
 fail-closed revocation refuses to overwrite.
+
+## Custom theme assets
+
+`AppThemeStore` keeps the small Codable theme document in `PreferenceStore`; image bytes live in
+`~/Library/Application Support/Threading/ThemeAssets/<theme-id>/`. The document names fixed local
+slots rather than absolute paths. `ThemeAssetStore` normalizes all inputs through the shared
+ImageIO gate, owns the per-theme folder, copies it when a custom theme is duplicated, and removes
+it when the theme is deleted. Reset Everything already moves the enclosing Application Support
+directory aside, so these files receive the same recoverable reset as projects and baselines.
+
+Classic `.wsz` import follows that existing ownership rule. Only the validated TITLEBAR image is
+stored as `classic-titlebar.png`; the selected archive itself is not retained. The corresponding
+`chrome.titleBar.classicSkin.titleBarAsset` value therefore moves with custom-theme JSON backups
+without pretending the bytes are in the preferences domain. A document whose file is absent is
+still valid and draws the stock clean-room Classic Player band.
 
 ## Visual baselines
 
