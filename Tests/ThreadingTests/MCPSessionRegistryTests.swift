@@ -288,12 +288,15 @@ final class MCPWireTests: XCTestCase {
 
     let watched = try JSONDecoder().decode(
       MCPToolCallParameters.self,
-      from: Data(#"{"name":"watch_session","arguments":{"session_id":"\#(target)"}}"#.utf8)
+      from: Data(
+        #"{"name":"watch_session","arguments":{"session_id":"\#(target)","timeout_minutes":120}}"#.utf8
+      )
     )
     guard case .watchSession(let watchArguments) = watched.call else {
       return XCTFail("Expected typed watch_session arguments")
     }
     XCTAssertEqual(watchArguments.sessionID, target)
+    XCTAssertEqual(watchArguments.timeoutMinutes, 120)
 
     XCTAssertEqual(
       MCPTools.workspaceTools, ["list_sessions", "send_to_session", "watch_session"])
@@ -302,6 +305,7 @@ final class MCPWireTests: XCTestCase {
     XCTAssertEqual(send.inputSchema.required, ["session_id", "message"])
     let watch = try XCTUnwrap(MCPTools.definitions.first { $0.name == "watch_session" })
     XCTAssertEqual(watch.inputSchema.required, ["session_id"])
+    XCTAssertEqual(watch.inputSchema.properties["timeout_minutes"]?.type, .number)
     XCTAssertTrue(
       MCPToolCatalog.catalogIssues.isEmpty,
       "Every workspace tool needs exactly one catalog row and one schema: \(MCPToolCatalog.catalogIssues)"

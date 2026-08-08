@@ -188,13 +188,13 @@ waiting on one: `.dormant` (the agent exited) and `.limitReached` (nothing runs 
 window resets). A watch that ignored those would leave an agent waiting on a session that will
 never speak again, which is the failure the tool exists to prevent.
 
-**One-shot, in memory, bounded.** The watch is spent when it fires; re-arming is another call. It
-lives with the app run — a durable watch would fire into a session resumed hours later about a
-turn nobody remembers — expires after `ControlWatchDefaults.expiry` (30 minutes) **with a notice
-saying so**, since an agent that armed a watch and heard nothing cannot tell "still running" from
-"quietly forgotten", and one session may hold at most `ControlWatchDefaults.maximumPerWatcher`
-(8). That last number is a bound on being woken as much as on memory: every notice spends a turn
-of the watcher's own usage.
+**One-shot, in memory, bounded.** The watch is spent when it fires; re-arming is another call, and
+it lives only with the app run. With no `timeout_minutes`, the watch has no wall-clock expiry: it
+names the target's current turn, so an arbitrary default deadline would replace the event the
+caller asked for with a clock it did not ask for. A caller that needs a deadline supplies a
+positive finite number of minutes; that watch expires **with a notice saying so**. One session
+may hold at most `ControlWatchDefaults.maximumPerWatcher` (8), which bounds both memory and being
+woken because every delivered notice spends a turn of the watcher's own usage.
 
 **An already-settled target is refused, not watched** (`.targetAlreadySettled`, which is an
 outcome rather than a `ControlRefusal` — nothing was wrong with the ask). There is no edge left to

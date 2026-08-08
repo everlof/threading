@@ -15,12 +15,11 @@ import Foundation
 /// (`.dormant`) and the account's usage window being spent (`.limitReached`). A watch that
 /// ignored those would keep an agent waiting on a session that will never speak again.
 ///
-/// **In memory, one-shot, and bounded.** A watch dies with the app run: the notice is only worth
-/// delivering to a live conversation, and a durable one would fire into a session resumed hours
-/// later about a turn nobody remembers. It fires at most once and is then spent, expires after
-/// `ControlWatchDefaults.expiry` with a notice saying so rather than silently, and one watcher
-/// may hold at most `ControlWatchDefaults.maximumPerWatcher` — the bounded-work rule, and a bound
-/// on being woken, since every notice spends a turn of the watcher's own usage.
+/// **In memory, one-shot, and bounded.** A watch dies with the app run, fires at most once and is
+/// then spent. A caller may put a wall-clock timeout on that wait; omission means the watch lasts
+/// until the target settles or this Threading run ends, not until an arbitrary default deadline.
+/// One watcher may hold at most `ControlWatchDefaults.maximumPerWatcher` — the bounded-work rule,
+/// and a bound on being woken, since every notice spends a turn of the watcher's own usage.
 ///
 /// The notice itself is written here, in Threading's own voice, and deliberately *not* under the
 /// `[Cross-session message …]` header: that header states the body was written by the sending
@@ -48,7 +47,7 @@ final class SessionWatchCenter {
 
     /// What became of an ask to watch, before the plane dresses it in scope.
     enum WatchArmOutcome: Equatable {
-        case armed(expiresAfter: TimeInterval)
+        case armed(expiresAfter: TimeInterval?)
         /// This watcher already watches this target. Coalesced rather than doubled: two watches
         /// on one edge would deliver the same notice twice, spending two of the watcher's turns
         /// on one fact.
@@ -58,6 +57,7 @@ final class SessionWatchCenter {
         /// which is not the work the watcher was waiting on.
         case targetAlreadySettled
         case watcherAtCapacity(limit: Int)
+        case invalidTimeout
     }
 
     // MARK: - Properties
@@ -73,10 +73,6 @@ final class SessionWatchCenter {
         )
     )
 
-    /// Settable for the reason `SessionArchiveScheduler.requestExpiry` is: a test cannot wait
-    /// half an hour to prove a watch that never fired is retired with a notice.
-    var expiry: TimeInterval = ControlWatchDefaults.expiry
-
     private struct WatchKey: Hashable {
         let watcher: SessionID
         let target: SessionID
@@ -84,7 +80,8 @@ final class SessionWatchCenter {
 
     private struct Watch {
         let armedAt: Date
-        let timer: Timer
+        let expiresAfter: TimeInterval?
+        let timer: Timer?
     }
 
     private var watches: [WatchKey: Watch] = [:]
@@ -126,9 +123,17 @@ final class SessionWatchCenter {
     /// Every answer other than `.armed` is a refusal to pretend: an agent told a watch exists
     /// will stop and wait for it, so a coalesced, settled or over-budget ask has to say so.
     @discardableResult
-    func arm(watcher: SessionID, target: SessionID) -> WatchArmOutcome {
+    func arm(
+        watcher: SessionID,
+        target: SessionID,
+        timeout: TimeInterval? = nil
+    ) -> WatchArmOutcome {
         let key = WatchKey(watcher: watcher, target: target)
         guard watches[key] == nil else { return .alreadyWatching }
+
+        if let timeout, !ControlWatchDefaults.isValid(timeout: timeout) {
+            return .invalidTimeout
+        }
 
         guard dependencies.activity(target).hasTurnInFlight else {
             return .targetAlreadySettled
@@ -139,13 +144,13 @@ final class SessionWatchCenter {
             return .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)
         }
 
-        watches[key] = Watch(
-            armedAt: now(),
-            timer: Timer.scheduledTimer(withTimeInterval: expiry, repeats: false) { [weak self] _ in
+        let timer = timeout.map { timeout in
+            Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.expire(key) }
             }
-        )
-        return .armed(expiresAfter: expiry)
+        }
+        watches[key] = Watch(armedAt: now(), expiresAfter: timeout, timer: timer)
+        return .armed(expiresAfter: timeout)
     }
 
     func isWatching(watcher: SessionID, target: SessionID) -> Bool {
@@ -180,12 +185,13 @@ final class SessionWatchCenter {
         for key in watches.keys.filter({ $0.target == target }) {
             // A watch whose timer has not been serviced — the run loop was blocked, the machine
             // slept — is retired rather than spent on an edge it has already outlived.
-            guard let watch = watches[key],
-                  now().timeIntervalSince(watch.armedAt) < expiry else {
+            guard let watch = watches[key] else { continue }
+            if let expiresAfter = watch.expiresAfter,
+               now().timeIntervalSince(watch.armedAt) >= expiresAfter {
                 expire(key)
-                continue
+            } else {
+                fire(key, notice: Self.notice(for: ending, title: title(of: target), target: target))
             }
-            fire(key, notice: Self.notice(for: ending, title: title(of: target), target: target))
         }
     }
 
@@ -193,16 +199,16 @@ final class SessionWatchCenter {
     /// delivery that synchronously moves the watcher's own activity must not re-enter here and
     /// find the same watch still armed.
     private func fire(_ key: WatchKey, notice: String) {
-        watches.removeValue(forKey: key)?.timer.invalidate()
+        watches.removeValue(forKey: key)?.timer?.invalidate()
         attemptDelivery(notice, to: key.watcher)
     }
 
     private func expire(_ key: WatchKey) {
-        guard watches[key] != nil else { return }
+        guard let watch = watches[key], let expiresAfter = watch.expiresAfter else { return }
         let notice = Self.expiryNotice(
             title: title(of: key.target),
             target: key.target,
-            after: expiry
+            after: expiresAfter
         )
         fire(key, notice: notice)
     }
@@ -308,9 +314,17 @@ final class SessionWatchCenter {
     ) -> String {
         """
         [Session watch — Threading] The watch on “\(title)” \
-        (\(target.uuidString.lowercased())) expired after \(Int((expiry / 60).rounded())) \
-        minutes with the turn still running. Re-arm it if you still need the signal. This is \
+        (\(target.uuidString.lowercased())) expired after \(minutesDescription(for: expiry)) \
+        with the turn still running. Re-arm it if you still need the signal. This is \
         Threading speaking, not that session's agent.
         """
+    }
+
+    private static func minutesDescription(for interval: TimeInterval) -> String {
+        let minutes = interval / 60
+        if minutes.rounded() == minutes, minutes <= Double(Int.max) {
+            return "\(Int(minutes)) minutes"
+        }
+        return "\(minutes) minutes"
     }
 }

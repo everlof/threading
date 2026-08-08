@@ -35,7 +35,7 @@ final class WorkspaceControlPlane {
         let steer: (String, SessionID) -> SessionMessageDelivery.SteerOutcome
         /// Arms one watcher's one-shot watch on one target. The plane has already decided the
         /// watch is permitted; the centre owns the edge, the budget and the notice.
-        let armWatch: (SessionID, SessionID) -> SessionWatchCenter.WatchArmOutcome
+        let armWatch: (SessionID, SessionID, TimeInterval?) -> SessionWatchCenter.WatchArmOutcome
     }
 
     private let dependencies: Dependencies
@@ -52,7 +52,9 @@ final class WorkspaceControlPlane {
             surface: { SessionMessageDelivery.surface(for: $0) },
             deliver: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) },
             steer: { SessionMessageDelivery.steer($0, to: $1) },
-            armWatch: { SessionWatchCenter.shared.arm(watcher: $0, target: $1) }
+            armWatch: {
+                SessionWatchCenter.shared.arm(watcher: $0, target: $1, timeout: $2)
+            }
         )
     )
 
@@ -168,7 +170,11 @@ final class WorkspaceControlPlane {
     /// text — so who may be watched is exactly who may be messaged, decided here rather than
     /// twice. Synchronous: arming is a decision, not a delivery, and the notice it buys arrives
     /// later through the delivery seam.
-    func watch(_ targetID: SessionID, from actor: ControlActor) -> ControlWatchOutcome {
+    func watch(
+        _ targetID: SessionID,
+        timeout: TimeInterval? = nil,
+        from actor: ControlActor
+    ) -> ControlWatchOutcome {
         guard case .agentSession(let callerID) = actor,
               let caller = dependencies.session(callerID),
               !caller.isArchived,
@@ -184,7 +190,7 @@ final class WorkspaceControlPlane {
         guard !target.isArchived else { return .refused(.targetArchived) }
 
         let overview = overview(of: target, caller: callerID)
-        switch dependencies.armWatch(callerID, targetID) {
+        switch dependencies.armWatch(callerID, targetID, timeout) {
         case .armed(let expiresAfter):
             return .armed(on: overview, expiresAfter: expiresAfter)
         case .alreadyWatching:
@@ -193,6 +199,8 @@ final class WorkspaceControlPlane {
             return .targetAlreadySettled(overview)
         case .watcherAtCapacity(let limit):
             return .refused(.watcherAtCapacity(limit: limit))
+        case .invalidTimeout:
+            return .refused(.invalidWatchTimeout)
         }
     }
 

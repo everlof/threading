@@ -133,15 +133,26 @@ extension AgentToolCoordinator {
                 """)
         }
 
-        switch dependencies.control.watch(targetID, from: .agentSession(sessionID)) {
+        let timeout = arguments.timeoutMinutes.map { $0 * 60 }
+        switch dependencies.control.watch(
+            targetID,
+            timeout: timeout,
+            from: .agentSession(sessionID)
+        ) {
         case .armed(let target, let expiresAfter):
-            let minutes = Int((expiresAfter / 60).rounded())
+            let lifetime: String
+            if let expiresAfter {
+                lifetime = "It expires after \(Self.minutesDescription(for: expiresAfter)) "
+                    + "with a notice of its own."
+            } else {
+                lifetime = "It has no wall-clock expiry and lasts only as long as this run "
+                    + "of Threading."
+            }
             return .success("""
                 Watching “\(target.title)”. When its current turn settles — or it exits, or \
                 stops at its usage limit — you receive one message saying so, and that message \
                 spends this session's turn. The watch says nothing before then and is spent on \
-                that one notice. It expires after \(minutes) minutes with a notice of its own, \
-                and it lives only as long as this run of Threading.
+                that one notice. \(lifetime)
                 """)
         case .alreadyWatching(let target):
             return .success("""
@@ -211,8 +222,14 @@ extension AgentToolCoordinator {
                 """
         case .watcherAtCapacity(let limit):
             return """
-                This session already holds \(limit) watches; they fire or expire before more \
-                fit. Wait for one of them, or read list_sessions instead of watching another.
+                This session already holds \(limit) watches; they fire, expire, or end with \
+                this Threading run before more fit. Wait for one of them, or read \
+                list_sessions instead of watching another.
+                """
+        case .invalidWatchTimeout:
+            return """
+                timeout_minutes must be a positive finite number. Omit it to keep the watch \
+                until the target settles or this run of Threading ends.
                 """
         case .steerUnavailable(let refusal):
             switch refusal {
@@ -263,5 +280,13 @@ extension AgentToolCoordinator {
         // from one whose account cannot answer at all until its window resets.
         case .limitReached: return "stopped at its usage limit"
         }
+    }
+
+    private static func minutesDescription(for interval: TimeInterval) -> String {
+        let minutes = interval / 60
+        if minutes.rounded() == minutes, minutes <= Double(Int.max) {
+            return "\(Int(minutes)) minutes"
+        }
+        return "\(minutes) minutes"
     }
 }

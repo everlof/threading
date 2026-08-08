@@ -7,7 +7,8 @@ import XCTest
 /// The whole component is about *when* and *how often*: that the notice lands on the edge the
 /// app already calls "finished", that an ending which is not a finished turn — the agent exiting,
 /// the usage window running out — counts as one too, that a watch is spent when it fires, and
-/// that one which never fires retires itself out loud rather than silently.
+/// that an optional deadline retires out loud rather than silently, and that omission does not
+/// impose a hidden wall-clock deadline.
 ///
 /// Driven through a private `NotificationCenter` with the clock and all three lookups injected,
 /// so no live agent, no store and none of the running app's own event traffic is involved.
@@ -44,8 +45,8 @@ final class SessionWatchCenterTests: XCTestCase {
         super.tearDown()
     }
 
-    private func makeCenter(expiry: TimeInterval = ControlWatchDefaults.expiry) -> SessionWatchCenter {
-        let center = SessionWatchCenter(
+    private func makeCenter() -> SessionWatchCenter {
+        SessionWatchCenter(
             center: notifications,
             now: { [weak self] in self?.clock ?? Date() },
             dependencies: SessionWatchCenter.Dependencies(
@@ -57,8 +58,6 @@ final class SessionWatchCenterTests: XCTestCase {
                 }
             )
         )
-        center.expiry = expiry
-        return center
     }
 
     /// The one signal the centre listens to, as the container posts it.
@@ -124,7 +123,7 @@ final class SessionWatchCenterTests: XCTestCase {
         let center = makeCenter()
         XCTAssertEqual(
             center.arm(watcher: watcher, target: target),
-            .armed(expiresAfter: ControlWatchDefaults.expiry)
+            .armed(expiresAfter: nil)
         )
 
         reportActivity(.working)
@@ -233,7 +232,7 @@ final class SessionWatchCenterTests: XCTestCase {
 
         XCTAssertEqual(
             center.arm(watcher: watcher, target: target),
-            .armed(expiresAfter: ControlWatchDefaults.expiry)
+            .armed(expiresAfter: nil)
         )
         XCTAssertEqual(center.arm(watcher: watcher, target: target), .alreadyWatching)
 
@@ -252,7 +251,7 @@ final class SessionWatchCenterTests: XCTestCase {
         for id in targets {
             XCTAssertEqual(
                 center.arm(watcher: watcher, target: id),
-                .armed(expiresAfter: ControlWatchDefaults.expiry)
+                .armed(expiresAfter: nil)
             )
         }
 
@@ -264,7 +263,7 @@ final class SessionWatchCenterTests: XCTestCase {
         // Another session's budget is its own.
         XCTAssertEqual(
             center.arm(watcher: SessionID(), target: target),
-            .armed(expiresAfter: ControlWatchDefaults.expiry)
+            .armed(expiresAfter: nil)
         )
     }
 
@@ -273,8 +272,8 @@ final class SessionWatchCenterTests: XCTestCase {
     /// A watch on a turn that never ends retires itself, and says so: an agent that armed one
     /// and heard nothing cannot tell "still running" from "quietly forgotten".
     func testAWatchThatNeverFiresExpiresOutLoudAndIsSpent() throws {
-        let center = makeCenter(expiry: 0.03)
-        center.arm(watcher: watcher, target: target)
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target, timeout: 0.03)
 
         settle(0.2)
 
@@ -296,15 +295,43 @@ final class SessionWatchCenterTests: XCTestCase {
     /// on a turn it has outlived.
     func testAWatchOlderThanItsBudgetIsRetiredRatherThanSpentOnALaterTurn() throws {
         let center = makeCenter()
-        center.arm(watcher: watcher, target: target)
+        let timeout: TimeInterval = 30
+        center.arm(watcher: watcher, target: target, timeout: timeout)
 
-        clock = clock.addingTimeInterval(ControlWatchDefaults.expiry + 1)
+        clock = clock.addingTimeInterval(timeout + 1)
         reportActivity(.idle)
 
         let notice = try XCTUnwrap(delivered.first?.text)
         XCTAssertEqual(delivered.count, 1)
         XCTAssertTrue(notice.contains("expired"), "a stale watch was spent on an unrelated turn's end")
         XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
+    }
+
+    /// With no caller-supplied deadline, elapsed wall time does not replace the settle edge the
+    /// caller asked for. The app run and the per-watcher cap remain the lifetime bounds.
+    func testAWatchWithoutATimeoutStillFiresAfterThirtyMinutes() throws {
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target)
+
+        clock = clock.addingTimeInterval(31 * 60)
+        reportActivity(.idle)
+
+        let notice = try XCTUnwrap(delivered.first?.text)
+        XCTAssertTrue(notice.contains("finished its turn and is idle"))
+        XCTAssertFalse(notice.contains("expired"))
+        XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
+    }
+
+    func testInvalidTimeoutsAreRefusedWithoutHoldingAWatch() {
+        let center = makeCenter()
+
+        for timeout in [0, -1, .infinity, .nan] {
+            XCTAssertEqual(
+                center.arm(watcher: watcher, target: target, timeout: timeout),
+                .invalidTimeout
+            )
+            XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
+        }
     }
 
     // MARK: - Delivery

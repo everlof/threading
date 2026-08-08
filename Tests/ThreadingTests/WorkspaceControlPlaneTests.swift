@@ -66,8 +66,10 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         steerOutcome: @escaping (SessionID) -> SessionMessageDelivery.SteerOutcome = { _ in .steered },
         activity: @escaping (SessionID) -> SessionActivity = { _ in .idle },
         surface: @escaping (SessionID) -> ControlSessionOverview.Surface = { _ in .chat },
-        armWatch: @escaping (SessionID, SessionID) -> SessionWatchCenter.WatchArmOutcome = { _, _ in
-            .armed(expiresAfter: ControlWatchDefaults.expiry)
+        armWatch: @escaping (
+            SessionID, SessionID, TimeInterval?
+        ) -> SessionWatchCenter.WatchArmOutcome = { _, _, timeout in
+            .armed(expiresAfter: timeout)
         }
     ) -> WorkspaceControlPlane {
         WorkspaceControlPlane(
@@ -238,10 +240,10 @@ final class WorkspaceControlPlaneTests: XCTestCase {
     func testAWatchRunsTheSameScopeGuardsAsASend() {
         let workspace = makeWorkspace()
         let caller = ControlActor.agentSession(workspace.caller.id)
-        var asked: [(watcher: SessionID, target: SessionID)] = []
-        let plane = makePlane(workspace, armWatch: { watcher, target in
-            asked.append((watcher, target))
-            return .armed(expiresAfter: ControlWatchDefaults.expiry)
+        var asked: [(watcher: SessionID, target: SessionID, timeout: TimeInterval?)] = []
+        let plane = makePlane(workspace, armWatch: { watcher, target, timeout in
+            asked.append((watcher, target, timeout))
+            return .armed(expiresAfter: timeout)
         })
 
         XCTAssertEqual(plane.watch(workspace.stranger.id, from: caller), .refused(.targetUnknown))
@@ -262,17 +264,17 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         func watch(
             when centreSaid: SessionWatchCenter.WatchArmOutcome
         ) -> ControlWatchOutcome {
-            makePlane(workspace, armWatch: { _, _ in centreSaid })
+            makePlane(workspace, armWatch: { _, _, _ in centreSaid })
                 .watch(workspace.peer.id, from: caller)
         }
 
         guard case .armed(let on, let expiresAfter) =
-            watch(when: .armed(expiresAfter: ControlWatchDefaults.expiry))
+            watch(when: .armed(expiresAfter: nil))
         else {
             return XCTFail("Expected an armed watch")
         }
         XCTAssertEqual(on.id, workspace.peer.id)
-        XCTAssertEqual(expiresAfter, ControlWatchDefaults.expiry)
+        XCTAssertNil(expiresAfter)
 
         guard case .alreadyWatching(let already) = watch(when: .alreadyWatching) else {
             return XCTFail("A coalesced watch names the session it is already watching")
@@ -289,21 +291,31 @@ final class WorkspaceControlPlaneTests: XCTestCase {
             .refused(.watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)),
             "The budget is the plane's refusal to make, and it carries the limit it enforced"
         )
+        XCTAssertEqual(
+            watch(when: .invalidTimeout),
+            .refused(.invalidWatchTimeout)
+        )
     }
 
     func testAWatchPassesTheCallerAsTheWatcherAndNotTheOtherWayRound() {
         let workspace = makeWorkspace()
-        var asked: [(watcher: SessionID, target: SessionID)] = []
-        let plane = makePlane(workspace, armWatch: { watcher, target in
-            asked.append((watcher, target))
-            return .armed(expiresAfter: ControlWatchDefaults.expiry)
+        var asked: [(watcher: SessionID, target: SessionID, timeout: TimeInterval?)] = []
+        let plane = makePlane(workspace, armWatch: { watcher, target, timeout in
+            asked.append((watcher, target, timeout))
+            return .armed(expiresAfter: timeout)
         })
 
-        _ = plane.watch(workspace.peer.id, from: .agentSession(workspace.caller.id))
+        let timeout: TimeInterval = 90 * 60
+        _ = plane.watch(
+            workspace.peer.id,
+            timeout: timeout,
+            from: .agentSession(workspace.caller.id)
+        )
 
         XCTAssertEqual(asked.count, 1)
         XCTAssertEqual(asked.first?.watcher, workspace.caller.id)
         XCTAssertEqual(asked.first?.target, workspace.peer.id)
+        XCTAssertEqual(asked.first?.timeout, timeout)
     }
 
     // MARK: - Hardening

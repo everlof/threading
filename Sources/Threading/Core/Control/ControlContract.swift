@@ -85,6 +85,9 @@ enum ControlRefusal: Error, Equatable, Sendable {
     /// spends a turn of the watcher's own usage when it fires, so an agent cannot arm a
     /// notice for every session it can see and then be woken by all of them.
     case watcherAtCapacity(limit: Int)
+    /// A caller-supplied watch timeout must describe a future deadline. Omitting it is the
+    /// distinct, valid request to keep the watch for the rest of this Threading run.
+    case invalidWatchTimeout
 }
 
 /// How a message should meet the target's current turn.
@@ -119,7 +122,9 @@ enum ControlSendOutcome: Equatable, Sendable {
 /// What became of an ask to be told when another session settles.
 enum ControlWatchOutcome: Equatable, Sendable {
     /// Armed. One notice arrives when the target next settles, exits, or stops at its limit.
-    case armed(on: ControlSessionOverview, expiresAfter: TimeInterval)
+    /// `expiresAfter == nil` means there is no wall-clock expiry; the watch still dies with
+    /// this run of Threading and remains bounded by `maximumPerWatcher`.
+    case armed(on: ControlSessionOverview, expiresAfter: TimeInterval?)
     /// This caller already watches that session; the ask changed nothing and the one notice
     /// still arrives. Coalesced rather than doubled, so a repeated ask cannot buy two notices.
     case alreadyWatching(on: ControlSessionOverview)
@@ -132,11 +137,6 @@ enum ControlWatchOutcome: Equatable, Sendable {
 
 /// Named budgets for watches, per the bounded-work rule.
 enum ControlWatchDefaults {
-    /// How long a watch waits for a turn that never ends before it retires itself — with a
-    /// notice, because an agent that armed a watch and heard nothing cannot tell "still
-    /// running" from "quietly forgotten".
-    static let expiry: TimeInterval = 30 * 60
-
     /// How many watches one session may hold at once. Each one spends a turn of the watcher's
     /// own usage when it fires, so this is a bound on being woken as much as on memory.
     static let maximumPerWatcher = 8
@@ -145,6 +145,14 @@ enum ControlWatchDefaults {
     /// its next settle edge. Bounded like every input-controlled collection; past the cap new
     /// facts are dropped with a ledger record rather than growing the queue.
     static let maximumHeldNotices = 8
+
+    /// A supplied timeout becomes one timer, and its magnitude does not change the bounded
+    /// amount of work held. It must still be finite and in the future so Foundation is never
+    /// asked to schedule a nonsensical deadline. Omission, rather than a magic large number,
+    /// is how a caller requests no wall-clock expiry.
+    static func isValid(timeout: TimeInterval) -> Bool {
+        timeout.isFinite && timeout > 0
+    }
 }
 
 /// Named budgets, per the bounded-work rule.

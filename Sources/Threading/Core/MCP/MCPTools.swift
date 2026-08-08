@@ -1416,17 +1416,20 @@ struct SendToSessionArguments: Decodable, Sendable {
 
 /// The session to be told about, addressed exactly as `send_to_session` addresses one.
 ///
-/// No duration and no "what to watch for": the boundary is the app's own answer to "is it
-/// finished", and the budget is Threading's, so neither is the caller's to choose.
+/// The boundary is the app's own answer to "is it finished". A timeout is optional: omission
+/// means the watch lasts for this run of Threading instead of inheriting a magic deadline.
 struct WatchSessionArguments: Decodable, Sendable {
   let sessionID: String?
+  let timeoutMinutes: Double?
 
   private enum CodingKeys: String, CodingKey {
     case sessionID = "session_id"
+    case timeoutMinutes = "timeout_minutes"
   }
 
-  init(sessionID: String?) {
+  init(sessionID: String?, timeoutMinutes: Double? = nil) {
     self.sessionID = sessionID
+    self.timeoutMinutes = timeoutMinutes
   }
 }
 
@@ -1930,7 +1933,7 @@ struct MCPToolCallParameters: Decodable, Sendable {
     case .watchSession:
       call = .watchSession(
         try container.decodeIfPresent(WatchSessionArguments.self, forKey: .arguments)
-          ?? WatchSessionArguments(sessionID: nil)
+          ?? WatchSessionArguments(sessionID: nil, timeoutMinutes: nil)
       )
     case .listReclaimableStorage:
       call = .listReclaimableStorage(
@@ -4496,8 +4499,9 @@ enum MCPTools {
         this session's own usage when it lands. It is one notice: the watch is spent when it \
         fires, and arming it again is another call. A session that has *already* settled is \
         refused rather than watched — read list_sessions for its state instead, since the edge \
-        you asked about has gone by. The watch lives with this run of Threading and expires \
-        after 30 minutes, with a notice saying so.
+        you asked about has gone by. The watch lives with this run of Threading. It has no \
+        wall-clock expiry unless timeout_minutes is supplied; a supplied timeout expires with \
+        a notice saying so.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4505,6 +4509,13 @@ enum MCPTools {
             type: .string,
             description: """
               The session to watch, by its Threading id — exactly as list_sessions prints it.
+              """
+          ),
+          "timeout_minutes": MCPPropertySchema(
+            type: .number,
+            description: """
+              Optional positive finite number of minutes to wait. Omit it to keep the watch \
+              until that turn settles or this run of Threading ends.
               """
           )
         ],
