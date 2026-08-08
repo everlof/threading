@@ -736,6 +736,30 @@ heading too. Moving somewhere unrelated leaves it under the project where it was
 terminal-specific theme wins first; otherwise it inherits from the project it is currently
 shown under, then from the app default.
 
+### Project scripts
+
+A repository can check in a versioned `.threading.json` at its root to name up to 32 commands.
+Valid commands appear under **Project ▸ Scripts** and in the **Command Palette** (**Cmd+K**).
+Each script has a stable lowercase ID, display name and one-line command; it may also name an SF
+Symbol, a checkout-relative working directory, and an HTTP(S) preview URL. The complete schema is
+checked in at `docs/schemas/threading-project.schema.json`.
+
+Scripts follow the checkout you are actually using. In a managed session, that means the
+managed worktree's configuration and directories rather than the original project folder.
+Changing `.threading.json` refreshes the menu and an open palette after the save completes.
+Malformed files, excessive script lists, escaping or missing directories, control characters and
+unsafe preview URLs are shown as unavailable instead of being guessed at or ignored.
+
+Selecting a script shows the exact command and resolved directory in a confirmation that cannot
+be switched off. After you choose **Run in Terminal**, Threading creates and selects a standalone
+terminal there. The terminal prints the real shell exit code and the preview URL, if there is
+one; it does not open the URL automatically.
+
+Discovery never runs repository code. Adding a project, creating a worktree, launching a session,
+opening the app, saving the config or waiting on a schedule cannot run a project script. There
+are no setup hooks or unattended project scripts; every run starts with your explicit choice and
+confirmation in the foreground.
+
 ### The shell drawer
 
 **⌃`** (Control-backtick), or **View ▸ Shell**, opens a tabbed drawer underneath the session
@@ -3410,6 +3434,7 @@ screen says so and leads with the offers further down the list instead.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
+| Command Palette | Cmd+K |
 | Start the session being composed (Return breaks the line, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |

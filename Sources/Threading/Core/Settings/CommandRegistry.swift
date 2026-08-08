@@ -22,6 +22,7 @@ final class CommandRegistry {
 
     private let builtInCommands: [AppCommand]
     private var extensions: [String: ExtensionCommands] = [:]
+    private var projectScripts: [ProjectScript] = []
     private var resolvedCommands: [AppCommand]
 
     init(builtInCommands: [AppCommand] = AppCommands.all) {
@@ -35,6 +36,13 @@ final class CommandRegistry {
 
     var extensionCommands: [AppCommand] {
         resolvedCommands.filter { $0.origin.extensionIdentifier != nil }
+    }
+
+    var projectScriptCommands: [AppCommand] {
+        resolvedCommands.filter {
+            if case .projectScript = $0.origin { return true }
+            return false
+        }
     }
 
     func command(id: String) -> AppCommand? {
@@ -71,12 +79,22 @@ final class CommandRegistry {
         rebuildAndNotify()
     }
 
+    func replaceProjectScripts(_ scripts: [ProjectScript]) {
+        guard scripts != projectScripts else { return }
+        projectScripts = scripts
+        rebuildAndNotify()
+    }
+
     static func qualifiedID(extensionIdentifier: String, commandID: String) -> String {
         "extension.\(extensionIdentifier).\(commandID)"
     }
 
+    static func projectScriptID(_ scriptID: String) -> String {
+        "project.script.\(scriptID)"
+    }
+
     private func rebuildAndNotify() {
-        resolvedCommands = builtInCommands + extensions
+        let extensionCommands = extensions
             .sorted { left, right in
                 let names = left.value.name.localizedCaseInsensitiveCompare(right.value.name)
                 if names != .orderedSame { return names == .orderedAscending }
@@ -111,6 +129,22 @@ final class CommandRegistry {
                         )
                     }
             }
+        let scriptCommands = projectScripts
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { script in
+                AppCommand(
+                    id: Self.projectScriptID(script.id),
+                    group: .projectScripts,
+                    title: script.name,
+                    detail: script.command,
+                    defaultShortcut: nil,
+                    isEditable: false,
+                    origin: .projectScript(localID: script.id),
+                    scope: .project,
+                    iconName: script.icon
+                )
+            }
+        resolvedCommands = builtInCommands + scriptCommands + extensionCommands
         NotificationCenter.default.post(CommandRegistryDidChange())
     }
 }

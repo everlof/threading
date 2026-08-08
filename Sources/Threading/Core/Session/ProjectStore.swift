@@ -717,11 +717,15 @@ final class ProjectStore {
     /// Creates a durable terminal record. Its live PTY is owned separately by
     /// `ProjectTerminalRuntime` and begins when the row is presented.
     @discardableResult
-    func addTerminal(to projectID: ProjectID, id: TerminalID = TerminalID()) -> ProjectTerminal? {
+    func addTerminal(
+        to projectID: ProjectID,
+        id: TerminalID = TerminalID(),
+        currentDirectory: String? = nil
+    ) -> ProjectTerminal? {
         guard let projectIndex = index(ofProject: projectID) else { return nil }
 
         let terminal = ProjectTerminal(
-            currentDirectory: projects[projectIndex].folderPath,
+            currentDirectory: currentDirectory ?? projects[projectIndex].folderPath,
             id: id
         )
         projects[projectIndex].terminals.append(terminal)

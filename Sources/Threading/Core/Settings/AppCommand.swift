@@ -15,6 +15,7 @@ struct AppCommand {
     /// — Find sits in the Edit menu but belongs beside the other things the app does.
     enum Group: String, CaseIterable {
         case session = "Session"
+        case projectScripts = "Project Scripts"
         case view = "View"
         case inspect = "Inspect"
         case extensions = "Extensions"
@@ -24,6 +25,7 @@ struct AppCommand {
     enum Origin: Equatable {
         case builtIn
         case extensionCommand(identifier: String, name: String, localID: String)
+        case projectScript(localID: String)
 
         var extensionIdentifier: String? {
             guard case .extensionCommand(let identifier, _, _) = self else { return nil }
@@ -36,8 +38,12 @@ struct AppCommand {
         }
 
         var localCommandID: String? {
-            guard case .extensionCommand(_, _, let localID) = self else { return nil }
-            return localID
+            switch self {
+            case .extensionCommand(_, _, let localID), .projectScript(let localID):
+                return localID
+            case .builtIn:
+                return nil
+            }
         }
     }
 
@@ -61,6 +67,7 @@ struct AppCommand {
     let scope: ExtensionCommandScope
     let risk: ExtensionCommandRisk
     let menuPlacements: [ExtensionMenuPlacement]
+    let iconName: String?
 
     init(
         id: String,
@@ -72,7 +79,8 @@ struct AppCommand {
         origin: Origin = .builtIn,
         scope: ExtensionCommandScope = .application,
         risk: ExtensionCommandRisk = .ordinary,
-        menuPlacements: [ExtensionMenuPlacement] = []
+        menuPlacements: [ExtensionMenuPlacement] = [],
+        iconName: String? = nil
     ) {
         self.id = id
         self.group = group
@@ -80,7 +88,7 @@ struct AppCommand {
         case .builtIn:
             self.title = L10n.string(title)
             self.detail = detail.map { L10n.string($0) }
-        case .extensionCommand:
+        case .extensionCommand, .projectScript:
             self.title = title
             self.detail = detail
         }
@@ -90,6 +98,7 @@ struct AppCommand {
         self.scope = scope
         self.risk = risk
         self.menuPlacements = menuPlacements
+        self.iconName = iconName
     }
 }
 

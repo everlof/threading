@@ -1237,6 +1237,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// work and more ways to be wrong.
     private var commandItems: [String: NSMenuItem] = [:]
     private var extensionMenu: NSMenu?
+    private var projectScriptsSeparator: NSMenuItem?
+    private var projectScriptsItem: NSMenuItem?
     private var projectExtensionSeparator: NSMenuItem?
     private var projectExtensionItem: NSMenuItem?
     private var viewExtensionSeparator: NSMenuItem?
@@ -1304,6 +1306,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
+        }
+        menuEvents.observe(ProjectScriptsDidChange.self) { [weak self] _ in
+            self?.rebuildProjectScriptsMenu()
         }
         menuEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             self?.updateCurrentThemeMenuVisibility()
@@ -1377,6 +1382,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.allowsKeyEquivalentWhenHidden = true
             menu.addItem(item)
         }
+
+        rebuildProjectScriptsMenu()
+    }
+
+    private func rebuildProjectScriptsMenu() {
+        guard let menu = projectScriptsItem?.submenu else { return }
+        menu.removeAllItems()
+        for id in Array(commandItems.keys) where id.hasPrefix("project.script.") {
+            commandItems.removeValue(forKey: id)
+        }
+
+        for command in CommandRegistry.shared.projectScriptCommands {
+            let item = NSMenuItem(
+                title: command.title,
+                action: #selector(performProjectScript(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = command.id
+            item.toolTip = command.detail
+            if let iconName = command.iconName {
+                item.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+            }
+            commandItems[command.id] = item
+            menu.addItem(item)
+        }
+
+        if let catalog = ProjectScriptService.shared.activeCatalog,
+           !catalog.diagnostics.isEmpty {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            for diagnostic in catalog.diagnostics.prefix(ProjectScriptDefaults.maximumDiagnostics) {
+                let item = NSMenuItem(
+                    title: diagnostic.message,
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                item.isEnabled = false
+                menu.addItem(item)
+            }
+        }
+
+        let visible = !menu.items.isEmpty
+        projectScriptsItem?.isHidden = !visible
+        projectScriptsSeparator?.isHidden = !visible
     }
 
     private func populate(
@@ -1499,6 +1548,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // carries the same action beside a chevron that picks the app; this is the menu-bar
         // half of it, and the reason the chord exists at all.
         menu.addItem(commandItem(AppCommands.ID.openIn, action: #selector(openInExternalApp)))
+
+        let scriptsSeparator = NSMenuItem.separator()
+        scriptsSeparator.isHidden = true
+        menu.addItem(scriptsSeparator)
+        projectScriptsSeparator = scriptsSeparator
+
+        let scriptsItem = NSMenuItem()
+        scriptsItem.title = L10n.string("Scripts")
+        scriptsItem.submenu = NSMenu(title: L10n.string("Project Scripts"))
+        scriptsItem.isHidden = true
+        menu.addItem(scriptsItem)
+        projectScriptsItem = scriptsItem
 
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.closeTab, action: #selector(closeActiveTab)))
@@ -1770,6 +1831,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ = hostCommandPlane.invoke(commandID: id)
     }
 
+    @MainActor @objc private func performProjectScript(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let invocation = ProjectScriptService.shared
+                .availability(commandID: id).invocation else { return }
+
+        let command = String(invocation.script.command.prefix(600))
+            + (invocation.script.command.count > 600 ? "…" : "")
+        let request = ConfirmationRequest(
+            prompt: .runProjectScript,
+            title: L10n.format("Run “%@”?", invocation.script.name),
+            message: L10n.format(
+                "This repository defines the command below. It will run in %@ only after you choose Run.\n\n%@",
+                invocation.workingDirectory.path,
+                command
+            ),
+            confirmTitle: L10n.string("Run in Terminal")
+        )
+
+        let window = mainWindowController?.window
+        ConfirmationAlert.ask(request, in: window) { [weak self] accepted in
+            guard accepted,
+                  let current = ProjectScriptService.shared
+                    .availability(commandID: id).invocation,
+                  current == invocation else { return }
+
+            guard self?.mainWindowController?.runProjectScript(current) != nil else {
+                let failure = ThemedAlert()
+                failure.messageText = L10n.string("The project script did not start")
+                failure.informativeText = L10n.string(
+                    "Its checkout or working directory changed before a terminal could accept the command."
+                )
+                failure.alertStyle = .critical
+                if let window { failure.beginSheetModal(for: window) } else { failure.runModal() }
+                return
+            }
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         // Recovery first, and only for items that carry a command id. Items still owned wholly
         // by AppKit — About and the Help entries — carry none and stay enabled by construction.
@@ -1826,6 +1925,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return AppUpdater.shared.canCheckForUpdates
         }
 
+        // A repository-defined script explains itself in the item: its reason is specific
+        // ("no longer in the active checkout") in a way a scope guess could not be.
+        if menuItem.action == #selector(performProjectScript(_:)),
+           let id = menuItem.representedObject as? String {
+            let availability = ProjectScriptService.shared.availability(commandID: id)
+            menuItem.toolTip = availability.reason
+                ?? CommandRegistry.shared.command(id: id)?.detail
+            return availability.invocation != nil
+        }
+
         guard let id = menuItem.representedObject as? String,
               let command = CommandRegistry.shared.command(id: id) else { return true }
         return commandIsAvailable(command)
@@ -1849,6 +1958,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     ) -> HostCommandDescriptor.Availability {
         if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
             return .unavailable(reason: L10n.string("This command is unavailable in Recovery Mode."))
+        }
+        // A script is available exactly while its declaration still resolves to something
+        // runnable in the active checkout; the service's reason beats any scope inference.
+        if case .projectScript = command.origin {
+            let availability = ProjectScriptService.shared.availability(commandID: command.id)
+            guard availability.invocation != nil else {
+                return .unavailable(
+                    reason: availability.reason ?? L10n.string("This command is unavailable.")
+                )
+            }
         }
         switch command.scope {
         case .application: break
@@ -2014,7 +2133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return .invoked(commandID: id)
     }
 
-    private func showCommandPalette() {
+    @objc private func showCommandPalette() {
         guard commandPaletteController == nil, let window = mainWindowController?.window else { return }
         let controller = CommandPaletteViewController(
             catalog: { [weak self] in self?.hostCommandPlane.commands() ?? [] },

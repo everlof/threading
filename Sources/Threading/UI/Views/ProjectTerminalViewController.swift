@@ -103,6 +103,25 @@ final class ProjectTerminalViewController: NSViewController {
         session.startShell(initialDirectory: startDirectory)
     }
 
+    /// Sends one already-validated project command to this terminal's interactive shell.
+    /// Starting the shell and inserting the line happen only on this explicit call path; file
+    /// discovery never reaches the PTY. The returned receipt says the command was accepted by
+    /// a visible terminal, while the host-owned suffix printed there reports its eventual exit.
+    func runProjectScript(
+        _ invocation: ProjectScriptInvocation
+    ) -> ProjectScriptExecutionReceipt? {
+        startIfNeeded()
+        guard session.isRunning else { return nil }
+
+        session.insertText(ProjectScriptShellCommand.source(for: invocation) + "\n")
+        return ProjectScriptExecutionReceipt(
+            terminalID: terminalID,
+            scriptID: invocation.script.id,
+            workingDirectory: invocation.workingDirectory,
+            previewURL: invocation.script.previewURL
+        )
+    }
+
     func terminate() {
         directoryTimer.invalidate()
         session.terminate()

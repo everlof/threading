@@ -287,6 +287,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             .folderURL
     }
 
+    /// The checkout repository commands belong to. A managed session points at its execution
+    /// worktree rather than its logical Project; a standalone terminal follows its live cwd;
+    /// the composer follows the selected project. Settings deliberately carries no checkout.
+    var currentExecutionDirectoryURL: URL? {
+        if let currentSessionID,
+           let path = ProjectStore.shared.workingDirectory(forSessionID: currentSessionID) {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        if let currentTerminalID,
+           let terminal = ProjectStore.shared.terminal(withID: currentTerminalID) {
+            return URL(fileURLWithPath: terminal.currentDirectory, isDirectory: true)
+        }
+        return containerViewController.currentComposerProjectID
+            .flatMap { ProjectStore.shared.project(withID: $0) }?
+            .folderURL
+    }
+
     // MARK: - Initialization
 
     override init(window: NSWindow?) {
@@ -798,6 +815,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // pane next changed.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.updateSessionTitleItem()
+            self?.refreshProjectScriptContext()
         }
 
         // A clicked macOS notification lands here. The sidebar owns the chat selection; the
@@ -2402,7 +2420,44 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             history.visit(page)
         }
         updateNavigationButtons()
+        refreshProjectScriptContext()
     }
+
+    private func refreshProjectScriptContext() {
+        ProjectScriptService.shared.activate(
+            executionDirectory: currentExecutionDirectoryURL
+        )
+    }
+
+    /// Creates and selects a durable project terminal before sending a repository command.
+    /// The receipt means the validated command reached that visible PTY; completion remains a
+    /// fact printed by the terminal's host-owned exit-status suffix, not guessed here.
+    func runProjectScript(
+        _ invocation: ProjectScriptInvocation
+    ) -> ProjectScriptExecutionReceipt? {
+        guard !RecoveryMode.isActive,
+              let projectID = currentProjectID,
+              ProjectScriptService.shared.activeCatalog?.repositoryRoot
+                == invocation.repositoryRoot else { return nil }
+
+        guard let terminal = ProjectStore.shared.addTerminal(
+            to: projectID,
+            currentDirectory: invocation.workingDirectory.path
+        ) else { return nil }
+        ProjectStore.shared.renameTerminal(
+            id: terminal.id,
+            to: L10n.format("Script: %@", invocation.script.name)
+        )
+
+        sidebarViewController.select(terminalID: terminal.id)
+        guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
+              let receipt = controller.runProjectScript(invocation) else {
+            ProjectStore.shared.removeTerminal(id: terminal.id)
+            return nil
+        }
+        return receipt
+    }
+
 
     /// What the pane is showing now, as a page — a session, a project's composer, or nothing.
     /// Settings is not one of the answers: it is what the caller is about to replace.

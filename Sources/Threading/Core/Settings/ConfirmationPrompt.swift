@@ -68,6 +68,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case resetAppData
     case clearBrowserWebsiteData
     case runDestructiveExtensionCommand
+    case runProjectScript
 
     // MARK: Security grants
 
@@ -217,6 +218,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .approveAgentStorageCleanup,
              .clearBrowserWebsiteData,
              .runDestructiveExtensionCommand,
+             .runProjectScript,
              // A reset keeps what it took, in a dated folder — but restoring it means quitting
              // and dragging directories back, so nothing in the app brings it back and the
              // alert must behave as though nothing does. It also restarts the app under the

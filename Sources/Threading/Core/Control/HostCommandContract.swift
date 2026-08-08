@@ -8,6 +8,10 @@ struct HostCommandDescriptor: Equatable, Sendable {
     enum Origin: Equatable, Sendable {
         case builtIn
         case extensionCommand(identifier: String, name: String, localID: String)
+        /// A command the open checkout declares in `.threading.json`. It is neither the host's
+        /// own nor an installed extension's, and the palette says so: what runs is decided by
+        /// the repository in front of you.
+        case projectScript(localID: String)
     }
 
     enum Scope: String, Equatable, Sendable {
@@ -64,6 +68,8 @@ extension AppCommand {
                 name: name,
                 localID: localID
             )
+        case .projectScript(let localID):
+            hostOrigin = .projectScript(localID: localID)
         }
         return HostCommandDescriptor(
             id: id,
@@ -143,6 +149,9 @@ enum HostCommandSearch {
             switch command.origin {
             case .builtIn: origin = ""
             case .extensionCommand(_, let name, _): origin = name.folded
+            // A script's origin is the checkout that declares it, and the group is what the
+            // palette shows for it, so searching "project scripts" finds them as a set.
+            case .projectScript: origin = command.group.folded
             }
             let score: Int
             if title == query { score = 0 }

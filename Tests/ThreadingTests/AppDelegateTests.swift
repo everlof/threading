@@ -56,7 +56,7 @@ final class AppDelegateTests: XCTestCase {
             "showPreferences", "openTerminalTab", "openFilesTab", "openBrowser", "openReview",
             "openInfo", "toggleShell", "toggleDisplayPanel", "toggleCurrentTheme", "newSession", "addProject",
             "newProject", "closeSession", "toggleSidebar", "showFind", "inspectElement",
-            "increaseFontSize", "decreaseFontSize"
+            "increaseFontSize", "decreaseFontSize", "showCommandPalette"
         ]
 
         for name in actions {
@@ -233,5 +233,57 @@ final class AppDelegateTests: XCTestCase {
             extensionsMenu.items.filter { !$0.isHidden }.map(\.title),
             ["No Extension Commands Here"]
         )
+    }
+
+    func testProjectScriptsUseTheRegistryBackedProjectMenuAndPaletteShortcut() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        let root = FileManager.default.temporaryDirectory
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("AppDelegateProjectScripts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            ProjectScriptService.shared.activate(executionDirectory: nil)
+            CommandRegistry.shared.replaceProjectScripts([])
+            try? FileManager.default.removeItem(at: root)
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+
+        let configuration = try JSONSerialization.data(withJSONObject: [
+            "version": 1,
+            "scripts": [[
+                "id": "check", "name": "Check project", "command": "make check"
+            ]]
+        ])
+        try configuration.write(to: root.appendingPathComponent(".threading.json"))
+        ProjectScriptService.shared.activate(executionDirectory: root)
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+        let project = try XCTUnwrap(
+            NSApp.mainMenu?.items.compactMap(\.submenu).first {
+                $0.title == MenuIdentifiers.projectMenu
+            }
+        )
+        let scripts = try XCTUnwrap(project.item(withTitle: L10n.string("Scripts")))
+        XCTAssertFalse(scripts.isHidden)
+        XCTAssertEqual(
+            scripts.submenu?.item(withTitle: "Check project")?.representedObject as? String,
+            "project.script.check"
+        )
+
+        // The palette searches every app and extension command, not just this project's, so it
+        // sits in View under the chord that means "command palette" nearly everywhere.
+        let view = try XCTUnwrap(
+            NSApp.mainMenu?.items.compactMap(\.submenu).first {
+                $0.title == MenuIdentifiers.viewMenu
+            }
+        )
+        let palette = try XCTUnwrap(view.item(withTitle: L10n.string("Command Palette…")))
+        XCTAssertEqual(palette.keyEquivalent, "p")
+        XCTAssertEqual(palette.keyEquivalentModifierMask, [.command, .shift])
     }
 }

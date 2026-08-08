@@ -332,6 +332,7 @@
 		732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */; };
 		1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3683502D0102546A91853CD /* SessionSnoozeTests.swift */; };
 		F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */; };
+		5BC2C0260E538FB3F07D09FC /* ProjectScriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -720,6 +721,7 @@
 		4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitTurnCheckpointTests.swift; sourceTree = "<group>"; };
 		E3683502D0102546A91853CD /* SessionSnoozeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSnoozeTests.swift; sourceTree = "<group>"; };
 		8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostBoundaryFeatureTests.swift; sourceTree = "<group>"; };
+		5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectScriptTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1185,6 +1187,7 @@
 				4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */,
 				E3683502D0102546A91853CD /* SessionSnoozeTests.swift */,
 				8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */,
+				5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2017,6 +2020,7 @@
 				732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */,
 				1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */,
 				F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */,
+				5BC2C0260E538FB3F07D09FC /* ProjectScriptTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

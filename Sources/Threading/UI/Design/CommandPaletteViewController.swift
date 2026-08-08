@@ -255,6 +255,7 @@ final class CommandPaletteViewController: NSViewController {
         switch origin {
         case .builtIn: return L10n.string("Threading")
         case .extensionCommand(_, let name, _): return name
+        case .projectScript: return L10n.string("Project Scripts")
         }
     }
 
