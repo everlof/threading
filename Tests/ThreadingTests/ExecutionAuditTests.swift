@@ -185,7 +185,7 @@ final class ExecutionAuditTests: XCTestCase {
             provider: .claude
         )
         fixture.store.record(
-            streamEvent: .turnFinished(text: "assistant prose", isError: false, metrics: metrics),
+            streamEvent: .turnFinished(text: "assistant prose", outcome: .completed, metrics: metrics),
             sessionID: sessionID,
             provider: .claude
         )

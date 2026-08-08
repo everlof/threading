@@ -42,9 +42,9 @@ extension GitReviewViewController {
                     self.changeRequestBar.configure(
                         title: L10n.string("Pull request"),
                         detail: L10n.string("The origin remote is not a github.com repository."),
-                        status: "",
+                        status: L10n.string("Unavailable"),
                         statusColor: Design.Text.tertiary,
-                        actionTitle: L10n.string("Unavailable"),
+                        actionTitle: nil,
                         actionEnabled: false,
                         showsOpen: false,
                         policy: self.changeRequestConfiguration.publishPolicy
@@ -145,7 +145,7 @@ extension GitReviewViewController {
         let checkSummary = pullRequest?.checks ?? status.checks
         let (checkText, checkColor) = checkPresentation(checkSummary)
         let action: GitReviewChangeRequestPrimaryAction
-        let actionTitle: String
+        let actionTitle: String?
         let actionEnabled: Bool
         if isChangingRequest {
             action = .none
@@ -161,7 +161,8 @@ extension GitReviewViewController {
             actionEnabled = true
         } else if local.branch == status.defaultBranch {
             action = .none
-            actionTitle = L10n.string("Default branch")
+            actionTitle = nil
+            details.append(L10n.string("Default branch"))
             actionEnabled = false
         } else if local.needsPush {
             action = .push
@@ -169,7 +170,8 @@ extension GitReviewViewController {
             actionEnabled = true
         } else if policy == .pushOnly {
             action = .none
-            actionTitle = L10n.string("Branch pushed")
+            actionTitle = nil
+            details.append(L10n.string("Branch pushed"))
             actionEnabled = false
         } else {
             action = .create
@@ -181,9 +183,10 @@ extension GitReviewViewController {
             case .createReady:
                 actionTitle = L10n.string("Create pull request")
             case .pushOnly:
-                actionTitle = L10n.string("Branch pushed")
+                actionTitle = nil
+                details.append(L10n.string("Branch pushed"))
             }
-            actionEnabled = true
+            actionEnabled = actionTitle != nil
         }
         changeRequestPrimaryAction = action
         changeRequestBar.configure(

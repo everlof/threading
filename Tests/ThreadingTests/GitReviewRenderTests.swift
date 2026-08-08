@@ -355,6 +355,89 @@ final class GitReviewRenderTests: XCTestCase {
         return host
     }
 
+    // MARK: - The Whole Pane
+
+    /// **Draws the pane itself, not a stack of rows built by hand.**
+    ///
+    /// Every other render here assembles `GitReviewFileRow`s into an `NSStackView`, which is not
+    /// the surface the app shows: file comparisons go through a virtualized `NSTableView`, and
+    /// the fault this test exists for lived entirely in the table. Its sole column kept
+    /// `NSTableColumn`'s 100pt default, so cards came out 76pt wide in a pane hundreds of points
+    /// wider and every changed line wrapped to three characters — for a whole window, with no
+    /// assertion anywhere failing and no broken constraint logged. A picture of the real pane is
+    /// what shows that instantly; the width assertion below is what fails when it recurs.
+    func testRendersTheFilePaneItselfInBothAppearances() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+            var cardWidth: CGFloat = 0
+            let render = {
+                let pane = self.laidOutPane(files, appearance: appearance)
+                cardWidth = pane.cardWidth
+                data = self.png(of: pane.view)
+            }
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            try XCTUnwrap(data, "failed to render \(name)")
+                .write(to: directory.appendingPathComponent("git-review-pane-\(name).png"))
+            XCTAssertEqual(
+                cardWidth, Render.width - Design.Spacing.inset * 2, accuracy: 0.5,
+                "\(name): a file card did not span the pane"
+            )
+        }
+
+        print("Rendered the review pane to \(directory.path)")
+    }
+
+    /// The real controller, laid out the way the app lays it out: the pane is sized and settled
+    /// first, and the diff arrives afterwards from what would be a background git read.
+    private func laidOutPane(
+        _ files: [GitFileDiff],
+        appearance: NSAppearance?
+    ) -> (view: NSView, cardWidth: CGFloat) {
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        // Unshown: an ordered-in window would make this an `all`-only test, and nothing here
+        // needs one — see "Test levels" in CLAUDE.md.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: Render.width, height: 520),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        let content = window.contentView!
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: content.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+        ])
+        window.layoutIfNeeded()
+
+        controller.show(.files(files))
+        AppThemeRefresh.repaint(controller.view)
+        window.layoutIfNeeded()
+
+        let card = controller.fileTableView
+            .view(atColumn: 0, row: 0, makeIfNecessary: true)?
+            .subviews.first
+        return (controller.view, card?.bounds.width ?? 0)
+    }
+
     private func png(of host: NSView) -> Data? {
         guard host.bounds.height > 1,
               let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }

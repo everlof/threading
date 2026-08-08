@@ -107,8 +107,7 @@ extension GitReviewViewController {
     private func isFileExpanded(_ file: GitFileDiff) -> Bool {
         expansionOverrides[file.path]
             ?? bulkExpansionOverride
-            ?? defaultFileExpansion[file.path]
-            ?? false
+            ?? GitReviewFileRow.expandsByDefault(file)
     }
 
     /// What the pane is showing, as a request the reader can run again — which is what copying

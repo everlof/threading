@@ -79,7 +79,7 @@ final class GitTurnBaselineStore {
             preparedActivityEdges.remove(sessionID)
         }
 
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID),
+        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
               let root = GitInfo.repositoryRoot(for: project.folderPath) else {
             if expectsActivityEdge,
                preparingActivityEdges.remove(sessionID) != nil {

@@ -48,6 +48,7 @@ final class GitReviewChangeRequestBar: NSView {
         statusLabel.stringValue = ""
         actionButton.title = L10n.string("Loading…")
         actionButton.isEnabled = false
+        actionButton.isHidden = false
         openButton.isHidden = true
     }
 
@@ -56,7 +57,7 @@ final class GitReviewChangeRequestBar: NSView {
         detail: String,
         status: String,
         statusColor: NSColor,
-        actionTitle: String,
+        actionTitle: String?,
         actionEnabled: Bool,
         showsOpen: Bool,
         policy: ChangeRequestPublishPolicy
@@ -66,8 +67,9 @@ final class GitReviewChangeRequestBar: NSView {
         detailLabel.stringValue = detail
         statusLabel.stringValue = status
         statusLabel.textColor = statusColor
-        actionButton.title = actionTitle
-        actionButton.isEnabled = actionEnabled
+        actionButton.title = actionTitle ?? ""
+        actionButton.isEnabled = actionTitle != nil && actionEnabled
+        actionButton.isHidden = actionTitle == nil
         openButton.isHidden = !showsOpen
         configurePolicy(policy)
     }
@@ -124,11 +126,14 @@ final class GitReviewChangeRequestBar: NSView {
         copy.spacing = Design.Spacing.hairline
         copy.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [copy, policyChip, openButton, actionButton])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.small
-        row.translatesAutoresizingMaskIntoConstraints = false
+        // The policy chooser and the next transition are peers. A plain stack lets each one
+        // choose its own height, which changes with the material and visibly put Bauhaus's
+        // shadowed chooser off-level beside its button. The shared row owns their height and
+        // optical edges, while the copy keeps the slack between the two runs.
+        let row = ControlRowView(
+            leading: [copy],
+            trailing: [policyChip, openButton, actionButton]
+        )
 
         addSubview(surface)
         surface.addSubview(row)
@@ -138,10 +143,9 @@ final class GitReviewChangeRequestBar: NSView {
             surface.trailingAnchor.constraint(equalTo: trailingAnchor),
             surface.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            row.topAnchor.constraint(equalTo: surface.topAnchor, constant: Design.Spacing.small),
             row.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: Design.Spacing.medium),
             row.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -Design.Spacing.medium),
-            row.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -Design.Spacing.small)
+            row.centerYAnchor.constraint(equalTo: surface.centerYAnchor)
         ])
         setAccessibilityElement(true)
     }

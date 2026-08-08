@@ -2,6 +2,11 @@ import AppKit
 
 // MARK: - Rendering
 
+private struct GitReviewFileScrollAnchor {
+    let path: String
+    let offsetWithinRow: CGFloat
+}
+
 /// Turning a loaded phase into the pane's view tree, split from the controller that drives it.
 /// Same type, separate file for length — `ConversationRendering`'s arrangement, for the same
 /// reason.
@@ -13,6 +18,20 @@ extension GitReviewViewController {
 
     func show(_ phase: Phase) {
         if !isViewLoaded { loadView() }
+
+        // Filesystem results can arrive while AppKit is carrying trackpad momentum. Mutating
+        // the table at that point interrupts the live-scroll transaction and feels like the
+        // diff grabbed the wheel. Coalesce to the newest result and reconcile once momentum
+        // ends; an explicit mode change is a different surface and still happens immediately.
+        if isFileLiveScrolling,
+           renderedMode == mode,
+           scrollView.documentView === fileTableView,
+           case .files = phase {
+            deferredPhaseDuringLiveScroll = phase
+            return
+        }
+        deferredPhaseDuringLiveScroll = nil
+
         let performanceSpan = PerformanceRecorder.shared.begin(
             "git.review.render",
             category: "git.review.ui",
@@ -33,8 +52,10 @@ extension GitReviewViewController {
         // A watched checkout redraws itself under the reader. Keeping the offset across a
         // reload of the *same* surface is what makes that tolerable; a mode switch or a commit
         // opening is a different page and starts at the top.
-        let keepsPlace = renderedMode == mode && Self.isSameSurface(self.phase, phase)
+        let previousPhase = self.phase
+        let keepsPlace = renderedMode == mode && Self.isSameSurface(previousPhase, phase)
         let offset = scrollView.documentVisibleRect.origin
+        let fileAnchor = keepsPlace ? currentFileScrollAnchor() : nil
         let composerWasFocused = isFocused(commitComposer)
 
         self.phase = phase
@@ -43,18 +64,34 @@ extension GitReviewViewController {
             bulkExpansionOverride = nil
         }
 
+        let pendingNotice = notice
+        notice = nil
+
+        // A watched working tree can refresh every couple of seconds while a build is writing
+        // files. Replacing the document view here used to destroy and reconstruct every visible
+        // TextKit diff even when only one of thousands of models changed; the real 8,984-file
+        // trace measured 45–295 ms on main for each refresh. Keep the table and its unchanged
+        // viewport rows alive, and mutate only the stable file identities that differ.
+        if keepsPlace,
+           pendingNotice == nil,
+           mode != .staged,
+           scrollView.documentView === fileTableView,
+           case .files(let files) = phase,
+           case .files = previousPhase {
+            renderCounter(files)
+            refreshFilesInPlace(files)
+            restoreScroll(to: fileAnchor, fallbackY: offset.y)
+            DispatchQueue.main.async { [weak self] in self?.updateScrollControls() }
+            return
+        }
+
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         resetRenderedFiles()
         scrollView.documentView = stack
         placeholderLabel.isHidden = true
         setBackVisible(false)
         counterLabel.isHidden = true
-        summaryPill.isHidden = true
         jumpToEndButton.isHidden = true
-        scrollView.contentInsets.bottom = 0
-
-        let pendingNotice = notice
-        notice = nil
 
         switch phase {
         case .message(let text):
@@ -94,7 +131,11 @@ extension GitReviewViewController {
             renderFiles(files, prelude: prelude)
         }
 
-        restoreScroll(to: keepsPlace ? offset.y : 0)
+        if keepsPlace {
+            restoreScroll(to: fileAnchor, fallbackY: offset.y)
+        } else {
+            restoreScroll(to: 0)
+        }
         DispatchQueue.main.async { [weak self] in
             self?.updateScrollControls()
         }
@@ -124,6 +165,63 @@ extension GitReviewViewController {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
+    /// A pixel offset is only stable while every row above it remains the same. Watched build
+    /// output violates that constantly, so preserve the first visible file and the reader's
+    /// position within it; fall back to the old offset only if that file disappeared.
+    private func restoreScroll(to anchor: GitReviewFileScrollAnchor?, fallbackY: CGFloat) {
+        guard let anchor,
+              let fileIndex = renderedFiles.firstIndex(where: { $0.path == anchor.path }) else {
+            restoreScroll(to: fallbackY)
+            return
+        }
+        view.layoutSubtreeIfNeeded()
+        let row = filePreludeViews.count + fileIndex
+        let targetY = fileTableView.rect(ofRow: row).minY + anchor.offsetWithinRow
+        scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: min(max(targetY, 0), maximumScrollOffsetY())
+        ))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    private func currentFileScrollAnchor() -> GitReviewFileScrollAnchor? {
+        guard scrollView.documentView === fileTableView else { return nil }
+        let visibleY = scrollView.documentVisibleRect.minY
+        let row = fileTableView.row(at: NSPoint(x: 1, y: visibleY + 0.5))
+        let fileIndex = row - filePreludeViews.count
+        guard renderedFiles.indices.contains(fileIndex) else { return nil }
+        return GitReviewFileScrollAnchor(
+            path: renderedFiles[fileIndex].path,
+            offsetWithinRow: visibleY - fileTableView.rect(ofRow: row).minY
+        )
+    }
+
+    /// Ends the scroll transaction in one place: apply the newest watched model, then replace
+    /// cheap estimates only for rows that survived into the resting viewport. Exact TextKit
+    /// height notifications are deliberately ignored during momentum so they cannot retile the
+    /// table between wheel events.
+    func finishFileLiveScrolling() {
+        isFileLiveScrolling = false
+        if let deferredPhaseDuringLiveScroll {
+            self.deferredPhaseDuringLiveScroll = nil
+            show(deferredPhaseDuringLiveScroll)
+        }
+
+        let visible = fileTableView.rows(in: fileTableView.visibleRect)
+        guard visible.location != NSNotFound else { return }
+        for tableRow in visible.location..<NSMaxRange(visible) {
+            let fileIndex = tableRow - filePreludeViews.count
+            guard renderedFiles.indices.contains(fileIndex),
+                  let host = fileTableView.view(
+                    atColumn: 0,
+                    row: tableRow,
+                    makeIfNecessary: false
+                  ) as? GitReviewVirtualRowHost,
+                  let row = host.installedContent as? GitReviewFileRow else { continue }
+            recordFileHeight(renderedFiles[fileIndex], row: row)
+        }
+    }
+
     /// One line about the write that just happened — an index another git had locked, or the
     /// commit that landed. In the list rather than in an alert: it is about what the pane is
     /// showing, and a sheet for "try again" would be worse than the problem.
@@ -140,13 +238,17 @@ extension GitReviewViewController {
     func renderCounter(_ files: [GitFileDiff]) {
         let added = files.reduce(0) { $0 + $1.added }
         let removed = files.reduce(0) { $0 + $1.removed }
+        let compactAdded = added.formatted(.number.notation(.compactName))
+        let compactRemoved = removed.formatted(.number.notation(.compactName))
+        let exactAdded = added.formatted(.number.grouping(.automatic))
+        let exactRemoved = removed.formatted(.number.grouping(.automatic))
 
         let text = NSMutableAttributedString()
-        text.append(NSAttributedString(string: "+\(added)", attributes: [
+        text.append(NSAttributedString(string: "+\(compactAdded)", attributes: [
             .foregroundColor: Design.Diff.added,
             .font: Design.Typography.caption()
         ]))
-        text.append(NSAttributedString(string: " −\(removed)", attributes: [
+        text.append(NSAttributedString(string: " −\(compactRemoved)", attributes: [
             .foregroundColor: Design.Diff.removed,
             .font: Design.Typography.caption()
         ]))
@@ -154,10 +256,16 @@ extension GitReviewViewController {
         // what was measured. Assigning only the attributed value leaves the old width.
         counterLabel.stringValue = text.string
         counterLabel.attributedStringValue = text
+        counterLabel.toolTip = "+\(exactAdded) −\(exactRemoved)"
+        counterLabel.setAccessibilityLabel(
+            L10n.format(
+                "%lld changed files, %lld additions, %lld deletions",
+                Int64(files.count),
+                Int64(added),
+                Int64(removed)
+            )
+        )
         counterLabel.isHidden = false
-        summaryPill.configure(files: files.count, added: added, removed: removed)
-        summaryPill.isHidden = false
-        scrollView.contentInsets.bottom = 54
     }
 
     /// Files open ready to read. The model is complete immediately, while AppKit asks for views
@@ -181,9 +289,6 @@ extension GitReviewViewController {
 
         renderedFiles = files
         filePreludeViews = prelude
-        for file in files {
-            defaultFileExpansion[file.path] = GitReviewFileRow.expandsByDefault(file)
-        }
 
         // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
         // branch comparison can list hundreds of files.
@@ -198,10 +303,109 @@ extension GitReviewViewController {
         scrollView.documentView = fileTableView
     }
 
+    /// Reconciles a watched `.files` refresh without replacing the table or unchanged visible
+    /// file rows. Git's order is stable for common paths; insertions and removals shift those
+    /// identities in one AppKit update, while content changes reload only their rows.
+    private func refreshFilesInPlace(_ files: [GitFileDiff]) {
+        let span = PerformanceRecorder.shared.begin(
+            "git.review.refresh-files",
+            category: "git.review.ui",
+            metadata: ["old_files": String(renderedFiles.count), "files": String(files.count)]
+        )
+        let oldFiles = renderedFiles
+        let oldIndexByPath = Dictionary(
+            oldFiles.indices.map { (oldFiles[$0].path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let newIndexByPath = Dictionary(
+            files.indices.map { (files[$0].path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let removed = IndexSet(oldFiles.indices.filter {
+            newIndexByPath[oldFiles[$0].path] == nil
+        })
+        let inserted = IndexSet(files.indices.filter {
+            oldIndexByPath[files[$0].path] == nil
+        })
+
+        var lastCommonNewIndex = -1
+        var keepsCommonOrder = true
+        for file in oldFiles {
+            guard let newIndex = newIndexByPath[file.path] else { continue }
+            if newIndex <= lastCommonNewIndex {
+                keepsCommonOrder = false
+                break
+            }
+            lastCommonNewIndex = newIndex
+        }
+
+        // Replacing the value model is enough for every offscreen path: its eventual row asks
+        // `renderedFiles` for the new value. Deep-comparing all hunk text merely to discover
+        // which nonexistent views to reload cost 47 ms for the 9k-file/80k-line fixture. Only
+        // rows AppKit currently owns and paths with an exact cached height need comparison.
+        var comparisonPaths = Set(measuredFileRowHeights.keys)
+        fileTableView.enumerateAvailableRowViews { _, tableRow in
+            let fileIndex = tableRow - filePreludeViews.count
+            guard oldFiles.indices.contains(fileIndex) else { return }
+            comparisonPaths.insert(oldFiles[fileIndex].path)
+        }
+        var changedPaths = Set<String>()
+        for path in comparisonPaths {
+            guard let oldIndex = oldIndexByPath[path],
+                  let newIndex = newIndexByPath[path],
+                  oldFiles[oldIndex] != files[newIndex] else { continue }
+            changedPaths.insert(path)
+        }
+        let changedRows = IndexSet(changedPaths.compactMap { newIndexByPath[$0] })
+
+        for index in removed {
+            measuredFileRowHeights[oldFiles[index].path] = nil
+        }
+        for path in changedPaths {
+            measuredFileRowHeights[path] = nil
+        }
+
+        if keepsCommonOrder {
+            fileTableView.beginUpdates()
+            renderedFiles = files
+            if !removed.isEmpty {
+                fileTableView.removeRows(
+                    at: removed.offset(by: filePreludeViews.count),
+                    withAnimation: []
+                )
+            }
+            if !inserted.isEmpty {
+                fileTableView.insertRows(
+                    at: inserted.offset(by: filePreludeViews.count),
+                    withAnimation: []
+                )
+            }
+            fileTableView.endUpdates()
+            if !changedRows.isEmpty {
+                fileTableView.reloadData(
+                    forRowIndexes: changedRows.offset(by: filePreludeViews.count),
+                    columnIndexes: IndexSet(integer: 0)
+                )
+            }
+        } else {
+            // Renames and git mode changes can genuinely reorder common paths. They are rare and
+            // correctness wins; the path anchor still restores the reader after this fallback.
+            renderedFiles = files
+            fileTableView.reloadData()
+        }
+
+        span.end(metadata: [
+            "inserted": String(inserted.count),
+            "removed": String(removed.count),
+            "compared": String(comparisonPaths.count),
+            "changed": String(changedPaths.count),
+            "reordered": String(!keepsCommonOrder)
+        ])
+    }
+
     private func resetRenderedFiles() {
         renderedFiles = []
         filePreludeViews = []
-        defaultFileExpansion = [:]
         measuredFileRowHeights = [:]
         measuredPreludeRowHeights = [:]
         fileRowHeightWidth = 0
@@ -326,8 +530,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         guard let measured = measuredFileRowHeights[file.path] else {
             let expanded = expansionOverrides[file.path]
                 ?? bulkExpansionOverride
-                ?? defaultFileExpansion[file.path]
-                ?? false
+                ?? GitReviewFileRow.expandsByDefault(file)
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
@@ -338,8 +541,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         guard abs(measured.width - cardWidth) <= 0.5 else {
             let expanded = expansionOverrides[file.path]
                 ?? bulkExpansionOverride
-                ?? defaultFileExpansion[file.path]
-                ?? false
+                ?? GitReviewFileRow.expandsByDefault(file)
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
@@ -373,16 +575,15 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         let fileIndex = tableRow - filePreludeViews.count
         guard renderedFiles.indices.contains(fileIndex) else { return nil }
-        host.install(makeFileRow(renderedFiles[fileIndex], tableRow: tableRow))
+        host.install(makeFileRow(renderedFiles[fileIndex]))
         return host
     }
 
-    private func makeFileRow(_ file: GitFileDiff, tableRow: Int) -> GitReviewFileRow {
+    private func makeFileRow(_ file: GitFileDiff) -> GitReviewFileRow {
         instantiatedFileRowCount += 1
         let expanded = expansionOverrides[file.path]
             ?? bulkExpansionOverride
-            ?? defaultFileExpansion[file.path]
-            ?? false
+            ?? GitReviewFileRow.expandsByDefault(file)
 
         // The row's "Open in" needs an absolute path, and a diff carries only a path
         // relative to the checkout — which is the pane's fact, not the row's.
@@ -405,26 +606,36 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
         }
-        row.onWillToggle = { [weak self] expanded in
-            guard let self else { return }
+        row.onWillToggle = { [weak self, weak row] expanded in
+            guard let self, let row else { return }
             self.expansionOverrides[file.path] = expanded
             self.measuredFileRowHeights[file.path] = nil
+            let tableRow = self.fileTableView.row(for: row)
+            guard tableRow >= 0 else { return }
             guard tableRow < self.fileTableView.numberOfRows else { return }
             self.fileTableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(integer: tableRow)
             )
         }
         row.onHeightChange = { [weak self, weak row] in
-            self?.recordFileHeight(file, row: row, tableRow: tableRow)
+            self?.recordFileHeight(file, row: row)
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
-        if let conversation = AgentRuntime.shared.conversation(for: sessionID) {
-            row.onAddContextAttachment = { [weak conversation] attachment in
-                conversation?.stageContextAttachment(attachment)
+        // Asked of the handoff rather than of the runtime's conversation cache: Git Review is a
+        // pane, and a pane is open beside terminal sessions too. Resolved per row build so a
+        // session that launches while the pane is up gains the actions on its next refresh.
+        if SessionContextHandoff.canReceiveContext(for: sessionID) {
+            let sessionID = sessionID
+            row.onAddContextAttachment = { attachment in
+                SessionContextHandoff.stage(attachment, for: sessionID)
             }
-            row.onRequestContextComment = { [weak conversation] attachment in
-                conversation?.requestComment(on: attachment)
+            row.onRequestContextComment = { attachment, preview in
+                ContextCommentAlert.request(
+                    on: attachment,
+                    preview: preview,
+                    for: sessionID
+                )
             }
         }
         // The row knows it holds a picture; the pane knows which two endpoints the mode
@@ -439,28 +650,28 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 path: file.path, request: request, in: root, completion: completion
             )
         }
-        scheduleFileHeightMeasurement(file, row: row, tableRow: tableRow)
+        scheduleFileHeightMeasurement(file, row: row)
         return row
     }
 
     private func scheduleFileHeightMeasurement(
         _ file: GitFileDiff,
-        row: GitReviewFileRow?,
-        tableRow: Int
+        row: GitReviewFileRow?
     ) {
         DispatchQueue.main.async { [weak self, weak row] in
-            self?.recordFileHeight(file, row: row, tableRow: tableRow)
+            self?.recordFileHeight(file, row: row)
         }
     }
 
     private func recordFileHeight(
         _ file: GitFileDiff,
-        row: GitReviewFileRow?,
-        tableRow: Int
+        row: GitReviewFileRow?
     ) {
-        guard let row,
+        guard !isFileLiveScrolling else { return }
+        guard let row else { return }
+        let tableRow = fileTableView.row(for: row)
+        guard tableRow >= 0,
               tableRow < fileTableView.numberOfRows,
-              fileTableView.row(for: row) == tableRow,
               tableRow >= filePreludeViews.count,
               renderedFiles[tableRow - filePreludeViews.count].path == file.path else {
             return
@@ -508,8 +719,11 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
 /// this host, so offscreen file views and their constraints are released.
 private final class GitReviewVirtualRowHost: NSView {
 
+    private(set) weak var installedContent: NSView?
+
     func install(_ content: NSView) {
         subviews.forEach { $0.removeFromSuperview() }
+        installedContent = content
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
@@ -527,5 +741,12 @@ private final class GitReviewVirtualRowHost: NSView {
                 constant: -Design.Spacing.small
             )
         ])
+    }
+}
+
+private extension IndexSet {
+    func offset(by delta: Int) -> IndexSet {
+        guard delta != 0 else { return self }
+        return IndexSet(map { $0 + delta })
     }
 }

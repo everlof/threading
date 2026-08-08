@@ -142,23 +142,32 @@ final class GitStatusOverlayView: BackdropOverlay {
     // MARK: - Types
 
     /// What the card should say about the agent this session runs, **already reduced to the facts
-    /// its own status line does not show**.
+    /// the caller wants said here**.
     ///
-    /// The filtering happens before the card, and deliberately: for a terminal session it is
-    /// `ClaudeStatusLineCoverage` that decides — by running the account's `statusLine` and looking
-    /// for values Threading already holds — and a native conversation has no status line to
-    /// complement, so it passes everything. Either way this view is handed a decision rather than
-    /// asked to make one, which is what keeps a Claude-specific rule out of a Git-shaped card.
+    /// Which facts those are is decided before the card, and deliberately: a native conversation
+    /// passes none, because its own status row carries them directly above the composer, and a
+    /// terminal session passes everything its pane can extract. This view is handed a decision
+    /// rather than asked to make one, which keeps a runtime-specific rule out of a Git-shaped card.
     ///
-    /// A nil field is not "unknown", it is "do not say this". A caller that wants the model shown
-    /// puts it here; a caller whose status line already prints it leaves it out.
+    /// A nil field is not "unknown", it is "do not say this" — a caller with nothing to report for
+    /// a field leaves it out, and the row shrinks to the facts that are left.
     struct ModelReading: Equatable {
         var name: String?
+        /// The permission posture, already display-named — "Accept Edits", not "acceptEdits".
+        ///
+        /// Set only from a mode the session was *observed* in, never from the launch record: a
+        /// terminal's own Shift+Tab moves the posture without telling this app, so the record
+        /// answers what the next launch will ask for rather than what is true now. See
+        /// `ObservedPermissionMode`.
+        var mode: String?
         /// Already display-named — "Extra High", not "xhigh".
         var effort: String?
+        /// Drawn as the bolt the row ends on, and only while it is true. False is not a fact the
+        /// card reports: standard speed is what every session runs at unless something says
+        /// otherwise, so it earns no ink — see `speedMark`.
         var isFast = false
 
-        var isEmpty: Bool { name == nil && effort == nil && !isFast }
+        var isEmpty: Bool { name == nil && mode == nil && effort == nil && !isFast }
     }
 
     // MARK: - Properties
@@ -212,6 +221,21 @@ final class GitStatusOverlayView: BackdropOverlay {
         classicGlyph: .model,
         pointSize: GitStatusOverlayDefaults.markPointSize,
         accessibilityDescription: L10n.string("Model")
+    )
+    /// Fast mode, drawn rather than spelled: a bolt after the agent line's words is what the
+    /// state *looks* like everywhere else in the app, and the word "Fast" spent a sixth of a
+    /// capped row saying what the symbol says at a glance. It is the same `bolt.fill` the
+    /// composer's speed chip carries, so one fact keeps one mark.
+    ///
+    /// It appears **only when fast mode is on**. Off has no mark, exactly as it has no word: a
+    /// dimmed or crossed-out bolt would be a second thing to learn about a state that is simply
+    /// the ordinary one. The row still says "Fast" to a reader who hears it — see
+    /// `spokenModelText`, since a symbol read aloud is a fact lost rather than a fact shortened.
+    private let speedMark = ThemedFloatingGlyphView(
+        systemSymbolName: "bolt.fill",
+        classicGlyph: .speed,
+        pointSize: GitStatusOverlayDefaults.markPointSize,
+        accessibilityDescription: L10n.string("Fast")
     )
     private let subagentsButton: ThemedButton
     private let audienceButton: ThemedButton
@@ -385,6 +409,16 @@ final class GitStatusOverlayView: BackdropOverlay {
         modelRow.translatesAutoresizingMaskIntoConstraints = false
         modelRow.isHidden = true
         modelRow.addArrangedSubview(modelMark)
+        // Trailing the words rather than sharing the leading mark column: the bolt is a
+        // *qualifier* on this row, and a mark in that column is what the row is. It keeps its own
+        // intrinsic width for the same reason — the column's width is the air the leading marks
+        // are aligned in, and spending it after a truncating label would open a hole. `rebuild()`
+        // inserts the label between the two.
+        speedMark.translatesAutoresizingMaskIntoConstraints = false
+        speedMark.setContentHuggingPriority(.required, for: .horizontal)
+        speedMark.setContentCompressionResistancePriority(.required, for: .horizontal)
+        speedMark.isHidden = true
+        modelRow.addArrangedSubview(speedMark)
 
         // One gap, every row, and the card's own inset around the outside — see `rowGap` for
         // the rhythm this replaced. The children row is the one row that pads itself, and
@@ -551,12 +585,15 @@ final class GitStatusOverlayView: BackdropOverlay {
         surfaceFill = chrome.fill
         chrome.apply(to: self)
 
-        for mark in [glyph, countersMark, modelMark] {
+        for mark in [glyph, countersMark, modelMark, speedMark] {
             mark.setPointSize(GitStatusOverlayDefaults.markPointSize)
         }
         glyph.tintColor = surfaceInk.secondary
         countersMark.tintColor = surfaceInk.tertiary
         modelMark.tintColor = surfaceInk.tertiary
+        // Tertiary with the row's other qualifiers: the bolt stands for a word that was set in
+        // that weight, and a mark louder than the effort beside it would read as a warning.
+        speedMark.tintColor = surfaceInk.tertiary
         // Both button rows, the same way. The audience row used to be given neither, so it drew
         // in AppKit's own label colour and lifted to nothing under the pointer — the one row of
         // the card that was inert by omission rather than by design.
@@ -627,6 +664,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.isHidden = true
         audienceButton.isHidden = true
         modelRow.isHidden = true
+        speedMark.isHidden = true
         hasContent = false
         applyVisibility(animated: false)
     }
@@ -738,11 +776,15 @@ final class GitStatusOverlayView: BackdropOverlay {
         let counters = Self.countersText(for: lastReading, ink: surfaceInk, diff: diff)
 
         let model = Self.modelText(for: modelReading, ink: surfaceInk)
+        // The bolt is a row of its own right, not decoration on the words: a session whose only
+        // agent fact is its speed still gets the agent line, the same way one with only a posture
+        // does.
+        let isFast = modelReading?.isFast ?? false
 
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
         let hasAudience = !audienceReading.isEmpty
-        guard hasGitReceipt || hasSubagents || hasAudience || model != nil else {
+        guard hasGitReceipt || hasSubagents || hasAudience || model != nil || isFast else {
             hasContent = false
             applyVisibility(animated: false)
             return
@@ -796,12 +838,14 @@ final class GitStatusOverlayView: BackdropOverlay {
             let label = NSTextField.label(attributed: model)
             label.cell?.lineBreakMode = .byTruncatingTail
             modelLabel = label
-            modelRow.addArrangedSubview(label)
+            // After the mark and before the bolt, which are the row's fixed ends.
+            modelRow.insertArrangedSubview(label, at: 1)
         }
 
         summaryRow.isHidden = head == nil
         countersRow.isHidden = counters == nil
-        modelRow.isHidden = model == nil
+        modelRow.isHidden = model == nil && !isFast
+        speedMark.isHidden = !isFast
         subagentsButton.isHidden = !hasSubagents
         audienceButton.isHidden = !hasAudience
 
@@ -986,21 +1030,28 @@ final class GitStatusOverlayView: BackdropOverlay {
         return (files, totals)
     }
 
-    /// The agent line: the model leading, then how it is running.
+    /// The agent line's **words**: the model leading, then how it is running. Speed is not among
+    /// them — it is `speedMark`, the bolt this row ends on.
     ///
     /// The name takes `secondary` and its qualifiers `tertiary` — the same split the counters row
     /// makes between the file count and its totals, and what keeps a three-part line reading as
     /// one fact with detail rather than three of equal weight.
     ///
-    /// Nil when there is nothing to say, which is the caller's cue to hide the row. Each part is
-    /// independently optional because the caller has already dropped whatever the session's own
-    /// status line prints: a line of just "Fast" is the correct output for an account whose status
-    /// line names the model and effort but not the speed.
+    /// Nil when there are no words at all, which includes a reading whose only fact is its speed:
+    /// the row is then the mark and the bolt, and `rebuild()` keeps it open on `isFast` rather
+    /// than on this. Each part is independently optional — a session may know its posture and not
+    /// its model, or the reverse.
+    ///
+    /// **Mode leads effort**, and the bolt follows both, so the row reads model → posture → how it
+    /// thinks → how fast: the order the composer's own chips are in (`modelChip`, `modeChip`,
+    /// `effortChip`, `speedChip`). Speed used to sit between posture and effort here, which
+    /// nothing on screen agreed with; no runtime could reach the case, so the disagreement lived
+    /// only in the fixtures until the bolt made it visible.
     private static func modelText(
         for reading: ModelReading?,
         ink: Design.Ink
     ) -> NSAttributedString? {
-        guard let reading, !reading.isEmpty else { return nil }
+        guard let reading else { return nil }
         let font = GitStatusOverlayDefaults.font.resolved()
         let text = NSMutableAttributedString()
 
@@ -1012,16 +1063,17 @@ final class GitStatusOverlayView: BackdropOverlay {
         }
 
         var details: [String] = []
-        if reading.isFast { details.append(L10n.string("Fast")) }
+        if let mode = reading.mode { details.append(mode) }
         if let effort = reading.effort { details.append(effort) }
-        guard !details.isEmpty else { return text }
+        if !details.isEmpty {
+            let joined = details.joined(separator: " · ")
+            text.append(NSAttributedString(
+                string: text.length == 0 ? joined : " · \(joined)",
+                attributes: [.font: font, .foregroundColor: ink.tertiary]
+            ))
+        }
 
-        let joined = details.joined(separator: " · ")
-        text.append(NSAttributedString(
-            string: text.length == 0 ? joined : " · \(joined)",
-            attributes: [.font: font, .foregroundColor: ink.tertiary]
-        ))
-        return text
+        return text.length == 0 ? nil : text
     }
 
     /// The audience row's words.
@@ -1041,12 +1093,17 @@ final class GitStatusOverlayView: BackdropOverlay {
     }
 
     /// The agent line as one spoken phrase, or nil when the card has no agent row.
+    ///
+    /// Fast is a **word** here and a bolt on screen, in the same last place. A symbol is the
+    /// faster read for an eye and nothing at all for a reader who hears the card, so the row is
+    /// drawn short and spoken whole.
     private static func spokenModelText(for reading: ModelReading?) -> String? {
         guard let reading, !reading.isEmpty else { return nil }
         var parts: [String] = []
         if let name = reading.name { parts.append(name) }
-        if reading.isFast { parts.append(L10n.string("Fast")) }
+        if let mode = reading.mode { parts.append(mode) }
         if let effort = reading.effort { parts.append(effort) }
+        if reading.isFast { parts.append(L10n.string("Fast")) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

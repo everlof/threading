@@ -14,7 +14,7 @@ final class DiffView: DiffAppKitView {
     private var contextMenuSession: AnyObject?
 
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)?
-    var onRequestComment: ((ConversationContextAttachment) -> Void)?
+    var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)?
 
     convenience init(lines: [DiffLine], path: String? = nil, wraps: Bool = true) {
         self.init(
@@ -64,11 +64,12 @@ final class DiffView: DiffAppKitView {
     override func rightMouseDown(with event: NSEvent) {
         guard onAddContextAttachment != nil || onRequestComment != nil,
               let index = lineIndex(at: convert(event.locationInWindow, from: nil)),
-              let reference = contextAttachment(atDisplayedLine: index) else {
+              let reference = contextAttachment(atDisplayedLine: index),
+              let preview = contextPreview(spanningDisplayedLines: index...index) else {
             super.rightMouseDown(with: event)
             return
         }
-        presentContextMenu(for: reference, at: event.locationInWindow)
+        presentContextMenu(for: reference, preview: preview, at: event.locationInWindow)
     }
 
     private func lineIndex(at point: NSPoint) -> Int? {
@@ -79,6 +80,7 @@ final class DiffView: DiffAppKitView {
 
     private func presentContextMenu(
         for reference: ConversationContextAttachment,
+        preview: CodeContextPreview,
         at windowPoint: NSPoint
     ) {
         guard contextMenuSession == nil else { return }
@@ -92,7 +94,7 @@ final class DiffView: DiffAppKitView {
         if onRequestComment != nil {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Comment on line…"),
-                onChoose: { [weak self] in self?.onRequestComment?(reference) }
+                onChoose: { [weak self] in self?.onRequestComment?(reference, preview) }
             )))
         }
         contextMenuSession = ThemedMenuPresenter.present(
@@ -122,6 +124,22 @@ final class DiffView: DiffAppKitView {
             lineStart: number,
             lineEnd: number
         )
+    }
+
+    func contextPreview(
+        spanningDisplayedLines span: ClosedRange<Int>
+    ) -> CodeContextPreview? {
+        CodeContextPreview.make(
+            totalLineCount: contextLines.count,
+            target: span
+        ) { [contextLines] index in
+            let line = contextLines[index]
+            return CodeContextPreview.SourceLine(
+                number: line.newNumber ?? line.oldNumber,
+                change: line.kind.contextPreviewChange,
+                text: line.text
+            )
+        }
     }
 
     private func beginObservingTheme() {
@@ -211,7 +229,7 @@ final class GitReviewDiffTextView: ThemedTextView {
     private var contextMenuSession: AnyObject?
 
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)?
-    var onRequestComment: ((ConversationContextAttachment) -> Void)?
+    var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)?
     var onPreferredHeightChange: (() -> Void)?
     private(set) var initialMeasuredSize = NSSize.zero
 
@@ -304,8 +322,16 @@ final class GitReviewDiffTextView: ThemedTextView {
             super.rightMouseDown(with: event)
             return
         }
-        guard let reference = contextAttachment(atDisplayedLine: lineIndex) else { return }
-        presentContextMenu(for: reference, at: event.locationInWindow)
+        let span = targetSpan(forClickedLine: lineIndex)
+        guard let reference = contextAttachment(spanningDisplayedLines: span),
+              let preview = contextPreview(spanningDisplayedLines: span) else { return }
+        highlightLines(span)
+        presentContextMenu(
+            for: reference,
+            preview: preview,
+            spanning: span,
+            at: event.locationInWindow
+        )
     }
 
     private func rebuildDocument() {
@@ -554,37 +580,109 @@ final class GitReviewDiffTextView: ThemedTextView {
     /// `DiffView.contextAttachment(atDisplayedLine:)` so the compact renderer cannot trade away
     /// exact line actions for speed.
     func contextAttachment(atDisplayedLine index: Int) -> ConversationContextAttachment? {
-        guard renderedLines.indices.contains(index) else { return nil }
-        let line = renderedLines[index].source
-        let number = line.newNumber ?? line.oldNumber
+        contextAttachment(spanningDisplayedLines: index...index)
+    }
+
+    /// The same anchor over a run of rendered lines — what a text selection comments on.
+    ///
+    /// The numbers are the span's first and last displayed line, each preferring its new
+    /// number, so a span that ends on a removed line anchors to the closest number the
+    /// working copy still has — the single-line rule, applied at both ends.
+    func contextAttachment(
+        spanningDisplayedLines span: ClosedRange<Int>
+    ) -> ConversationContextAttachment? {
+        guard span.lowerBound >= 0, span.upperBound < renderedLines.count else { return nil }
+        let lines = renderedLines[span].map(\.source)
+        let start = lines.first.flatMap { $0.newNumber ?? $0.oldNumber }
+        let end = lines.last.flatMap { $0.newNumber ?? $0.oldNumber }
         let titlePath = path ?? L10n.string("Code change")
+        let title: String = if let start, let end, end > start {
+            "\(titlePath):\(start)-\(end)"
+        } else if let start {
+            "\(titlePath):\(start)"
+        } else {
+            titlePath
+        }
         return ConversationContextAttachment(
             kind: .reference,
             source: .code,
-            title: number.map { "\(titlePath):\($0)" } ?? titlePath,
-            excerpt: line.text,
+            title: title,
+            excerpt: lines.map(\.text).joined(separator: "\n"),
             locator: path,
-            lineStart: number,
-            lineEnd: number
+            lineStart: start,
+            lineEnd: end
         )
+    }
+
+    func contextPreview(
+        spanningDisplayedLines span: ClosedRange<Int>
+    ) -> CodeContextPreview? {
+        CodeContextPreview.make(
+            totalLineCount: renderedLines.count,
+            target: span
+        ) { [renderedLines] index in
+            let line = renderedLines[index].source
+            return CodeContextPreview.SourceLine(
+                number: line.newNumber ?? line.oldNumber,
+                change: line.kind.contextPreviewChange,
+                text: line.text
+            )
+        }
+    }
+
+    /// The lines a context action speaks about: the selection when the click lands inside it —
+    /// which is how more than one line is chosen — otherwise the line under the pointer alone.
+    func targetSpan(forClickedLine index: Int) -> ClosedRange<Int> {
+        guard let selected = selectedLineSpan(), selected.contains(index) else {
+            return index...index
+        }
+        return selected
+    }
+
+    private func selectedLineSpan() -> ClosedRange<Int>? {
+        let selection = selectedRange()
+        guard selection.length > 0 else { return nil }
+        let first = lineRanges.firstIndex { NSIntersectionRange(selection, $0).length > 0 }
+        let last = lineRanges.lastIndex { NSIntersectionRange(selection, $0).length > 0 }
+        guard let first, let last else { return nil }
+        return first...last
+    }
+
+    /// Selects the span's whole lines, so what the menu — and the comment sheet after it —
+    /// will quote is the run the selection wash is sitting on, not a memory of a pointer
+    /// position. A partial selection grows to its line boundaries for the same reason: the
+    /// excerpt quotes complete lines.
+    func highlightLines(_ span: ClosedRange<Int>) {
+        guard lineRanges.indices.contains(span.lowerBound),
+              lineRanges.indices.contains(span.upperBound) else { return }
+        let start = lineRanges[span.lowerBound].location
+        let end = NSMaxRange(lineRanges[span.upperBound])
+        setSelectedRange(NSRange(location: start, length: end - start))
     }
 
     private func presentContextMenu(
         for reference: ConversationContextAttachment,
+        preview: CodeContextPreview,
+        spanning span: ClosedRange<Int>,
         at windowPoint: NSPoint
     ) {
         guard contextMenuSession == nil else { return }
+        let plural = span.count > 1
         var entries: [ThemedMenuEntry] = []
         if onAddContextAttachment != nil {
             entries.append(.item(ThemedMenuItem(
-                title: L10n.string("Add line to chat"),
+                title: plural
+                    ? L10n.string("Add lines to chat")
+                    : L10n.string("Add line to chat"),
                 onChoose: { [weak self] in self?.onAddContextAttachment?(reference) }
             )))
         }
         if onRequestComment != nil {
             entries.append(.item(ThemedMenuItem(
-                title: L10n.string("Comment on line…"),
-                onChoose: { [weak self] in self?.onRequestComment?(reference) }
+                title: plural
+                    ? L10n.string("Comment on lines…")
+                    : L10n.string("Comment on line…"),
+                onChoose: { [weak self] in self?.onRequestComment?(reference, preview) }
             )))
         }
         contextMenuSession = ThemedMenuPresenter.present(
@@ -635,6 +733,16 @@ final class GitReviewDiffTextView: ThemedTextView {
     private static let defaultLayoutWidth: CGFloat = 240
     private static let maximumContinuationIndentColumns = 16
     private static let noWrapContainerWidth: CGFloat = 1_000_000
+}
+
+private extension GitDiffLine.Kind {
+    var contextPreviewChange: CodeContextPreview.Change {
+        switch self {
+        case .context: .context
+        case .added: .added
+        case .removed: .removed
+        }
+    }
 }
 
 @MainActor

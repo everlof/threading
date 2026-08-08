@@ -82,6 +82,19 @@ struct ExecutionAuditRecord: Codable, Equatable, Sendable, Identifiable {
         case denied
         case interrupted
 
+        /// How a turn's outcome files in the ledger.
+        ///
+        /// `interrupted` existed here from the start and no turn could ever reach it: the
+        /// terminal event carried one boolean, so a turn the user stopped was recorded as a
+        /// failure. The three outcomes map one-to-one.
+        init(turnOutcome: TurnOutcome) {
+            switch turnOutcome {
+            case .completed: self = .completed
+            case .failed: self = .failed
+            case .stopped: self = .interrupted
+            }
+        }
+
         var displayName: String {
             switch self {
             case .requested: return L10n.string("Requested")
@@ -286,13 +299,19 @@ final class ExecutionAuditStore: @unchecked Sendable {
                 phase: .completed,
                 operation: "background_work.updated",
                 output: .object([
-                    "in_flight": .array(inFlight.map(JSONValue.string))
+                    "in_flight": .array(inFlight.map { JSONValue.string($0.id) })
                 ]),
                 fidelity: .exact
             )
 
-        case .turnFinished(_, let isError, let metrics):
-            var output: [String: JSONValue] = ["is_error": .bool(isError)]
+        case .turnFinished(_, let outcome, let metrics):
+            // Both facts, because the ledger is a record rather than a rendering: `is_error`
+            // stays for readers already keyed on it, and `outcome` is what tells an audit that
+            // a turn ended because somebody pressed Stop.
+            var output: [String: JSONValue] = [
+                "is_error": .bool(outcome.isError),
+                "outcome": .string(outcome.auditName)
+            ]
             if let duration = metrics.duration {
                 output["duration_ms"] = .integer(Int64((duration * 1_000).rounded()))
             }
@@ -305,7 +324,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
                 source: .providerStream,
                 provider: provider.rawValue,
                 category: .lifecycle,
-                phase: isError ? .failed : .completed,
+                phase: .init(turnOutcome: outcome),
                 operation: "turn.finished",
                 output: .object(output),
                 fidelity: .exact

@@ -154,12 +154,6 @@ final class GitReviewViewController: NSViewController {
         label.maximumNumberOfLines = 0
         return label
     }()
-    lazy var summaryPill: GitReviewSummaryPill = {
-        let pill = GitReviewSummaryPill()
-        pill.translatesAutoresizingMaskIntoConstraints = false
-        pill.isHidden = true
-        return pill
-    }()
     lazy var changeRequestBar: GitReviewChangeRequestBar = {
         let bar = GitReviewChangeRequestBar()
         bar.isHidden = true
@@ -176,25 +170,16 @@ final class GitReviewViewController: NSViewController {
         return bar
     }()
     lazy var jumpToEndButton: ThemedButton = {
-        let button = ThemedButton(
-            symbol: "arrow.down",
+        let button = ThemedButton.floatingScrollToEnd(
             accessibility: L10n.string("Scroll to the end of the diff"),
             target: self,
             action: #selector(scrollToDiffEnd)
-        )
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.isBordered = false
-        button.toolTip = L10n.string("Scroll to end")
-        button.applySurface(
-            fill: Design.Surface.elevated,
-            radius: .fixed(20),
-            border: Design.Surface.border,
-            glow: true
         )
         button.isHidden = true
         return button
     }()
     nonisolated(unsafe) private var scrollObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var liveScrollObservers: [NSObjectProtocol] = []
     private let appEvents = AppEventObservations()
 
     /// What the body is currently showing. Commit mode is two phases deep: the history list,
@@ -237,7 +222,6 @@ final class GitReviewViewController: NSViewController {
     /// the viewport.
     var renderedFiles: [GitFileDiff] = []
     var filePreludeViews: [NSView] = []
-    var defaultFileExpansion: [String: Bool] = [:]
     var renderedFileRoot: URL?
     var instantiatedFileRowCount = 0
     var measuredFileRowHeights: [String: (width: CGFloat, height: CGFloat)] = [:]
@@ -256,6 +240,11 @@ final class GitReviewViewController: NSViewController {
     /// The checkout changed while a load was in flight or the pane was off screen; the next
     /// opportunity re-reads regardless of the debounce.
     private var pendingReload = false
+
+    /// A checkout refresh must not replace table rows in the middle of trackpad momentum.
+    /// Keep only the newest result and reconcile it when AppKit ends the live-scroll gesture.
+    var isFileLiveScrolling = false
+    var deferredPhaseDuringLiveScroll: Phase?
 
     private var watcher: GitCheckoutWatcher?
 
@@ -353,14 +342,9 @@ final class GitReviewViewController: NSViewController {
         super.viewDidLayout()
         guard scrollView.documentView === fileTableView else { return }
 
-        // A one-column table does not make its column follow the clip width merely because the
-        // column is autoresizing. Without this, the table occupied the pane but every file card
-        // stayed at AppKit's narrow initial column width.
-        if let column = fileTableView.tableColumns.first,
-           abs(column.width - fileTableView.bounds.width) > 0.5 {
-            fileTableView.sizeLastColumnToFit()
-        }
-
+        // The column follows the table's width in `SoleColumnFitting`, not here. It was here, and
+        // a pane laid out before its diff arrives never calls this method again — see that
+        // protocol for the cards it left 76pt wide.
         let cardWidth = max(fileTableView.bounds.width - Design.Spacing.inset * 2, 0)
         guard cardWidth > 1, abs(cardWidth - fileRowHeightWidth) > 0.5 else { return }
         fileRowHeightWidth = cardWidth
@@ -386,6 +370,7 @@ final class GitReviewViewController: NSViewController {
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
         }
+        liveScrollObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     // MARK: - Setup
@@ -419,11 +404,30 @@ final class GitReviewViewController: NSViewController {
                 self?.updateScrollControls()
             }
         }
+        liveScrollObservers = [
+            NotificationCenter.default.addObserver(
+                forName: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.isFileLiveScrolling = true
+                }
+            },
+            NotificationCenter.default.addObserver(
+                forName: NSScrollView.didEndLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.finishFileLiveScrolling()
+                }
+            },
+        ]
 
         view.addSubview(scrollView)
         view.addSubview(changeRequestBar)
         view.addSubview(placeholderLabel)
-        view.addSubview(summaryPill)
         view.addSubview(jumpToEndButton)
     }
 
@@ -483,17 +487,11 @@ final class GitReviewViewController: NSViewController {
             placeholderLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             placeholderLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: inset),
 
-            summaryPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            summaryPill.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Design.Spacing.inset),
-            summaryPill.heightAnchor.constraint(equalToConstant: 34),
-
             jumpToEndButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             jumpToEndButton.bottomAnchor.constraint(
-                equalTo: summaryPill.topAnchor,
-                constant: -Design.Spacing.small
-            ),
-            jumpToEndButton.widthAnchor.constraint(equalToConstant: 40),
-            jumpToEndButton.heightAnchor.constraint(equalToConstant: 40)
+                equalTo: view.bottomAnchor,
+                constant: -Design.Spacing.inset
+            )
         ])
     }
 
@@ -505,7 +503,9 @@ final class GitReviewViewController: NSViewController {
     }
 
     func updateScrollControls() {
-        guard isViewLoaded, !summaryPill.isHidden else {
+        guard isViewLoaded,
+              scrollView.documentView === fileTableView,
+              !counterLabel.isHidden else {
             if isViewLoaded { jumpToEndButton.isHidden = true }
             return
         }
@@ -514,10 +514,9 @@ final class GitReviewViewController: NSViewController {
         jumpToEndButton.isHidden = overflow <= 1 || distanceFromEnd <= 4
     }
 
-    /// AppKit's actual terminal scroll position. A document-height subtraction ignores the
-    /// bottom content inset reserved for the floating summary pill, so the jump button stopped
-    /// early and then hid as though it had reached the end. Let the clip view apply the same
-    /// constraints it uses for wheel and scroller-thumb movement.
+    /// AppKit's actual terminal scroll position. Let the clip view apply the same constraints
+    /// it uses for wheel and scroller-thumb movement rather than approximating from document
+    /// and viewport heights.
     func maximumScrollOffsetY() -> CGFloat {
         guard scrollView.documentView != nil else { return 0 }
         let bounds = scrollView.contentView.bounds
@@ -817,68 +816,6 @@ final class GitReviewViewController: NSViewController {
 
     @objc private func backToCommits() {
         show(.commits(canLoadMore: lastPageWasFull))
-    }
-}
-
-/// The compact total that remains visible while reading a long diff, mirroring the mobile
-/// review surface without making the Mac renderer depend on the phone's view layer.
-final class GitReviewSummaryPill: NSView {
-    private let filesLabel = NSTextField(labelWithString: "")
-    private let addedLabel = NSTextField(labelWithString: "")
-    private let removedLabel = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        let labels = [filesLabel, addedLabel, removedLabel]
-        labels.forEach {
-            $0.applyFont(.caption)
-            $0.setContentHuggingPriority(.required, for: .horizontal)
-        }
-
-        let stack = NSStackView(views: labels)
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = Design.Spacing.medium
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        setAccessibilityElement(true)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func configure(files: Int, added: Int, removed: Int) {
-        filesLabel.stringValue = files == 1
-            ? L10n.string("1 file")
-            : L10n.format("%lld files", Int64(files))
-        filesLabel.textColor = Design.Text.secondary
-        addedLabel.stringValue = "+\(added.formatted(.number.notation(.compactName)))"
-        addedLabel.textColor = Design.Diff.added
-        removedLabel.stringValue = "−\(removed.formatted(.number.notation(.compactName)))"
-        removedLabel.textColor = Design.Diff.removed
-        setAccessibilityLabel(
-            L10n.format(
-                "%lld changed files, %lld additions, %lld deletions",
-                Int64(files),
-                Int64(added),
-                Int64(removed)
-            )
-        )
-        applySurface(
-            fill: Design.Surface.elevated,
-            radius: .fixed(17),
-            border: Design.Surface.border,
-            glow: true
-        )
     }
 }
 

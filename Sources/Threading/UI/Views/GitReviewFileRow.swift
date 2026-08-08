@@ -49,7 +49,7 @@ final class GitReviewFileRow: NSView {
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
         didSet { wireContextDiffs() }
     }
-    var onRequestContextComment: ((ConversationContextAttachment) -> Void)? {
+    var onRequestContextComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)? {
         didSet { wireContextDiffs() }
     }
     private var contextDiffs: [GitReviewDiffTextView] = []
@@ -400,7 +400,7 @@ final class GitReviewFileRow: NSView {
         if onRequestContextComment != nil {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Comment on file…"),
-                onChoose: { [weak self] in self?.onRequestContextComment?(context) }
+                onChoose: { [weak self] in self?.onRequestContextComment?(context, nil) }
             )))
         }
 
@@ -583,7 +583,9 @@ final class GitReviewFileRow: NSView {
 
     private func wireContextDiff(_ diff: GitReviewDiffTextView) {
         diff.onAddContextAttachment = onAddContextAttachment
-        diff.onRequestComment = onRequestContextComment
+        diff.onRequestComment = { [weak self] attachment, preview in
+            self?.onRequestContextComment?(attachment, preview)
+        }
     }
 
     /// The compare surface, fed with the file's bytes at the mode's two endpoints. Fetched on
@@ -859,10 +861,19 @@ extension GitReviewFileRow: NSGestureRecognizerDelegate {
     /// A click that lands on a control belongs to the control. Without this the row's own
     /// recognizer sees it too, and pressing Stage would collapse the file out from under the
     /// pointer at the same moment.
+    ///
+    /// The body is excluded the same way: it is a selectable text surface carrying its own
+    /// line actions, and a click that placed a caret *also* collapsed the card — the table
+    /// re-laid hundreds of points of rows and the pane leapt under the pointer. Only the
+    /// header row is the toggle.
     func gestureRecognizer(
         _ recognizer: NSGestureRecognizer,
         shouldAttemptToRecognizeWith event: NSEvent
     ) -> Bool {
+        if !bodyContainer.isHidden,
+           bodyContainer.frame.contains(convert(event.locationInWindow, from: nil)) {
+            return false
+        }
         guard let superview else { return true }
         return !(superview.hitTest(superview.convert(event.locationInWindow, from: nil)) is ThemedButton)
     }

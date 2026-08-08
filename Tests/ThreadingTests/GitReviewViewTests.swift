@@ -81,6 +81,145 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    /// A right-click inside a selection speaks about the whole selection — that is how more
+    /// than one line is commented on — and the anchor is the span's first and last numbered
+    /// lines with every selected line quoted.
+    func testSelectionSpanningLinesTargetsTheWholeSpan() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let lines = file.hunks.flatMap(\.lines)
+        let view = GitReviewDiffTextView(
+            gitLines: lines,
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+
+        let text = view.string as NSString
+        let start = text.range(of: "context").location
+        let end = NSMaxRange(text.range(of: "new line"))
+        view.setSelectedRange(NSRange(location: start, length: end - start))
+
+        XCTAssertEqual(view.targetSpan(forClickedLine: 1), 0...2)
+        let reference = try XCTUnwrap(view.contextAttachment(spanningDisplayedLines: 0...2))
+        XCTAssertEqual(reference.title, "Sources/Foo.swift:1-2")
+        XCTAssertEqual(reference.lineStart, 1)
+        XCTAssertEqual(reference.lineEnd, 2)
+        XCTAssertEqual(reference.excerpt, "context\nold line\nnew line")
+    }
+
+    func testSelectionPreviewKeepsDiffContextAndHighlightsTheWholeSpan() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let view = GitReviewDiffTextView(
+            gitLines: file.hunks.flatMap(\.lines),
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+
+        let preview = try XCTUnwrap(view.contextPreview(spanningDisplayedLines: 0...2))
+        let rows = preview.rows.compactMap { row -> (CodeContextPreview.SourceLine, Bool)? in
+            guard case .line(let line, let isTarget) = row else { return nil }
+            return (line, isTarget)
+        }
+
+        XCTAssertEqual(rows.map { $0.0.text }, [
+            "context", "old line", "new line", "older", "newer",
+        ])
+        XCTAssertEqual(rows.map { $0.0.change }, [
+            .context, .removed, .added, .removed, .added,
+        ])
+        XCTAssertEqual(rows.map { $0.1 }, [true, true, true, false, false])
+    }
+
+    /// A right-click outside the selection is about the line under the pointer, exactly as if
+    /// nothing were selected — macOS's own convention for contextual clicks.
+    func testRightClickOutsideTheSelectionTargetsTheClickedLine() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let lines = file.hunks.flatMap(\.lines)
+        let view = GitReviewDiffTextView(
+            gitLines: lines,
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+
+        let text = view.string as NSString
+        let selected = text.range(of: "context")
+        view.setSelectedRange(selected)
+
+        XCTAssertEqual(view.targetSpan(forClickedLine: 4), 4...4)
+    }
+
+    /// The highlight is what says which lines a comment will quote, so it grows a partial
+    /// selection to whole line boundaries and lights a bare right-click's single line.
+    func testHighlightGrowsToWholeLineBoundaries() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let lines = file.hunks.flatMap(\.lines)
+        let view = GitReviewDiffTextView(
+            gitLines: lines,
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+
+        view.highlightLines(0...1)
+        let selected = (view.string as NSString).substring(with: view.selectedRange())
+        XCTAssertTrue(selected.contains("context"))
+        XCTAssertTrue(selected.contains("old line"))
+        XCTAssertFalse(selected.contains("new line"))
+    }
+
+    /// A click inside the opened diff body must not fold the card: it is a selectable text
+    /// surface with its own line actions, and the collapse re-laid the table out from under
+    /// the pointer — reported as the whole pane jumping on click. The header keeps the toggle.
+    func testClickInsideTheBodyDoesNotToggleTheFileCard() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let row = GitReviewFileRow(file: files[0], expanded: true)
+
+        // Built, never shown — see the fixture-window rule in CLAUDE.md.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let host = try XCTUnwrap(window.contentView)
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let recognizer = try XCTUnwrap(row.gestureRecognizers.first)
+        let body = try XCTUnwrap(row.subviews.compactMap { $0 as? NSStackView }.first)
+        XCTAssertFalse(body.isHidden)
+        XCTAssertGreaterThan(body.frame.height, 1)
+
+        func click(at rowPoint: NSPoint) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: row.convert(rowPoint, to: nil),
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            ))
+        }
+
+        let inBody = NSPoint(x: body.frame.midX, y: body.frame.midY)
+        XCTAssertFalse(
+            row.gestureRecognizer(recognizer, shouldAttemptToRecognizeWith: try click(at: inBody)),
+            "a click on the diff body must not collapse the card"
+        )
+
+        let inHeader = NSPoint(x: row.bounds.midX, y: (body.frame.maxY + row.bounds.maxY) / 2)
+        XCTAssertTrue(
+            row.gestureRecognizer(recognizer, shouldAttemptToRecognizeWith: try click(at: inHeader)),
+            "the header row keeps the open/close toggle"
+        )
+    }
+
     func testEditToolDiffViewKeepsTwoLabelRows() {
         let view = DiffView(lines: [
             DiffLine(kind: .removed, text: "a"),
@@ -402,7 +541,7 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
-    func testLongDiffShowsSummaryAndScrollToEndControl() {
+    func testLongDiffShowsScrollToEndControl() {
         let lines = (1...80).map { number in
             GitDiffLine(
                 kind: .context,
@@ -429,7 +568,6 @@ final class GitReviewViewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         controller.updateScrollControls()
 
-        XCTAssertFalse(controller.summaryPill.isHidden)
         XCTAssertFalse(controller.jumpToEndButton.isHidden)
 
         controller.scrollToDiffEnd()
@@ -444,6 +582,45 @@ final class GitReviewViewTests: XCTestCase {
             "document=\(controller.scrollView.documentView?.frame.height ?? -1), "
                 + "viewport=\(controller.scrollView.contentView.bounds.height), "
                 + "offset=\(controller.scrollView.contentView.bounds.origin.y)"
+        )
+    }
+
+    func testHeaderUsesCompactDiffCountsAndExposesExactCountsOnHover() {
+        let added = 79_738
+        let removed = 8_486
+        let file = GitFileDiff(
+            path: "Sources/Large.swift",
+            change: .modified,
+            hunks: [],
+            added: added,
+            removed: removed
+        )
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.show(.files([file]))
+
+        XCTAssertEqual(
+            controller.counterLabel.stringValue,
+            "+\(added.formatted(.number.notation(.compactName))) "
+                + "−\(removed.formatted(.number.notation(.compactName)))"
+        )
+        XCTAssertEqual(
+            controller.counterLabel.toolTip,
+            "+\(added.formatted(.number.grouping(.automatic))) "
+                + "−\(removed.formatted(.number.grouping(.automatic)))"
+        )
+        XCTAssertEqual(
+            controller.counterLabel.accessibilityLabel(),
+            L10n.format(
+                "%lld changed files, %lld additions, %lld deletions",
+                Int64(1),
+                Int64(added),
+                Int64(removed)
+            )
         )
     }
 
@@ -582,6 +759,181 @@ final class GitReviewViewTests: XCTestCase {
             0.01,
             "resizing should replace offscreen wrapping estimates as one table-height update"
         )
+    }
+
+    /// A watched checkout is not the same immutable list with a repaint: generated files can be
+    /// inserted ahead of the viewport while the reader is moving through it. A raw pixel offset
+    /// then names a different file, which is the visible "jump" this pane promises to avoid.
+    func testWatchedRefreshPreservesTheVisibleFileAnchorAcrossEarlierInsertions() throws {
+        let original = Self.stressSmallExpandedFiles(count: 120, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(original))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let anchorIndex = 70
+        let anchorOffset: CGFloat = 11
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: anchorIndex).minY + anchorOffset
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+
+        let inserted = Self.stressSmallExpandedFiles(
+            count: 12,
+            linesPerFile: 9,
+            pathPrefix: "000-Earlier"
+        )
+        controller.show(.files(inserted + original))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let visibleY = controller.scrollView.contentView.bounds.minY
+        let visibleRow = controller.fileTableView.row(
+            at: NSPoint(x: 1, y: visibleY + anchorOffset)
+        )
+        XCTAssertEqual(visibleRow, anchorIndex + inserted.count)
+        XCTAssertEqual(
+            visibleY - controller.fileTableView.rect(ofRow: visibleRow).minY,
+            anchorOffset,
+            accuracy: 0.5
+        )
+
+        // The fast path keeps an unchanged visible row alive, but a same-path content update
+        // still has to replace that row rather than leaving the old TextKit document onscreen.
+        let refreshedLine = "fresh watcher content at the anchored path"
+        let refreshedFile = GitFileDiff(
+            path: original[anchorIndex].path,
+            change: .untracked,
+            hunks: [GitHunk(
+                header: "@@ -0,0 +1 @@",
+                lines: [GitDiffLine(
+                    kind: .added,
+                    text: refreshedLine,
+                    oldNumber: nil,
+                    newNumber: 1
+                )]
+            )],
+            added: 1,
+            removed: 0
+        )
+        var refreshed = inserted + original
+        refreshed[anchorIndex + inserted.count] = refreshedFile
+        controller.show(.files(refreshed))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let refreshedHost = try XCTUnwrap(controller.fileTableView.view(
+            atColumn: 0,
+            row: anchorIndex + inserted.count,
+            makeIfNecessary: false
+        ))
+        let refreshedText = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewDiffTextView.self, in: refreshedHost)
+        )
+        XCTAssertTrue(refreshedText.string.contains(refreshedLine))
+    }
+
+    /// Applying a watcher result while AppKit is carrying trackpad momentum ends that scroll
+    /// transaction abruptly. The pane keeps receiving models, but only the newest one should
+    /// touch the table after live scrolling ends.
+    func testWatchedRefreshCoalescesUntilLiveScrollingEnds() {
+        let original = Self.stressSmallExpandedFiles(count: 30, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(original))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let anchorIndex = 15
+        let anchorOffset: CGFloat = 13
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: anchorIndex).minY + anchorOffset
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: controller.scrollView
+        )
+        let firstInsert = Self.stressSmallExpandedFiles(
+            count: 1,
+            linesPerFile: 9,
+            pathPrefix: "000-Earlier-A"
+        )
+        let latestInsert = Self.stressSmallExpandedFiles(
+            count: 2,
+            linesPerFile: 9,
+            pathPrefix: "000-Earlier-B"
+        )
+        controller.show(.files(firstInsert + original))
+        controller.show(.files(latestInsert + original))
+
+        XCTAssertEqual(controller.fileTableView.numberOfRows, original.count)
+        XCTAssertNotNil(controller.deferredPhaseDuringLiveScroll)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: controller.scrollView
+        )
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.fileTableView.numberOfRows, original.count + latestInsert.count)
+        XCTAssertNil(controller.deferredPhaseDuringLiveScroll)
+        let visibleY = controller.scrollView.contentView.bounds.minY
+        let visibleRow = controller.fileTableView.row(at: NSPoint(x: 1, y: visibleY + 0.5))
+        XCTAssertEqual(visibleRow, anchorIndex + latestInsert.count)
+        XCTAssertEqual(
+            visibleY - controller.fileTableView.rect(ofRow: visibleRow).minY,
+            anchorOffset,
+            accuracy: 0.5
+        )
+    }
+
+    /// Exact TextKit heights arrive one run-loop turn after a virtual row is mounted. Letting
+    /// those notifications retile the table between momentum events is another source of a
+    /// visible jump, independent of filesystem refreshes.
+    func testExactHeightDiscoveryWaitsUntilLiveScrollingEnds() {
+        let files = Self.stressSmallExpandedFiles(count: 80, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        let measurementsBeforeScroll = controller.measuredFileRowHeights.count
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: controller.scrollView
+        )
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: 60).minY
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(controller.measuredFileRowHeights.count, measurementsBeforeScroll)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: controller.scrollView
+        )
+        XCTAssertGreaterThan(controller.measuredFileRowHeights.count, measurementsBeforeScroll)
     }
 
     /// Opt-in rather than part of the fast suite: this is a repeatable workload for `sample`,
@@ -769,6 +1121,221 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    /// Thousands of short generated files are a different row-mount shape from either the
+    /// 1,000 collapsed headers or 174 maximum-size files above. This matches the reported
+    /// accidental-build-output case: roughly 9,000 expanded files and 80,000 added lines.
+    func testStressMassiveExpandedFileIndexWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(
+            environment["THREADING_GIT_MASSIVE_STRESS"] == "1",
+            "Set THREADING_GIT_MASSIVE_STRESS=1 to run the massive expanded-file sweep."
+        )
+        let fileCount = environment["THREADING_GIT_MASSIVE_STRESS_FILES"]
+            .flatMap(Int.init)
+            .map { max($0, 1) }
+            ?? 8_985
+        let linesPerFile = environment["THREADING_GIT_MASSIVE_STRESS_LINES"]
+            .flatMap(Int.init)
+            .map { max($0, 1) }
+            ?? 9
+        let files = Self.stressSmallExpandedFiles(
+            count: fileCount,
+            linesPerFile: linesPerFile
+        )
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+
+        let renderStarted = DispatchTime.now().uptimeNanoseconds
+        controller.show(.files(files))
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let table = controller.fileTableView
+        let scroll = controller.scrollView
+        let viewport = scroll.bounds
+        let bitmap = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: viewport))
+        let initialDocumentHeight = table.frame.height
+        let frames = 120
+        func measureSweep(distance: CGFloat) -> (
+            scroll: UInt64,
+            layout: UInt64,
+            draw: UInt64,
+            p95: UInt64,
+            maximum: UInt64
+        ) {
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+            controller.view.layoutSubtreeIfNeeded()
+
+            var scrollNanoseconds: UInt64 = 0
+            var layoutNanoseconds: UInt64 = 0
+            var drawNanoseconds: UInt64 = 0
+            var frameNanoseconds: [UInt64] = []
+            for frame in 0..<frames {
+                let fraction = CGFloat(frame) / CGFloat(max(frames - 1, 1))
+                let started = DispatchTime.now().uptimeNanoseconds
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: distance * fraction))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                let scrolled = DispatchTime.now().uptimeNanoseconds
+                controller.view.layoutSubtreeIfNeeded()
+                let laidOut = DispatchTime.now().uptimeNanoseconds
+                scroll.cacheDisplay(in: viewport, to: bitmap)
+                let drawn = DispatchTime.now().uptimeNanoseconds
+                scrollNanoseconds += scrolled - started
+                layoutNanoseconds += laidOut - scrolled
+                drawNanoseconds += drawn - laidOut
+                frameNanoseconds.append(drawn - started)
+            }
+            let sortedFrames = frameNanoseconds.sorted()
+            let p95 = sortedFrames[
+                min(Int(Double(sortedFrames.count - 1) * 0.95), sortedFrames.count - 1)
+            ]
+            return (
+                scrollNanoseconds / UInt64(frames),
+                layoutNanoseconds / UInt64(frames),
+                drawNanoseconds / UInt64(frames),
+                p95,
+                sortedFrames.last ?? 0
+            )
+        }
+
+        let maximumDistance = max(table.frame.height - scroll.contentView.bounds.height, 0)
+        let continuous = measureSweep(distance: min(
+            maximumDistance,
+            scroll.contentView.bounds.height * 24
+        ))
+        let fullIndex = measureSweep(distance: maximumDistance)
+
+        // Let the deferred exact-height pass catch up. The cheap model estimates are what make
+        // a 9,000-file document immediately scrollable; resolving the materialized rows must not
+        // substantially rewrite the scrollbar extent once the user is already at the end.
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        controller.view.layoutSubtreeIfNeeded()
+        let finalDocumentHeight = table.frame.height
+
+        // A build watcher can deliver this shape repeatedly while the user is scrolling. Insert
+        // generated files before the current viewport to exercise both incremental row
+        // reconciliation and path-relative scroll anchoring, not merely the cold table mount.
+        let inserted = Self.stressSmallExpandedFiles(
+            count: 12,
+            linesPerFile: linesPerFile,
+            pathPrefix: "000-Earlier"
+        )
+        let instantiatedBeforeRefresh = controller.instantiatedFileRowCount
+        let refreshStarted = DispatchTime.now().uptimeNanoseconds
+        controller.show(.files(inserted + files))
+        let refreshEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+        let refreshLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        print(
+            "THREADING_PERF git-review-massive-expanded "
+                + "files=\(fileCount) lines=\(fileCount * linesPerFile) "
+                + "instantiated=\(controller.instantiatedFileRowCount) "
+                + "render_ms=\(Self.milliseconds(renderEnded - renderStarted)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "document_delta=\(Int(finalDocumentHeight - initialDocumentHeight))"
+        )
+        for (kind, measurement) in [("continuous", continuous), ("full-index", fullIndex)] {
+            print(
+                "THREADING_PERF git-review-massive-scroll "
+                    + "kind=\(kind) files=\(fileCount) frames=\(frames) "
+                    + "scroll_ms=\(Self.milliseconds(measurement.scroll)) "
+                    + "layout_ms=\(Self.milliseconds(measurement.layout)) "
+                    + "draw_ms=\(Self.milliseconds(measurement.draw)) "
+                    + "p95_frame_ms=\(Self.milliseconds(measurement.p95)) "
+                    + "max_frame_ms=\(Self.milliseconds(measurement.maximum))"
+            )
+        }
+        print(
+            "THREADING_PERF git-review-massive-refresh "
+                + "old_files=\(fileCount) files=\(fileCount + inserted.count) "
+                + "refresh_ms=\(Self.milliseconds(refreshEnded - refreshStarted)) "
+                + "layout_ms=\(Self.milliseconds(refreshLayoutEnded - refreshEnded)) "
+                + "instantiated_delta="
+                + "\(controller.instantiatedFileRowCount - instantiatedBeforeRefresh)"
+        )
+
+        XCTAssertEqual(table.numberOfRows, fileCount + inserted.count)
+        XCTAssertLessThan(controller.instantiatedFileRowCount, fileCount + inserted.count)
+    }
+
+    // MARK: - The Pane's Own Ordering
+
+    /// **The diff arrives after the pane is laid out, and the cards still span it.**
+    ///
+    /// Every other test here sets `view.frame` and *then* renders, which lays the pane out with
+    /// the file table already installed. The app never does that: git runs off the main thread,
+    /// so the pane is sized, drawn and idle for a beat before `documentView = fileTableView`.
+    /// A document-view swap deep inside a scroll view does not lay out the controller's root
+    /// view, so `viewDidLayout` — which was the only thing calling `sizeLastColumnToFit()` — was
+    /// never called, and the sole column kept `NSTableColumn`'s 100pt default. The pane, the
+    /// header, the counters and the table were all the pane's full width; only the cells were
+    /// not, and 76pt-wide cards wrapped source code three characters to a line for the whole
+    /// height of the window. `SoleColumnFit` is the fix, and this ordering is the test.
+    func testFileCardsSpanThePaneWhenTheDiffArrivesAfterLayout() throws {
+        let paneWidth: CGFloat = 900
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: paneWidth, height: 700),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let content = try XCTUnwrap(window.contentView)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: content.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+        ])
+
+        // Laid out — and settled — before there is anything to show, exactly as the pane is
+        // while git reads the checkout.
+        window.layoutIfNeeded()
+        XCTAssertEqual(controller.view.bounds.width, paneWidth, accuracy: 0.5)
+
+        controller.show(.files(Self.stressExpandableFiles(count: 40)))
+        window.layoutIfNeeded()
+
+        let table = controller.fileTableView
+        XCTAssertEqual(
+            table.tableColumns[0].width, table.bounds.width, accuracy: 0.5,
+            "the file table's sole column did not follow the table's width"
+        )
+
+        let host = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let card = try XCTUnwrap(host.subviews.first as? GitReviewFileRow)
+        let cardFrame = card.convert(card.bounds, to: controller.view)
+        XCTAssertEqual(
+            cardFrame.minX, Design.Spacing.inset, accuracy: 0.5,
+            "a file card should start on the pane's own margin"
+        )
+        XCTAssertEqual(
+            cardFrame.maxX, paneWidth - Design.Spacing.inset, accuracy: 0.5,
+            "a file card should end on the pane's own margin, not at a default column width"
+        )
+
+        // And the diff inside it, which is what the reader actually sees wrapped to a ribbon.
+        let diff = try XCTUnwrap(Self.firstDescendant(of: GitReviewDiffTextView.self, in: card))
+        XCTAssertEqual(
+            diff.convert(diff.bounds, to: controller.view).width, cardFrame.width, accuracy: 0.5,
+            "the diff did not use the full width of its card"
+        )
+    }
+
     // MARK: - Stress Fixtures
 
     private static func stressFiles(count: Int) -> [GitFileDiff] {
@@ -836,6 +1403,33 @@ final class GitReviewViewTests: XCTestCase {
                 hunks: [GitHunk(header: "@@ -1,\(linesPerFile) +1,\(linesPerFile) @@", lines: lines)],
                 added: lines.lazy.filter { $0.kind == .added }.count,
                 removed: lines.lazy.filter { $0.kind == .removed }.count
+            )
+        }
+    }
+
+    private static func stressSmallExpandedFiles(
+        count: Int,
+        linesPerFile: Int,
+        pathPrefix: String = "tmp/BuildProducts"
+    ) -> [GitFileDiff] {
+        (0..<count).map { fileIndex in
+            let lines = (0..<linesPerFile).map { lineIndex in
+                GitDiffLine(
+                    kind: .added,
+                    text: "generated artifact \(fileIndex)-\(lineIndex) records a representative build value and its dependency fingerprint",
+                    oldNumber: nil,
+                    newNumber: lineIndex + 1
+                )
+            }
+            return GitFileDiff(
+                path: "\(pathPrefix)/Shard\(fileIndex / 100)/artifact-\(fileIndex).json",
+                change: .untracked,
+                hunks: [GitHunk(
+                    header: "@@ -0,0 +1,\(linesPerFile) @@",
+                    lines: lines
+                )],
+                added: linesPerFile,
+                removed: 0
             )
         }
     }

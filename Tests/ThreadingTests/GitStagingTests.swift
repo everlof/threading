@@ -301,6 +301,209 @@ final class GitStagingTests: XCTestCase {
         XCTAssertEqual(summary.added, 1)
     }
 
+    // MARK: - Managed Workspaces
+
+    func testManagedWorkspacePlanWrittenBeforePublicationKeepsLocalDefaults() throws {
+        let data = try XCTUnwrap(#"{"delivery":"mergeAndCleanUp"}"#.data(using: .utf8))
+        let plan = try JSONDecoder().decode(ManagedWorkspacePlan.self, from: data)
+
+        XCTAssertEqual(plan.delivery, .mergeAndCleanUp)
+        XCTAssertNil(plan.publication)
+    }
+
+    func testManagedWorkspaceUsesNoFeatureBranchThenFastForwardsAndDisposesItself() throws {
+        let workspaceParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workspaceParent) }
+
+        let project = Project(name: "Fixture", folderURL: root)
+        let emptyHooks = root.appendingPathComponent(".test-hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyHooks, withIntermediateDirectories: true)
+        try git("config", "core.hooksPath", emptyHooks.path)
+        let branchesBefore = try output("branch", "--format=%(refname:short)")
+        let workspace = try ManagedGitWorkspace.provision(
+            sessionID: SessionID(),
+            from: project,
+            plan: ManagedWorkspacePlan(),
+            rootDirectory: workspaceParent
+        )
+
+        XCTAssertEqual(
+            try GitDiffParser.decode(
+                GitProcess.run(["rev-parse", "--abbrev-ref", "HEAD"], in: URL(
+                    fileURLWithPath: workspace.worktreeRoot
+                ))
+            ).trimmingCharacters(in: .whitespacesAndNewlines),
+            "HEAD",
+            "the generated checkout is detached; no feature-branch name is invented"
+        )
+
+        let worktree = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
+        try "isolated\n".write(
+            to: worktree.appendingPathComponent("managed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "managed.txt"], in: worktree)
+        _ = try GitProcess.run(["commit", "--quiet", "--message", "managed work"], in: worktree)
+
+        let completed = try ManagedGitWorkspace.integrateAndClean(workspace)
+        XCTAssertEqual(completed.state, .integrated)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("managed.txt")), "isolated\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+        XCTAssertEqual(
+            try output("branch", "--format=%(refname:short)"),
+            branchesBefore,
+            "local delivery leaves neither a generated branch nor a worktree behind"
+        )
+    }
+
+    func testManagedWorkspacePublishesOnlyAnOpaqueRemoteBranchThenDisposesLocally() async throws {
+        let workspaceParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)
+        let remote = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingRemote-\(UUID().uuidString).git", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: workspaceParent)
+            try? FileManager.default.removeItem(at: remote)
+        }
+
+        _ = try GitProcess.run(
+            ["init", "--quiet", "--bare", remote.path],
+            in: remote.deletingLastPathComponent()
+        )
+        let emptyHooks = root.appendingPathComponent(".test-hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyHooks, withIntermediateDirectories: true)
+        try git("config", "core.hooksPath", emptyHooks.path)
+        try git("remote", "add", "origin", "git@github.com:team/app.git")
+
+        let project = Project(name: "Fixture", folderURL: root)
+        let sessionID = SessionID()
+        let sourceHead = try output("rev-parse", "HEAD")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let branchesBefore = try output("branch", "--format=%(refname:short)")
+        let workspace = try ManagedGitWorkspace.provision(
+            sessionID: sessionID,
+            from: project,
+            plan: ManagedWorkspacePlan(publication: .draft),
+            rootDirectory: workspaceParent
+        )
+
+        let worktree = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
+        try "remote review\n".write(
+            to: worktree.appendingPathComponent("review.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "review.txt"], in: worktree)
+        _ = try GitProcess.run(
+            ["commit", "--quiet", "--message", "managed review"],
+            in: worktree
+        )
+
+        let snapshot = try ManagedGitWorkspace.publicationSnapshot(for: workspace)
+        XCTAssertEqual(snapshot.branch, ManagedGitWorkspace.publicationBranch(for: sessionID))
+        XCTAssertEqual(snapshot.repository.slug, "team/app")
+
+        // The production path pushes to the GitHub origin above. Point the same named remote at
+        // a local bare repository only for the process-level assertion.
+        try git("remote", "set-url", "origin", remote.path)
+        try await ChangeRequestGit.pushDetached(
+            commit: snapshot.finalCommit,
+            to: snapshot.branch,
+            in: worktree
+        )
+
+        let remoteBranches = GitDiffParser.decode(try GitProcess.run(
+            ["--git-dir", remote.path, "branch", "--format=%(refname:short)"],
+            in: remote.deletingLastPathComponent()
+        ))
+        XCTAssertEqual(
+            remoteBranches.trimmingCharacters(in: .whitespacesAndNewlines),
+            snapshot.branch
+        )
+        let publishedRemoteRevision = try await ChangeRequestGit.remoteRevision(
+            of: snapshot.branch,
+            in: worktree
+        )
+        XCTAssertEqual(publishedRemoteRevision, snapshot.finalCommit)
+
+        var recorded = workspace
+        recorded.finalCommit = snapshot.finalCommit
+        recorded.changeRequest = ManagedWorkspaceChangeRequest(
+            provider: "github",
+            repository: "team/app",
+            remote: "origin",
+            branch: snapshot.branch,
+            number: 42,
+            url: try XCTUnwrap(URL(string: "https://github.com/team/app/pull/42")),
+            isDraft: true
+        )
+        let completed = try ManagedGitWorkspace.cleanPublished(recorded)
+
+        XCTAssertEqual(completed.state, .published)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+        XCTAssertEqual(
+            try output("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines),
+            sourceHead,
+            "publication leaves the selected checkout untouched"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("review.txt").path))
+        XCTAssertEqual(
+            try output("branch", "--format=%(refname:short)"),
+            branchesBefore,
+            "publication creates no local branch to clean up"
+        )
+
+        try await ChangeRequestGit.deleteRemoteBranch(
+            snapshot.branch,
+            ifRevisionIs: snapshot.finalCommit,
+            in: root
+        )
+        let removedRemoteRevision = try await ChangeRequestGit.remoteRevision(
+            of: snapshot.branch,
+            in: root
+        )
+        XCTAssertNil(
+            removedRemoteRevision,
+            "a closed review can dispose its exact generated remote ref without a worktree"
+        )
+
+        // The ref is app-owned only while it is still the commit in the receipt. Simulate a
+        // remote actor advancing it between publication and cleanup; the deletion lease must
+        // refuse even though the name still has Threading's prefix.
+        try await ChangeRequestGit.pushDetached(
+            commit: snapshot.finalCommit,
+            to: snapshot.branch,
+            in: root
+        )
+        let tree = try output("rev-parse", "\(snapshot.finalCommit)^{tree}")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let advanced = GitDiffParser.decode(try GitProcess.run(
+            ["commit-tree", tree, "-p", snapshot.finalCommit, "-m", "remote advancement"],
+            in: root
+        )).trimmingCharacters(in: .whitespacesAndNewlines)
+        try await ChangeRequestGit.pushDetached(
+            commit: advanced,
+            to: snapshot.branch,
+            in: root
+        )
+        do {
+            try await ChangeRequestGit.deleteRemoteBranch(
+                snapshot.branch,
+                ifRevisionIs: snapshot.finalCommit,
+                in: root
+            )
+            XCTFail("a moved generated ref must survive cleanup")
+        } catch {
+            let retainedRemoteRevision = try await ChangeRequestGit.remoteRevision(
+                of: snapshot.branch,
+                in: root
+            )
+            XCTAssertEqual(retainedRemoteRevision, advanced)
+        }
+    }
+
     // MARK: - Helpers
 
     private func stage(hunk index: Int, of file: GitFileDiff) throws {

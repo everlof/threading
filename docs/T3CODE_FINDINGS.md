@@ -430,8 +430,11 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    newest subjects travel as a voice sample, so the draft matches the repository rather
    than a convention.
 10. **Steering/queueing a message while the agent works** — their 47-vote demand, half-built
-    (steering works, no queue UI). For our native surface `--input-format stream-json`
-    likely permits it; needs a probe. *Open.*
+    (steering works, no queue UI). **Probed 2026-08-06** → `COMPOSER_QUEUE_FINDINGS.md`.
+    `--input-format stream-json` permits all of it on 2.1.223: steering lands at the model
+    boundary, `interrupt` is receipted with `still_queued`, and a client-minted `uuid` buys a
+    per-message `command_lifecycle`. Codex has `turn/steer` with an `expectedTurnId`
+    precondition; ACP has cancel only. Design and order of work are in that document. *Open.*
 11. ~~**Long-user-message collapse**~~ — §3.5. **Adopted 2026-07-28** →
     `UserMessageBubbleView`, documented in `native-conversations.md`. Thresholds verbatim
     (8 lines / 600 chars); the fade is a real alpha mask per their rule, and copy copies the

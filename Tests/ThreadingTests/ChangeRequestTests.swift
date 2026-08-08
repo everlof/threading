@@ -128,6 +128,112 @@ final class ChangeRequestTests: XCTestCase {
         })
     }
 
+    func testLifecycleReadsAClosedPullRequestByDurableNumber() async throws {
+        let recorder = RequestRecorder()
+        let subject = GitHubPullRequestClient(
+            resolver: resolver(gh: "gh-token"),
+            transport: { request in
+                recorder.record(request)
+                return (
+                    Self.pullBody(
+                        number: 42,
+                        state: "closed",
+                        mergedAt: "2026-08-08T12:00:00Z",
+                        headBranch: "threading/session-id",
+                        headRevision: "published-sha"
+                    ),
+                    Self.response(200, request)
+                )
+            }
+        )
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.github(remote: "git@github.com:team/app.git")
+        )
+
+        let outcome = await subject.lifecycle(repository: repository, number: 42)
+        guard case .loaded(let lifecycle) = outcome else {
+            return XCTFail("expected a closed review lifecycle, got \(outcome)")
+        }
+        XCTAssertEqual(lifecycle.number, 42)
+        XCTAssertEqual(lifecycle.state, .closed(merged: true))
+        XCTAssertEqual(lifecycle.headBranch, "threading/session-id")
+        XCTAssertEqual(lifecycle.headRevision, "published-sha")
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(recorder.requests.first?.url?.path, "/repos/team/app/pulls/42")
+        XCTAssertEqual(
+            recorder.requests.first?.cachePolicy,
+            .reloadIgnoringLocalCacheData,
+            "a cached closed response must never authorize branch deletion after a reopen"
+        )
+    }
+
+    func testManagedRemoteCleanerNeverTouchesAnOpenReviewBranch() async throws {
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-review-cleaner-\(UUID().uuidString)")
+        let root = container.appendingPathComponent("repo")
+        let git = root.appendingPathComponent(".git")
+        try FileManager.default.createDirectory(at: git, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: container) }
+        try """
+        [remote "origin"]
+            url = git@github.com:team/app.git
+        """.write(
+            to: git.appendingPathComponent("config"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sessionID = SessionID()
+        let branch = ManagedGitWorkspace.publicationBranch(for: sessionID)
+        let finalCommit = String(repeating: "a", count: 40)
+        let recorder = RequestRecorder()
+        let client = GitHubPullRequestClient(
+            resolver: resolver(),
+            transport: { request in
+                recorder.record(request)
+                return (
+                    Self.pullBody(
+                        number: 42,
+                        headBranch: branch,
+                        headRevision: finalCommit
+                    ),
+                    Self.response(200, request)
+                )
+            }
+        )
+        let workspace = ManagedWorkspace(
+            repositoryRoot: root.path,
+            sourceCheckoutPath: root.path,
+            worktreeRoot: container.appendingPathComponent("disposed").path,
+            executionPath: container.appendingPathComponent("disposed").path,
+            targetBranch: "main",
+            baseCommit: String(repeating: "b", count: 40),
+            delivery: .mergeAndCleanUp,
+            publication: .draft,
+            remoteBranch: branch,
+            finalCommit: finalCommit,
+            changeRequest: ManagedWorkspaceChangeRequest(
+                provider: "github",
+                repository: "team/app",
+                remote: "origin",
+                branch: branch,
+                number: 42,
+                url: try XCTUnwrap(URL(string: "https://github.com/team/app/pull/42")),
+                isDraft: true
+            ),
+            remoteBranchState: .awaitingReviewCompletion,
+            state: .published,
+            lastError: nil
+        )
+
+        let outcome = await ManagedWorkspaceRemoteCleaner(github: client).reconcile(
+            sessionID: sessionID,
+            workspace: workspace
+        )
+        XCTAssertEqual(outcome, .waiting)
+        XCTAssertEqual(recorder.requests.count, 1, "an open review requires no Git write")
+    }
+
     func testCreatingAPullRequestIsOneAuthenticatedPOST() async throws {
         let chain = resolver(gh: "gh-token")
         let recorder = RequestRecorder()
@@ -226,6 +332,16 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertTrue(recorder.requests.isEmpty, "anonymous creation is a guaranteed 401")
     }
 
+    func testAutomaticCreationRequiresANativeCredentialBeforeAnyWrite() async {
+        let signedOut = GitHubPullRequestClient(resolver: resolver())
+        let signedIn = GitHubPullRequestClient(resolver: resolver(git: "git-token"))
+
+        let signedOutSupported = await signedOut.supportsAutomaticCreation()
+        let signedInSupported = await signedIn.supportsAutomaticCreation()
+        XCTAssertFalse(signedOutSupported)
+        XCTAssertTrue(signedInSupported)
+    }
+
     // MARK: - AI boundary
 
     func testCodexDraftParserAcceptsFencedJSONAndNothingElse() {
@@ -277,17 +393,25 @@ final class ChangeRequestTests: XCTestCase {
         )!
     }
 
-    private static func pullBody(number: Int) -> Data {
-        Data("""
+    private static func pullBody(
+        number: Int,
+        state: String = "open",
+        mergedAt: String? = nil,
+        headBranch: String = "feature",
+        headRevision: String = "remote-sha"
+    ) -> Data {
+        let mergedAtJSON = mergedAt.map { "\"\($0)\"" } ?? "null"
+        return Data("""
         {
           "number": \(number),
           "title": "Native pull requests",
           "body": "Body",
           "html_url": "https://github.com/team/app/pull/\(number)",
+          "state": "\(state)",
           "draft": true,
-          "merged_at": null,
+          "merged_at": \(mergedAtJSON),
           "base": {"ref":"main","sha":"base-sha"},
-          "head": {"ref":"feature","sha":"remote-sha"},
+          "head": {"ref":"\(headBranch)","sha":"\(headRevision)"},
           "requested_reviewers": [{"login":"pat"}]
         }
         """.utf8)
