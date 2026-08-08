@@ -143,15 +143,33 @@ final class SessionMessageDeliveryTests: XCTestCase {
         verifiedBoot: Bool = true,
         requiresVerifiedBoot: Bool = true,
         confirmsAcceptance: Bool = true,
+        deliveryInFlight: Bool = false,
         into typed: TypedText
     ) -> SessionMessageDelivery.TerminalTarget {
         SessionMessageDelivery.TerminalTarget(
             isMidTurn: midTurn,
             hasVerifiedBoot: verifiedBoot,
             requiresVerifiedBoot: requiresVerifiedBoot,
+            hasDeliveryInFlight: deliveryInFlight,
             type: { typed.texts.append($0) },
             awaitAcceptance: { $0(confirmsAcceptance) }
         )
+    }
+
+    /// A PTY takes one message at a time. The text is pasted at once and the Return follows a
+    /// beat later, so a second delivery inside that window would paste onto the same composer
+    /// line and the CLI would receive both as one prompt — while the second caller was told its
+    /// own message had been sent. Two watches settling on one edge is enough to reach it.
+    func testATerminalMidDeliveryRefusesASecondMessageRatherThanSharingTheLine() {
+        let typed = TypedText()
+        let outcome = SessionMessageDelivery.deliver(
+            ConversationPrompt(text: "Second"),
+            chat: nil,
+            terminal: terminal(deliveryInFlight: true, into: typed)
+        )
+
+        XCTAssertEqual(outcome, .busyTerminal)
+        XCTAssertTrue(typed.texts.isEmpty, "the second message must not join the first one's line")
     }
 
     // MARK: - The Receipt
@@ -322,5 +340,28 @@ final class SessionMessageDeliveryTests: XCTestCase {
             .targetNotLiveChat
         )
         XCTAssertTrue(dead.steered.isEmpty, "A dead conversation must never be handed the steer")
+    }
+
+    /// One turn report is evidence for **one** message. Resolving every outstanding waiter for
+    /// a session handed the same receipt to each of them: two deliveries outstanding, one
+    /// `UserPromptSubmit` arrives, and both callers hear `.sentNow` while the CLI accepted one.
+    func testOneTurnReportResolvesOneReceiptNotEveryOutstandingOne() {
+        let runtime = AgentRuntime.shared
+        let session = SessionID()
+        var answers: [Bool] = []
+
+        runtime.awaitReportedTurnStart(sessionID: session, timeout: 60) { answers.append($0) }
+        runtime.awaitReportedTurnStart(sessionID: session, timeout: 60) { answers.append($0) }
+
+        guard let report = HookLifecycleReport(
+            sessionID: session,
+            event: .turnStarted,
+            payload: [:]
+        ) else {
+            return XCTFail("Expected a turn-started report")
+        }
+        runtime.applyLifecycle(report)
+
+        XCTAssertEqual(answers, [true], "the second waiter must not spend the first one's receipt")
     }
 }

@@ -117,11 +117,22 @@ enum SessionMessageDelivery {
         /// Whether this runtime will ever verify (`.terminalThreadingBridge`). One that
         /// cannot is taken at `isMidTurn`'s word rather than refused forever.
         let requiresVerifiedBoot: Bool
+        /// Whether a delivery to this terminal is already typed and still waiting for its
+        /// receipt. A PTY takes one message at a time: the text is pasted immediately and the
+        /// Return follows a beat later, so a second delivery inside that window pastes onto
+        /// the same composer line and the CLI receives both as one prompt — while the second
+        /// caller is told its own message was sent. Two watches settling on one edge is
+        /// enough to hit it. Refused as busy, which is what a terminal mid-delivery is.
+        let hasDeliveryInFlight: Bool
         let type: (String) -> Void
         /// Waits for the session's own turn-started report and answers whether one arrived —
         /// the receipt a typed delivery needs before claiming the message was accepted.
         let awaitAcceptance: (@escaping @MainActor (Bool) -> Void) -> Void
     }
+
+    /// Terminals with a delivery typed and not yet receipted. Static because the rules are, and
+    /// because the window it guards is per-PTY rather than per-caller.
+    private static var terminalsMidDelivery: Set<SessionID> = []
 
     /// Which input surface is live for a session right now, for describing it to a caller.
     ///
@@ -236,6 +247,7 @@ enum SessionMessageDelivery {
 
         guard let terminal else { return .noLiveSurface }
         guard !terminal.isMidTurn else { return .busyTerminal }
+        guard !terminal.hasDeliveryInFlight else { return .busyTerminal }
         guard terminal.hasVerifiedBoot || !terminal.requiresVerifiedBoot else {
             return .busyTerminal
         }
@@ -286,8 +298,12 @@ enum SessionMessageDelivery {
             hasVerifiedBoot: AgentRuntime.shared.hasHeardFromProcess(sessionID: sessionID),
             // A record that has vanished mid-call verifies nothing and requires everything.
             requiresVerifiedBoot: kind?.supports(.terminalThreadingBridge) ?? true,
+            hasDeliveryInFlight: terminalsMidDelivery.contains(sessionID),
             type: { [weak controller] text in
                 guard let controller else { return }
+                // Claimed at the paste, released by the receipt or its timeout, so the whole
+                // paste-then-Return window is one delivery's own.
+                terminalsMidDelivery.insert(sessionID)
                 controller.session.pasteText(text)
                 // The Return goes in its own write, a beat later — the rename request
                 // measured a Return bundled with its text being read as pasted content,
@@ -301,9 +317,11 @@ enum SessionMessageDelivery {
             awaitAcceptance: { completion in
                 AgentRuntime.shared.awaitReportedTurnStart(
                     sessionID: sessionID,
-                    timeout: SessionMessageDeliveryDefaults.terminalReceiptTimeout,
-                    completion: completion
-                )
+                    timeout: SessionMessageDeliveryDefaults.terminalReceiptTimeout
+                ) { accepted in
+                    terminalsMidDelivery.remove(sessionID)
+                    completion(accepted)
+                }
             }
         )
     }

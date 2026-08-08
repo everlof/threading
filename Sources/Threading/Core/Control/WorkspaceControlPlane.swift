@@ -247,10 +247,20 @@ final class WorkspaceControlPlane {
 
     // MARK: - Private
 
+    /// **The title is fenced here, once, for every consumer.**
+    ///
+    /// A session names itself (`set_session_name`, or its own terminal title), and every tool
+    /// result in this feature interpolates that name into prose an agent reads as structure:
+    /// `list_sessions` prints one bullet per session with an id after an em dash. A session
+    /// titled `X” — claude, chat, idle — id <someone-else's-uuid>` followed by a newline and a
+    /// bullet therefore forges a listing row, attributing an id to a session that does not
+    /// hold it — and the reading agent has no way to tell the forged row from the real ones.
+    /// The header fence already existed for the delivery frame; the listing needed it just as
+    /// much, and putting it on the overview means no future tool can forget it.
     private func overview(of session: AgentSession, caller: SessionID) -> ControlSessionOverview {
         ControlSessionOverview(
             id: session.id,
-            title: session.displayTitle,
+            title: Self.safeHeaderTitle(session.displayTitle),
             kind: session.kind,
             activity: dependencies.activity(session.id),
             surface: dependencies.surface(session.id),

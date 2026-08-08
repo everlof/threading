@@ -165,7 +165,15 @@ final class AgentRuntime {
         // Not a turn boundary, but the earliest proof the CLI is up: delivery gates on it.
         // Dropped on the floor here, it left every session idle since an app relaunch
         // reading as still-booting — refused by send_to_session while listed as idle.
-        case .sessionStarted: tracker.noteSessionStarted()
+        //
+        // It is announced as an activity change even though the *state* did not move, because
+        // what moved is the thing delivery asks about: a session that could not be typed into
+        // a moment ago can be now. `SessionWatchCenter` drains the notices it held for exactly
+        // this session on that edge, and without the announcement a notice held during a boot
+        // waits for some unrelated later edge — for a session that then sits idle, forever.
+        case .sessionStarted:
+            tracker.noteSessionStarted()
+            NotificationCenter.default.post(SessionActivityDidChange(sessionID: report.sessionID))
         case .subagentStarted, .subagentStopped: break
         }
 
@@ -324,11 +332,15 @@ final class AgentRuntime {
     // MARK: - Turn-Start Receipts
 
     private struct TurnStartWaiter {
+        let token: UUID
         let sessionID: SessionID
         let completion: @MainActor (Bool) -> Void
     }
 
-    private var turnStartWaiters: [UUID: TurnStartWaiter] = [:]
+    /// Ordered, because a turn report is evidence for **one** message rather than for every
+    /// message outstanding. Held as an array so the oldest waiter — the delivery that typed
+    /// first — is the one a report answers for.
+    private var turnStartWaiters: [TurnStartWaiter] = []
 
     /// One-shot: answers `true` when the session next *reports* a started turn, `false` at the
     /// timeout. Resolved only by the session's own lifecycle reports, never by the output
@@ -340,20 +352,33 @@ final class AgentRuntime {
         completion: @escaping @MainActor (Bool) -> Void
     ) {
         let token = UUID()
-        turnStartWaiters[token] = TurnStartWaiter(sessionID: sessionID, completion: completion)
+        turnStartWaiters.append(
+            TurnStartWaiter(token: token, sessionID: sessionID, completion: completion)
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self, let waiter = self.turnStartWaiters.removeValue(forKey: token) else {
-                return
-            }
+            guard let self,
+                  let index = self.turnStartWaiters.firstIndex(where: { $0.token == token })
+            else { return }
+            let waiter = self.turnStartWaiters.remove(at: index)
             waiter.completion(false)
         }
     }
 
+    /// Spends one turn report on the session's oldest outstanding waiter.
+    ///
+    /// **One report, one receipt.** Resolving every waiter for the session handed the same
+    /// evidence to each of them: two deliveries outstanding, one `UserPromptSubmit` arrives,
+    /// and both callers are told `.sentNow` while the CLI accepted one — the silent loss the
+    /// receipt exists to prevent, reintroduced by the thing preventing it. Deliveries to one
+    /// terminal are serialized upstream (`SessionMessageDelivery.terminalsMidDelivery`), so
+    /// in practice there is one waiter to answer; this keeps the arithmetic honest if that
+    /// ever stops being true.
     private func resolveTurnStartWaiters(for sessionID: SessionID) {
-        for (token, waiter) in turnStartWaiters where waiter.sessionID == sessionID {
-            turnStartWaiters.removeValue(forKey: token)
-            waiter.completion(true)
+        guard let index = turnStartWaiters.firstIndex(where: { $0.sessionID == sessionID }) else {
+            return
         }
+        let waiter = turnStartWaiters.remove(at: index)
+        waiter.completion(true)
     }
 
     /// Whether the session has a terminal allocated, running or exited.

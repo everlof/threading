@@ -1,6 +1,14 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Couldn’t ask “%@” to report back": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte be ”%@” rapportera tillbaka" } } }
+    },
+    "Its agent could not take the request. Try again when it is idle.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess agent kunde inte ta emot förfrågan. Försök igen när den är ledig." } } }
+    },
     "%@ could not archive this conversation: %@": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kunde inte arkivera den här konversationen: %@" } } }

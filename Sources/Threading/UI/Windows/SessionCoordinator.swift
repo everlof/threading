@@ -301,15 +301,42 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// path so it is echoed into the transcript as a user turn — visible, correctable, and
     /// openly spending the user's usage. The delivery itself then carries Threading's
     /// provenance header into the parent, exactly as any cross-session message does.
+    /// **The receipt form, and a receipt on screen when it fails.** The gate passed a moment
+    /// ago, which is not the same as the request landing: a side chat mid-`/compact` swallows
+    /// the paste and reports no turn, and the earlier shape — the synchronous overload, its
+    /// outcome discarded — left the user believing they had asked for something that was never
+    /// asked. Success stays silent because the transcript shows it; only a failure needs words.
     func askAgentToReportBack(_ sessionID: SessionID) {
         guard Self.canAskForReportBack(sessionID),
-              let parentID = ProjectStore.shared.session(withID: sessionID)?.forkedFrom
+              let session = ProjectStore.shared.session(withID: sessionID),
+              let parentID = session.forkedFrom
         else { return }
 
-        _ = SessionMessageDelivery.deliver(
+        SessionMessageDelivery.deliver(
             SessionReportBackRequest.prompt(parentID: parentID),
             to: sessionID
-        )
+        ) { [weak self] outcome in
+            guard let self, let detail = Self.reportBackFailure(outcome) else { return }
+            self.sidebar.presentToast(ToastRequest(
+                message: L10n.format("Couldn’t ask “%@” to report back", session.displayTitle),
+                detail: detail,
+                identifier: "sidebar.toast.reportBack.failed"
+            ))
+        }
+    }
+
+    /// What to say about a report-back request that did not land, or nil where it did.
+    static func reportBackFailure(_ outcome: SessionMessageDelivery.Outcome) -> String? {
+        switch outcome {
+        case .sentNow, .queuedBehindTurn:
+            return nil
+        case .typedUnconfirmed:
+            return L10n.string(
+                "It was typed into the session, which never confirmed a turn started."
+            )
+        case .busyTerminal, .noLiveSurface, .notTaken:
+            return L10n.string("Its agent could not take the request. Try again when it is idle.")
+        }
     }
 
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
