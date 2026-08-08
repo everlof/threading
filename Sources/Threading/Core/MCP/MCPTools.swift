@@ -4491,8 +4491,8 @@ enum MCPTools {
     MCPToolDefinition(
       tool: .watchSession,
       description: """
-        Ask to be told once when another session in this project settles — when the turn it is \
-        running now finishes, or its agent exits, or it stops at its usage limit. Use it \
+        Wait for another chat/session in this project to settle, so work here can continue \
+        after its current turn finishes, its agent exits, or it stops at its usage limit. Use it \
         instead of calling list_sessions again and again while you wait for a sibling's result.
 
         The notice arrives as a message in this conversation, which means it spends a turn of \

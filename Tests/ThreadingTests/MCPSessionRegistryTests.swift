@@ -644,6 +644,10 @@ final class MCPWireTests: XCTestCase {
     )
     XCTAssertTrue(prefix.contains("may load lazily"))
     XCTAssertTrue(prefix.contains("discover a matching tool"))
+    XCTAssertTrue(prefix.contains("another chat/session"))
+    XCTAssertTrue(prefix.contains("list_sessions"))
+    XCTAssertTrue(prefix.contains("send_to_session"))
+    XCTAssertTrue(prefix.contains("watch_session"))
     XCTAssertTrue(prefix.contains("display panel"))
     XCTAssertTrue(prefix.contains("archive_session"))
     XCTAssertTrue(prefix.contains("list_reclaimable_storage"))
@@ -656,11 +660,19 @@ final class MCPWireTests: XCTestCase {
     XCTAssertFalse(ordinaryPrefix.contains("display panel"))
     XCTAssertFalse(ordinaryPrefix.contains("archive_session"))
     XCTAssertFalse(ordinaryPrefix.contains("list_reclaimable_storage"))
+    XCTAssertFalse(ordinaryPrefix.contains("watch_session"))
 
     let sessionPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.session])
-    XCTAssertTrue(sessionPrefix.contains("close, archive, finish"))
+    XCTAssertTrue(sessionPrefix.contains("close/archive/finish"))
     XCTAssertTrue(sessionPrefix.contains("after your reply"))
     XCTAssertFalse(sessionPrefix.contains("list_reclaimable_storage"))
+
+    let workspacePrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.workspace])
+    XCTAssertTrue(workspacePrefix.contains("another chat/session"))
+    XCTAssertTrue(workspacePrefix.contains("list_sessions"))
+    XCTAssertTrue(workspacePrefix.contains("send_to_session"))
+    XCTAssertTrue(workspacePrefix.contains("watch_session"))
+    XCTAssertFalse(workspacePrefix.contains("archive_session"))
   }
 
   /// The session the archive acts on is the one the call arrived on: the URL carries the

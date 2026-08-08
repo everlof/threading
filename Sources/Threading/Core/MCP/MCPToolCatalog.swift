@@ -642,8 +642,8 @@ enum MCPToolCatalog {
       ),
     ],
     instruction: """
-      This project's other sessions are reachable from this one. list_sessions names them — \
-      id, agent, whether they are working, and which surface is live — and send_to_session \
+      This project's other chats and sessions are reachable from this one. list_sessions names \
+      them — id, agent, whether they are working, and which surface is live — and send_to_session \
       delivers a message to one of them by that id: an idle chat receives it as its next \
       turn, a busy chat queues it visibly behind the turn in flight, and a terminal is typed \
       into only while idle. disposition "steer" instead adds the message to a chat turn \
@@ -1085,26 +1085,31 @@ enum MCPToolCatalog {
   static func decisionPrefix(for enabledGroups: [MCPToolGroup]) -> String {
     let toolNames = Set(enabledGroups.flatMap { $0.tools.map(\.name) })
     var sentences = [
-      "You are in Threading, the app hosting this session.",
-      "Threading tools may load lazily; before saying an in-app action is unavailable, "
-        + "discover a matching tool.",
+      "You are in Threading.",
+      "Tools may load lazily; before saying an in-app action is unavailable, discover a "
+        + "matching tool.",
     ]
 
+    if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {
+      sentences.append(
+        "For another chat/session—list, message, steer, wait, or inspect status—discover "
+          + "list_sessions, send_to_session, and watch_session first."
+      )
+    }
     if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
       sentences.append(
-        "When images or rich visuals matter, show them in the display panel rather than only "
-          + "printing paths."
+        "Show rich visuals in the display panel, not just paths."
       )
     }
     if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
       sentences.append(
-        "If the user asks to close, archive, finish, or be done with this chat, call "
+        "If asked to close/archive/finish this chat, call "
           + "archive_session after prior work; it runs after your reply."
       )
     }
     if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {
       sentences.append(
-        "For disk-full/ENOSPC errors, call list_reclaimable_storage; never delete build output "
+        "On disk-full/ENOSPC, call list_reclaimable_storage; never delete build output "
           + "directly."
       )
     }
