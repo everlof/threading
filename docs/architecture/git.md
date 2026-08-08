@@ -95,6 +95,12 @@ menu bar's only stateful item. Branch headings are not selectable, collapse like
 prefers the session's recorded branch over the checkout's current one for the same reason the
 record exists.
 
+Pinning is also a row state, not only an ordering rule. `SessionRowView` keeps a filled pin after
+the title (the same mark the mobile dashboard uses), outside its replaceable content so an
+extension-customized identity cannot erase host-owned state. The mark is an accessible image,
+and on an emphasized selection it takes the selection's ink rather than drawing the accent on
+the accent-filled row.
+
 The branch is **not shown on the project row** — it lived there once as a subtitle, which read
 as though the project *were* that branch, when a checkout's branch changes and one repo can
 have several checkouts at once. It surfaces instead in the **session rows' hover popover**

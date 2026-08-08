@@ -117,6 +117,29 @@ final class SessionRowActionsTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// Pinning already changes where the row sorts, but position alone is not a visible state:
+    /// under Name or Recent Activity the same session may have led the list anyway. The row
+    /// therefore carries an explicit mark, and reuse must remove it when the cell is handed to
+    /// an ordinary session.
+    func testPinnedSessionsCarryAnAccessibleMarkThatClearsOnReuse() throws {
+        let (_, row) = hostedRow()
+        var pinned = session("Pinned session")
+        pinned.isPinned = true
+        row.configure(with: pinned, activity: .idle)
+
+        let indicator = try view(named: "sidebar.session.pinned", in: row)
+        XCTAssertFalse(indicator.isHidden)
+        XCTAssertTrue(indicator.isAccessibilityElement())
+        XCTAssertEqual(indicator.accessibilityRole(), .image)
+        XCTAssertEqual(
+            indicator.accessibilityLabel(),
+            SidebarRowDefaults.pinnedAccessibilityLabel
+        )
+
+        row.configure(with: session("Ordinary session"), activity: .idle)
+        XCTAssertTrue(indicator.isHidden, "a recycled row kept the previous session's pin")
+    }
+
     /// The report that produced this test: the `⋯` could not be clicked on the selected chat,
     /// which was also the one showing a spinner.
     func testTheActionsButtonTakesTheClickWhileTheRowIsWorking() throws {

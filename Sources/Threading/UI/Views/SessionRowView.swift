@@ -4,8 +4,8 @@ import ThreadingExtensionKit
 
 // MARK: - Session Row View
 
-/// Sidebar row for a session: the agent icon, the session title, and a trailing slot that
-/// shows status normally and the row's actions under the pointer.
+/// Sidebar row for a session: the agent icon, the session title and its optional pinned mark,
+/// plus a trailing slot that shows status normally and the row's actions under the pointer.
 final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     // MARK: - Properties
@@ -76,6 +76,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private let accountChipView = NSImageView()
 
     private let titleLabel = MorphingTitleLabel()
+    /// Pinning is stronger than every sidebar sort, so it remains visible beside the title
+    /// rather than being communicated only by the row's position.
+    private let pinnedIndicator = NSImageView()
     private let nativeIdentityContent = NSView()
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
@@ -84,7 +87,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
     private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, afterTitleSlot]
+        views: [contentContainer, pinnedIndicator, afterTitleSlot]
     )
     private lazy var identityCustomizationHost = ComponentCustomizationHost(
         target: .sessionIdentity(),
@@ -224,6 +227,30 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             SidebarRowDefaults.stretchableHugging,
             for: .horizontal
         )
+
+        pinnedIndicator.image = Design.Symbol.image(
+            SidebarRowDefaults.pinnedSymbol,
+            slot: Design.Size.inlineButtonGlyph,
+            pointSize: Design.Symbol.control
+        )
+        pinnedIndicator.imageScaling = .scaleProportionallyDown
+        pinnedIndicator.translatesAutoresizingMaskIntoConstraints = false
+        pinnedIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        pinnedIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        pinnedIndicator.setAccessibilityElement(true)
+        pinnedIndicator.setAccessibilityRole(.image)
+        pinnedIndicator.setAccessibilityLabel(SidebarRowDefaults.pinnedAccessibilityLabel)
+        pinnedIndicator.setAccessibilityIdentifier("sidebar.session.pinned")
+        pinnedIndicator.isHidden = true
+
+        NSLayoutConstraint.activate([
+            pinnedIndicator.widthAnchor.constraint(
+                equalToConstant: Design.Size.inlineButtonGlyph
+            ),
+            pinnedIndicator.heightAnchor.constraint(
+                equalToConstant: Design.Size.inlineButtonGlyph
+            )
+        ])
 
         setupTrailingSlot()
         setupCustomizableContent()
@@ -593,6 +620,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         sessionID = session.id
         nativeTitle = session.displayTitle
         nativeToolTip = nil
+        pinnedIndicator.isHidden = !session.isPinned
 
         // Bound to *this* session rather than reading the row's id when it fires. A press
         // outlives the row it started on — `ThemedIconButton` completes the gesture even after
@@ -712,6 +740,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// appearance flip only stood in for it when the two themes disagreed about light and dark —
     /// see `ThemeDerivedContent`.
     func rederiveThemedContent() {
+        // Unlike the buttons, NSImageView keeps the tint object it was handed. Re-ask the
+        // current theme whenever the sweep reaches this retained/reused row.
+        applyTextColors()
         guard let agentMark else { return }
         iconView.image = plated(agentMark)
         nativeIcon = iconView.image
@@ -882,6 +913,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // fill is named: the unemphasized one is the accent held far back over the sidebar's
         // surface, where the chrome's ink is still the ink that reads.
         let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
+        pinnedIndicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.label
+            : Design.Surface.accent
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
     }

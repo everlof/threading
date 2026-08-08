@@ -73,7 +73,26 @@ final class SidebarRowRenderTests: XCTestCase {
             selected: true
         )
 
-        XCTAssertEqual(written, 12, "Every story should render in both appearances")
+        // Pinning changes the row's order under every sort, and the filled pin beside the title
+        // makes that durable state visible even when the row would have led the list anyway.
+        written += try write(
+            story: "07-pinned-at-rest",
+            activity: .idle,
+            hovered: false,
+            pinned: true
+        )
+
+        // On a selected row the pin must use the selection's ink rather than disappearing into
+        // the same accent that fills the row.
+        written += try write(
+            story: "08-pinned-and-selected",
+            activity: .idle,
+            hovered: false,
+            selected: true,
+            pinned: true
+        )
+
+        XCTAssertEqual(written, 16, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -613,6 +632,7 @@ final class SidebarRowRenderTests: XCTestCase {
         activity: SessionActivity,
         hovered: Bool,
         selected: Bool = false,
+        pinned: Bool = false,
         title: String = "Fix the hover state"
     ) throws -> Int {
         let directory = Render.directory
@@ -642,7 +662,8 @@ final class SidebarRowRenderTests: XCTestCase {
                 // Configured before the hover is asserted, then again after: `configure`
                 // reapplies the hover state without animating, which is what makes the
                 // hovered stories deterministic rather than a race with the crossfade.
-                let session = AgentSession(kind: .claude, title: title)
+                var session = AgentSession(kind: .claude, title: title)
+                session.isPinned = pinned
                 row.configure(with: session, activity: activity)
                 if hovered, let entered = Self.enterEvent() {
                     row.mouseEntered(with: entered)

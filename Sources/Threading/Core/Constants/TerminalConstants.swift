@@ -654,6 +654,10 @@ enum SidebarRowDefaults {
     static let sideChatSymbol = "arrow.triangle.branch"
     static var sideChatAccessibilityLabel: String { L10n.string("Side chat") }
 
+    /// Marks a session held ahead of the ordinary sidebar order.
+    static let pinnedSymbol = "pin.fill"
+    static var pinnedAccessibilityLabel: String { L10n.string("Pinned") }
+
     /// Revealed on hover, opening the row's actions.
     static let actionSymbol = "ellipsis"
     /// Revealed on hover beside the `⋯`, filing the session away in one press.

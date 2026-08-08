@@ -185,9 +185,10 @@ First** for Order Added, **Most Recent First** or **Least Recent First** for Rec
 **A to Z** or **Z to A** for Name. Picking a different order starts it at its own natural
 direction, so a reversal made about names is not inherited by a sort about dates.
 
-A pinned session leads the list under every order and either direction — pinning is a stronger
-statement than any sort, and reversing reverses the sort rather than the list. Sorting
-rearranges branch groups too: a group sits where its first session would.
+A pinned session carries a filled pin beside its title and leads the list under every order and
+either direction — pinning is a stronger statement than any sort, and reversing reverses the
+sort rather than the list. Sorting rearranges branch groups too: a group sits where its first
+session would.
 
 **Compact Tree** (off by default) trades indentation for a narrower list: every row —
 project, branch heading, session, side chat — starts at the same left edge, with the

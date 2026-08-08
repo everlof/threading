@@ -451,6 +451,10 @@ list in the app holds its rows to its window's key state through `ListSelectionS
 rows read `isEmphasized` and draw. See [`design-system.md`](design-system.md), *a list's selection
 follows its window*.
 
+A session row carries a filled pin after its title when the session is pinned, so a durable state
+that already outranks every sidebar sort is not communicated only by position. The mark remains
+outside extension-replaceable content and re-inks against an emphasized selection.
+
 A session row's trailing edge is one fixed-size slot holding the status indicator and the
 `⋯` actions button overlaid, crossfaded on hover via `alphaValue` rather than `isHidden` —
 a stack view detaches hidden arranged views, so toggling visibility would re-lay out the row
