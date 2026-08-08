@@ -9,7 +9,7 @@ import AppKit
 /// it to `ConversationOutbox.movePending`, which counts in outbox terms — so scheduled rows mixed
 /// in would silently shift every drag by however many of them sat above, because `movePending`
 /// clamps rather than refuses. Its `Row.id` is a `ConversationMessageID`, and one flag gates
-/// draggability, removal *and* editing together, so "ordered by the clock, still removable" is
+/// draggability, removal *and* editing together, so "store-ordered, still removable" is
 /// not a state it can express. A separate strip costs one small view and keeps both models
 /// honest — and the draft view, which has no rail at all, needed exactly this view anyway.
 ///
@@ -25,7 +25,7 @@ final class ScheduledMessageStripView: NSView, ThemedComponent {
     struct Row: Equatable {
         let id: ScheduledMessageID
         let summary: String
-        /// When it goes, already written — "Tomorrow at 09:00", "in 3h 20m".
+        /// What releases it, already written — "Tomorrow at 09:00", "When Build finishes".
         let timing: String
         /// Set when the send needs a decision rather than a wait.
         let problem: String?
@@ -188,7 +188,7 @@ final class ScheduledMessageRowView: ThemedControl {
         removeButton.translatesAutoresizingMaskIntoConstraints = false
 
         // Offered only where there is a decision to make. A row that is simply waiting needs no
-        // "send now" — the clock is doing what it was asked to.
+        // "send now" — the trigger is doing what it was asked to.
         if row.needsAttention {
             addSubview(sendNowButton)
             sendNowButton.translatesAutoresizingMaskIntoConstraints = false

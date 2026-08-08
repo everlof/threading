@@ -24,6 +24,7 @@ extension SessionComposerViewController {
             return [.item(ThemedMenuItem(title: reason, isEnabled: false))]
         }
 
+        let finishCandidates = ScheduledFinishCandidates.current()
         let account = selectedAgent.supportsAccounts
             ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
             : nil
@@ -31,12 +32,15 @@ extension SessionComposerViewController {
 
         return ScheduleMenu.entries(
             usage: account.flatMap { AccountUsageService.shared.usage(for: $0) },
-            metering: account.flatMap { modelIdentifierToLaunch(on: $0) }
+            metering: account.flatMap { modelIdentifierToLaunch(on: $0) },
+            canWaitForConversation: !finishCandidates.isEmpty
         ) { [weak self] choice in
             guard let self else { return }
             switch choice {
             case .at(let date, let anchor):
                 self.scheduleStart(at: date, anchor: anchor)
+            case .whenConversationFinishes:
+                self.presentScheduledFinishPicker(candidates: finishCandidates)
             case .custom:
                 ScheduleMessageAlert.present(
                     over: self.view.window,
@@ -47,6 +51,18 @@ extension SessionComposerViewController {
                 }
             }
         }
+    }
+
+    private func presentScheduledFinishPicker(candidates: [ScheduledFinishCandidate]) {
+        guard !candidates.isEmpty else { return }
+        let picker = ScheduledFinishPickerViewController(candidates: candidates)
+        picker.onPick = { [weak self, weak picker] candidate in
+            guard let self, let picker else { return }
+            self.dismiss(picker)
+            guard let candidate else { return }
+            self.scheduleStart(whenSessionFinishes: candidate.id)
+        }
+        presentAsSheet(picker)
     }
 
     /// Opens the offers under the button that asked for them.
@@ -102,17 +118,63 @@ extension SessionComposerViewController {
             anchor: anchor
         )
 
+        _ = storeScheduledStart(message, projectID: projectID, event: [
+            "dueAt": ISO8601DateFormatter().string(from: date)
+        ])
+    }
+
+    func scheduleStart(whenSessionFinishes watchedSessionID: SessionID) {
+        guard let projectID else { return }
+        let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !brief.isEmpty else { return }
+
+        let plan = ScheduledSessionPlan(
+            projectID: projectID,
+            kind: selectedAgent,
+            accountHandle: selectedAccountHandle,
+            model: selectedModel,
+            reasoningEffort: selectedReasoningEffort,
+            fastMode: selectedFastMode,
+            branch: selectedBranch,
+            usesNativeUI: usesNativeUI,
+            permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
+            managedWorkspacePlan: selectedManagedWorkspacePlan
+        )
+        let message = ScheduledMessage(
+            whenSessionFinishes: watchedSessionID,
+            target: .newSession(plan),
+            text: brief
+        )
+
+        guard storeScheduledStart(message, projectID: projectID, event: [
+            "afterSession": watchedSessionID.uuidString
+        ]) else { return }
+
+        ScheduledMessageScheduler.shared.evaluateCompletion(
+            of: watchedSessionID,
+            acceptsSettledSnapshot: true
+        )
+    }
+
+    @discardableResult
+    private func storeScheduledStart(
+        _ message: ScheduledMessage,
+        projectID: ProjectID,
+        event details: [String: String]
+    ) -> Bool {
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
-            EventLog.shared.record(.composer, "Session start scheduled", [
+            var fields = details
+            fields.merge([
                 "project": projectID.uuidString,
                 "agent": selectedAgent.rawValue,
-                "dueAt": ISO8601DateFormatter().string(from: date),
-                "prompt": brief
-            ])
+                "prompt": message.text
+            ]) { _, new in new }
+            EventLog.shared.record(.composer, "Session start scheduled", fields)
             promptView.clear()
             DraftStore.shared.clear(for: projectID)
             refreshScheduledStrip()
+            return true
         case .failure(let refusal):
             let alert = ThemedAlert()
             alert.messageText = L10n.string("Couldn't schedule this")
@@ -123,6 +185,7 @@ extension SessionComposerViewController {
             } else {
                 alert.runModal()
             }
+            return false
         }
     }
 
@@ -144,7 +207,7 @@ extension SessionComposerViewController {
                 ScheduledMessageStripView.Row(
                     id: message.id,
                     summary: message.summary,
-                    timing: ScheduledTiming.sentence(for: message.dueAt, from: now),
+                    timing: ScheduledTiming.sentence(for: message, from: now),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
             }

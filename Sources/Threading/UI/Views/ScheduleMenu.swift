@@ -8,15 +8,17 @@ import AppKit
 /// same question and it has to read the same way in both — the reason `AccountUsageMenu` exists
 /// one shelf along, for the same reason.
 ///
-/// Nothing here decides anything: it turns `ScheduledTimePresets` into rows and hands the chosen
-/// moment back. The account whose windows are offered is resolved by the caller, because only the
-/// caller knows whether it is the composer's current chips or a session's own record.
+/// Nothing here decides anything: it turns `ScheduledTimePresets` and the conversation-finish
+/// condition into rows and hands the choice back. The account whose windows are offered is
+/// resolved by the caller, because only the caller knows whether it is the composer's current
+/// chips or a session's own record.
 @MainActor
 enum ScheduleMenu {
 
     /// What a chosen row asks for.
     enum Choice {
         case at(Date, anchor: ScheduledMessage.Anchor)
+        case whenConversationFinishes
         case custom
     }
 
@@ -32,6 +34,7 @@ enum ScheduleMenu {
         locale: Locale = .current,
         usage: AccountUsage? = nil,
         metering model: String? = nil,
+        canWaitForConversation: Bool = false,
         onChoose: @escaping (Choice) -> Void
     ) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = []
@@ -56,6 +59,17 @@ enum ScheduleMenu {
             }
         }
 
+        entries.append(.separator)
+        entries.append(.item(
+            ThemedMenuItem(
+                title: L10n.string("When a conversation finishes…"),
+                subtitle: canWaitForConversation
+                    ? nil
+                    : L10n.string("No conversations with reliable finish signals are working."),
+                isEnabled: canWaitForConversation,
+                onChoose: { onChoose(.whenConversationFinishes) }
+            )
+        ))
         entries.append(.separator)
         entries.append(.item(
             ThemedMenuItem(

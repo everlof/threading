@@ -2,7 +2,7 @@ import AppKit
 
 // MARK: - Scheduled Message Scheduler
 
-/// Watches the clock for everything waiting in `ScheduledMessageStore`.
+/// Watches clock and session-finish triggers in `ScheduledMessageStore`.
 ///
 /// `SessionArchiveScheduler`'s shape, one feature along: it knows when, and nothing else. It
 /// announces a due send (`ScheduledMessageDidBecomeDue`) and `SessionCoordinator` — which already
@@ -32,7 +32,9 @@ final class ScheduledMessageScheduler {
     private let center: NotificationCenter
     private let workspaceCenter: NotificationCenter
     private let now: @MainActor () -> Date
+    private let activity: @MainActor (SessionID) -> SessionActivity
     private let reportsOwnTurns: @MainActor (SessionID) -> Bool
+    private let sessionExists: @MainActor (SessionID) -> Bool
 
     private var observations: AppEventObservations?
     private var workspaceObservations: AppEventObservations?
@@ -43,6 +45,13 @@ final class ScheduledMessageScheduler {
     /// without the record on disk growing a field only this class would read.
     private var waitingSince: [ScheduledMessageID: Date] = [:]
 
+    /// Watched turns this run of Threading has actually seen in flight.
+    ///
+    /// `SessionActivityDidChange` intentionally carries only an id, and `SessionStart` posts it
+    /// even when activity stays idle. Requiring this receipt turns a current idle snapshot into
+    /// the edge it claims to be and prevents a relaunch from spending an old condition.
+    private var finishTurnsObservedInFlight: Set<SessionID> = []
+
     // MARK: - Initialization
 
     /// Everything is injected for `SessionArchiveScheduler`'s reason: the rules have to be
@@ -52,15 +61,23 @@ final class ScheduledMessageScheduler {
         center: NotificationCenter = .default,
         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         now: @escaping @MainActor () -> Date = { Date() },
+        activity: @escaping @MainActor (SessionID) -> SessionActivity = {
+            AgentRuntime.shared.activity(sessionID: $0)
+        },
         reportsOwnTurns: @escaping @MainActor (SessionID) -> Bool = {
             AgentRuntime.shared.reportsOwnTurns(sessionID: $0)
+        },
+        sessionExists: @escaping @MainActor (SessionID) -> Bool = {
+            ProjectStore.shared.session(withID: $0) != nil
         }
     ) {
         self.store = store
         self.center = center
         self.workspaceCenter = workspaceCenter
         self.now = now
+        self.activity = activity
         self.reportsOwnTurns = reportsOwnTurns
+        self.sessionExists = sessionExists
     }
 
     // MARK: - Public Methods
@@ -80,8 +97,12 @@ final class ScheduledMessageScheduler {
             self?.rearm()
         }
         // A send that found its target busy is owed another try the moment that target settles.
-        observations.observe(SessionActivityDidChange.self) { [weak self] _ in
+        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+            // Retry sends whose own trigger already happened first. If the same activity edge
+            // satisfies a new finish trigger and its destination is busy, the performer changes
+            // that record to `waiting`; evaluating after that would offer it twice on one edge.
             self?.evaluate()
+            self?.evaluateCompletion(of: event.sessionID)
         }
         observations.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
             self?.evaluate()
@@ -128,6 +149,45 @@ final class ScheduledMessageScheduler {
         let moment = now()
         for message in store.due(at: moment) {
             guard canAttemptNow(message, at: moment) else { continue }
+            center.post(ScheduledMessageDidBecomeDue(id: message.id))
+        }
+        rearm()
+    }
+
+    /// Announces sends waiting for this conversation's current turn to finish.
+    ///
+    /// Activity changes call this on the authoritative edge. A scheduling surface also calls it
+    /// immediately after filing a record with `acceptsSettledSnapshot`: the selected turn can
+    /// finish while its picker sheet is open, between the last activity event and the durable
+    /// write, and that race should send now rather than wait for an unrelated later turn.
+    func evaluateCompletion(
+        of sessionID: SessionID,
+        acceptsSettledSnapshot: Bool = false
+    ) {
+        guard hasStarted else { return }
+        let messages = store.dueWhenSessionFinishes(sessionID)
+        guard !messages.isEmpty else { return }
+
+        guard sessionExists(sessionID) else {
+            for message in messages {
+                store.fail(
+                    message.id,
+                    reason: L10n.string("The conversation this was waiting for was deleted.")
+                )
+            }
+            return
+        }
+
+        if activity(sessionID).hasTurnInFlight {
+            guard reportsOwnTurns(sessionID) else { return }
+            finishTurnsObservedInFlight.insert(sessionID)
+            return
+        }
+        guard acceptsSettledSnapshot || reportsOwnTurns(sessionID) else { return }
+        guard acceptsSettledSnapshot
+                || finishTurnsObservedInFlight.remove(sessionID) != nil else { return }
+
+        for message in messages {
             center.post(ScheduledMessageDidBecomeDue(id: message.id))
         }
         rearm()
@@ -186,15 +246,18 @@ final class ScheduledMessageScheduler {
         timer?.invalidate()
         timer = nil
 
-        guard hasStarted, store.hasAnythingPending else { return }
+        rememberFinishTurnsInFlight()
+
+        guard hasStarted, store.hasClockWorkPending else { return }
 
         let moment = now()
         let interval: TimeInterval
         if let next = store.nextDueDate(after: moment) {
             interval = max(ScheduledSchedulerDefaults.minimumInterval, next.timeIntervalSince(moment))
         } else {
-            // Nothing armed, but something is waiting on a busy surface. The activity edge is
-            // the real signal; this is only so patience can run out while a session stays busy.
+            // No timed trigger is armed, but a delivery is waiting on a busy surface. The
+            // activity edge is the real signal; this only lets its patience run out. Armed
+            // finish triggers do not reach here — their authoritative edge needs no polling.
             interval = ScheduledSchedulerDefaults.heartbeat
         }
 
@@ -205,6 +268,17 @@ final class ScheduledMessageScheduler {
         // A long wait need not be punctual to the second, and letting the system coalesce it
         // keeps a scheduled send from being a reason the CPU wakes.
         timer?.tolerance = capped * ScheduledSchedulerDefaults.toleranceFraction
+    }
+
+    /// Seeds the edge receipt when a condition is added during a turn or the scheduler starts
+    /// midway through one. It never spends a condition: an idle snapshot merely stays absent.
+    private func rememberFinishTurnsInFlight() {
+        let armed = store.armedFinishSessionIDs
+        finishTurnsObservedInFlight.formIntersection(armed)
+        for sessionID in armed
+        where reportsOwnTurns(sessionID) && activity(sessionID).hasTurnInFlight {
+            finishTurnsObservedInFlight.insert(sessionID)
+        }
     }
 }
 

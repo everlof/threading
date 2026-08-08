@@ -38,7 +38,7 @@ extension SessionCoordinator {
     /// and has nothing to re-read. `ScheduledResetPolicy` owns how patient to be; this owns
     /// asking. Answers whether the send was postponed.
     private func standAsideForUnresetWindow(_ message: ScheduledMessage) -> Bool {
-        guard let windowID = message.anchor.usageWindowID,
+        guard let windowID = message.anchor?.usageWindowID,
               let account = accountFor(message.target),
               let window = AccountUsageService.shared.usage(for: account)?
                 .allWindows.first(where: { $0.id == windowID })

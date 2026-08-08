@@ -1,14 +1,14 @@
 # Scheduled Messages
 
-Writing something now and sending it later — a reply to a session that exists, or the brief that
-starts one that does not.
+Writing something now and sending it later — at a chosen time or when another agent finishes its
+current turn — as a reply to a session that exists, or the brief that starts one that does not.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-## One record, two payloads
+## One record, two payloads, two triggers
 
-`ScheduledMessage` carries both cases, because they share a clock, a store, a strip and every rule
-about what happens when the moment arrives. Splitting them would be two of everything below.
+`ScheduledMessage` carries both targets and both triggers, because they share a store, a strip and
+every delivery rule. Splitting them would be two of everything below.
 
 - **`.session(SessionID)`** — a reply, scheduled from the conversation's own composer.
 - **`.newSession(ScheduledSessionPlan)`** — a session start, scheduled from the draft view. The
@@ -20,17 +20,29 @@ about what happens when the moment arrives. Splitting them would be two of every
   `AccountHandle` is deliberately not `Codable`, so the handle rides as `persistedSessionName` and
   is rebuilt with `init(storedName:)`, which is the spelling every other persisted copy uses.
 
+- **`.time(TimeTrigger)`** — the original clock trigger: an absolute instant plus the wall-clock
+  intent needed to survive a time-zone change.
+- **`.sessionFinished(SessionID)`** — the end of the conversation's **current turn**, not the end
+  of its process and not a guess made from a quiet terminal. It is offered only while that turn is
+  in flight and only when the runtime reports its own turn boundaries. Agent-reported background
+  work remains `.working`, so the condition is not satisfied while a subagent or other reported
+  work is still outstanding.
+
 **Images are unschedulable, and the composer says so rather than dropping them.** A pasted
 screenshot is a file in a temporary directory, and a path written down now can name nothing by
 Monday — the reason [`persistence.md`](persistence.md) already refuses to *draft* them. Scheduling
 is that hazard with a longer fuse, so the affordance is disabled with its reason on the tooltip.
 
-**The record keeps the instant and the words.** `dueAt` is an absolute `Date`; `intendedTimeZone`
-and `intendedWallClock` are what the user actually chose. They disagree the moment a machine
-changes zone — "tomorrow at 09:00" set in Stockholm and opened in New York fires at 03:00 while
-every label relabels itself to 03:00, which would make the sheet's named time zone a promise the
-record could not keep. `NSSystemTimeZoneDidChange` re-derives `dueAt` from the components. A
+**A time trigger keeps the instant and the words.** `dueAt` is an absolute `Date`;
+`intendedTimeZone` and `intendedWallClock` are what the user actually chose. They disagree the
+moment a machine changes zone — "tomorrow at 09:00" set in Stockholm and opened in New York fires
+at 03:00 while every label relabels itself to 03:00, which would make the sheet's named time zone
+a promise the record could not keep. `NSSystemTimeZoneDidChange` re-derives `dueAt` from the components. A
 reset-anchored send is left alone: a window's boundary is an instant, not a time of day.
+
+The trigger is encoded as part of the durable record. The decoder also accepts the original
+top-level `dueAt` / time-zone / wall-clock shape and turns it into `.time`, so installing this
+version does not strand existing scheduled drafts.
 
 ## The store is a file, and it is written on the mutation
 
@@ -41,7 +53,8 @@ reset-anchored send is left alone: a window's boundary is an instant, not a time
 joined, and nothing here is: it is a handful of records read whole at launch. What it does need is
 the contract `DraftStore` and `SessionContinuityStore` already have — synchronous user-authored
 writes, quarantine rather than deletion — because once the composer is cleared this is the only
-copy of something somebody wrote. A scheduled message is a draft with a due time.
+copy of something somebody wrote. A scheduled message is a draft with a durable release
+condition.
 
 **Refuses rather than evicting.** Per-target and global ceilings, both stated as values
 (`ScheduledMessageStore.Refusal`) so the strip and any later adapter word them their own way. A
@@ -57,7 +70,7 @@ that is gone.
 app, so a store that always resolved Application Support would have every run editing the
 developer's own scheduled sends.
 
-## The clock knows only when
+## The scheduler announces; the coordinator performs
 
 `ScheduledMessageScheduler` is `SessionArchiveScheduler`'s shape one feature along: it announces
 (`ScheduledMessageDidBecomeDue`) and `SessionCoordinator` performs. Nothing in Core knows about
@@ -67,7 +80,24 @@ and what makes the rules testable with no live agent.
 **`Date()` is the only authority.** Nothing counts elapsed intervals: a timer does not fire while
 the machine sleeps, and one armed against uptime is wrong after an NTP step. The triggers exist to
 make the comparison happen often enough, not to measure anything — a wake, an activation, a clock
-step, a zone change, a store mutation, and one five-minute heartbeat while something is pending.
+step, a zone change, a store mutation, and one five-minute heartbeat while clock work or a
+blocked delivery is pending. An armed finish trigger does not run a timer; its activity edge is
+the authority and polling would add no information.
+
+**A finish trigger has a different authority: the runtime's turn edge.**
+`SessionActivityDidChange` is examined only for a watched session that reports its own turns. The
+scheduler first remembers that this run of Threading observed `hasTurnInFlight`, then satisfies
+the condition on the later false side. The receipt matters because `SessionStart` deliberately
+posts the same notification even when an idle state did not move; after relaunch that is a
+snapshot, not the missing finish edge. `hasTurnInFlight` includes agent-reported background work,
+per [`session-activity.md`](session-activity.md), and it does not read `.awaitingUser` as
+completion. Inferred terminal quietness is never enough for an unattended send.
+
+The picker and the activity edge race in one narrow place: a chosen turn can end after the sheet
+was populated but before the durable record is added. The scheduling surface therefore performs
+one explicit settled-snapshot check immediately after the write. Normal startup does **not** do
+that check; a conversation merely looking idle after Threading relaunches is not evidence that it
+finished while Threading was away. The record waits for a later observed authoritative turn end.
 
 **Two notification centres, and the second is not optional.**
 `NSWorkspace.didWakeNotification` is posted on `NSWorkspace.shared.notificationCenter`, never on
@@ -80,7 +110,7 @@ fails a test rather than a user's morning.
 `applicationDidFinishLaunching`: a scheduled start reads the MCP port for `--mcp-config`, and one
 firing into the window onboarding is still deferring gets a PTY in a pane nobody will see.
 
-## Nothing is sent that the clock passed while the app was closed
+## Nothing is sent for a time the app missed while it was closed
 
 There is **no grace window and no automatic late delivery**. Threading is not a server. Anything
 whose moment passed while it was not running becomes `.missed`, is reported once
@@ -91,6 +121,12 @@ watching.*
 A separate `.waiting(reason)` covers the other half — due *while* the app is running but not yet
 deliverable. Those keep trying for as long as the app runs and stay visible while they do;
 undelivered at quit, they join the next launch's missed set.
+
+Finish-triggered messages have no clock moment to mark missed. They survive relaunch without
+being released by a dormant snapshot, and remain armed until Threading observes a later matching
+turn end. If the watched conversation is deleted first, the words are preserved and the row
+becomes `.failed` with that reason; deleting the destination still removes messages addressed to
+it, as before.
 
 ## Delivery, and the question a woken session asks
 
@@ -190,12 +226,19 @@ A split Start button was the other candidate and was rejected: `ThemedButton` ha
 `drawsSurface`/`isRaised`/`surfaceStateDidChange`, so welding a chevron to a filled accent plate
 means teaching every button in the app to stop drawing its own surface.
 
+**“When a conversation finishes…” in both schedule menus.** The row is enabled only when at
+least one live conversation has a current turn with an authoritative finish signal. It opens a
+searchable sheet naming the conversation, project and agent. Candidate discovery value-scans the
+stored projects once; expected scale is 2–12 live turns against the sidebar's 5,000 stored-session
+stress case. The table creates only viewport rows, and filtering a large live set runs away from
+the main actor before the value model is replaced.
+
 **`ScheduledMessageStripView`, above the composer** — and deliberately *not* rows in
 `ConversationOutboxRailView`. That rail computes a drag's index across every pending row and hands
 it to `ConversationOutbox.movePending`, which counts in outbox terms, so scheduled rows mixed in
 would shift every drag by however many sat above — silently, because `movePending` clamps rather
 than refuses. Its `Row.id` is a `ConversationMessageID`, and one flag gates draggability, removal
-*and* editing together, so "ordered by the clock, still removable" is not a state it can express.
+*and* editing together, so "store-ordered, still removable" is not a state it can express.
 
 **An empty strip leaves the column rather than hiding in it.** A hidden arranged view is detached
 from a stack's layout but is still a subview with constraints of its own, and that was enough to

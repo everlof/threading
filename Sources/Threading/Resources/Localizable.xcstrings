@@ -573,6 +573,39 @@
     "Custom time…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Egen tid…" } } }
     },
+    "When a conversation finishes…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När en konversation blir klar…" } } }
+    },
+    "No conversations with reliable finish signals are working.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga konversationer med tillförlitliga slutsignaler arbetar." } } }
+    },
+    "When a conversation finishes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När en konversation blir klar" } } }
+    },
+    "Search working conversations": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök bland arbetande konversationer" } } }
+    },
+    "Working conversations": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Arbetande konversationer" } } }
+    },
+    "Choose the conversation whose current turn should finish first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj konversationen vars pågående tur ska bli klar först." } } }
+    },
+    "Choose among %lld conversations whose current turns are still running.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj bland %lld konversationer vars pågående turer fortfarande körs." } } }
+    },
+    "%lld of %lld working conversations": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld av %lld arbetande konversationer" } } }
+    },
+    "%@ · %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %@" } } }
+    },
+    "When “%@” finishes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När ”%@” blir klar" } } }
+    },
+    "The conversation this was waiting for was deleted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationen som det här väntade på togs bort." } } }
+    },
     "Schedule message": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalägg meddelande" } } }
     },

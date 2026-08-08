@@ -1021,6 +1021,10 @@ sits beside **Start session**. Both open the same offers:
   and how far off it is, read from the login the session will actually run on. If the model you
   have chosen is metered separately, it is *that* window you are offered, because that is the one
   which will stop you.
+- **When a conversation finishes…** opens a searchable list of agents that are working now. Pick
+  one and the message is sent when that conversation's current turn, including any background
+  work the agent reports, is finished. Only conversations that report reliable turn boundaries
+  are offered; Threading never schedules unattended work by guessing that a terminal looks quiet.
 - **Custom time…**, a day and a quarter-hour from two menus. The sheet names your time zone.
 
 What is waiting appears in a strip above the box — in a chat, above the queue of messages waiting
@@ -1032,6 +1036,11 @@ passes while Threading is closed, nothing is sent: the message is marked as miss
 you with a **Send now** beside it. That is deliberate — an agent starting work on Friday's
 instruction at Monday breakfast, spending your usage and touching your checkout with nobody
 watching, is not something an app should decide on your behalf.
+
+A message waiting for another conversation is not treated as a missed clock time. After a
+relaunch it stays armed until Threading observes a later reliable turn ending; an idle-looking
+conversation at startup is not assumed to have finished while the app was closed. If the watched
+conversation is deleted, the scheduled words stay in the strip with the failure explained.
 
 A scheduled message will **wake a session whose agent has stopped**, because that is the whole
 point of scheduling one overnight. Two limits on that. A session running in the agent's own

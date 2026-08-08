@@ -129,7 +129,7 @@ final class LimitRecoveryCoordinator {
         // A continuation already waiting for this session means a previous arm is still in
         // flight — a re-armed reset, an undelivered send. A second one would type twice.
         let pending = ScheduledMessageStore.shared.messages(for: sessionID)
-            .contains { $0.state.isOwed && $0.anchor.usageWindowID != nil }
+            .contains { $0.state.isOwed && $0.anchor?.usageWindowID != nil }
         guard !pending else {
             controller.activityTracker.noteLimitParked(recoveryArmed: true)
             EventLog.shared.record(.limitRecovery, "Continuation already scheduled, re-armed the park", [

@@ -84,8 +84,8 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
 /// A message the user wrote now and asked to be sent later.
 ///
 /// Two payloads, one record: a reply to a session that exists, and the brief that starts one
-/// that does not. They share a clock, a store, a strip and every rule about what happens when
-/// the moment arrives, so splitting them into two types would be two of everything below.
+/// that does not. They share a store, a strip and every rule about what happens when their
+/// trigger fires, so splitting them into two types would be two of everything below.
 ///
 /// **Images are deliberately absent.** A pasted screenshot is a file in a temporary directory,
 /// and a path written down now can name nothing by Monday — which is why `DraftStore` already
@@ -171,35 +171,68 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         }
     }
 
+    // MARK: - Trigger
+
+    /// What has to happen before the send is owed.
+    ///
+    /// A finish trigger is deliberately a session id rather than a snapshot of its title or
+    /// activity. The title may change while this waits, and the live activity edge is the only
+    /// authority on whether the current turn — including work it left running — has ended.
+    enum Trigger: Codable, Sendable, Equatable {
+        case time(TimeTrigger)
+        case sessionFinished(SessionID)
+
+        var dueAt: Date? {
+            guard case .time(let value) = self else { return nil }
+            return value.dueAt
+        }
+
+        var watchedSessionID: SessionID? {
+            guard case .sessionFinished(let id) = self else { return nil }
+            return id
+        }
+
+        var time: TimeTrigger? {
+            guard case .time(let value) = self else { return nil }
+            return value
+        }
+    }
+
+    /// The complete promise behind a clock-based trigger.
+    ///
+    /// Keeping these values together prevents a finish-triggered record from carrying a dummy
+    /// date or time zone. It also makes the persistence migration explicit: old records stored
+    /// these four fields at the top level and decode into this value below.
+    struct TimeTrigger: Codable, Sendable, Equatable {
+        var dueAt: Date
+        let intendedTimeZoneIdentifier: String
+        let intendedWallClock: DateComponents
+        let anchor: Anchor
+
+        var intendedTimeZone: TimeZone {
+            TimeZone(identifier: intendedTimeZoneIdentifier) ?? .current
+        }
+    }
+
     // MARK: - Properties
 
     let id: ScheduledMessageID
     let createdAt: Date
 
-    /// The instant, and what the user actually said.
-    ///
-    /// Both, because they disagree the moment a machine changes time zone: scheduling "tomorrow
-    /// at 09:00" in Stockholm and opening the laptop in New York fires at 03:00 while every
-    /// label relabels itself to 03:00 — which would make the sheet's named time zone a promise
-    /// the record could not keep. `ScheduledMessageScheduler` recomputes `dueAt` from the two
-    /// fields below when the system time zone changes.
-    var dueAt: Date
-    let intendedTimeZoneIdentifier: String
-    let intendedWallClock: DateComponents
-
     var target: Target
     var text: String
     var context: [ConversationContextAttachment]
-    var anchor: Anchor
+    var trigger: Trigger
     var state: State
 
     /// How many times a reset-anchored send has already stood aside for a window that had not
     /// actually reset. Bounded by `ScheduledResetPolicy`; see `ScheduledMessageDefaults`.
     var resetRearmCount: Int
 
-    var intendedTimeZone: TimeZone {
-        TimeZone(identifier: intendedTimeZoneIdentifier) ?? .current
-    }
+    var dueAt: Date? { trigger.dueAt }
+    var anchor: Anchor? { trigger.time?.anchor }
+    var intendedTimeZone: TimeZone? { trigger.time?.intendedTimeZone }
+    var intendedWallClock: DateComponents? { trigger.time?.intendedWallClock }
 
     // MARK: - Initialization
 
@@ -221,18 +254,103 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
 
         self.id = id
         self.createdAt = createdAt
-        self.dueAt = dueAt
-        self.intendedTimeZoneIdentifier = timeZone.identifier
-        self.intendedWallClock = wallClockCalendar.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: dueAt
-        )
+        self.trigger = .time(TimeTrigger(
+            dueAt: dueAt,
+            intendedTimeZoneIdentifier: timeZone.identifier,
+            intendedWallClock: wallClockCalendar.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: dueAt
+            ),
+            anchor: anchor
+        ))
         self.target = target
         self.text = text
         self.context = context
-        self.anchor = anchor
         self.state = state
         self.resetRearmCount = resetRearmCount
+    }
+
+    /// Builds a send that becomes owed when another conversation's current turn finishes.
+    init(
+        id: ScheduledMessageID = ScheduledMessageID(),
+        createdAt: Date = Date(),
+        whenSessionFinishes watchedSessionID: SessionID,
+        target: Target,
+        text: String,
+        context: [ConversationContextAttachment] = [],
+        state: State = .armed
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.target = target
+        self.text = text
+        self.context = context
+        self.trigger = .sessionFinished(watchedSessionID)
+        self.state = state
+        self.resetRearmCount = 0
+    }
+
+    // MARK: - Codable
+
+    /// New records keep the trigger as one value. The remaining keys are the pre-trigger shape,
+    /// decoded so an update never quarantines messages somebody already scheduled by time.
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case target
+        case text
+        case context
+        case trigger
+        case state
+        case resetRearmCount
+        case dueAt
+        case intendedTimeZoneIdentifier
+        case intendedWallClock
+        case anchor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(ScheduledMessageID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        target = try container.decode(Target.self, forKey: .target)
+        text = try container.decode(String.self, forKey: .text)
+        context = try container.decodeIfPresent(
+            [ConversationContextAttachment].self,
+            forKey: .context
+        ) ?? []
+        state = try container.decode(State.self, forKey: .state)
+        resetRearmCount = try container.decodeIfPresent(Int.self, forKey: .resetRearmCount) ?? 0
+
+        if let stored = try container.decodeIfPresent(Trigger.self, forKey: .trigger) {
+            trigger = stored
+        } else {
+            trigger = .time(TimeTrigger(
+                dueAt: try container.decode(Date.self, forKey: .dueAt),
+                intendedTimeZoneIdentifier: try container.decode(
+                    String.self,
+                    forKey: .intendedTimeZoneIdentifier
+                ),
+                intendedWallClock: try container.decode(
+                    DateComponents.self,
+                    forKey: .intendedWallClock
+                ),
+                anchor: try container.decode(Anchor.self, forKey: .anchor)
+            ))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(target, forKey: .target)
+        try container.encode(text, forKey: .text)
+        try container.encode(context, forKey: .context)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(state, forKey: .state)
+        try container.encode(resetRearmCount, forKey: .resetRearmCount)
     }
 
     // MARK: - Reading
@@ -247,7 +365,10 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && context.isEmpty
     }
 
-    func isDue(at now: Date) -> Bool { dueAt <= now }
+    func isDue(at now: Date) -> Bool {
+        guard let dueAt else { return false }
+        return dueAt <= now
+    }
 
     /// The prompt this becomes when it is finally sent.
     var prompt: ConversationPrompt {
@@ -262,7 +383,9 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         calendar: Calendar = .current,
         countingRearm: Bool = false
     ) -> ScheduledMessage {
-        ScheduledMessage(
+        guard case .time(let current) = trigger else { return self }
+
+        return ScheduledMessage(
             id: id,
             createdAt: createdAt,
             dueAt: newDueAt,
@@ -271,7 +394,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
             target: target,
             text: text,
             context: context,
-            anchor: anchor,
+            anchor: current.anchor,
             state: .armed,
             resetRearmCount: countingRearm ? resetRearmCount + 1 : resetRearmCount
         )

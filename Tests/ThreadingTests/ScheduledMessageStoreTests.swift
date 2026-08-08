@@ -84,6 +84,27 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertNoThrow(try store.add(message(to: session), now: now).get())
         XCTAssertEqual(store.messages(for: session).count, 1)
         XCTAssertEqual(store.all.first?.text, "Pick this up")
+        XCTAssertTrue(store.hasClockWorkPending)
+    }
+
+    func testAcceptsAFinishTriggerWithoutInventingAClockTime() {
+        let store = makeStore()
+        let watched = SessionID()
+        let message = ScheduledMessage(
+            createdAt: now,
+            whenSessionFinishes: watched,
+            target: .session(SessionID()),
+            text: "Review what it produced"
+        )
+
+        XCTAssertNoThrow(try store.add(message, now: now).get())
+        XCTAssertNil(store[message.id]?.dueAt)
+        XCTAssertTrue(store.due(at: now.addingTimeInterval(86_400)).isEmpty)
+        XCTAssertEqual(store.dueWhenSessionFinishes(watched).map(\.id), [message.id])
+        XCTAssertFalse(
+            store.hasClockWorkPending,
+            "an activity edge needs no five-minute polling heartbeat"
+        )
     }
 
     func testOrdersEverythingSoonestFirst() {
@@ -282,6 +303,26 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(store.messages(for: survivor).count, 1)
     }
 
+    func testDeletingAConversationWatchedByAnotherSendKeepsTheWordsAndFailsIt() {
+        let store = makeStore()
+        let watched = SessionID()
+        let target = SessionID()
+        let message = ScheduledMessage(
+            createdAt: now,
+            whenSessionFinishes: watched,
+            target: .session(target),
+            text: "Use the finished result"
+        )
+        store.add(message, now: now)
+
+        store.forget(sessionID: watched)
+
+        XCTAssertEqual(store.messages(for: target).map(\.text), ["Use the finished result"])
+        guard case .failed = store[message.id]?.state else {
+            return XCTFail("Deleting the watched conversation must not delete user-authored text")
+        }
+    }
+
     func testForgettingAProjectDropsItsScheduledStarts() {
         let store = makeStore()
         let project = ProjectID()
@@ -320,6 +361,51 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(reopened.messages(for: session).first?.text, "Still here tomorrow")
     }
 
+    func testFinishTriggerSurvivesBeingReadBackFromDisk() {
+        let watched = SessionID()
+        let written = makeStore()
+        let message = ScheduledMessage(
+            createdAt: now,
+            whenSessionFinishes: watched,
+            target: .session(SessionID()),
+            text: "Still waiting on that turn"
+        )
+        written.add(message, now: now)
+
+        let reopened = makeStore()
+
+        XCTAssertEqual(reopened[message.id]?.trigger, .sessionFinished(watched))
+    }
+
+    func testPreTriggerStoredShapeStillDecodes() throws {
+        let legacy = LegacyScheduledMessage(
+            id: ScheduledMessageID(),
+            createdAt: now,
+            dueAt: now.addingTimeInterval(3_600),
+            intendedTimeZoneIdentifier: TimeZone.current.identifier,
+            intendedWallClock: Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: now.addingTimeInterval(3_600)
+            ),
+            target: .session(SessionID()),
+            text: "Written by the previous release",
+            context: [],
+            anchor: .wallClock,
+            state: .armed,
+            resetRearmCount: 0
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(LegacyScheduledMessagesFile(messages: [legacy])).write(to: storeFile)
+
+        let reopened = makeStore()
+
+        XCTAssertEqual(reopened.all.first?.text, "Written by the previous release")
+        guard case .time = reopened.all.first?.trigger else {
+            return XCTFail("The pre-trigger clock fields should migrate into a time trigger")
+        }
+    }
+
     func testAnUnreadableFileIsMovedAsideRatherThanOverwritten() throws {
         try Data("not json at all".utf8).write(to: storeFile)
 
@@ -351,6 +437,24 @@ final class ScheduledMessageStoreTests: XCTestCase {
             """
         )
     }
+}
+
+private struct LegacyScheduledMessagesFile: Codable {
+    let messages: [LegacyScheduledMessage]
+}
+
+private struct LegacyScheduledMessage: Codable {
+    let id: ScheduledMessageID
+    let createdAt: Date
+    let dueAt: Date
+    let intendedTimeZoneIdentifier: String
+    let intendedWallClock: DateComponents
+    let target: ScheduledMessage.Target
+    let text: String
+    let context: [ConversationContextAttachment]
+    let anchor: ScheduledMessage.Anchor
+    let state: ScheduledMessage.State
+    let resetRearmCount: Int
 }
 
 // MARK: - Result Convenience

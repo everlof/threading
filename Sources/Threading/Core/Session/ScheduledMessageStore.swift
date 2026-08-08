@@ -13,7 +13,7 @@ import Foundation
 /// joined, and nothing here is: it is a handful of records read whole at launch. What it does
 /// need is the contract `DraftStore` and `SessionContinuityStore` already have — synchronous
 /// user-authored writes, and quarantine rather than deletion when the bytes will not decode. A
-/// scheduled message is a draft with a due time, so it lives where drafts live.
+/// scheduled message is a draft with a durable trigger, so it lives where drafts live.
 ///
 /// The store keeps no clock of its own and knows nothing about delivery. It answers what is
 /// waiting and records what became of it; `ScheduledMessageScheduler` owns when, and
@@ -74,7 +74,12 @@ final class ScheduledMessageStore {
     /// Everything waiting, soonest first. One order, everywhere: the strip, the review sheet and
     /// the scheduler all read a queue whose next item is its first.
     var all: [ScheduledMessage] {
-        messages.sorted { $0.dueAt < $1.dueAt }
+        messages.sorted {
+            let left = $0.dueAt ?? $0.createdAt
+            let right = $1.dueAt ?? $1.createdAt
+            if left != right { return left < right }
+            return $0.createdAt < $1.createdAt
+        }
     }
 
     /// What is waiting for one session's conversation.
@@ -98,12 +103,47 @@ final class ScheduledMessageStore {
     /// `isOwed`, not `isArmed`: a send that found its session busy is still owed an attempt, and
     /// filtering it out here is how it would wait forever for a retry that never came.
     func due(at now: Date) -> [ScheduledMessage] {
-        all.filter { $0.state.isOwed && $0.isDue(at: now) && !claimed.contains($0.id) }
+        all.filter { message in
+            guard message.state.isOwed, !claimed.contains(message.id) else { return false }
+
+            // `waiting` means the trigger already happened and delivery alone is standing by.
+            // It stays due even when its original trigger was another conversation finishing;
+            // otherwise that conversation beginning a later turn would arm this for the wrong
+            // finish edge.
+            if case .waiting = message.state { return true }
+            return message.isDue(at: now)
+        }
+    }
+
+    /// Armed sends whose selected conversation has just finished its current turn.
+    func dueWhenSessionFinishes(_ sessionID: SessionID) -> [ScheduledMessage] {
+        all.filter {
+            $0.state.isArmed
+                && $0.trigger.watchedSessionID == sessionID
+                && !claimed.contains($0.id)
+        }
+    }
+
+    /// Conversations with an armed finish condition, for remembering which current turns the
+    /// scheduler actually observed in flight. That memory is what distinguishes a real end edge
+    /// from an unrelated idle-state notification after relaunch.
+    var armedFinishSessionIDs: Set<SessionID> {
+        Set(messages.compactMap { message in
+            guard message.state.isArmed else { return nil }
+            return message.trigger.watchedSessionID
+        })
     }
 
     /// The soonest moment anything is waiting for, which is what a single timer is armed against.
     func nextDueDate(after now: Date) -> Date? {
-        all.first { $0.state.isArmed && $0.dueAt > now && !claimed.contains($0.id) }?.dueAt
+        all.compactMap { message -> Date? in
+            guard message.state.isArmed,
+                  let dueAt = message.dueAt,
+                  dueAt > now,
+                  !claimed.contains(message.id)
+            else { return nil }
+            return dueAt
+        }.min()
     }
 
     /// Sends the user still has a decision to make about — the review sheet's whole content.
@@ -111,10 +151,16 @@ final class ScheduledMessageStore {
         all.filter { $0.state.needsAttention }
     }
 
-    /// Whether anything at all is still expected to move on its own — what decides if the
-    /// scheduler keeps a heartbeat running.
-    var hasAnythingPending: Bool {
-        messages.contains { !$0.state.needsAttention }
+    /// Whether the clock can still change an outcome without an activity event.
+    ///
+    /// An armed finish trigger is intentionally absent: its authoritative session edge wakes
+    /// the scheduler, and a five-minute timer spinning for days would add no information. A
+    /// delivery already in `waiting` keeps the heartbeat so its patience can expire.
+    var hasClockWorkPending: Bool {
+        messages.contains { message in
+            if case .waiting = message.state { return true }
+            return message.state.isArmed && message.dueAt != nil
+        }
     }
 
     // MARK: - Writing
@@ -126,7 +172,7 @@ final class ScheduledMessageStore {
     @discardableResult
     func add(_ message: ScheduledMessage, now: Date = Date()) -> Result<ScheduledMessage, Refusal> {
         guard !message.isEmpty else { return .failure(.empty) }
-        guard message.dueAt > now else { return .failure(.inThePast) }
+        if let dueAt = message.dueAt, dueAt <= now { return .failure(.inThePast) }
         guard messages.count < ScheduledMessageDefaults.maximumTotal else {
             return .failure(.storeFull(limit: ScheduledMessageDefaults.maximumTotal))
         }
@@ -214,6 +260,7 @@ final class ScheduledMessageStore {
     func markMissed(before now: Date) -> [ScheduledMessage] {
         var missed: [ScheduledMessage] = []
         for index in messages.indices where messages[index].state.isArmed {
+            guard messages[index].dueAt != nil else { continue }
             guard messages[index].isDue(at: now) else { continue }
             messages[index].state = .missed
             missed.append(messages[index])
@@ -232,12 +279,15 @@ final class ScheduledMessageStore {
     @discardableResult
     func reanchorWallClockMoments(calendar: Calendar = .current) -> Bool {
         var changed = false
-        for index in messages.indices where messages[index].anchor == .wallClock {
+        for index in messages.indices {
+            guard case .time(var time) = messages[index].trigger,
+                  time.anchor == .wallClock else { continue }
             var wallClockCalendar = calendar
             wallClockCalendar.timeZone = .current
-            guard let moment = wallClockCalendar.date(from: messages[index].intendedWallClock),
-                  moment != messages[index].dueAt else { continue }
-            messages[index].dueAt = moment
+            guard let moment = wallClockCalendar.date(from: time.intendedWallClock),
+                  moment != time.dueAt else { continue }
+            time.dueAt = moment
+            messages[index].trigger = .time(time)
             changed = true
         }
         guard changed else { return false }
@@ -253,9 +303,28 @@ final class ScheduledMessageStore {
     /// one choke point every deletion route passes, and Settings ▸ Archived deletes sessions
     /// without going anywhere near the sidebar.
     func forget(sessionID: SessionID) {
-        let before = messages.count
-        messages.removeAll { $0.target.sessionID == sessionID }
-        guard messages.count != before else { return }
+        var changed = false
+        var retained: [ScheduledMessage] = []
+        retained.reserveCapacity(messages.count)
+
+        for var message in messages {
+            if message.target.sessionID == sessionID {
+                claimed.remove(message.id)
+                changed = true
+                continue
+            }
+            if message.trigger.watchedSessionID == sessionID {
+                message.state = .failed(L10n.string(
+                    "The conversation this was waiting for was deleted."
+                ))
+                claimed.remove(message.id)
+                changed = true
+            }
+            retained.append(message)
+        }
+
+        guard changed else { return }
+        messages = retained
         save()
     }
 
@@ -269,14 +338,35 @@ final class ScheduledMessageStore {
     /// Drops everything whose target is not in the given sets. The sweep for a store that has
     /// been edited behind the app's back — a session removed by a migration, say.
     func retainOnly(sessionIDs: Set<SessionID>, projectIDs: Set<ProjectID>) {
-        let before = messages.count
-        messages.removeAll { message in
+        var changed = false
+        var retained: [ScheduledMessage] = []
+        retained.reserveCapacity(messages.count)
+
+        for var message in messages {
+            let targetIsMissing: Bool
             switch message.target {
-            case .session(let id): return !sessionIDs.contains(id)
-            case .newSession(let plan): return !projectIDs.contains(plan.projectID)
+            case .session(let id): targetIsMissing = !sessionIDs.contains(id)
+            case .newSession(let plan): targetIsMissing = !projectIDs.contains(plan.projectID)
             }
+
+            if targetIsMissing {
+                claimed.remove(message.id)
+                changed = true
+                continue
+            }
+            if let watched = message.trigger.watchedSessionID,
+               !sessionIDs.contains(watched) {
+                message.state = .failed(L10n.string(
+                    "The conversation this was waiting for was deleted."
+                ))
+                claimed.remove(message.id)
+                changed = true
+            }
+            retained.append(message)
         }
-        guard messages.count != before else { return }
+
+        guard changed else { return }
+        messages = retained
         save()
     }
 

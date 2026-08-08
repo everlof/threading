@@ -17,6 +17,7 @@ extension ConversationViewController {
     /// Built fresh on every open, so a window that reset in the last five minutes is not still
     /// being offered as a moment to aim at.
     func scheduleMenuEntries() -> [ThemedMenuEntry] {
+        let finishCandidates = ScheduledFinishCandidates.current()
         let account = AgentAccountDiscovery.account(
             for: agentSession.kind,
             handle: agentSession.accountHandle
@@ -25,12 +26,15 @@ extension ConversationViewController {
 
         return ScheduleMenu.entries(
             usage: account.flatMap { AccountUsageService.shared.usage(for: $0) },
-            metering: agentSession.model
+            metering: agentSession.model,
+            canWaitForConversation: !finishCandidates.isEmpty
         ) { [weak self] choice in
             guard let self else { return }
             switch choice {
             case .at(let date, let anchor):
                 self.scheduleComposerContents(at: date, anchor: anchor)
+            case .whenConversationFinishes:
+                self.presentScheduledFinishPicker(candidates: finishCandidates)
             case .custom:
                 ScheduleMessageAlert.present(
                     over: self.view.window,
@@ -41,6 +45,18 @@ extension ConversationViewController {
                 }
             }
         }
+    }
+
+    private func presentScheduledFinishPicker(candidates: [ScheduledFinishCandidate]) {
+        guard !candidates.isEmpty else { return }
+        let picker = ScheduledFinishPickerViewController(candidates: candidates)
+        picker.onPick = { [weak self, weak picker] candidate in
+            guard let self, let picker else { return }
+            self.dismiss(picker)
+            guard let candidate else { return }
+            self.scheduleComposerContents(whenSessionFinishes: candidate.id)
+        }
+        presentAsSheet(picker)
     }
 
     // MARK: - Scheduling
@@ -64,13 +80,43 @@ extension ConversationViewController {
             anchor: anchor
         )
 
+        storeComposerContents(message)
+    }
+
+    func scheduleComposerContents(whenSessionFinishes watchedSessionID: SessionID) {
+        let prompt = ConversationPrompt(
+            text: promptView.stringValue,
+            context: promptView.contextAttachments
+        )
+        guard !prompt.isEmpty else { return }
+
+        let message = ScheduledMessage(
+            whenSessionFinishes: watchedSessionID,
+            target: .session(sessionID),
+            text: prompt.text,
+            context: prompt.context
+        )
+        guard storeComposerContents(message) else { return }
+
+        // The watched turn may have ended while the sheet was open, after its last activity
+        // event but before the record reached disk. Re-read the settled snapshot exactly once.
+        ScheduledMessageScheduler.shared.evaluateCompletion(
+            of: watchedSessionID,
+            acceptsSettledSnapshot: true
+        )
+    }
+
+    @discardableResult
+    private func storeComposerContents(_ message: ScheduledMessage) -> Bool {
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
             promptView.clear()
             SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
             refreshScheduledStrip()
+            return true
         case .failure(let refusal):
             apply(timeline.appendNotice(ScheduledRefusalText.sentence(for: refusal), kind: .error))
+            return false
         }
     }
 
@@ -86,7 +132,7 @@ extension ConversationViewController {
                 ScheduledMessageStripView.Row(
                     id: message.id,
                     summary: message.summary,
-                    timing: ScheduledTiming.sentence(for: message.dueAt, from: now),
+                    timing: ScheduledTiming.sentence(for: message, from: now),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
             }
@@ -139,6 +185,17 @@ extension ConversationViewController {
 /// three different ways.
 @MainActor
 enum ScheduledTiming {
+
+    static func sentence(for message: ScheduledMessage, from now: Date = Date()) -> String {
+        switch message.trigger {
+        case .time(let time):
+            return sentence(for: time.dueAt, from: now)
+        case .sessionFinished(let sessionID):
+            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
+                ?? L10n.string("Conversation")
+            return L10n.format("When “%@” finishes", title)
+        }
+    }
 
     static func sentence(for date: Date, from now: Date = Date()) -> String {
         L10n.format(

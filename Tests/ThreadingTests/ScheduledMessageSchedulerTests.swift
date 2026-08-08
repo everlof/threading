@@ -22,6 +22,8 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
     private var store: ScheduledMessageStore!
     private var clock: Date!
     private var reportingSessions: Set<SessionID> = []
+    private var activities: [SessionID: SessionActivity] = [:]
+    private var missingSessions: Set<SessionID> = []
 
     private let start = Date(timeIntervalSince1970: 1_775_000_000)
 
@@ -36,6 +38,8 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         store = ScheduledMessageStore(directory: directory, center: center)
         clock = start
         reportingSessions = []
+        activities = [:]
+        missingSessions = []
     }
 
     override func tearDown() {
@@ -53,7 +57,9 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
             center: center,
             workspaceCenter: workspaceCenter,
             now: { [unowned self] in self.clock },
-            reportsOwnTurns: { [unowned self] in self.reportingSessions.contains($0) }
+            activity: { [unowned self] in self.activities[$0] ?? .idle },
+            reportsOwnTurns: { [unowned self] in self.reportingSessions.contains($0) },
+            sessionExists: { [unowned self] in !self.missingSessions.contains($0) }
         )
     }
 
@@ -92,6 +98,21 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         return message
     }
 
+    @discardableResult
+    private func schedule(
+        whenSessionFinishes watchedSessionID: SessionID,
+        to targetSessionID: SessionID = SessionID()
+    ) -> ScheduledMessage {
+        let message = ScheduledMessage(
+            createdAt: clock,
+            whenSessionFinishes: watchedSessionID,
+            target: .session(targetSessionID),
+            text: "Carry on with the finished result"
+        )
+        store.add(message, now: clock)
+        return message
+    }
+
     // MARK: - Announcing
 
     func testAnnouncesASendWhoseMomentHasArrived() {
@@ -118,6 +139,203 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.evaluate()
 
         XCTAssertTrue(recorder.ids.isEmpty)
+    }
+
+    // MARK: - Another Conversation Finishing
+
+    func testAnnouncesAFinishTriggeredSendOnTheAuthoritativeTurnEnd() {
+        let watched = SessionID()
+        reportingSessions.insert(watched)
+        activities[watched] = .working
+        let recorder = DueRecorder(center: center)
+        let message = schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        XCTAssertTrue(recorder.ids.isEmpty)
+        activities[watched] = .needsAttention
+        center.post(SessionActivityDidChange(sessionID: watched))
+
+        XCTAssertEqual(recorder.ids, [message.id])
+    }
+
+    func testDoesNotReadAQuestionInsideTheTurnAsFinished() {
+        let watched = SessionID()
+        reportingSessions.insert(watched)
+        activities[watched] = .working
+        let recorder = DueRecorder(center: center)
+        schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        activities[watched] = .awaitingUser
+        center.post(SessionActivityDidChange(sessionID: watched))
+
+        XCTAssertTrue(recorder.ids.isEmpty)
+    }
+
+    func testDoesNotTriggerFromInferredTerminalQuietness() {
+        let watched = SessionID()
+        activities[watched] = .working
+        let recorder = DueRecorder(center: center)
+        schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        activities[watched] = .idle
+        center.post(SessionActivityDidChange(sessionID: watched))
+
+        XCTAssertTrue(
+            recorder.ids.isEmpty,
+            "A terminal going quiet is not strong enough evidence for an unattended send"
+        )
+    }
+
+    func testASettledSnapshotClosesThePickerRace() {
+        let watched = SessionID()
+        activities[watched] = .idle
+        let recorder = DueRecorder(center: center)
+        let message = schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        scheduler.evaluateCompletion(of: watched, acceptsSettledSnapshot: true)
+
+        XCTAssertEqual(recorder.ids, [message.id])
+    }
+
+    func testRelaunchDoesNotPretendADormantSessionFinishedWhileThreadingWasClosed() {
+        let watched = SessionID()
+        reportingSessions.insert(watched)
+        activities[watched] = .dormant
+        let recorder = DueRecorder(center: center)
+        let message = schedule(whenSessionFinishes: watched)
+
+        makeScheduler().start()
+
+        XCTAssertTrue(recorder.ids.isEmpty)
+        XCTAssertEqual(store[message.id]?.state, .armed)
+    }
+
+    func testAnIdleNotificationAfterRelaunchIsNotInventedIntoAFinishEdge() {
+        let watched = SessionID()
+        reportingSessions.insert(watched)
+        activities[watched] = .idle
+        let recorder = DueRecorder(center: center)
+        let message = schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        // SessionStart raises this even when the activity did not move. The scheduler did not
+        // witness the old turn running, so an idle snapshot cannot prove that turn just ended.
+        center.post(SessionActivityDidChange(sessionID: watched))
+        XCTAssertTrue(recorder.ids.isEmpty)
+        XCTAssertEqual(store[message.id]?.state, .armed)
+
+        // A later turn is observed on both sides of the boundary and can satisfy the condition.
+        activities[watched] = .working
+        center.post(SessionActivityDidChange(sessionID: watched))
+        activities[watched] = .idle
+        center.post(SessionActivityDidChange(sessionID: watched))
+
+        XCTAssertEqual(recorder.ids, [message.id])
+    }
+
+    func testWaitingDeliveryStaysSatisfiedIfTheWatchedConversationStartsAgain() {
+        let watched = SessionID()
+        let target = SessionID()
+        reportingSessions.formUnion([watched, target])
+        activities[watched] = .working
+        activities[target] = .working
+        let recorder = DueRecorder(center: center)
+        let message = schedule(whenSessionFinishes: watched, to: target)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        activities[watched] = .idle
+        center.post(SessionActivityDidChange(sessionID: watched))
+        scheduler.noteWaiting(message.id)
+        store.setState(.waiting("Waiting for the destination"), for: message.id)
+
+        activities[watched] = .working
+        activities[target] = .idle
+        center.post(SessionActivityDidChange(sessionID: target))
+
+        XCTAssertEqual(
+            recorder.ids,
+            [message.id, message.id],
+            "Once the finish happened, delivery waits only for its destination"
+        )
+    }
+
+    func testADeletedWatchedConversationFailsWithoutDroppingTheMessage() {
+        let watched = SessionID()
+        missingSessions.insert(watched)
+        let message = schedule(whenSessionFinishes: watched)
+        let scheduler = makeScheduler()
+        scheduler.start()
+
+        scheduler.evaluateCompletion(of: watched, acceptsSettledSnapshot: true)
+
+        guard case .failed = store[message.id]?.state else {
+            return XCTFail("The message should remain for the user with a reason")
+        }
+    }
+
+    func testFinishPickerOffersOnlyWorkingSessionsWithExactTurnBoundaries() {
+        let exact = AgentSession(
+            kind: .claude,
+            title: "Exact working turn",
+            accountHandle: .named("work")
+        )
+        let inferred = AgentSession(kind: .grok, title: "Only inferred")
+        let idle = AgentSession(kind: .codex, title: "Already idle")
+        var archived = AgentSession(kind: .claude, title: "Archived")
+        archived.isArchived = true
+        var project = Project(
+            name: "Scheduler",
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        project.sessions = [exact, inferred, idle, archived]
+
+        let candidates = ScheduledFinishCandidates.make(
+            projects: [project],
+            activity: { id in id == idle.id ? .idle : .working },
+            reportsOwnTurns: { id in id != inferred.id }
+        )
+
+        XCTAssertEqual(candidates.map(\.id), [exact.id])
+        XCTAssertEqual(candidates.first?.projectName, "Scheduler")
+        XCTAssertEqual(candidates.first?.agentName, "Claude Code · work")
+    }
+
+    func testFinishPickerScansStoredSessionsAsValuesAndBuildsOnlyLiveCandidates() {
+        var project = Project(
+            name: "Stress",
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        project.sessions = (0..<5_000).map {
+            AgentSession(kind: .claude, title: "Conversation \($0)")
+        }
+        let working = Set(project.sessions.suffix(3).map(\.id))
+        var activityReads = 0
+        var boundaryReads = 0
+
+        let candidates = ScheduledFinishCandidates.make(
+            projects: [project],
+            activity: { id in
+                activityReads += 1
+                return working.contains(id) ? .working : .idle
+            },
+            reportsOwnTurns: { _ in
+                boundaryReads += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(activityReads, 5_000)
+        XCTAssertEqual(boundaryReads, 3, "idle sessions should not need a capability lookup")
+        XCTAssertEqual(candidates.map(\.id), Array(project.sessions.suffix(3).map(\.id)))
     }
 
     func testWakingFromSleepIsWhatCatchesATimerThatSleptThroughItsMoment() {
@@ -259,7 +477,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 
     // MARK: - The Clock Itself Moving
 
-    func testATimeZoneChangeReDerivesWhatTheUserActuallyAskedFor() {
+    func testATimeZoneChangeReDerivesWhatTheUserActuallyAskedFor() throws {
         let calendar = Calendar(identifier: .gregorian)
         var stockholm = calendar
         stockholm.timeZone = TimeZone(identifier: "Europe/Stockholm")!
@@ -287,9 +505,168 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         var local = Calendar.current
         local.timeZone = .current
         XCTAssertEqual(
-            local.component(.hour, from: store[message.id]!.dueAt),
-            message.intendedWallClock.hour,
+            local.component(.hour, from: try XCTUnwrap(store[message.id]!.dueAt)),
+            try XCTUnwrap(message.intendedWallClock).hour,
             "The record keeps what was said as well as when it resolved to; this is why"
         )
+    }
+}
+
+/// The finish-trigger sheet is a real external-cardinality picker, not a menu with one view per
+/// session. These tests hold its search/selection contract and exercise the same loaded view
+/// through live theme changes, including the runtime theme-boundary audit.
+@MainActor
+final class ScheduledFinishPickerTests: XCTestCase {
+
+    func testScheduleMenuOffersTheFinishPickerOnlyWhenItHasAReliableCandidate() throws {
+        var choseFinish = false
+        let enabled = ScheduleMenu.entries(canWaitForConversation: true) { choice in
+            if case .whenConversationFinishes = choice { choseFinish = true }
+        }
+        let enabledItem = try XCTUnwrap(item(
+            titled: L10n.string("When a conversation finishes…"),
+            in: enabled
+        ))
+        XCTAssertTrue(enabledItem.isEnabled)
+        enabledItem.onChoose?()
+        XCTAssertTrue(choseFinish)
+
+        let disabled = ScheduleMenu.entries(canWaitForConversation: false) { _ in }
+        let disabledItem = try XCTUnwrap(item(
+            titled: L10n.string("When a conversation finishes…"),
+            in: disabled
+        ))
+        XCTAssertFalse(disabledItem.isEnabled)
+        XCTAssertEqual(
+            disabledItem.subtitle,
+            L10n.string("No conversations with reliable finish signals are working.")
+        )
+    }
+
+    func testSearchSelectsAndReturnsAWorkingConversation() {
+        let build = candidate(title: "Build the release", project: "Threading", kind: .codex)
+        let docs = candidate(title: "Rewrite the guide", project: "Website", kind: .claude)
+        let picker = ScheduledFinishPickerViewController(candidates: [build, docs])
+        picker.loadView()
+
+        picker.updateSearchQuery("website")
+        waitUntil { picker.visibleSessionIDs == [docs.id] }
+
+        XCTAssertEqual(picker.selectedSessionIDForTesting, docs.id)
+        XCTAssertTrue(picker.scheduleButtonIsEnabledForTesting)
+
+        var picked: ScheduledFinishCandidate?
+        picker.onPick = { picked = $0 }
+        picker.confirm()
+        XCTAssertEqual(picked, docs)
+    }
+
+    func testAnEmptySearchResultCannotScheduleTheWrongConversation() {
+        let picker = ScheduledFinishPickerViewController(candidates: [
+            candidate(title: "Build the release", project: "Threading", kind: .codex)
+        ])
+        picker.loadView()
+
+        picker.updateSearchQuery("no such conversation")
+        waitUntil { picker.visibleSessionIDs.isEmpty }
+
+        XCTAssertNil(picker.selectedSessionIDForTesting)
+        XCTAssertFalse(picker.scheduleButtonIsEnabledForTesting)
+    }
+
+    func testPickerPassesTheThemeBoundaryAndRendersDistinctLiveThemes() throws {
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+
+        let picker = ScheduledFinishPickerViewController(candidates: [
+            candidate(title: "Build the release", project: "Threading", kind: .codex),
+            candidate(title: "Check localization", project: "Threading", kind: .claude),
+            candidate(title: "Publish the guide", project: "Website", kind: .claude)
+        ])
+        picker.loadView()
+        picker.view.layoutSubtreeIfNeeded()
+
+        let table = try XCTUnwrap(
+            descendants(of: picker.view).compactMap { $0 as? ThemedTableView }.first
+        )
+        XCTAssertEqual(table.accessibilityLabel(), L10n.string("Working conversations"))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: picker.view), [])
+
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+            URL(fileURLWithPath: $0)
+        } ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+        var renders = Set<Data>()
+        for (name, theme, appearance) in variants {
+            // One loaded surface receives each change. Recreating it here would not prove the
+            // sheet follows a live theme switch while it is open.
+            AppThemeLibrary.apply(theme)
+            picker.view.appearance = NSAppearance(named: appearance)
+            picker.view.layoutSubtreeIfNeeded()
+            let twoLines = Design.Typography.lineHeight(of: Design.Typography.body())
+                + Design.Typography.lineHeight(of: Design.Typography.subheading())
+                + Design.Spacing.hairline
+                + 2 * Design.Spacing.small
+            XCTAssertGreaterThanOrEqual(
+                table.rowHeight,
+                twoLines,
+                "\(name): adjacent conversation rows overlap"
+            )
+            let data = try renderedPNG(of: picker.view)
+            renders.insert(data)
+            try data.write(to: directory.appendingPathComponent("scheduled-finish-\(name).png"))
+        }
+
+        XCTAssertEqual(renders.count, variants.count, "the open picker ignored a theme change")
+    }
+
+    private func candidate(
+        title: String,
+        project: String,
+        kind: AgentKind
+    ) -> ScheduledFinishCandidate {
+        ScheduledFinishCandidate(
+            id: SessionID(),
+            title: title,
+            projectName: project,
+            agentName: kind.displayName,
+            agentKindRawValue: kind.rawValue
+        )
+    }
+
+    private func waitUntil(_ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(condition(), "the detached picker filter did not publish its result")
+    }
+
+    private func descendants(of root: NSView) -> [NSView] {
+        [root] + root.subviews.flatMap(descendants)
+    }
+
+    private func item(
+        titled title: String,
+        in entries: [ThemedMenuEntry]
+    ) -> ThemedMenuItem? {
+        entries.compactMap { entry in
+            guard case .item(let item) = entry, item.title == title else { return nil }
+            return item
+        }.first
+    }
+
+    private func renderedPNG(of view: NSView) throws -> Data {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
     }
 }
