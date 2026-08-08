@@ -697,16 +697,16 @@ enum SidebarRowDefaults {
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
 
-    /// Width of a *session* row's trailing slot, which carries two buttons on hover.
+    /// Expanded width of a *session* row's trailing slot, which carries two buttons on hover.
     ///
     /// Stated as the pair's full width rather than one button's, so both buttons lie inside
     /// the slot. A button pinned to the slot's edge and allowed to overhang it draws
     /// perfectly and cannot be clicked at all: `NSView.hitTest` stops at the container's
     /// bounds, which is the same class of bug as the `⋯` the status dot used to swallow.
     ///
-    /// The cost is real and deliberate — the title gives up this much width on every row,
-    /// hovered or not, because a slot that resized under the pointer would re-lay out the
-    /// row as the pointer crossed it.
+    /// At rest the row reserves only `trailingSlotSize` for its status. It pays this full width
+    /// while the buttons are visible, when yielding that title space describes what is actually
+    /// on screen rather than taxing every truncated title for controls nobody can see.
     static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
     static let projectTrailingSlotWidth: CGFloat = sessionTrailingSlotWidth
 

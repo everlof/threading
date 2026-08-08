@@ -757,6 +757,14 @@ The vocabulary these encode, which new work should follow:
   which keeps the buttons inside the slot they are sized into.
   `SidebarRowRenderTests.testEveryTrailingMarkLandsOnOneOpticalLine` asserts the one line.
 
+  **Only visible controls earn width.** A session row rests with one inline target reserved for
+  its 12pt status mark, then expands the trailing slot to two targets before the `...` and archive
+  actions fade in. On exit it collapses only after they have faded out, so a visible target never
+  overhangs the parent that hit-tests it. The title yielding while two controls are on screen is
+  honest; permanently truncating every title for an invisible second target was not. The hover
+  transition re-lays out only the recycled row under the pointer, so session cardinality never
+  reaches that path.
+
   `ThemedTabItemView` is the same rule at the other end of a much shorter row, and was the last
   container not following it: a 12pt × inside a 20pt target put the "10pt after the title" at 14
   and the "12pt from the tab's edge" at 16, while the leading icon — a 14pt symbol in a 16pt slot

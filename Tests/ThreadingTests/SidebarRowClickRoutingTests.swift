@@ -144,11 +144,33 @@ final class SidebarRowClickRoutingTests: XCTestCase {
     func testEveryPointOfARowsTrailingButtonsReachesThemRatherThanTheList() throws {
         let themed = hostedOutline { ThemedOutlineView(frame: .zero) }
 
-        // Not hovered: the reveal is an `alphaValue` crossfade, and alpha is not a hit-testing
-        // gate. Asserting through the fade would be asserting the animation, not the target.
+        // Entering expands the trailing slot synchronously, before the alpha crossfade begins.
+        // That ordering is the contract under test: both targets must already be reachable while
+        // they fade in, even though an unhovered row only reserves room for its status indicator.
+        let row = themed.source.row
+        let location = row.convert(
+            NSPoint(x: row.bounds.midX, y: row.bounds.midY),
+            to: nil
+        )
+        let entered = try XCTUnwrap(
+            NSEvent.enterExitEvent(
+                with: .mouseEntered,
+                location: location,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: row.window?.windowNumber ?? 0,
+                context: nil,
+                eventNumber: 0,
+                trackingNumber: 0,
+                userData: nil
+            )
+        )
+        row.mouseEntered(with: entered)
+        themed.root.layoutSubtreeIfNeeded()
+
         for identifier in ["sidebar.session.archive", "sidebar.session.actions"] {
             let button = try XCTUnwrap(
-                descendants(of: themed.source.row)
+                descendants(of: row)
                     .first { $0.accessibilityIdentifier() == identifier },
                 "the row grew no \(identifier)"
             )

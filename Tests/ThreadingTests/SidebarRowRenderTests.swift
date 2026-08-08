@@ -62,12 +62,21 @@ final class SidebarRowRenderTests: XCTestCase {
             title: "Refactor the sidebar trailing slot and its hover controls"
         )
 
+        // The same title at rest: it should visibly reclaim the inboard action target while
+        // leaving the status on the same trailing line.
+        written += try write(
+            story: "06-long-title-at-rest",
+            activity: .idle,
+            hovered: false,
+            title: "Refactor the sidebar trailing slot and its hover controls"
+        )
+
         // Hovered on the *selected* row — the state where the row's ground is the theme's accent
         // rather than the sidebar's surface, and the one the `⋯` and archive were once drawn
         // wrong in: they kept the chrome's label over a block of colour it was never measured
         // against. What to look for is that the pair reads as the title beside it does.
         written += try write(
-            story: "06-hovered-and-selected",
+            story: "07-hovered-and-selected",
             activity: .idle,
             hovered: true,
             selected: true
@@ -76,7 +85,7 @@ final class SidebarRowRenderTests: XCTestCase {
         // Pinning changes the row's order under every sort, and the filled pin beside the title
         // makes that durable state visible even when the row would have led the list anyway.
         written += try write(
-            story: "07-pinned-at-rest",
+            story: "08-pinned-at-rest",
             activity: .idle,
             hovered: false,
             pinned: true
@@ -85,14 +94,14 @@ final class SidebarRowRenderTests: XCTestCase {
         // On a selected row the pin must use the selection's ink rather than disappearing into
         // the same accent that fills the row.
         written += try write(
-            story: "08-pinned-and-selected",
+            story: "09-pinned-and-selected",
             activity: .idle,
             hovered: false,
             selected: true,
             pinned: true
         )
 
-        XCTAssertEqual(written, 16, "Every story should render in both appearances")
+        XCTAssertEqual(written, 18, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 

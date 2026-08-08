@@ -36,12 +36,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The buttons the pointer reveals, crossfaded against the status indicator as one.
     ///
     /// Sized into the slot rather than overhanging it — see `sessionTrailingSlotWidth` for why
-    /// the slot pays for both buttons even at rest.
+    /// the slot expands before these buttons appear.
     private let hoverControls = NSStackView()
 
-    /// Fixed-size container holding the status indicator and the hover controls overlaid,
-    /// so swapping between them on hover never re-lays out the row.
+    /// Container holding the status indicator and the hover controls overlaid. At rest it pays
+    /// for the status target alone; under the pointer it expands to contain both actions.
     private let trailingSlot = NSView()
+    private var trailingSlotWidthConstraint: NSLayoutConstraint?
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -421,10 +422,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         trailingSlot.addSubview(statusIndicator)
         trailingSlot.addSubview(hoverControls)
 
+        let width = trailingSlot.widthAnchor.constraint(
+            equalToConstant: SidebarRowDefaults.trailingSlotSize
+        )
+        trailingSlotWidthConstraint = width
         NSLayoutConstraint.activate([
-            trailingSlot.widthAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.sessionTrailingSlotWidth
-            ),
+            width,
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
 
             // On the archive button's centre rather than the slot's: the archive button holds
@@ -575,20 +578,42 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         popover = nil
     }
 
-    /// Crossfades the trailing slot between status and actions. Both stay installed at a
-    /// fixed size, so the title never re-wraps under the pointer.
+    /// Crossfades the trailing slot between status and actions. The resting row reserves one
+    /// inline target; the title yields the second target only while both actions are visible.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
+        if visible {
+            setTrailingSlotExpanded(true)
+        }
+
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
             statusIndicator.alphaValue = visible ? 0 : 1
+            setTrailingSlotExpanded(visible)
             return
         }
 
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
             statusIndicator.animator().alphaValue = visible ? 0 : 1
-        }
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !visible, !self.isHovered else { return }
+                self.setTrailingSlotExpanded(false)
+            }
+        })
+    }
+
+    /// Keeps invisible controls from taxing every title. Expansion happens before the actions
+    /// fade in so both targets remain inside the hit-tested parent; collapse waits until the fade
+    /// out completes so a visible button never overhangs it.
+    private func setTrailingSlotExpanded(_ expanded: Bool) {
+        let target = expanded
+            ? SidebarRowDefaults.sessionTrailingSlotWidth
+            : SidebarRowDefaults.trailingSlotSize
+        guard trailingSlotWidthConstraint?.constant != target else { return }
+        trailingSlotWidthConstraint?.constant = target
+        layoutSubtreeIfNeeded()
     }
 
     private func actionClicked() {

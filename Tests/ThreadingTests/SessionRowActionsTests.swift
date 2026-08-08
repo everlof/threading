@@ -496,6 +496,44 @@ final class SessionRowActionsTests: XCTestCase {
         }
     }
 
+    /// Invisible hover actions do not earn permanent title width. The status keeps one inline
+    /// target at rest; entering the row makes room for both controls before they can take clicks.
+    func testTheTrailingSlotOnlyPaysForVisibleContent() throws {
+        let (host, row) = hostedRow()
+        row.configure(
+            with: session("A session title long enough to absorb the available width"),
+            activity: .working
+        )
+        host.layoutSubtreeIfNeeded()
+
+        let slot = try view(named: "sidebar.session.trailing", in: row)
+        let title = try view(named: "sidebar.session.title", in: row)
+        let restingTitleWidth = title.frame.width
+
+        XCTAssertEqual(
+            slot.frame.width,
+            SidebarRowDefaults.trailingSlotSize,
+            accuracy: 0.5,
+            "an unhovered row reserved room for actions it was not showing"
+        )
+
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            slot.frame.width,
+            SidebarRowDefaults.sessionTrailingSlotWidth,
+            accuracy: 0.5,
+            "the hovered row did not expand to contain both action targets"
+        )
+        XCTAssertGreaterThan(
+            restingTitleWidth,
+            title.frame.width,
+            "the resting title did not reclaim the invisible action's width"
+        )
+    }
+
     /// The archive button is the *outer* of the pair. Stated as an assertion because the order
     /// is the request, not an accident of how the stack was built.
     func testTheArchiveButtonSitsOutboardOfTheActionsButton() throws {
