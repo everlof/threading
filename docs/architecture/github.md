@@ -58,6 +58,31 @@ environment last — and both POST through the credential chain above. The repos
 constant, not a setting: a field pointing it elsewhere would let one user file this app's
 diagnostics into a stranger's tracker.
 
+### What the environment carries
+
+`GitHubIssueEnvironment` is the floor: version, build, macOS, and nothing else. A capture from
+the inspector closes with `InspectorEnvironment` instead, which *opens* with that same line and
+adds what a picture cannot say — the app theme and the appearance it resolved to, whether the
+window is wearing the theme's own frame or AppKit's, the window's size, backing scale and
+fullscreen state, the terminal in view with the scope that chose its palette and the font it is
+set in, the text size, and any chrome font, display accommodation or interface language that is
+not the default. Most
+visual complaints are conditional on exactly these: the row clipped under one theme, the overlap
+that appears only at the largest text size, the frame numbers that are half what an agent
+measuring the PNG counts because the window is retina.
+
+The safety rule is unchanged and is what bounds the list: a ticket outlives the conversation, so
+every value must be safe **by construction** rather than by review. Each one is a choice from a
+fixed catalogue — a stock theme's name, a named text size, a font family installed on the
+machine. A theme the user made and named is reported as `custom`, and a terminal palette that
+follows the app theme is reported as following it rather than by the name it borrowed, which
+would have leaked the same string by the back door.
+
+The sheet holds that block **apart from** the report text, because it is said in three places
+and must be said once in each: the details box, Copy Report, and the ticket, whose composer
+appends an environment under a rule of its own. A report string carrying its own environment
+arrived on GitHub with the build line printed twice.
+
 A write is not a read, and three rules are the POST's own:
 
 - **Anonymous never posts.** It cannot create an issue under any circumstance, so sending it
@@ -101,16 +126,34 @@ Every primary-button press advances exactly one external transition:
   ready pull request;
 - an existing pull request is opened, or a newer local head is pushed.
 
-"Create draft" and "create ready" are therefore shortcuts after an explicit click, never
-background automation. Uncommitted work is called out and remains local. Pushes and creations get
-bounded durable receipts naming the repository, branch, resulting URL, and credential tier where
-one was used.
+"Create draft" and "create ready" are therefore shortcuts after an explicit click, never inferred
+background automation. The one other authorization surface is a managed-workspace draft: its
+separate, nested publication checkbox explicitly grants Threading permission to publish after the
+agent's finish handshake. It is still off by default, and enabling isolation alone never grants
+it. Uncommitted work is called out and remains local. Pushes and creations get bounded durable
+receipts naming the repository, branch, resulting URL, and credential tier where one was used.
 
 Reads use the normal credential-tier walk because they are idempotent. Creation may walk after an
 explicit 401/403/404 refusal, but it **never retries after a transport failure**: GitHub may have
 accepted the POST before the connection failed. A 2xx response that cannot be decoded is treated
 the same way. With no usable API credential, the client opens GitHub's prefilled compare form and
 does not issue an anonymous POST.
+
+Managed-workspace publication is unattended, so it narrows that policy further. It preflights a
+native token before pushing and never uses the browser fallback: a compare page cannot complete
+the promised archive-and-dispose transaction. The session UUID deterministically names an opaque
+remote-only branch, discovery precedes creation so a retry can reuse the review, and the review
+receipt is durable before the local worktree is removed. GitHub wire details stop at the adapter;
+the managed-workspace record speaks only in provider, repository, remote branch, review number,
+URL, and draft state.
+
+That receipt also closes the remote-ref lifecycle. A background reconciler reads the pull request
+by number because the branch discovery endpoint intentionally returns only open reviews. Open
+means no Git write. Closed or merged permits one comparison against the recorded branch and head
+commit; an exact match is deleted with a force-with-lease compare-and-swap, while a moved ref is
+never treated as Threading's property merely because its name still begins with `threading/`.
+GitHub's own auto-delete is accepted as `alreadyAbsent`. Launch, app activation and a low-frequency
+heartbeat cover reviews completed while Threading was quit, elsewhere, or still in the foreground.
 
 ### The screenshot is not in the issue, and cannot be
 

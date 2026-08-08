@@ -140,7 +140,7 @@ enum RemoteGitReviewBridge {
 
     private static func repositoryRoot(for sessionID: SessionID) -> URL? {
         guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-              let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
             return nil
         }
         return GitInfo.repositoryRoot(for: project.folderPath)

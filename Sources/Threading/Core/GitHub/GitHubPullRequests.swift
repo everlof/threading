@@ -10,6 +10,13 @@ struct ChangeRequestRepository: Equatable, Sendable {
 
     var slug: String { "\(owner)/\(name)" }
 
+    /// The provider adapters Threading can publish through today. Callers use this entry point
+    /// rather than reaching for the GitHub parser, so adding GitLab does not change their model
+    /// or their capability check.
+    static func supported(remote: String) -> ChangeRequestRepository? {
+        github(remote: remote)
+    }
+
     static func github(remote: String) -> ChangeRequestRepository? {
         guard let identity = GitRemoteIdentity(remote: remote),
               identity.host == GitHubDefaults.webHost else { return nil }
@@ -89,6 +96,23 @@ enum ChangeRequestReadOutcome: Equatable, Sendable {
     case failed(message: String)
 }
 
+enum ChangeRequestLifecycleState: Equatable, Sendable {
+    case open
+    case closed(merged: Bool)
+}
+
+struct ChangeRequestLifecycle: Equatable, Sendable {
+    let number: Int
+    let state: ChangeRequestLifecycleState
+    let headBranch: String
+    let headRevision: String
+}
+
+enum ChangeRequestLifecycleOutcome: Equatable, Sendable {
+    case loaded(ChangeRequestLifecycle)
+    case failed(message: String)
+}
+
 enum ChangeRequestWriteOutcome: Equatable, Sendable {
     case created(ChangeRequestSummary, tier: GitHubCredential.Tier)
     case webForm(URL, message: String)
@@ -122,6 +146,14 @@ struct GitHubPullRequestClient: Sendable {
     @MainActor
     static func live() -> GitHubPullRequestClient {
         GitHubPullRequestClient(resolver: .live())
+    }
+
+    /// Automatic workflows cannot spend the browser fallback. Check before pushing their
+    /// generated branch so a signed-out Mac does not gain remote state it cannot turn into the
+    /// review object the user opted into.
+    func supportsAutomaticCreation() async -> Bool {
+        let credentials = await resolver?.orderedCredentials() ?? [.anonymous]
+        return credentials.contains { $0.token != nil }
     }
 
     func discover(
@@ -204,6 +236,54 @@ struct GitHubPullRequestClient: Sendable {
         ))
     }
 
+    /// Reads one review by its durable number, including closed reviews that ordinary branch
+    /// discovery intentionally omits. Managed-workspace cleanup uses this only as permission to
+    /// inspect its generated ref; a failed or unreadable response can never authorize deletion.
+    func lifecycle(
+        repository: ChangeRequestRepository,
+        number: Int
+    ) async -> ChangeRequestLifecycleOutcome {
+        let credentials = await resolver?.orderedCredentials() ?? [.anonymous]
+        let result = await read(
+            endpoint: endpoint(repository, suffix: "/pulls/\(number)"),
+            credentials: credentials,
+            // GitHub serves this endpoint with `Cache-Control: private, max-age=60`. A cached
+            // closed response could authorize deletion after a review was reopened, so this
+            // safety decision must always cross the network.
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        guard case .success(let data) = result else {
+            return .failed(message: readFailureMessage(result))
+        }
+        let pull: PullResponse
+        do {
+            pull = try JSONDecoder().decode(PullResponse.self, from: data)
+        } catch {
+            ThreadingLogger.github.error(
+                "GitHub pull-request lifecycle response could not be decoded: \(error.localizedDescription, privacy: .public)"
+            )
+            return .failed(message: L10n.string(
+                "GitHub returned a response Threading could not read."
+            ))
+        }
+
+        let state: ChangeRequestLifecycleState
+        switch pull.state {
+        case "open": state = .open
+        case "closed": state = .closed(merged: pull.mergedAt != nil)
+        default:
+            return .failed(message: L10n.string(
+                "GitHub returned a pull-request state Threading does not understand."
+            ))
+        }
+        return .loaded(ChangeRequestLifecycle(
+            number: pull.number,
+            state: state,
+            headBranch: pull.head.ref,
+            headRevision: pull.head.sha
+        ))
+    }
+
     func create(
         repository: ChangeRequestRepository,
         proposal: ChangeRequestProposal
@@ -276,7 +356,8 @@ struct GitHubPullRequestClient: Sendable {
 
     private func read(
         endpoint: URL?,
-        credentials: [GitHubCredential]
+        credentials: [GitHubCredential],
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
     ) async -> ReadResult {
         guard let endpoint else {
             return .failure(L10n.string("Threading could not build the GitHub address."))
@@ -284,6 +365,7 @@ struct GitHubPullRequestClient: Sendable {
 
         for credential in credentials {
             var request = request(endpoint, method: "GET", credential: credential)
+            request.cachePolicy = cachePolicy
             request.httpBody = nil
             do {
                 let (data, response) = try await transport(request)
@@ -486,6 +568,7 @@ struct GitHubPullRequestClient: Sendable {
         let title: String
         let body: String?
         let htmlURL: String
+        let state: String?
         let draft: Bool?
         let mergedAt: String?
         let base: Branch
@@ -493,7 +576,7 @@ struct GitHubPullRequestClient: Sendable {
         let requestedReviewers: [User]?
 
         enum CodingKeys: String, CodingKey {
-            case number, title, body, draft, base, head
+            case number, title, body, state, draft, base, head
             case htmlURL = "html_url"
             case mergedAt = "merged_at"
             case requestedReviewers = "requested_reviewers"

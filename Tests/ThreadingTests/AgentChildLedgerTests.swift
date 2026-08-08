@@ -1,0 +1,142 @@
+import XCTest
+@testable import Threading
+
+/// The file that tells the next launch what this one was running. Missing, readable and
+/// unreadable are three different answers here, because a ledger read as "no children" is a
+/// sweep that silently does nothing.
+final class AgentChildLedgerTests: XCTestCase {
+
+    // MARK: - Fixtures
+
+    private var directory: URL!
+    private var url: URL!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentChildLedgerTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        url = directory.appendingPathComponent(AgentChildLedgerDefaults.fileName)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+        url = nil
+        directory = nil
+        try super.tearDownWithError()
+    }
+
+    // MARK: - Round Trip
+
+    func testARecordSurvivesTheProcessThatWroteIt() {
+        let record = makeRecord(pid: 4321)
+        XCTAssertTrue(AgentChildLedger(url: url).record(record))
+
+        let outcome = AgentChildLedger(url: url).consumeInheritedRecords()
+        guard case .loaded(let records) = outcome else {
+            return XCTFail("expected a readable ledger, got \(outcome)")
+        }
+        XCTAssertEqual(records, [record])
+    }
+
+    func testClearingARecordEmptiesTheLedgerForTheNextLaunch() {
+        let ledger = AgentChildLedger(url: url)
+        ledger.record(makeRecord(pid: 11))
+        ledger.record(makeRecord(pid: 12))
+        ledger.clear(pid: 11)
+
+        XCTAssertEqual(ledger.currentRecords.map(\.pid), [12])
+
+        guard case .loaded(let records) = AgentChildLedger(url: url).consumeInheritedRecords()
+        else { return XCTFail("expected a readable ledger") }
+        XCTAssertEqual(records.map(\.pid), [12])
+    }
+
+    func testConsumingTheLedgerLeavesNothingForASecondSweep() {
+        AgentChildLedger(url: url).record(makeRecord(pid: 99))
+
+        _ = AgentChildLedger(url: url).consumeInheritedRecords()
+
+        // Consumed on read, the same discipline as EventLog's launch marker: a list that
+        // outlived the launch which acted on it would sweep this launch's own children.
+        guard case .loaded(let records) = AgentChildLedger(url: url).consumeInheritedRecords()
+        else { return XCTFail("expected a readable ledger") }
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    func testAnAbsentLedgerIsMissingRatherThanEmpty() {
+        let outcome = AgentChildLedger(url: url).consumeInheritedRecords()
+        guard case .missing(let records) = outcome else {
+            return XCTFail("expected a missing ledger, got \(outcome)")
+        }
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    // MARK: - Corrupt Data
+
+    func testAnUnreadableLedgerIsReportedRatherThanReadAsNoChildren() throws {
+        try Data("this is not the ledger you are looking for".utf8).write(to: url)
+
+        let outcome = AgentChildLedger(url: url).consumeInheritedRecords()
+        guard case .unreadable(let fallback, _) = outcome else {
+            return XCTFail("expected an unreadable ledger, got \(outcome)")
+        }
+        XCTAssertTrue(fallback.isEmpty)
+    }
+
+    func testALedgerWrittenByANewerBuildIsNotDecodedAsThisOne() throws {
+        try Data(#"{"formatVersion":99,"value":[]}"#.utf8).write(to: url)
+
+        let outcome = AgentChildLedger(url: url).consumeInheritedRecords()
+        guard case .unreadable = outcome else {
+            return XCTFail("expected a version refusal, got \(outcome)")
+        }
+    }
+
+    // MARK: - Budget
+
+    func testTheLedgerRefusesToGrowPastItsRecordBudget() {
+        let ledger = AgentChildLedger(url: url)
+        let overflow = AgentChildLedgerDefaults.maximumRecords + 8
+        for pid in 1...overflow {
+            ledger.record(makeRecord(pid: Int32(pid)))
+        }
+
+        let records = ledger.currentRecords
+        XCTAssertEqual(records.count, AgentChildLedgerDefaults.maximumRecords)
+        XCTAssertEqual(
+            records.last?.pid,
+            Int32(overflow),
+            "the newest child is the one most likely still alive"
+        )
+        XCTAssertFalse(
+            records.contains { $0.pid == 1 },
+            "the oldest record is evicted, not the newest refused"
+        )
+    }
+
+    func testRecordingTheSamePidTwiceReplacesRatherThanDuplicates() {
+        let ledger = AgentChildLedger(url: url)
+        ledger.record(makeRecord(pid: 7, executable: "claude"))
+        ledger.record(makeRecord(pid: 7, executable: "codex"))
+
+        XCTAssertEqual(ledger.currentRecords.count, 1)
+        XCTAssertEqual(ledger.currentRecords.first?.executable, "codex")
+    }
+
+    // MARK: - Helpers
+
+    private func makeRecord(
+        pid: Int32,
+        executable: String = "claude"
+    ) -> AgentChildRecord {
+        AgentChildRecord(
+            pid: pid,
+            startTime: ProcessStartTime(seconds: 1_700_000_000, microseconds: 123_456),
+            sessionID: UUID().uuidString,
+            executable: executable,
+            // Whole seconds: the store round-trips through ISO 8601, which carries no more.
+            recordedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+}

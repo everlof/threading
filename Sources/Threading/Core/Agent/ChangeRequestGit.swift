@@ -93,15 +93,104 @@ enum ChangeRequestGit {
         }
     }
 
+    /// Publishes a detached managed commit without creating a local branch or upstream.
+    ///
+    /// The destination is app-generated and the ordinary non-forced push is intentional: a
+    /// retry may fast-forward the same review branch, while an unexpected divergent ref is
+    /// preserved and reported instead of overwritten.
+    static func pushDetached(
+        commit: String,
+        to branch: String,
+        remote: String = "origin",
+        in root: URL
+    ) async throws {
+        try await perform {
+            _ = try GitProcess.run(
+                GitReviewCommands.common + [
+                    "push", remote, "\(commit):refs/heads/\(branch)"
+                ],
+                in: root,
+                maximumOutput: ChangeRequestGitDefaults.pushOutputLimit
+            )
+        }
+    }
+
+    /// Resolves exactly one remote branch without updating local tracking refs. An empty answer
+    /// means the provider or another actor already removed it.
+    static func remoteRevision(
+        of branch: String,
+        remote: String = "origin",
+        in root: URL
+    ) async throws -> String? {
+        try await perform {
+            let output = trimmed(try GitProcess.run(
+                GitReviewCommands.common + [
+                    "ls-remote", "--refs", remote, "refs/heads/\(branch)"
+                ],
+                in: root,
+                maximumOutput: ChangeRequestGitDefaults.remoteRefOutputLimit
+            ))
+            guard !output.isEmpty else { return nil }
+            let lines = output.split(separator: "\n", omittingEmptySubsequences: true)
+            guard lines.count == 1,
+                  let revision = lines.first?.split(whereSeparator: \Character.isWhitespace).first,
+                  !revision.isEmpty else {
+                throw GitFailure.gitFailed(L10n.string(
+                    "Git returned an ambiguous remote branch response."
+                ))
+            }
+            return String(revision)
+        }
+    }
+
+    /// Deletes only if the provider still sees the exact commit Threading published.
+    /// `--force-with-lease` is the compare-and-swap: a movement after `ls-remote` is a refusal,
+    /// never a reason to delete somebody else's newer work.
+    static func deleteRemoteBranch(
+        _ branch: String,
+        ifRevisionIs expectedRevision: String,
+        remote: String = "origin",
+        in root: URL
+    ) async throws {
+        try await perform {
+            _ = try GitProcess.run(
+                GitReviewCommands.common + [
+                    "push",
+                    "--force-with-lease=refs/heads/\(branch):\(expectedRevision)",
+                    remote,
+                    "--delete",
+                    branch
+                ],
+                in: root,
+                maximumOutput: ChangeRequestGitDefaults.pushOutputLimit
+            )
+        }
+    }
+
     static func proposalSeed(
         in root: URL,
         baseBranch: String
     ) async throws -> ChangeRequestProposalSeed {
+        try await proposalSeed(in: root, comparisonBase: "origin/\(baseBranch)")
+    }
+
+    /// Builds review text against the immutable commit a managed workspace recorded at launch,
+    /// so a moving or locally absent `origin/<branch>` cannot change what its review describes.
+    static func proposalSeed(
+        in root: URL,
+        baseRevision: String
+    ) async throws -> ChangeRequestProposalSeed {
+        try await proposalSeed(in: root, comparisonBase: baseRevision)
+    }
+
+    private static func proposalSeed(
+        in root: URL,
+        comparisonBase: String
+    ) async throws -> ChangeRequestProposalSeed {
         try await perform {
-            let base = "origin/\(baseBranch)"
             let subjectsText = trimmed(try GitProcess.run(
                 GitReviewCommands.common + [
-                    "log", "--pretty=format:%s", "--max-count=50", "\(base)..HEAD"
+                    "log", "--pretty=format:%s", "--max-count=50", "\(comparisonBase)..HEAD"
                 ],
                 in: root
             ))
@@ -124,7 +213,7 @@ enum ChangeRequestGit {
             let diffData = try GitProcess.run(
                 GitReviewCommands.common + [
                     "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-                    "--find-renames", "\(base)...HEAD"
+                    "--find-renames", "\(comparisonBase)...HEAD"
                 ],
                 in: root
             )
@@ -181,4 +270,5 @@ enum ChangeRequestGit {
 enum ChangeRequestGitDefaults {
     static let templateCharacterLimit = 30_000
     static let pushOutputLimit = 512 * 1024
+    static let remoteRefOutputLimit = 8 * 1024
 }

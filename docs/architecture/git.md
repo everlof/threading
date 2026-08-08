@@ -199,7 +199,11 @@ while scrolling. This distinction is load-bearing — 400 line views are accepta
 disclosure that must change height synchronously.
 
 `GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build only when a
-virtual table row is materialized**. Text files start expanded, so the first visible file is ready
+virtual table row is materialized**. In both views **the open body is excluded from the
+header's click-to-toggle** (each one's `NSGestureRecognizerDelegate`): the body is selectable
+text carrying its own per-line context actions, and a click that placed a caret used to *also*
+collapse the card — hundreds of points of table re-laid themselves and the pane leapt under the
+pointer, reported as "clicking a line moves the whole window". Only the header row toggles. Text files start expanded, so the first visible file is ready
 to read; an expanded offscreen file is only model state and constructs no text surface. Image
 comparisons retain explicit disclosure because opening one fetches and decodes two endpoint blobs.
 A manual close is an `expansionOverride` and survives watched refreshes. The mode persists with the tab
@@ -214,24 +218,44 @@ superlinear because every appended header remained in the stack.
 File comparisons now use a **reusable `ThemedTableView`**. The complete file model is available
 for immediate scrolling, while only viewport rows are constructed: the 1,000-file Debug fixture
 creates 14 rows initially and 28 total after a direct jump to the end. That run opens in about
-19 ms and the deep jump takes about 18 ms. A watched redraw preserves the scroll offset and
-expansion overrides. The table does not use AppKit automatic heights for file rows: that path
+19 ms and the deep jump takes about 18 ms. A watched redraw preserves expansion overrides and
+anchors the first visible **file path plus its within-row offset**, not the old document pixel:
+generated files inserted above the viewport therefore move the row without moving the reader.
+The existing table and unchanged visible TextKit rows survive a refresh. Only inserted/removed
+path identities are reconciled, and only materialized or exactly measured paths are deep-compared;
+offscreen rows have no view to reload and read the replacement model when they eventually mount.
+The table does not use AppKit automatic heights for file rows: that path
 double-counted a large `NSTextView` during its first fitting pass and retained a 12,082pt row for
 a 6,082pt card. Offscreen rows use cheap width-aware model estimates (line count, wrapping and
 hunk headers); a materialized row replaces its estimate with exact TextKit height keyed by width.
 This both preserves virtualization and keeps the scrollbar stable before the last viewport. Pane
 resize invalidates all estimates together while visible rows remeasure.
-The table's sole column is explicitly fitted in `viewDidLayout`; an autoresizing column does not
-otherwise follow the clip width, which left full-pane rows drawing as narrow intrinsic cards.
+
+Two operations are prohibited during `NSScrollView`'s live-scroll transaction. A checkout result
+coalesces to the newest phase and applies after momentum ends, and deferred exact-height reports
+are ignored until the resting viewport is known. Mutating table rows or calling
+`noteHeightOfRows` between momentum events made the pane appear to steal the wheel even when the
+individual operation was not a long hang. The end notification applies the newest model first,
+then measures only the rows that survived into the resting viewport.
+The table's sole column is fitted by `SoleColumnFitting` on the list itself, not by this pane;
+an autoresizing column does not otherwise follow the clip width, which left full-pane rows
+drawing as narrow intrinsic cards. **It was fitted here, from `viewDidLayout`, and that is the
+one place it cannot be.** The pane is laid out while git is still reading, and
+`documentView = fileTableView` arrives afterwards — a document-view swap deep inside a scroll
+view lays out no controller root, so `viewDidLayout` never ran again and the column kept
+`NSTableColumn`'s 100pt default. Every file card was 76pt wide in a 900pt pane, wrapping source
+three characters to a line, with no constraint broken and nothing logged. See the design-system
+note of 2026-08-06 for why the repair belongs to the list.
 
 **The table is `.plain`, and the pane owns its only margin.** `NSTableView.Style.automatic`
 resolves to `.inset` here, which keeps 16pt at each side of a row and 10pt above the first one.
 Added to the pane's own inset that put every file card 40pt in while the header's mode chip
 started at 12, so the diff read as a column floating inside a wider one. `.plain` with no
 intercell width hands the row the table's full width, leaving `GitReviewVirtualRowHost` to state
-the single inset — the same `Spacing.inset` the stack path gives its commit rows. It is also
-what the `viewDidLayout` column check assumed all along: under `.inset` the column can never
-equal the table's width, so the guard never held and every layout pass re-fitted.
+the single inset — the same `Spacing.inset` the stack path gives its commit rows. It is also why
+"is the column as wide as the table yet?" is the wrong test for whether a fit is still owed:
+under `.inset` the column can never equal the table's width, so that guard never holds and every
+layout pass re-fits. `SoleColumnFitting` keys on the *list's* width instead.
 
 **The gap between cards hangs under each one, not around all of them.** `intercellSpacing` is
 `.zero` and the host insets its content at the bottom instead, because AppKit splits the
@@ -244,8 +268,20 @@ is pulled out by its `opticalHorizontalInset` so the glyph — not the hover sur
 lands where the cards end. Back does the same on the leading side when a commit is open, which
 is why its visibility goes through `setBackVisible(_:)` rather than `isHidden` directly.
 `GitReviewViewTests` holds all of it — chip, cards, overflow, and both gaps — to one measure.
+The diff totals beside the chip use the same locale-aware compact notation as the status card;
+their tooltip retains the exact grouped values, and their accessibility label speaks the exact
+file, addition, and deletion totals. There is no second totals pill over the bottom of the diff:
+only the shared down-arrow appears while the reader is away from its end.
 The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
 `git.review.render-files` spans are documented in [`performance.md`](performance.md).
+
+The publish strip follows the same ownership rule one level down: its repository copy is the
+leading run and its policy chooser, open action, and next transition are the trailing run of one
+`ControlRowView`. The row owns their height and optical centreline across themes. A repository
+state with no transition — **Default branch**, **Branch pushed**, or an unavailable provider — is
+copy, not a disabled primary button. The distinction is semantic and visible: hard-print themes
+remove a disabled button's action depth while a live chooser keeps its shadow, so presenting a
+fact as a button put neighbouring surfaces on two different elevation rules.
 
 A file row's **right-click opens it in an editor at the first line the diff changes** — the
 primary click still belongs to the row's own job, opening and closing the body. This is the
@@ -474,33 +510,71 @@ hit target rather than a line of text. Wherever it meets an inset or a gap, that
 gives its padding back (`childrenRowInset`), so what the reader sees lands on the same rhythm as
 every other row instead of a step below it.
 
-**The agent line says what the session's own CLI does not.** It carries the model, and where they
-are knowable the effort and Fast state, under the checkout rows and above the children — the rows
-reading outward from what the pane *is*: which branch, what changed in it, which agent is working
-it, who it delegated to. It reuses the `cpu` mark the composer and the conversation's status row
-already give the model chip, so one fact keeps one mark wherever it appears.
+**The agent line says which agent is working this checkout, and how.** It carries the model, and
+where they are knowable the permission mode, the effort and the Fast state, under the checkout rows
+and above the children — the rows reading outward from what the pane *is*: which branch, what
+changed in it, which agent is working it, who it delegated to. Within the row the order is the
+composer's own — model, then posture, then how it thinks, then how fast — so one fact keeps one
+place wherever it is shown. It reuses the `cpu` mark the composer and the conversation's status row
+already give the model chip, so one fact keeps one mark too.
+
+**Fast mode is a bolt, not a word, and only when it is on.** The row ends on `speedMark` — the same
+`bolt.fill` the composer's speed chip carries — set in the qualifiers' `tertiary` weight so it does
+not read as a warning. The word "Fast" spent a sixth of a 360-point row saying what the symbol says
+at a glance; standard speed draws nothing at all, because it is what every session runs at unless
+something says otherwise and a dimmed or crossed-out bolt would be a second state to learn. The
+spoken label keeps the word, in the bolt's place at the end of the phrase: a symbol read aloud is a
+fact lost rather than a fact shortened. Under a period theme the bolt is the hand-drawn one-bit
+`ClassicGlyph.speed` rather than an SF Symbol, like every other mark on the card. Moving speed last
+also settled a disagreement the fixtures had been carrying: the row claimed the composer's order
+while putting speed between posture and effort, which no runtime could reach and so nothing on
+screen contradicted.
 
 Which facts belong to the card is decided *before* it. A **native conversation** gets none: its
 status row already carries model, effort and speed as chips directly above the composer, so the
 card would say them twice in one view — the same rule the run spinner follows. A **terminal
-session** gets whatever its status line leaves out, which `ClaudeStatusLineCoverage` answers by
-running the account's own command (see
-[`session-activity.md`](session-activity.md)); on the machine this was written against three of
-four Claude logins print usage and nothing else, so the model appears nowhere until the card shows
-it. `GitStatusOverlayView.ModelReading` is handed the decision rather than asked to make one — a
-nil field means "do not say this", not "unknown" — which keeps a Claude-specific rule out of a
-Git-shaped view and lets each part drop independently: a line of just "Fast" is correct for an
-account whose status line names the model and effort but not the speed.
+session** gets everything the pane can extract, whether or not its own status line already prints
+one of them. It used to get only what the line left out, which `ClaudeStatusLineCoverage` answered
+by running the account's command and matching values Threading already held; that probe is gone
+and [`session-activity.md`](session-activity.md) records why. The short version: it spent a
+subprocess and a cache per session switch to avoid a fact appearing twice in one pane, and its
+only failure direction was hiding a fact the user had asked to see. Duplication is the cheap
+outcome; a missing model is not. `GitStatusOverlayView.ModelReading` is still handed the decision
+rather than asked to make one — a nil field means "do not say this", not "unknown" — which keeps a
+runtime-specific rule out of a Git-shaped view and lets each part drop independently.
 
-Two facts are withheld rather than guessed. **Fast mode is a reading only where Threading sets
+**The permission mode is the one fact taken only from observation.** Nothing in the app used to
+show it at all: the session's `⋯` menu and Settings ▸ General state what the *next* launch will
+ask for, the native composer's chip belongs to a surface a terminal does not have, and a terminal
+posture the user Shift+Tabbed into was invisible to Threading entirely. Claude writes each
+assertion of it into the session's transcript, so the card reads it back through
+`ObservedPermissionMode` — the provider-neutral seam, gated on
+`AgentCapabilities.transcriptPermissionModeRecord`, which Claude alone claims. The launch record is
+deliberately **not** a fallback: Bypass Permissions shown from a flag the user has since cycled out
+of is a promise the app cannot keep, so an unobservable runtime, an unreadable transcript and a
+session that has not started all show no posture rather than a stale one. All six modes show,
+Manual included, because a posture that is only ever drawn when it is unusual is one nobody learns
+to look for.
+
+It is also the one fact no status line could ever carry, which is measured rather than assumed:
+the CLI's own payload builder in 2.1.222 spreads `model`, `workspace`, `output_style`, `cost`,
+`context_window`, `exceeds_200k_tokens`, `fast_mode`, `effort`, `thinking`, `rate_limits`, `vim`,
+`agent`, `remote`, `pr` and `worktree` into the document a status line reads, and no posture — a
+command cannot print what it was never handed. Claude's TUI does draw the posture in its own
+footer for three of the modes (`accept edits on`, `plan mode on`, `auto mode on`, with the default
+posture labelled with an empty string), which the card repeats knowingly: the modes the footer
+stays silent about are the ones worth saying most.
+
+One fact is withheld rather than guessed. **Fast mode is a reading only where Threading sets
 it** — `appendCodexConversationOverrides` is Codex-only, and Claude's fast-mode state belongs to
 its print transport (`AgentModels.defaultFastMode` returns nil for Claude and says why) — so a
-Claude *terminal* session reports no speed at all. **Effort for a Claude terminal session is its
+Claude *terminal* session draws no bolt whatever its CLI is doing, which is the honest answer
+rather than a guess with a symbol on it. **Effort for a Claude terminal session is its
 explicit opening choice, then the account's configured value**; the former is pinned with
-`--effort`, while either reading goes stale the moment the user types `/effort`. When their
-status line prints effort the card hides its own, which is also the case where the staleness
-would have shown. The transcript records what each turn actually ran at and is the authoritative
-source where a conversation is being replayed — see
+`--effort`, while either reading goes stale the moment the user types `/effort`. It is shown
+anyway: it is the best answer this surface has, and a blank where the effort belongs is not more
+truthful than a stale one. The transcript records what each turn actually ran at and is the
+authoritative source where a conversation is being replayed — see
 [`native-conversations.md`](native-conversations.md).
 
 **The model has a third source, and it is the transcript.** The two configuration sources both
@@ -531,8 +605,8 @@ one. The card was already a session status card rather than a Git one — childr
 it on screen since the subagent receipt joined it.
 
 **Drawn counts are abbreviated**, `+4.2K`, in the reader's own notation — the same
-`.compactName` the Git Review changed-files pill uses for the same diff, so the two surfaces
-agree. The accessibility label keeps the exact counts, joined by the separator the eye
+`.compactName` the Git Review header uses for the same diff, so the two surfaces agree. The
+accessibility label keeps the exact counts, joined by the separator the eye
 sees as a line break: an abbreviation read aloud is a number lost rather than a number
 shortened. The file count itself stays exact in both places; it is small enough to read at a
 glance and it carries the plural of the noun beside it.
