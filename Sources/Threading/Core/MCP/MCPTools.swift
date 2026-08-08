@@ -802,6 +802,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let backdropPattern: AppThemeBackdropPatternArguments?
   let removeBackdropPattern: Bool?
   let textScale: Double?
+  let choiceHeight: Double?
   let glow: AppThemeGlowArguments?
   let removeGlow: Bool?
   let popoverStyle: AppThemePopoverStyleArguments?
@@ -821,8 +822,11 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let removeFontFallbacks: Bool?
   let scrollerPlacement: String?
   let scrollerTrackStyle: String?
+  let scrollerAppearance: String?
+  let menuAppearance: String?
   let progressStyle: String?
   let choiceStyle: String?
+  let checkboxStyle: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
@@ -833,6 +837,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case backdropPattern = "backdrop_pattern"
     case removeBackdropPattern = "remove_backdrop_pattern"
     case textScale = "text_scale"
+    case choiceHeight = "choice_height"
     case glow
     case removeGlow = "remove_glow"
     case popoverStyle = "popover_style"
@@ -867,11 +872,13 @@ struct AppThemePopoverStyleArguments: Decodable, Sendable {
   let shadow: String?
   let density: String?
   let glyphStyle: String?
+  let cornerRadius: Double?
 
   private enum CodingKeys: String, CodingKey {
     case arrow, edge, shadow, density
     case surfaceRole = "surface_role"
     case glyphStyle = "glyph_style"
+    case cornerRadius = "corner_radius"
   }
 }
 
@@ -894,8 +901,16 @@ struct AppThemeButtonStyleArguments: Decodable, Sendable {
   let typeface: String?
   let fontFamily: String?
   let tracking: Double?
+  let fontScale: Double?
+  let minimumWidth: Double?
+  let minimumHeight: Double?
+  let embossesDisabledTitle: Bool?
+  let antialiasesTitle: Bool?
   let primaryTreatment: String?
   let primaryRole: String?
+  let secondaryRole: String?
+  let secondaryHoverRole: String?
+  let secondaryShadow: String?
   let primaryBorderRole: String?
   let removePrimaryBorder: Bool?
   let hoverOffsetX: Double?
@@ -909,8 +924,16 @@ struct AppThemeButtonStyleArguments: Decodable, Sendable {
     case fontWeight = "font_weight"
     case typeface, tracking
     case fontFamily = "font_family"
+    case fontScale = "font_scale"
+    case minimumWidth = "minimum_width"
+    case minimumHeight = "minimum_height"
+    case embossesDisabledTitle = "embosses_disabled_title"
+    case antialiasesTitle = "antialiases_title"
     case primaryTreatment = "primary_treatment"
     case primaryRole = "primary_role"
+    case secondaryRole = "secondary_role"
+    case secondaryHoverRole = "secondary_hover_role"
+    case secondaryShadow = "secondary_shadow"
     case primaryBorderRole = "primary_border_role"
     case removePrimaryBorder = "remove_primary_border"
     case hoverOffsetX = "hover_offset_x"
@@ -1347,6 +1370,47 @@ struct SetSessionNameArguments: Decodable, Sendable {
   let name: String?
 }
 
+/// A message for another session in this project, addressed by its Threading id.
+///
+/// The id is the target's `SessionID` — the one `list_sessions` prints — never a provider
+/// transcript id, which belongs to a different identity space and can be absent for half the
+/// runtimes. The sender is not an argument: the MCP URL carries it, exactly as it does for the
+/// self-scoped session tools.
+struct SendToSessionArguments: Decodable, Sendable {
+  let sessionID: String?
+  let message: String?
+  /// "queue" (default) or "steer". Decoded as a raw string so an unknown value can be
+  /// refused in prose rather than failing the whole call's decode.
+  let disposition: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case message, disposition
+  }
+
+  init(sessionID: String?, message: String?, disposition: String? = nil) {
+    self.sessionID = sessionID
+    self.message = message
+    self.disposition = disposition
+  }
+}
+
+/// The session to be told about, addressed exactly as `send_to_session` addresses one.
+///
+/// No duration and no "what to watch for": the boundary is the app's own answer to "is it
+/// finished", and the budget is Threading's, so neither is the caller's to choose.
+struct WatchSessionArguments: Decodable, Sendable {
+  let sessionID: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+  }
+
+  init(sessionID: String?) {
+    self.sessionID = sessionID
+  }
+}
+
 struct ConversationHistoryArguments: Decodable, Sendable {
   let cursor: String?
 }
@@ -1420,6 +1484,9 @@ enum AgentCommand: Sendable {
   case archiveSession(ArchiveSessionArguments)
   case cancelSessionArchive(EmptyToolArguments)
   case setSessionName(SetSessionNameArguments)
+  case listSessions(EmptyToolArguments)
+  case sendToSession(SendToSessionArguments)
+  case watchSession(WatchSessionArguments)
   case listReclaimableStorage(EmptyToolArguments)
   case proposeStorageCleanup(StorageCleanupArguments)
   case listSettings(EmptyToolArguments)
@@ -1490,6 +1557,9 @@ enum AgentCommand: Sendable {
     case .archiveSession: return .archiveSession
     case .cancelSessionArchive: return .cancelSessionArchive
     case .setSessionName: return .setSessionName
+    case .listSessions: return .listSessions
+    case .sendToSession: return .sendToSession
+    case .watchSession: return .watchSession
     case .listReclaimableStorage: return .listReclaimableStorage
     case .proposeStorageCleanup: return .proposeStorageCleanup
     case .listSettings: return .listSettings
@@ -1827,6 +1897,21 @@ struct MCPToolCallParameters: Decodable, Sendable {
       call = .setSessionName(
         try container.decodeIfPresent(SetSessionNameArguments.self, forKey: .arguments)
           ?? SetSessionNameArguments(name: nil)
+      )
+    case .listSessions:
+      call = .listSessions(
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      )
+    case .sendToSession:
+      call = .sendToSession(
+        try container.decodeIfPresent(SendToSessionArguments.self, forKey: .arguments)
+          ?? SendToSessionArguments(sessionID: nil, message: nil)
+      )
+    case .watchSession:
+      call = .watchSession(
+        try container.decodeIfPresent(WatchSessionArguments.self, forKey: .arguments)
+          ?? WatchSessionArguments(sessionID: nil)
       )
     case .listReclaimableStorage:
       call = .listReclaimableStorage(
@@ -2402,6 +2487,7 @@ enum MCPTools {
   static let panelTools = names(in: .panel)
   static let projectTools = names(in: .project)
   static let sessionTools = names(in: .session)
+  static let workspaceTools = names(in: .workspace)
   static let storageTools = names(in: .storage)
   static let notificationTools = names(in: .notifications)
   static let themeTools = [
@@ -4287,6 +4373,93 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .listSessions,
+      description: """
+        List the sessions in this session's own project: each row carries the session's \
+        Threading id, its name, its agent, whether it is working right now, and which \
+        input surface is live — a chat, a terminal, or nothing (dormant). A side chat \
+        also names the session it was forked from, which is how you find your parent \
+        when you were asked to report a conclusion back.
+
+        The ids this prints are what send_to_session addresses. It sees only this \
+        project — other projects' sessions do not exist as far as this tool is concerned.
+        """,
+      inputSchema: MCPInputSchema(properties: [:], required: [])
+    ),
+    MCPToolDefinition(
+      tool: .sendToSession,
+      description: """
+        Send a message to another session in this project, addressed by the Threading id \
+        list_sessions prints. The message is delivered as that session's own next turn: \
+        an idle chat session receives it immediately, a chat session mid-turn queues it \
+        visibly behind the turn in flight (where the user can edit or remove it), and a \
+        terminal session is typed into only while its agent is idle — a busy terminal \
+        refuses rather than typing into whatever its screen is showing. A dormant session \
+        cannot receive messages; resuming it is the user's decision.
+
+        Every delivered message is prefixed with which session sent it, and it runs on \
+        the receiving session's own usage. Send conclusions and briefs, not chatter: the \
+        canonical use is a side chat reporting its result back to the session it was \
+        forked from. Never mechanically relay a message that itself arrived as a \
+        cross-session message — that is how two sessions ping-pong forever.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "session_id": MCPPropertySchema(
+            type: .string,
+            description: """
+              The target's Threading session id, exactly as list_sessions printed it.
+              """
+          ),
+          "message": MCPPropertySchema(
+            type: .string,
+            description: """
+              What to tell the other session. Whole sentences; it arrives as a user-turn \
+              message in that conversation, after a line naming this session as sender.
+              """
+          ),
+          "disposition": MCPPropertySchema(
+            type: .string,
+            description: """
+              "queue" (default) sends the message as its own turn — now if the target is \
+              free, behind the running turn otherwise. "steer" adds it to the turn already \
+              running instead: additive guidance sharing that turn's context, for a live \
+              chat session mid-turn only, refused rather than downgraded when the target \
+              cannot steer. Steered text arrives beside tool results, where models treat \
+              override-shaped instructions as injection — steer to add, never to countermand.
+              """
+          ),
+        ],
+        required: ["session_id", "message"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .watchSession,
+      description: """
+        Ask to be told once when another session in this project settles — when the turn it is \
+        running now finishes, or its agent exits, or it stops at its usage limit. Use it \
+        instead of calling list_sessions again and again while you wait for a sibling's result.
+
+        The notice arrives as a message in this conversation, which means it spends a turn of \
+        this session's own usage when it lands. It is one notice: the watch is spent when it \
+        fires, and arming it again is another call. A session that has *already* settled is \
+        refused rather than watched — read list_sessions for its state instead, since the edge \
+        you asked about has gone by. The watch lives with this run of Threading and expires \
+        after 30 minutes, with a notice saying so.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "session_id": MCPPropertySchema(
+            type: .string,
+            description: """
+              The session to watch, by its Threading id — exactly as list_sessions prints it.
+              """
+          )
+        ],
+        required: ["session_id"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .panelActivateTab,
       description: """
         Bring one of the display panel's tabs to the front, so the user is looking at it. \
@@ -5095,6 +5268,10 @@ enum MCPTools {
         description: "Multiplier for semantic app text, 0.65–1.5. It composes with the "
           + "user's own text-size preference; default 1."
       ),
+      "choice_height": MCPPropertySchema(
+        type: .number,
+        description: "Closed compact-chooser height, 14–44 points; default 26."
+      ),
       "glow": MCPPropertySchema(
         type: .object,
         description: """
@@ -5163,7 +5340,8 @@ enum MCPTools {
       "popover_style": MCPPropertySchema(
         type: .object,
         description: "The shared chrome for every app-owned anchored popover. It controls "
-          + "the stem, semantic fill, edge construction, depth, density, and glyph language.",
+          + "the stem, semantic fill, edge construction, depth, density, glyph language, and "
+          + "optional plate radius.",
         properties: [
           "arrow": MCPPropertySchema(
             type: .string,
@@ -5191,6 +5369,11 @@ enum MCPTools {
             type: .string,
             description: "\"system\" (default) or \"classic\" for simple period folder, branch, "
               + "handoff, and status marks inside shared hover cards."
+          ),
+          "corner_radius": MCPPropertySchema(
+            type: .number,
+            description: "Optional anchored-surface radius, 0–24 points; omitted follows the "
+              + "theme panel radius."
           ),
         ]
       ),
@@ -5290,6 +5473,27 @@ enum MCPTools {
             type: .number,
             description: "Additional title spacing, -1–4 points; default 0."
           ),
+          "font_scale": MCPPropertySchema(
+            type: .number,
+            description: "Button-label scale over the semantic control size, 0.5–2; default 1."
+          ),
+          "minimum_width": MCPPropertySchema(
+            type: .number,
+            description: "Optional pushbutton width floor, 20–240 points."
+          ),
+          "minimum_height": MCPPropertySchema(
+            type: .number,
+            description: "Optional pushbutton height floor, 14–60 points."
+          ),
+          "embosses_disabled_title": MCPPropertySchema(
+            type: .boolean,
+            description: "True draws classic shadow ink with a one-pixel lit disabled echo."
+          ),
+          "antialiases_title": MCPPropertySchema(
+            type: .boolean,
+            description: "False keeps a bitmap-era button title on hard device pixels; "
+              + "default true preserves modern font smoothing."
+          ),
           "primary_treatment": MCPPropertySchema(
             type: .string,
             description: "\"filled\" (default), \"outlined\", or \"raised\" for a classic "
@@ -5298,6 +5502,19 @@ enum MCPTools {
           "primary_role": MCPPropertySchema(
             type: .string,
             description: "Theme role supplying a primary action's fill, outline, and title."
+          ),
+          "secondary_role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role supplying an ordinary bordered action's resting face."
+          ),
+          "secondary_hover_role": MCPPropertySchema(
+            type: .string,
+            description: "Theme role supplying an ordinary bordered action's hover/press face."
+          ),
+          "secondary_shadow": MCPPropertySchema(
+            type: .string,
+            description: "Shadow source for ordinary bordered actions: \"control\" (default), "
+              + "\"panel\" for broad neutral relief, or \"none\"."
           ),
           "primary_border_role": MCPPropertySchema(
             type: .string,
@@ -5428,8 +5645,10 @@ enum MCPTools {
       ),
       "progress_style": MCPPropertySchema(
         type: .string,
-        description: "Determinate progress treatment: \"continuous\" (the default) or "
-          + "\"segmented\" for the classic Win32 recessed block control."
+        description: "Determinate progress treatment: \"continuous\" (the default), "
+          + "\"segmented\" for the classic Win32 recessed block control, \"irix\" for "
+          + "Indigo Magic's measured slanted-edge scale, or \"amiga\" for Workbench's "
+          + "source-inferred hard horizontal gauge filled from active title blue."
       ),
       "choice_style": MCPPropertySchema(
         type: .string,

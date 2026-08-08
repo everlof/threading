@@ -153,9 +153,11 @@ The grouping can be toggled from wherever you notice it, not only from Settings:
 ### The sidebar's top and bottom
 The band at the top of the sidebar carries the app's brand at its left — the Threading mark,
 which stitches itself in when the app launches (skipped under Reduce Motion), beside the
-app's name — and two quiet controls at its right: **+** to add a project, and the
-arrangement control described below. Both the brand and **Settings**, at the sidebar's
-bottom-left, sit on the same left margin as the rows between them, icon and word.
+app's name — and three quiet controls at its right: the arrangement control described below,
+**+** to add a project, and **×** in the corner, which hides the sidebar — the same collapse
+as **⌃⌘S** and the toolbar's sidebar button, either of which brings it back. Both the brand
+and **Settings**, at the sidebar's bottom-left, sit on the same left margin as the rows
+between them, icon and word.
 
 A build that is not a release names itself beside Settings: a quiet **NIGHTLY**, **BETA**
 or **DEV** mark, so a screenshot or a bug report always says which kind of build produced
@@ -177,8 +179,15 @@ Branches** — disabled while grouping is off — and **Compact Tree**), then ho
 - **Sort by Recent Activity** — the most recently active session first
 - **Sort by Name** — alphabetical, case-insensitive
 
-A pinned session leads the list under every order — pinning is a stronger statement than
-any sort. Sorting rearranges branch groups too: a group sits where its first session would.
+Below the orders, the same menu offers that order's two directions, named for what the order
+actually sorts by rather than "ascending" and "descending": **Oldest First** or **Newest
+First** for Order Added, **Most Recent First** or **Least Recent First** for Recent Activity,
+**A to Z** or **Z to A** for Name. Picking a different order starts it at its own natural
+direction, so a reversal made about names is not inherited by a sort about dates.
+
+A pinned session leads the list under every order and either direction — pinning is a stronger
+statement than any sort, and reversing reverses the sort rather than the list. Sorting
+rearranges branch groups too: a group sits where its first session would.
 
 **Compact Tree** (off by default) trades indentation for a narrower list: every row —
 project, branch heading, session, side chat — starts at the same left edge, with the
@@ -322,11 +331,14 @@ only question there is. Type your task first if you like and pick the folder sec
 follow the composer into the project you choose. The send stays disabled until there is somewhere
 to run, and says so when you point at it.
 
-**The identity chip's menu is the same shape.** Your logins for the current agent come first,
-each with what is left of it (see
-[Usage when picking an account](#usage-when-picking-an-account)); under the line are the other
-agents. Picking a login keeps the agent; picking an agent moves to that agent's preferred
-login. The agent you are already on has no row of its own — the chip is showing it.
+**The identity chip's menu is one list of logins.** Every login of every agent is one row deep —
+Claude Code, Codex, Grok and OpenCode together — each with the agent's mark beside it and what is
+left of it underneath (see [Usage when picking an account](#usage-when-picking-an-account)).
+Picking one sets the agent *and* the login at once, so moving to another agent's account is a
+single click rather than two. An agent appears as a row of its own only when it has no login to
+offer — either it does not use accounts, or none was found. Whichever row you pick, the model and
+reasoning effort go back to that login's own defaults, since a model pinned on one account is not
+necessarily offered on another.
 
 **The prompt is focused the moment the composer appears**, however you got there, so the
 first message can be typed straight away without clicking the field. If a draft is waiting,
@@ -364,8 +376,9 @@ choice anywhere in the chain answers the whole menu. Only the menu bar at the to
 screen remains the system's own.
 
 The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
-"Default". Its menu's first row means "leave the choice to the agent", and names what that
-resolves to, marked with where the name came from:
+"Default". "Leave the choice to the agent" is not a row of its own: the model that choice
+resolves to is **marked in the list**, where it already stands, with where the name came from.
+Choosing that row keeps the choice with the agent rather than pinning today's answer to it:
 
 - *(account default)* — the model your account is configured to use, in its `settings.json`
   (Claude) or `config.toml` (Codex), or the default set by your organisation. A setting you can
@@ -376,15 +389,23 @@ resolves to, marked with where the name came from:
   Threading or read back from the account's own transcripts. This covers sessions you ran in a
   plain terminal too, so an account that has never been used in Threading still names its model.
 
-It falls back to "Agent's choice" only when none of those can answer — a login that has never run
+A row of its own comes back only where the list cannot carry the mark: a model the menu does not
+list, and "Agent's choice" when none of the three above can answer — a login that has never run
 this agent anywhere at all. That wording is literal: nothing has chosen yet, and the agent will
 decide at launch. Threading does not guess what it would pick, because that is negotiated with
 the service and is not recorded on your machine.
 
-The menu also offers any model your login has beyond the standard ones (`Opus`, `Sonnet`,
-`Fable`), read from the agent's own cache — `Fable 5 · 1M`, for instance, which no plain alias
-names. Those three aliases always mean *the latest* of each family, so they stay current on their
+The menu also offers any model your login has beyond the standard ones (`Fable`, `Opus`,
+`Sonnet`, `Haiku`), read from the agent's own cache — `Fable 5 · 1M`, for instance, which no plain
+alias names. Those aliases always mean *the latest* of each family, so they stay current on their
 own as new versions ship.
+
+**The list is ordered by capability, most capable first** — Fable, then Opus, then Sonnet, then
+Haiku — so the row at the top is the strongest model your login can run and the list steps down
+from there. Inside a family the plain alias comes first and its variants follow it, which is why
+`Fable 5 · 1M` sits directly under `Fable` rather than at the end of the menu. A model Threading
+does not recognise — an organisation's own grant, or one that ships before Threading knows about
+it — is listed last rather than guessed into a rank.
 
 For **OpenCode**, provider login and model selection stay in its own TUI. Run `/connect`, choose
 **OpenRouter**, and enter the key there; use `/models` to choose any OpenRouter model, including
@@ -402,11 +423,13 @@ which creates one on a new branch and adds it as its own project. A branch nothi
 checked out on is not offered — there would be nowhere to run — so making a worktree is how
 you get one.
 
-The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return sends
-it**, and so does **⌘Return**; **Shift+Return** or **Option+Return** breaks the line. This is
-the same box, and the same key, as a reply inside a running conversation — see the Keyboard
-setting below if you would rather Return always broke the line. Under the box sits
-**Import _n_ conversations** when this project has conversations it could adopt.
+The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return breaks the
+line here**, because a brief is usually several of them; **⌘Return** sends, and so does the
+**Start session** button under the box, which says the same chord on its face. A reply inside a
+running conversation is the other way round — that box is usually one line, so Return sends it —
+and the Keyboard setting below gives you one answer everywhere if you would rather not have two.
+The button sits at the right end of the row under the box; **Import _n_ conversations** appears
+at its left end when this project has conversations it could adopt.
 
 To give every new chat the same standing instruction, enter an **Opening Message** under
 **Settings ▸ General**. Threading appends it after the task you write and sends both as the
@@ -419,13 +442,14 @@ continuations. Reopening or resuming an existing chat does not send it again, an
 conversations receive nothing. The sidebar's initial name still comes from the task you typed,
 not from this reusable message.
 
-**If you write long briefs, say so** under **Settings ▸ Keyboard ▸ Composer**, at *When writing
-a prompt, press Return to*. The default — **Do What the Composer Expects** — sends from any box
-with a send control in it, which is every prompt you write to an agent. **Start a New Line**
-gives Return back to the text everywhere, leaving ⌘Return as the send; **Send** makes Return
-send in the report fields too. Whichever you pick, three keys never change: **⌘Return** always
-sends, **Shift+Return** and **Option+Return** always break the line, and Return while an input
-method is still converting a word belongs to the input method rather than to the send.
+**Want one answer everywhere?** Say so under **Settings ▸ Keyboard ▸ Composer**, at *When
+writing a prompt, press Return to*. The default — **Do What the Composer Expects** — is the
+split above: Return sends from a box whose send control is in it, and breaks the line in one
+whose send is a button beside it, like this composer. **Send** makes Return send in every box,
+briefs included; **Start a New Line** gives Return back to the text everywhere, leaving ⌘Return
+as the send. Whichever you pick, three keys never change: **⌘Return** always sends,
+**Shift+Return** and **Option+Return** always break the line, and Return while an input method
+is still converting a word belongs to the input method rather than to the send.
 
 **Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
 agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
@@ -482,9 +506,11 @@ Three things do get an indicator, at the trailing edge of the row:
 The filled dot is the one worth interrupting yourself for: that session is doing nothing until
 you reply. The ring only means there is something to read.
 
-Either mark clears as soon as you select that session. Answering a question mid-turn puts the
-row back to the spinner rather than leaving it blank — the session is still working, and it says
-so.
+Either mark clears as soon as you select that session — except when the session is stopped on a
+question it put to you outright, such as Claude's multiple-choice question or a plan waiting for
+approval. Those keep the filled dot while you are looking at them, because looking is not
+answering: the agent is doing nothing until you pick. Answering puts the row back to the spinner
+rather than leaving it blank — the session is still working, and it says so.
 
 Hovering a session row swaps the indicator for two buttons, so the list stays quiet until you
 reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete — and,
@@ -506,10 +532,17 @@ immediately, and a small band appears at the bottom of the sidebar naming the se
 whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
 six seconds, and a thin line along its lower edge shows how much of that is left. Rest the
 pointer on the band and both stop, so it will not disappear while you are reaching for it; move
-away and the band starts over with its full time again. Undo puts the row back where it was and
+away and it picks the clock back up where it stopped. Undo puts the row back where it was and
 reopens the session if it was the one on screen; the agent is not restarted, so the session comes
 back dormant with **Resume** on it, exactly as it would after Close. Miss the band and nothing is
 lost — the session is in **Settings ▸ Archived**, which is what the band's second line says.
+
+**You do not have to wait for it.** Every band carries a ✕ in its corner that takes it away at
+once, and you can also just throw it out: drag it sideways, or swipe it with two fingers, and let
+go. It fades as it travels, so you can see when it has gone far enough; let go short of that, or
+pull it back, and it settles where it was. Throwing a band gives the space to the next receipt
+waiting behind it, so a burst can be cleared one card at a time. Sending a band away is only that
+— the session stays archived, and its **Undo** goes with the band.
 
 **Archive several in a row and the bands wait their turn.** Each one carries its own Undo, so
 none of them is thrown away to make room for the next: the second band appears when the first
@@ -534,6 +567,12 @@ working, and output stopping means it has finished. A terminal bell counts as an
 request for attention. This is a heuristic rather than something the agents report directly —
 it applies equally to Codex and to plain shells running a long command.
 
+Claude is the exception in one direction: it reports its own turn boundaries, and it reports the
+moment it calls a tool whose whole purpose is to ask you — the multiple-choice question, and the
+plan put up for approval. Those two are reported as they open and as they are answered, so the
+filled dot appears while the question is still being drawn rather than several seconds later, and
+it survives you reading the question and arrowing through the options.
+
 Redraws caused by resizing the window — or by scrolling inside a program that handles its
 own scrolling, like Claude Code — are ignored, since an agent repainting itself is not the
 same as an agent working.
@@ -544,9 +583,17 @@ states until that work lands. Claude ends its turn straight away in that case an
 conversation back up on its own once the command exits, so a session waiting on its own shell
 has not finished anything and does not notify as though it had.
 
-Only the turn that *started* the work waits on it. Something long-lived that the agent parked
-earlier — a dev server it started three answers ago — does not hold later turns open, so those
-finish and notify as usual while it keeps running.
+For a shell or a monitor, only the turn that *started* the work waits on it. Something
+long-lived that the agent parked earlier — a dev server it started three answers ago — does not
+hold later turns open, so those finish and notify as usual while it keeps running.
+
+A **subagent or workflow** running in the background is different, and keeps the working mark
+for as long as it runs. It is delegated work with an end: it reports back into the conversation
+on its own, so the session has something outstanding no matter how many turns ago it was
+handed off. You can ask "is it still going?" as often as you like without the row going quiet
+on you, and without a *finished* notification for a turn whose child has not answered yet. The
+**Subagents** summary names what is running; the mark beside the session says that something
+is.
 
 ### Notifications
 
@@ -629,6 +676,16 @@ show them idle and ready, and opening one attaches a session that is already run
 of resuming it on the click. Only what was live at quit comes back — closed and archived
 sessions stay dormant — and after a crash nothing relaunches automatically.
 
+**After an unexpected quit, the workspace waits to be asked for.** If Threading did not shut
+down the last time it ran, the next launch leaves the workspace closed: the session you had
+selected does not reopen, and neither do any detached browser windows, so a session that took
+the app down does not immediately take it down again. A quiet band appears across the top of the
+session pane saying the last run ended unexpectedly. **Restore** opens exactly what was held
+back, **Show Crash Report** reveals the macOS report for that run in the Finder when one was
+filed, and ✕ dismisses the band. The band takes no focus, blocks nothing, and stays until you
+answer it. It appears once for each unexpected quit, whether or not you restore, and the launch
+after it is an ordinary one.
+
 ### Continuing with another provider
 
 Right-click a recorded chat and choose **Continue with…** to start a new session with any other
@@ -698,9 +755,16 @@ Conversations you started outside Threading — in a plain terminal, say — can
 project and then resumed like any other session.
 
 Select a project and the composer shows an **Import _n_ conversations** offer under its prompt
-box once it has finished looking. Opening it lists what was found, newest first. Picking one adds it to the
-project already resumable; it is not launched, so selecting it in the sidebar is what reopens
-the conversation.
+box once it has finished looking. Opening it lists what was found, newest first — by when the
+conversation itself last moved, not when its file was last touched, so a CLI writing
+bookkeeping into an old transcript does not float it to the top. A conversation both of your
+logins hold a copy of is listed once.
+
+Pick as many as you like: rows take ⌘-click and ⇧-click, and the button counts what you have
+chosen. **A choice survives the search that hides it**, so you can search, take what matched,
+search again, take more, and import the lot in one go — the count on the button is what is
+going to be adopted, whether or not it is still on screen. Imported conversations arrive
+already resumable; they are not launched, so selecting one in the sidebar is what reopens it.
 
 Search it by title, by agent, or **by session ID** — paste a whole one, or type any fragment of
 one. Each row carries the first eight characters of its ID down the right-hand edge, which is
@@ -776,10 +840,11 @@ prompts have their own narrower memory instead — "Always Allow This Host" is o
 A session is named after its conversation, never after its agent or account — the row's icon
 and account mark already say which agent and login it runs on.
 
-By default the sidebar follows the agent's own name for the conversation, which it updates as
-the work develops: the terminal title for terminal sessions, and the title Claude records in
-its transcript for natively rendered ones (including a `/rename` typed into the CLI). Until
-the agent has named it, a session is named after its first prompt.
+By default the sidebar and chat tab follow the agent's own name for the conversation: Claude's
+terminal/transcript title, or the canonical thread name Codex keeps for both its terminal and
+native interfaces. A `/rename` typed into either CLI is reflected in both places; a Codex rename
+made while Threading is closed is picked up the next time it launches. Until the agent has named
+the conversation, a session is named after its first prompt.
 
 Renaming a session in Threading pins your own name instead, and it stops following the agent.
 The rename sheet's **Use Agent's Name** button hands it back — it appears only when you have
@@ -850,8 +915,10 @@ Set it in three places:
 
 - The **mode chip** in the composer, on the row inside the prompt box beside the model, when
   starting a chat.
-- A single chat's **⋯** menu has a **Permission Mode** submenu, including an inherit item that
-  follows the setting below.
+- A single chat's **⋯** menu has a **Permission Mode** submenu. The mode from the setting below
+  is marked *(default)* where it stands in the list rather than repeated above it, and choosing
+  it keeps the chat following that setting. Where the setting is *Agent's Setting* there is no
+  mode to mark, so the submenu opens with **Use Agent's Setting** instead.
 - **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
   default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
   still decide.
@@ -902,6 +969,71 @@ One thing to keep in mind: moving to another account to keep working past a limi
 the accounts are genuinely separate (your personal and your work login, say). Rotating through
 accounts purely to dodge usage limits is the pattern Anthropic's terms discourage — Threading
 leaves the choice, and the timing, to you rather than doing it automatically.
+
+### Sending something later
+
+Both places you write a message can send it later instead of now.
+
+**In a chat**, a chevron sits beside the send glyph. **On the new-session screen**, a clock button
+sits beside **Start session**. Both open the same offers:
+
+- **In an hour**, rounded to the next five minutes.
+- **Tomorrow at 9:00**, and **Monday at 9:00**.
+- **When the 5-hour window resets** and **when the weekly window resets** — each showing the time
+  and how far off it is, read from the login the session will actually run on. If the model you
+  have chosen is metered separately, it is *that* window you are offered, because that is the one
+  which will stop you.
+- **Custom time…**, a day and a quarter-hour from two menus. The sheet names your time zone.
+
+What is waiting appears in a strip above the box — in a chat, above the queue of messages waiting
+for the current turn to finish. Click a row to open it back up in the composer, ✕ to unschedule
+it. Scheduling clears the composer, exactly as sending does.
+
+**Threading has to be running.** It is an app on your Mac, not a server. If a scheduled moment
+passes while Threading is closed, nothing is sent: the message is marked as missed and waits for
+you with a **Send now** beside it. That is deliberate — an agent starting work on Friday's
+instruction at Monday breakfast, spending your usage and touching your checkout with nobody
+watching, is not something an app should decide on your behalf.
+
+A scheduled message will **wake a session whose agent has stopped**, because that is the whole
+point of scheduling one overnight. Two limits on that. A session running in the agent's own
+terminal is never typed into unattended — a resumed Claude often asks whether to summarise the
+conversation or read it in full, and Threading will not answer that question with your message —
+so those wait for one click instead. And a session that is mid-turn when the moment arrives is
+waited on rather than interrupted.
+
+**Images can't be scheduled.** A pasted screenshot lives in a temporary file that may be gone by
+the time the message sends, so the offer is disabled while one is attached and says so.
+
+If you schedule against a usage window's reset, **Settings ▸ Usage Windows** decides what happens
+when the moment comes and the window has not actually turned over: send it anyway, wait once for
+the new reset (the default), or keep waiting until it frees.
+
+### Limit recovery
+
+When a running terminal session is refused over its account's usage limit, Claude Code stops in
+one of two ways — on a chooser ("Stop and wait for limit to reset / Upgrade your plan"), or by
+just printing "You've hit your session limit · resets …" and returning to its prompt — and
+without help the session sits there either way. Threading reads the refusal from the session's
+own transcript and, by default, says so on the row: the spinner ends and a **red triangle**
+takes its place — a different shape from either attention dot, because this is not a question
+you can answer. Hover the row and the card names it, with the reset time in the provider's own
+words ("Stopped · usage limit resets 1:20pm (Europe/Rome)"). Nothing is typed into the session.
+
+The triangle stays until the conversation actually runs again — sending it something, or a
+scheduled continuation landing. Looking at the row does not clear it: neither of the chooser's
+options gives the account any allowance back, so a session that still cannot work goes on saying
+so.
+
+**Settings ▸ Usage Windows ▸ Limit recovery** can automate the routine instead: when the
+chooser is up Threading answers it with **Stop and wait** (found by its words, never by its
+number); when the CLI only printed the notice there is nothing to answer and nothing is typed.
+Either way it then schedules a **continue** message for the moment the binding window resets,
+and the session picks its work back up on its own. The continuation rides the ordinary scheduled-messages machinery, so it
+shows in the strip above the composer, obeys the has-the-window-really-reset rule above, and
+can be removed there like any other scheduled send. Upgrading your plan is never chosen, under
+any setting. Every step is written to the diagnostics journal (**Help ▸ Reveal Diagnostics
+Log**), so if a recovery ever stands down you can read exactly what it saw and why.
 
 ## Accounts
 
@@ -1036,9 +1168,12 @@ Choosing a login is when the number actually changes a decision — an account a
 week is a poor place to start a long task — so the composer shows it twice over:
 
 - **In the identity chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
-  accounts are compared before one is picked. Within the line the values carry the ink:
-  window names and separators sit back, and a value turns amber as its window nears the
-  limit and red when it is nearly spent — the same colours the toolbar pill uses.
+  accounts are compared before one is picked. Beside each is its agent's mark with a small meter
+  under it: the meter's length and colour are the same reading as the numbers, so the busiest
+  login stands out without reading every row. The agent is named in words too, at the start of
+  the same line — the same login name often exists on two agents. Within the line the values
+  carry the ink: window names and separators sit back, and a value turns amber as its window
+  nears the limit and red when it is nearly spent — the same colours the toolbar pill uses.
 - **In the model chip's menu**, every model carries what a session on it would be measured
   against — the account's windows, plus that model's own where the plan meters one separately.
   This is the menu where a spent limit is escaped, since switching model is the way out of it.
@@ -1072,6 +1207,33 @@ Where the numbers come from, per agent:
 
 Threading never stores or refreshes a login itself — it reads what the official CLI keeps, and
 if a token has expired the tooltip says so and the CLI is the place to sign in again.
+
+### Opening the day's window on time
+
+**Settings ▸ Usage Windows.** Off until you turn it on.
+
+Claude's short usage window opens with the first message you send and resets five hours later,
+so where its boundaries fall is decided by when you happened to start. Start at nine and the
+window resets at two, then again at seven in the evening, after you have stopped. Threading can
+send one very small message earlier, on the days you choose, so those boundaries land where the
+working day can use them.
+
+Tell it when you start and stop, and it works out the rest. On a nine-hour day it opens the
+window about two hours before you sit down: the first window is drained exactly as it resets, and
+a third window's worth of work fits inside the day instead of two. The page draws that comparison
+rather than asserting it, and states where its figures came from — measured from your own
+account once it has watched a window being spent, and clearly labelled as assumed until then.
+
+**This raises no limit.** The same window still holds the same allowance, and the weekly cap
+above it does not move at all, so an extra window pulled into the day is a week spent faster.
+Threading stands down when your weekly limit is running ahead of the clock, and it never fires
+while a window is already open, while a session is busy, when too little of the day is left to
+use a fresh window, or more than three times a day. Each account you allow says on the page what
+it is doing and why, and **Poke now** runs one on the spot so you can see it work instead of
+waiting for tomorrow morning.
+
+Claude only. The window has to open on the first message rather than slide continuously for any
+of this to mean anything, and Claude is the runtime where that has been measured.
 
 ## Chat Sessions (experimental)
 
@@ -1119,6 +1281,34 @@ The line **above** the box is the session talking rather than something you set:
 and a word for the turn in flight while the agent runs, and after it what the last turn cost —
 `Ready · last turn 47s · ↓ 1.2k tokens`.
 
+### Typing while the agent is working
+
+You do not have to wait. **Return queues** what you have written, and it is sent on its own as
+soon as the current turn finishes. Queued messages appear as a short list between the
+conversation and the reply box, in the order they will go:
+
+- **Drag** a waiting message to reorder it, or **⌘↑** / **⌘↓** from the keyboard.
+- **Click** one to open it back up in the reply box and change it. Anything you were part-way
+  through typing joins the queue rather than being lost.
+- **↑** in an empty box opens the last queued message the same way.
+- **⌫**, or the **✕** on the row, removes one.
+
+A message the agent has already been handed stops offering those: it is no longer yours to
+reorder or withdraw, and the row says where it got to instead.
+
+**⌘Return sends the message into the turn that is already running**, rather than queueing it —
+Claude and Codex accept this; Grok does not, and there the chord simply queues like Return. It
+reaches the agent at its next step rather than immediately, and it lands as an addition to what
+it is already doing. Use it to add ("also run the tests when you're done"), not to countermand:
+an instruction that reads like an override arrives through a channel the model is trained to
+distrust and may well be ignored. To change course, stop the turn instead.
+
+The send control **becomes a Stop while a turn is running**, and **Esc** does the same thing. Stop
+ends that turn and anything it started — background shells and sub-agents included, which keep
+running and keep costing tokens if only the main turn is interrupted. It leaves the conversation
+open, so you can carry straight on. A stopped turn folds up saying **Stopped after 42s** rather
+than reporting a failure, because nothing failed. Whatever you had queued stays queued.
+
 ### Referencing and commenting
 
 Use the **…** beside one of your messages or an agent response to **Add … to chat** or
@@ -1135,9 +1325,18 @@ The same pattern reaches beyond messages:
 - secondary-click an image already waiting in the reply box and choose **Comment…**.
 
 Several references and comments can be staged together. The reply box keeps them as compact count
-receipts; opening a receipt lists the individual messages, lines, and files. This works the same in
-Claude, Codex, and Grok Chat. OpenCode currently uses its terminal surface, so it has no Threading
-Chat reply box to receive these receipts.
+receipts; opening a receipt lists the individual messages, lines, and files.
+
+**Return holds it, ⌘Return sends it.** The comment box has two buttons: **Add to Chat** parks the
+comment above the reply box so you can add more, and **Send** hands it to the agent straight away
+as its own turn — along with anything you had already typed. Both chords are drawn on the buttons.
+
+**This works with every agent.** Sessions running Claude, Codex or Grok Chat receive the receipts
+in the reply box. A session running the agent's own terminal — every OpenCode session, and any
+session with Chat turned off — is handed the same thing by paste instead: the file's path goes in
+first, on its own, so Claude and Codex attach the picture rather than reading a line of text, and
+your comment follows it. **Send** then presses Return for you. The **Chat…** button and the
+secondary-click actions appear whenever the agent is running and disappear when it is not.
 
 Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
 returned — `$ Bash · ls -la · 42 lines`. Click to expand. A directory listing is usually
@@ -1181,6 +1380,12 @@ diff** to open Git Review on the Last Turn scope — offered on the latest turn'
 that is the turn the scope describes. The card appears for turns run live in this window;
 reopened conversations don't reconstruct old turn diffs.
 
+**Rest on a file row and its diff appears beside it** — the change itself, with line numbers,
+syntax colour and the usual added/removed washes, scrolling if the file is long. Move down the
+rows and the preview follows; move onto the preview and it stays open, so a long change can be
+read and scrolled without it closing under the pointer. Binary files show none, and a very
+large file's preview stops after the first few hundred lines and says how many it left out.
+
 ### Finding your way back
 
 A long conversation scrolls past the point where scrolling finds anything, so a **turn rail**
@@ -1190,7 +1395,21 @@ brighter, so the rail also shows where you are.
 
 It needs margin to live in, so it appears only when the pane is wide enough to spare some —
 in a narrow pane it stays out of the way entirely rather than crowding the text. It also needs
-at least two exchanges to index before it is worth drawing.
+at least two exchanges to index before it is worth drawing. In a very long conversation the marks
+stop at the closest spacing a pointer can still separate, and each one then stands for the
+exchange nearest it; the keyboard commands below still walk every turn.
+
+A single exchange can be tall on its own — one turn may run dozens of tool calls — and the rail
+gives that whole turn one mark. So while you are scrolled inside a turn, a **step header** pins
+the tool call you are currently reading to the top of the conversation: its symbol, the tool, and
+the one-line subject. Click it to jump back to the top of that call. It disappears at a turn's
+own boundaries, where the divider or the fold already says where you are. Unlike the rail it
+costs no width, so it works in a narrow pane too.
+
+Four keys move without the pointer. **⌃⌘↑** and **⌃⌘↓** step between exchanges, the vertical
+counterparts of Go Back and Go Forward. **⌥⌘↑** and **⌥⌘↓** step between tool calls inside a turn
+that is showing its work; a folded turn's calls are skipped, since folding it was a decision to
+treat it as one line. All four are reboundable in Settings.
 
 Command executions, MCP calls, searches and file-change events use the same collapsed treatment,
 with their result attached when the agent finishes the item. An edit shows the change itself as
@@ -1404,11 +1623,22 @@ may be pruned.
 
 Agent-UI terminals use **Independent terminal drafts** on iPhone by default. Type in the composer
 below the terminal and send when the line is ready; the entire line and Return reach Claude Code
-or Codex as one PTY write, so another phone cannot mix its keystrokes into yours. Escape, Ctrl-C,
-Tab, and arrow controls remain immediate. In the iPhone notification settings, **In-app
-collaboration** lets you independently hide people presence, hide typing indicators, or turn off
-independent drafts to restore raw direct terminal typing. These in-app indicators never create a
-push notification.
+or Codex as one PTY write, so another phone cannot mix its keystrokes into yours. The key bar's
+controls remain immediate. In the iPhone notification settings, **In-app collaboration** lets you
+independently hide people presence, hide typing indicators, or turn off independent drafts to
+restore raw direct terminal typing. These in-app indicators never create a push notification.
+
+The key bar under the terminal is customizable per agent, per device — a Termius-style keyboard
+that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
+agent (Claude Code's leads with ⇧⇥, the permission-mode cycle its TUI answers to), and the
+`⌨︎…` control at its trailing edge — or **Settings → On this iPhone → Terminal keys** — opens the
+editor: add chord keys such as ⌃→ or ⇧⇥ from the catalogue, add snippet keys that type saved
+text (optionally submitting it with Return; long-press such a key to insert without running),
+relabel any key, drag to reorder with Edit, swipe to delete, and reset to the stock layout. The
+⌃ and ⌥ keys latch: tap once to apply to the next key — from the bar or typed on the system
+keyboard — tap twice to lock, tap again to release. Arrows, Home and End follow the TUI's
+application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
+are stored only on the device that authored them; an iPhone and an iPad keep separate bars.
 
 Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
 draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
@@ -1511,8 +1741,9 @@ the right that Claude or Codex can put content into while you keep working in th
 Ask for something visual — "show me that screenshot", "chart the bundle sizes", "render that
 as a table" — and the panel opens beside the terminal, taking about a third of the window the
 first time and the width you last dragged it to after that. Drag its divider to resize it; drag
-it all the way to the edge and the panel closes. Close it with the **✕** in its header;
-it reopens the next time the agent displays something. It can also be opened by hand — the
+it all the way to the edge and the panel closes. Close it with the **✕** at the right of its
+header, beside the **+** — that one shuts the panel, while the ✕ on a tab closes only that tab.
+Your tabs are kept either way, and the panel reopens the next time the agent displays something. It can also be opened by hand — the
 panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
 
@@ -1657,6 +1888,27 @@ being asked to show something outranks a filter you left set.
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
 sits above an inline image/PDF preview; click an image to enter the same collection-aware media
 inspector. **Open**, **Finder**, and **Copy Path** act on the selected file.
+
+Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in** your
+installed editors, **Reveal in Finder**, **Copy Image** (or **Copy File** for a PDF) and **Copy
+Path** — plus **Compare with**, which names every other picture the session holds and opens the two
+of them in a **Compare** tab. Right-clicking also selects the row, so the preview underneath is
+always showing the file the menu is about.
+
+**Comparing two pictures.** Drag one row onto another and drop it: the row under the pointer says
+**Drop to compare**, and releasing opens the pair in the Compare tab with the wipe, crossfade,
+difference and side-by-side modes. A picture dragged in from outside — the Desktop, a Finder
+window, or dragged straight out of another app — works the same way: drop it on any image row and
+Threading compares the two. That picture also joins the list, marked **You**, and is copied into
+Threading if it came from outside the project, so the comparison still opens tomorrow when a
+temporary file has been cleaned up. Dropping the same outside picture again after it has changed
+compares the new version, not the copy Threading kept the first time. However the pair was named,
+the older file is always the *old* side — and two pictures that arrived together are ordered the way
+the list already shows them — so the arrow points the way you read. Rows can be dragged out too —
+onto Finder, onto a composer, into a message.
+
+PDFs are not part of this: a comparison is drawn from pixels, so a PDF row is not offered
+**Compare with** and does not take a drop.
 
 Images shown by earlier versions came back as one panel tab each. On the first launch after
 updating, those tabs become rows in this list — same pictures, same order, one place.
@@ -1949,6 +2201,36 @@ whose text cannot be read against its own background is refused outright.
 Switch the group off in **Settings ▸ Tools ▸ Terminal theme** if you would rather agents left
 your colours alone.
 
+### Letting sessions talk to each other
+
+The **Other sessions** tool group lets a session see and message its project siblings —
+nothing beyond its own project. `list_sessions` names them (id, agent, whether they are
+working); `send_to_session` delivers a message to one of them by id.
+
+Nothing about it is invisible. A delivered message lands in the receiving conversation as an
+ordinary turn, prefixed with which session sent it; if the receiver is mid-turn it queues in
+the same visible queue rail as anything you type yourself, where you can edit or remove it
+before it runs. A terminal session is only typed into while its agent is idle — and "sent"
+means confirmed: Threading waits for the receiving session's own turn report before claiming
+a typed delivery arrived. A dormant session cannot receive anything — resuming it stays your
+decision. Sessions can also *steer* each other — add a line to a chat turn already running,
+the same thing ⌘Return does in your own composer — and a session that cannot be steered
+refuses rather than quietly queueing.
+
+A session waiting on a sibling can also ask to be told once when that sibling finishes, rather
+than checking on it over and over: `watch_session` arms a single notice for when the watched
+session's turn settles — or its agent exits, or it stops at its usage limit. The notice arrives
+as an ordinary visible message in the waiting session's conversation, so you see exactly what it
+was told and when.
+
+The canonical use is a side chat reporting its conclusion back to the session it was forked
+from — ask a side chat to "report back when done" and it can, or use **Send Result to
+Parent** on the side chat's `⋯` menu: it sends the side chat's agent one visible line asking
+it to deliver its conclusion to the parent. The item appears only when it would work — on a
+side chat whose parent is still in the sidebar, with its agent idle and this tool group on.
+Messages run on the receiving session's own usage. Switch the group off in
+**Settings ▸ Tools ▸ Other sessions** if you would rather sessions stayed strangers.
+
 ## Git Review
 
 **View ▸ Git Review** (Cmd+Shift+R) opens a Review tab in the display panel: a native diff
@@ -2006,6 +2288,14 @@ session left on the CLI's own default still reports it — and a `/model` typed 
 moves the line the next time the card refreshes. A terminal session whose own status line already
 prints the model shows it once, on that line, rather than twice.
 
+**The same line names the permission mode a Claude session is actually in** — Auto, Plan, Accept
+Edits, Manual, Don't Ask or Bypass Permissions — between the model and the effort. It is read from
+what the session recorded, not from what it was started with, so pressing Shift+Tab inside Claude
+moves the line the next time the card refreshes. Chats where the posture cannot be observed show
+none: Codex, Grok and OpenCode record nothing to read, and a chat that has not been started yet
+has nothing to have observed. The mode shown here is a *reading*; the place to change it is still
+the chat's **⋯** menu ▸ Permission Mode, which takes effect the next time the chat starts.
+
 While the agent is working, that card becomes a live run receipt: the branch gives way to a
 working orb, the current **Step n / total** when the agent reports a plan, and the number of
 changed files beside the live `+N −M` totals. If Claude is running several task-list items in
@@ -2040,9 +2330,14 @@ a row to open or close it. Untracked files appear as all-added diffs, binary fil
 highlighted** for the languages Threading recognises by file extension; a file it does not
 recognise renders plain rather than guessed at.
 
-Secondary-click a rendered line to **Add line to chat** or **Comment on line…**. The staged receipt
-keeps the file path, line number, and line text together. The file row's own secondary-click menu
-offers the same pair for the complete file.
+Secondary-click a rendered line to **Add line to chat** or **Comment on line…**. To speak about
+several lines at once, select them first — a secondary click inside the selection offers **Add
+lines to chat** and **Comment on lines…** for the whole run. Either way the targeted lines light
+up whole, so what is highlighted is exactly what the comment will quote. The staged receipt keeps
+the file path, the line number or range, and the line text together. The file row's own
+secondary-click menu offers the same pair for the complete file. In the comment box, Return parks
+it above the reply box and ⌘Return sends it immediately; a session running its agent in a
+terminal is pasted the same thing instead.
 
 **A changed image opens too.** A row whose binary file is a raster image (PNG, JPEG, GIF,
 WebP, HEIC, TIFF, BMP, ICNS) says `image` instead of `binary` and expands into the same
@@ -2177,6 +2472,19 @@ marked, and the report text:
 - Point and region reports give the geometry twice: in window coordinates (bottom-left
   origin, what AppKit code speaks) and from the top-left (how anyone reading the screenshot
   counts).
+- Every capture closes with what the app was wearing when it was taken: version, build and
+  macOS; the app theme with the appearance it resolved to; whether the window is wearing the
+  theme's own frame or the native one; the window's size, backing scale and fullscreen state;
+  the terminal in view — its palette, the scope that chose it, and the font it is set in; your
+  text size, and any chrome font, display accommodation or interface language that differs from
+  the default. A row is clipped
+  under one theme and correct under three, and two controls overlap only at the largest text
+  size — none of which the picture on its own can say. The scale is there because the report
+  speaks points while the PNG beside it is pixels.
+
+  **A theme you made and named is reported as `custom`, never by name.** A capture can travel
+  to a public issue tracker, so everything in this block is a choice from a fixed list rather
+  than words you typed.
 
 Above the captured details is the **description**: whatever you type there leads the copied
 text and the filed issue, so "make this padding smaller" arrives above the evidence for it. It
@@ -2203,6 +2511,17 @@ permission and can never include another app's window. The one honest gap: conte
 process draws — a web page in the display panel — may appear blank in it.
 
 ## Appearance
+
+### The composer's activity ring
+
+Under the System theme, the prompt box — both the opening composer and a conversation's reply
+box — carries a quiet breathing ring while any agent in the app is working. One working agent
+lights it at 30% strength; each additional agent adds 10%, capping at full. The ring is
+monochrome, and turns colorful while any working session runs at its provider's highest
+reasoning effort (Claude's Max, Codex's top catalog level, and so on). It is purely
+decorative: it takes no clicks, appears in no accessibility tree, and under Reduce Motion it
+holds a static glow instead of breathing. Styled themes — the retro chromes especially — do
+not show it at all. Requires macOS 14.
 
 ### Sidebar
 - **Cmd+Ctrl+S**, or the toggle button at the left of the header: show/hide the sidebar
@@ -2443,6 +2762,11 @@ one sentence on why and an **Open** button. The run uses your own agent login an
 small amount of its usage, which is why it only ever happens on the click — typing alone
 never launches anything. It can see which pages exist and their keywords, never your values.
 
+Opening a suggestion is an ordinary page visit, so **Back** (⌃⌘← or the toolbar arrow)
+returns to the suggestions exactly as you left them. Clicking **Ask AI** again with the same
+query does the same thing — a held answer is re-shown, never re-bought; only a changed query
+starts a new run.
+
 The page list is grouped under six quiet captions — **App** (General, Keyboard), **Appearance**
 (Themes, Profiles, Motion), **Agents** (Accounts, Tools, Usage), **Access** (Remote Access,
 GitHub, Privacy), **Data** (Storage, Archived, Advanced), and **Extensions**, which also holds
@@ -2492,8 +2816,9 @@ than borrowing an unrelated app translation.
 
 - **Working indicator** defaults to **Random**, choosing a new orb for each turn without
   immediately repeating the last one. Choose a named orb to use that animation every time. The
-  list shows every orb running side by side, so they can be compared without being selected one
-  at a time; Random's row re-rolls each time you point at it.
+  nine named choices are Working, Searching, Solving, Listening, Connecting, Weaving, Composing,
+  Breathing, and Shaping. The list shows every orb running side by side, so they can be compared
+  without being selected one at a time; Random's row re-rolls each time you point at it.
 - **Chat name transition** defaults to **Shape Morph**. Point at a transition in the list and
   its row demonstrates it, morphing between the transition's name and the app's own and back for
   as long as you stay on it — one row at a time, and only after a short pause, so a pointer
@@ -2649,9 +2974,10 @@ on the capture: the ticket then carries the view, its frame, the measured spacin
 screenshot ready to paste.
 
 **Getting help.** **Help ▸ Create Remote Support Report…** writes a file and reveals it in the
-Finder. It holds versions, counts, and which OS grants Threading has — no project or session
-names, no paths, and no prompts, by construction rather than by scrubbing. Threading never
-uploads it; sending it is your decision.
+Finder. It holds versions, counts, and which OS grants Threading has, together with how many
+crashes and hangs macOS itself recorded for the app and which build the most recent crash hit —
+no project or session names, no paths, no prompts, and no crash stacks, by construction rather
+than by scrubbing. Threading never uploads it; sending it is your decision.
 
 **What is never asked for.** Threading has no analytics and no identifier for your install. It
 requests no camera, microphone, contacts, calendar, location or Full Disk Access.
@@ -2749,6 +3075,22 @@ The report is built in the background and remembered between launches, so the pa
 what is already known. **Rebuild** re-reads every transcript now, which takes about a minute.
 
 Claude only — Codex records its usage differently, and is not in these totals yet.
+
+### Usage Windows
+When the day's usage window opens. Off until you turn it on; the full explanation is under
+[Opening the day's window on time](#opening-the-days-window-on-time).
+
+The page leads with a picture rather than with switches, because what it configures is a
+consequence of how a subscription meters time rather than a preference. It draws your working
+day twice — once with the window opening when you start, once with it opened early — so the
+extra reset and the hour it buys are visible before you decide anything.
+
+Below that: when you start and stop, which days, and which logins may be poked. Each allowed
+account says what it is doing right now (`A window is open until 12:00, 3h from now`,
+`Waiting until 07:00`, `Standing down: the weekly limit is 84% spent, ahead of the clock`), and
+every poke that has actually run is listed with what came of it.
+
+Claude only, and the page says why.
 
 ### Storage
 Build output your projects can make again, and a button that removes it. Also reachable from a
@@ -2864,11 +3206,49 @@ therefore handed to the next launch, and that launch says how many of them it br
 A launch that never reaches its quit leaves its marker behind, and the next launch records
 `Previous launch did not quit cleanly`, pointing at the macOS crash report from that run in
 `~/Library/Logs/DiagnosticReports/`. That pair — what Threading was doing, and what macOS
-recorded about it dying — is what a crash needs explaining.
+recorded about it dying — is what a crash needs explaining. The same launch records
+`Held the workspace back after an unclean exit` beside it, so a report saying the workspace came
+back is never confused with one saying it was held.
 
 This owner-local log is different from the share-safe remote diagnostics timeline. It can contain
 prompts, commands and paths, so it is never populated by or attached through the iPhone/browser
 sharing control.
+
+## Recovery Mode
+
+When Threading has quit unexpectedly more than once in a row, the next launch comes up in
+**recovery mode**: the window opens, your projects are listed in the sidebar, and nothing else
+starts. No session, no shell, no extensions, no scheduled messages, no remote access, and nothing
+from the last session is reopened. It uses the stock appearance while it is on, and does not change
+the theme you chose.
+
+You can also ask for it: hold **Option** while Threading starts, or launch it with
+`open -a Threading --args --recovery-mode`. Both work even when the app cannot read its own launch
+history.
+
+The pane explains why it came up and how far the launch that failed got, then offers, in order:
+
+| Offer | What it does |
+|-------|--------------|
+| **Try Normal Launch Once** | Restarts Threading and lets that one launch come up normally, whatever the crash history says. If it fails too, the launch after it returns to recovery |
+| **Continue in Recovery Mode** | Puts the screen away and leaves the app as it is. A band stays across the top of the pane, and **Show Options** brings the screen back |
+| **Disable Extensions for Next Launch** | The next launch starts no extensions and no companions. Nothing is uninstalled and nothing is switched off: the launch after that starts them again. Press it a second time to change your mind |
+| **Reset Window Layout** | Forgets the window size and position, the sidebar width, the panel widths and the shell drawer height. Nothing else is touched |
+| **Reveal Crash Report** | Shows the `.ips` file macOS filed for the failed launch in the Finder, ready to attach to a bug report. Offered only when there is one |
+| **Create Support Report** | Writes the share-safe diagnostics file and reveals it, the same as **Help > Create Remote Support Report** |
+| **Move App Data Aside** | The recoverable reset from **Settings > Advanced**: your projects, sessions and settings move into a dated folder under `~/Library/Application Support/Threading Resets/` and Threading restarts on nothing. Nothing is deleted, and the folder can be moved back |
+
+Nothing recovery mode does on its own is destructive. It does not delete anything, does not change
+your theme, does not resend an interrupted prompt, and does not touch the record of which sessions
+were running the last time you quit normally, so those still come back once Threading starts
+normally again. **Move App Data Aside** is the one offer that changes your data, and it asks first.
+
+While recovery mode is on, the menu items that would start work are unavailable. Quit, Copy, the
+window commands, Settings, and everything under Help keep working, as do the sidebar's own view
+options and **Check for Updates** — a newer build is a perfectly good fix for a crash.
+
+If a launch you asked to try normally also fails, or if the recovery launch itself fails, the
+screen says so and leads with the offers further down the list instead.
 
 ## Keyboard Shortcuts
 
@@ -2876,7 +3256,7 @@ sharing control.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
-| Start the session being composed (Return sends it too, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
+| Start the session being composed (Return breaks the line, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
@@ -2898,6 +3278,8 @@ sharing control.
 |--------|----------|
 | Toggle Sidebar | Cmd+Ctrl+S |
 | Go Back / Go Forward (selection history) | Cmd+Ctrl+Left / Cmd+Ctrl+Right |
+| Previous Turn / Next Turn (in a conversation) | Cmd+Ctrl+Up / Cmd+Ctrl+Down |
+| Previous Step / Next Step (tool calls in a turn) | Cmd+Opt+Up / Cmd+Opt+Down |
 | Group Sessions by Branch | Cmd+Ctrl+B |
 | Headings for Lone Branches | Cmd+Option+B |
 | Terminal (display panel tab) | Cmd+T |
@@ -2955,8 +3337,8 @@ At the top of the same page, **Composer** holds the one key that is not a comman
 a prompt, press Return to*. It is here because "what is this key already doing" is most of why a
 shortcuts page gets opened, and Return is the key people most often mean.
 
-| Choice | Return in a prompt to an agent | Return in a note attached to a report |
-|--------|-------------------------------|--------------------------------------|
+| Choice | Return in a reply to a running chat | Return in a new session's brief, or a note attached to a report |
+|--------|------------------------------------|----------------------------------------------------------------|
 | **Do What the Composer Expects** (default) | sends | breaks the line |
 | **Send** | sends | sends |
 | **Start a New Line** | breaks the line | breaks the line |

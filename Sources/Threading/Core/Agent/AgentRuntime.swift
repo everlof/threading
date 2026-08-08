@@ -119,6 +119,12 @@ final class AgentRuntime {
             ProjectStore.shared.applyPromptTitle(prompt, forSessionID: report.sessionID)
         }
 
+        // Before the tracker guard on purpose: the receipt is about the report arriving,
+        // and a session mid-registration still owes its waiters the answer.
+        if report.event == .turnStarted {
+            resolveTurnStartWaiters(for: report.sessionID)
+        }
+
         guard let tracker = controllers[report.sessionID]?.activityTracker else {
             // Ordinary for a rendered conversation, which learns its boundaries from the stream
             // and has no terminal controller. Recorded at debug because it is also what a
@@ -138,20 +144,28 @@ final class AgentRuntime {
         switch report.event {
         case .turnStarted: tracker.noteTurnStarted()
         case .turnFinished:
-            if !report.backgroundTaskIDs.isEmpty {
+            if !report.backgroundWork.isEmpty {
                 // The one line that explains a session sitting at `working` with a quiet
                 // terminal: its agent is waiting on something it started, not on the user.
+                // The delegated count is called out separately because it is the half that
+                // pauses the session however old it is.
+                let delegated = report.backgroundWork.filter { $0.kind == .delegated }.count
                 ThreadingLogger.agent.debug(
                     """
-                    Turn ended with \(report.backgroundTaskIDs.count, privacy: .public) \
-                    background task(s) in flight for \
+                    Turn ended with \(report.backgroundWork.count, privacy: .public) \
+                    background task(s) in flight, \(delegated, privacy: .public) delegated, for \
                     \(report.sessionID.uuidString, privacy: .public)
                     """
                 )
             }
-            tracker.noteTurnFinished(backgroundWork: report.backgroundTaskIDs)
+            tracker.noteTurnFinished(backgroundWork: report.backgroundWork)
         case .awaitingUser: tracker.noteAwaitingUser()
-        case .sessionStarted: break
+        case .blockingAskOpened: tracker.noteBlockingAskOpened(id: report.toolCallID)
+        case .blockingAskClosed: tracker.noteBlockingAskClosed(id: report.toolCallID)
+        // Not a turn boundary, but the earliest proof the CLI is up: delivery gates on it.
+        // Dropped on the floor here, it left every session idle since an app relaunch
+        // reading as still-booting — refused by send_to_session while listed as idle.
+        case .sessionStarted: tracker.noteSessionStarted()
         case .subagentStarted, .subagentStopped: break
         }
 
@@ -233,7 +247,8 @@ final class AgentRuntime {
                     ))
                 }
             }
-        case .turnStarted, .turnFinished, .awaitingUser, .sessionStarted:
+        case .turnStarted, .turnFinished, .awaitingUser, .sessionStarted,
+             .blockingAskOpened, .blockingAskClosed:
             break
         }
     }
@@ -293,6 +308,52 @@ final class AgentRuntime {
             return controller.activityTracker.reportsOwnActivity
         }
         return conversations[sessionID] != nil
+    }
+
+    /// Whether the session's current process has been heard from at all — its `SessionStart`
+    /// hook or any later lifecycle report. Deliberately weaker than `reportsOwnTurns`: it
+    /// proves the CLI is up without claiming turn boundaries will be declared, which is the
+    /// question delivery asks before typing into a PTY.
+    func hasHeardFromProcess(sessionID: SessionID) -> Bool {
+        if let controller = controllers[sessionID] {
+            return controller.activityTracker.hasHeardFromProcess
+        }
+        return conversations[sessionID] != nil
+    }
+
+    // MARK: - Turn-Start Receipts
+
+    private struct TurnStartWaiter {
+        let sessionID: SessionID
+        let completion: @MainActor (Bool) -> Void
+    }
+
+    private var turnStartWaiters: [UUID: TurnStartWaiter] = [:]
+
+    /// One-shot: answers `true` when the session next *reports* a started turn, `false` at the
+    /// timeout. Resolved only by the session's own lifecycle reports, never by the output
+    /// heuristic — the caller is asking "did the CLI accept what was typed", and inferred
+    /// turns are precisely what a compaction repaint fakes.
+    func awaitReportedTurnStart(
+        sessionID: SessionID,
+        timeout: TimeInterval,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        let token = UUID()
+        turnStartWaiters[token] = TurnStartWaiter(sessionID: sessionID, completion: completion)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            guard let self, let waiter = self.turnStartWaiters.removeValue(forKey: token) else {
+                return
+            }
+            waiter.completion(false)
+        }
+    }
+
+    private func resolveTurnStartWaiters(for sessionID: SessionID) {
+        for (token, waiter) in turnStartWaiters where waiter.sessionID == sessionID {
+            turnStartWaiters.removeValue(forKey: token)
+            waiter.completion(true)
+        }
     }
 
     /// Whether the session has a terminal allocated, running or exited.

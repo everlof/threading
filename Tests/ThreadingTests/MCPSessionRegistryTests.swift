@@ -233,6 +233,62 @@ final class MCPWireTests: XCTestCase {
     )
   }
 
+  func testWorkspaceControlCallsAreTypedAndAdvertised() throws {
+    let target = UUID().uuidString.lowercased()
+    let data = Data(
+      #"{"name":"send_to_session","arguments":{"session_id":"\#(target)","message":"The importer bug is in the byte cap."}}"#
+        .utf8
+    )
+    let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
+    guard case .sendToSession(let arguments) = decoded.call else {
+      return XCTFail("Expected typed send_to_session arguments")
+    }
+    XCTAssertEqual(arguments.sessionID, target)
+    XCTAssertEqual(arguments.message, "The importer bug is in the byte cap.")
+    XCTAssertNil(arguments.disposition, "Absent means queue; the default is decided in one place")
+
+    let steered = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(
+        #"{"name":"send_to_session","arguments":{"session_id":"\#(target)","message":"Also check the tests.","disposition":"steer"}}"#
+          .utf8
+      )
+    )
+    guard case .sendToSession(let steerArguments) = steered.call else {
+      return XCTFail("Expected typed send_to_session arguments")
+    }
+    XCTAssertEqual(steerArguments.disposition, "steer")
+
+    let listed = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(#"{"name":"list_sessions"}"#.utf8)
+    )
+    guard case .listSessions = listed.call else {
+      return XCTFail("Expected typed list_sessions call")
+    }
+
+    let watched = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(#"{"name":"watch_session","arguments":{"session_id":"\#(target)"}}"#.utf8)
+    )
+    guard case .watchSession(let watchArguments) = watched.call else {
+      return XCTFail("Expected typed watch_session arguments")
+    }
+    XCTAssertEqual(watchArguments.sessionID, target)
+
+    XCTAssertEqual(
+      MCPTools.workspaceTools, ["list_sessions", "send_to_session", "watch_session"])
+    XCTAssertTrue(MCPTools.definitions.contains { $0.name == "list_sessions" })
+    let send = try XCTUnwrap(MCPTools.definitions.first { $0.name == "send_to_session" })
+    XCTAssertEqual(send.inputSchema.required, ["session_id", "message"])
+    let watch = try XCTUnwrap(MCPTools.definitions.first { $0.name == "watch_session" })
+    XCTAssertEqual(watch.inputSchema.required, ["session_id"])
+    XCTAssertTrue(
+      MCPToolCatalog.catalogIssues.isEmpty,
+      "Every workspace tool needs exactly one catalog row and one schema: \(MCPToolCatalog.catalogIssues)"
+    )
+  }
+
   func testRequestIDPreservesIntegerStringNullAndMissing() throws {
     XCTAssertEqual(try request(#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#).id, .integer(7))
     XCTAssertEqual(

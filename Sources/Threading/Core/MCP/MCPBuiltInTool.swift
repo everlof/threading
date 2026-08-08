@@ -51,6 +51,9 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case archiveSession = "archive_session"
   case cancelSessionArchive = "cancel_session_archive"
   case setSessionName = "set_session_name"
+  case listSessions = "list_sessions"
+  case sendToSession = "send_to_session"
+  case watchSession = "watch_session"
   case listReclaimableStorage = "list_reclaimable_storage"
   case proposeStorageCleanup = "propose_storage_cleanup"
   case listSettings = "list_settings"
@@ -78,6 +81,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case panel
     case project
     case session
+    case workspace
     case storage
     case notifications
     case appearance
@@ -103,6 +107,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case .panelListTabs, .panelActivateTab: return .panel
     case .setProjectIcon: return .project
     case .archiveSession, .cancelSessionArchive, .setSessionName: return .session
+    case .listSessions, .sendToSession, .watchSession: return .workspace
     case .listReclaimableStorage, .proposeStorageCleanup: return .storage
     case .listSettings: return .settings
     case .notifyUser: return .notifications
@@ -123,6 +128,7 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
     case .conversationHistory, .browserCapabilities, .browserSnapshot, .browserAnnotations,
       .browserScreenshot, .browserVisualCompare, .browserQuery, .browserConsole,
       .browserNetwork, .browserPerformance, .browserAccessibilityAudit, .panelListTabs,
+      .listSessions,
       .listReclaimableStorage, .listSettings, .listThemes, .listAppThemes, .getAppTheme,
       .extensionListComponents, .extensionDescribeComponent,
       .extensionValidateComponentPatch:
@@ -165,14 +171,20 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
       .browserDrag, .browserType, .browserFillForm, .browserFillCredentials,
       .browserSelect, .browserSetChecked,
       .browserPressKey, .browserScroll, .browserWait, .panelActivateTab, .setProjectIcon,
-      .notifyUser, .setTheme, .createTheme, .setAppTheme, .createAppTheme,
+      .notifyUser, .sendToSession, .watchSession, .setTheme, .createTheme, .setAppTheme,
+      .createAppTheme,
       .duplicateAppTheme, .updateAppTheme, .extensionScaffoldProject,
       .extensionPreviewComponentPatch:
       return MCPToolAnnotations(
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
-        openWorldHint: family == .browser || self == .notifyUser
+        // `send_to_session` reaches beyond this session's own surfaces: it starts or extends
+        // a turn in another agent process, which is a resource outside this call's world.
+        // `watch_session` writes nothing now and leads to exactly that message later, so it
+        // is classified by what it causes rather than by what the call itself does.
+        openWorldHint: family == .browser || self == .notifyUser || self == .sendToSession
+          || self == .watchSession
       )
     }
   }

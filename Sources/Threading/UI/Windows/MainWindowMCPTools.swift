@@ -149,6 +149,9 @@ struct AgentToolDependencies {
   let settings: AppSettings
   let notifications: RemoteNotificationService
   let archiveScheduler: SessionArchiveScheduler
+  /// The typed session control plane — scope and refusal rules for every cross-session
+  /// operation, whoever the caller is. Handlers own wording only.
+  let control: WorkspaceControlPlane
   /// The project's durable visual baselines. Injected rather than reached for as a singleton from
   /// the handler, so a test drives its own directory instead of the developer's.
   let baselines: BrowserBaselineStore
@@ -163,6 +166,7 @@ struct AgentToolDependencies {
     settings: .shared,
     notifications: .shared,
     archiveScheduler: .shared,
+    control: .live,
     baselines: .shared
   )
 }
@@ -184,8 +188,17 @@ final class AgentToolCoordinator: AgentCommandHandling {
   }
 
   let displayPaneController: DisplayPaneController
+  /// Where this session's browser actually is, across every pane that can hold one. The panel
+  /// stays a separate dependency because `display_*` and `panel_*` are panel-scoped by
+  /// contract; only the `browser_*` family follows the browser.
+  let browserResolver: SessionBrowserResolver
   let visibleSessionID: () -> SessionID?
   let setPaneVisible: (Bool) -> Void
+  /// Opens the pane that holds a given host, so a tool that drove a browser can show the user
+  /// the page it drove rather than whichever pane the panel happens to be. Supplied by the
+  /// window, which is the only thing that can open a pane it does not own; a coordinator built
+  /// without one opens the panel and leaves other hosts alone, which is the old behaviour.
+  let revealBrowserHost: (TabHostID) -> Void
   /// Bringing Threading forward, as its own seam because a password takeover has to do it and a
   /// test must not: universal autofill fills the frontmost app's focused field, so this is real
   /// behaviour rather than polish, and `NSApp.activate` in a test host steals the developer's
@@ -202,8 +215,10 @@ final class AgentToolCoordinator: AgentCommandHandling {
 
   convenience init(
     displayPaneController: DisplayPaneController,
+    browserResolver: SessionBrowserResolver? = nil,
     visibleSessionID: @escaping () -> SessionID?,
     setPaneVisible: @escaping (Bool) -> Void,
+    revealBrowserHost: ((TabHostID) -> Void)? = nil,
     windowProvider: @escaping () -> NSWindow?,
     browserAccessDecisionProvider: BrowserAccessDecisionProvider? = nil,
     browserSiteDataDecisionProvider: BrowserSiteDataDecisionProvider? = nil,
@@ -213,8 +228,10 @@ final class AgentToolCoordinator: AgentCommandHandling {
   ) {
     self.init(
       displayPaneController: displayPaneController,
+      browserResolver: browserResolver,
       visibleSessionID: visibleSessionID,
       setPaneVisible: setPaneVisible,
+      revealBrowserHost: revealBrowserHost,
       windowProvider: windowProvider,
       browserAccessDecisionProvider: browserAccessDecisionProvider,
       browserSiteDataDecisionProvider: browserSiteDataDecisionProvider,
@@ -227,8 +244,10 @@ final class AgentToolCoordinator: AgentCommandHandling {
 
   init(
     displayPaneController: DisplayPaneController,
+    browserResolver: SessionBrowserResolver? = nil,
     visibleSessionID: @escaping () -> SessionID?,
     setPaneVisible: @escaping (Bool) -> Void,
+    revealBrowserHost: ((TabHostID) -> Void)? = nil,
     windowProvider: @escaping () -> NSWindow?,
     browserAccessDecisionProvider: BrowserAccessDecisionProvider?,
     browserSiteDataDecisionProvider: BrowserSiteDataDecisionProvider?,
@@ -238,8 +257,15 @@ final class AgentToolCoordinator: AgentCommandHandling {
     dependencies: AgentToolDependencies
   ) {
     self.displayPaneController = displayPaneController
+    // Panel-only when the caller names no other host: a coordinator built without a window has
+    // no other host to name, which is exactly the shape every test uses.
+    self.browserResolver = browserResolver ?? SessionBrowserResolver(panel: displayPaneController)
     self.visibleSessionID = visibleSessionID
     self.setPaneVisible = setPaneVisible
+    self.revealBrowserHost = revealBrowserHost ?? { hostID in
+      guard hostID == .displayPanel else { return }
+      setPaneVisible(true)
+    }
     self.activateApp = activateApp
     self.windowProvider = windowProvider
     self.browserAccessDecisionProvider = browserAccessDecisionProvider
@@ -486,7 +512,7 @@ final class AgentToolCoordinator: AgentCommandHandling {
     let traceDetail = shouldTrace ? browserTraceDetail(for: call) : nil
     let initialTraceBrowser =
       shouldTrace
-      ? displayPaneController.browser(for: sessionID)
+      ? browserResolver.browser(for: sessionID)
       : nil
     let workspaceEffect = browserWorkspaceEffect(for: call)
     // A tool that reads or changes the panel means the agent's transcript now reflects it, so
@@ -494,7 +520,7 @@ final class AgentToolCoordinator: AgentCommandHandling {
     let observed: @MainActor @Sendable (MCPToolResult) -> Void = { [weak self] result in
       if shouldTrace {
         let browser =
-          self?.displayPaneController.browser(for: sessionID)
+          self?.browserResolver.browser(for: sessionID)
           ?? initialTraceBrowser
         browser?.recordAgentToolTrace(
           name: call.name,
@@ -658,6 +684,16 @@ final class AgentToolCoordinator: AgentCommandHandling {
       completion(cancelSessionArchive(for: sessionID))
     case .setSessionName(let arguments):
       completion(setSessionName(arguments, for: sessionID))
+    case .listSessions:
+      // Not `observed`: a listing is not panel content, and marking the panel seen here
+      // would suppress the description a later resume owes the agent.
+      completion(listProjectSessions(for: sessionID))
+    case .sendToSession(let arguments):
+      // Answers only once the delivery is confirmed or honestly unconfirmed — a terminal
+      // send waits on the target's own turn-started receipt.
+      sendToSession(arguments, for: sessionID, completion: completion)
+    case .watchSession(let arguments):
+      completion(watchSession(arguments, for: sessionID))
     case .listReclaimableStorage:
       completion(listReclaimableStorage())
     case .listSettings:

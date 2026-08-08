@@ -239,6 +239,9 @@
 		2A930AB0EED9800F4092F799 /* SidebarRowAnimationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */; };
 		499E878F58A0896D446FBBFD /* TerminalCopyOnSelectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */; };
 		A28A528264B6B44C3F42C3A8 /* SidebarCompactTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C97E9A1F74D747C7881AF2 /* SidebarCompactTreeTests.swift */; };
+		A5842DBF52B7FC0B4852D1D0 /* WorkspaceControlPlaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31812CCEC9ACFA545C219FB /* WorkspaceControlPlaneTests.swift */; };
+		92FF9FD8BECADF43A005C1DF /* SessionWatchCenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F50E4AFFB156140F02FE00 /* SessionWatchCenterTests.swift */; };
+		7E00FBCE77E9A9B198E099F2 /* SessionMessageDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DD2A70131EF6ADD714168F7 /* SessionMessageDeliveryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -522,6 +525,9 @@
 		1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowAnimationTests.swift; sourceTree = "<group>"; };
 		311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalCopyOnSelectTests.swift; sourceTree = "<group>"; };
 		83C97E9A1F74D747C7881AF2 /* SidebarCompactTreeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarCompactTreeTests.swift; sourceTree = "<group>"; };
+		F31812CCEC9ACFA545C219FB /* WorkspaceControlPlaneTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkspaceControlPlaneTests.swift; sourceTree = "<group>"; };
+		68F50E4AFFB156140F02FE00 /* SessionWatchCenterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionWatchCenterTests.swift; sourceTree = "<group>"; };
+		0DD2A70131EF6ADD714168F7 /* SessionMessageDeliveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionMessageDeliveryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -872,6 +878,9 @@
 				1583D8BD794F15F344B12B80 /* SidebarRowAnimationTests.swift */,
 				311DEBADF054054D0B08E383 /* TerminalCopyOnSelectTests.swift */,
 				83C97E9A1F74D747C7881AF2 /* SidebarCompactTreeTests.swift */,
+				F31812CCEC9ACFA545C219FB /* WorkspaceControlPlaneTests.swift */,
+				68F50E4AFFB156140F02FE00 /* SessionWatchCenterTests.swift */,
+				0DD2A70131EF6ADD714168F7 /* SessionMessageDeliveryTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1462,6 +1471,9 @@
 				2A930AB0EED9800F4092F799 /* SidebarRowAnimationTests.swift in Sources */,
 				499E878F58A0896D446FBBFD /* TerminalCopyOnSelectTests.swift in Sources */,
 				A28A528264B6B44C3F42C3A8 /* SidebarCompactTreeTests.swift in Sources */,
+				A5842DBF52B7FC0B4852D1D0 /* WorkspaceControlPlaneTests.swift in Sources */,
+				92FF9FD8BECADF43A005C1DF /* SessionWatchCenterTests.swift in Sources */,
+				7E00FBCE77E9A9B198E099F2 /* SessionMessageDeliveryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

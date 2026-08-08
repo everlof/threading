@@ -26,6 +26,16 @@ enum SessionActivity {
     /// Finished working while the session was not on screen.
     case needsAttention
 
+    /// The provider refused the turn because the account's usage limit is spent, and nothing
+    /// will happen here until the window resets or the conversation moves to another login.
+    ///
+    /// Its own state rather than a shade of `needsAttention`, because the two answer different
+    /// questions. Every other state here says what the session is doing; this one says why it is
+    /// doing nothing, and it is the only one the user cannot resolve by looking. It was found by
+    /// wearing the alternative: a session refused at 10:45 went on drawing a spinner until the
+    /// user noticed at 11:04 and asked what had happened.
+    case limitReached
+
     /// Whether a turn is unfinished: the agent is mid-answer, or stopped on a question it
     /// cannot get past.
     ///
@@ -33,11 +43,14 @@ enum SessionActivity {
     /// merely unread has already finished its turn and loses only its process, which resumes;
     /// these two lose the answer being written. Copy that counts "running agents" counts both
     /// sides of that line and reads as the worse one.
+    ///
+    /// A refused turn is *over*: the CLI is back at its prompt and the answer it was writing is
+    /// already lost, so there is nothing left for an interruption to cost.
     var hasTurnInFlight: Bool {
         switch self {
         case .working, .awaitingUser:
             return true
-        case .dormant, .idle, .needsAttention:
+        case .dormant, .idle, .needsAttention, .limitReached:
             return false
         }
     }
@@ -95,6 +108,17 @@ final class SessionActivityTracker {
             // Looking at a session answers whatever it was asking for. What it goes back to is
             // the turn it is in rather than idle: an agent that asked mid-turn is still working,
             // and nothing else would have said so again until the user's next prompt.
+            //
+            // `openAsks` and `limitPark` are deliberately untouched. This rule is a guess — the
+            // runtime's own "waiting" notice cannot say what it is waiting for, so being looked
+            // at is the best evidence available that it was answered — and neither a named tool
+            // call nor a refused request is a guess.
+            //
+            // The park in particular is not a question the user can answer by arriving. Both of
+            // the CLI's own chooser options leave the account exactly as spent as it was, so a
+            // glance that lowered the mark would show an ordinary idle row for a session that
+            // still cannot run. What lowers it is the conversation running again, which the
+            // transcript states outright.
             guard isVisible, awaitsUser else { return }
             awaitsUser = false
             settle()
@@ -108,6 +132,16 @@ final class SessionActivityTracker {
     /// state straight back to the proxy this exists to replace.
     private(set) var reportsOwnActivity = false
 
+    /// Whether this process has been heard from at all — its `SessionStart` hook, or any
+    /// later lifecycle report. Deliberately weaker than `reportsOwnActivity`: hearing a
+    /// SessionStart proves the CLI is up and the hook path works, without yet claiming turn
+    /// boundaries will be declared — which is why it must not switch off the output
+    /// heuristic. It exists for delivery: typing into a PTY whose `isRunning` flipped at
+    /// spawn lands text in a login shell, and this is the earliest honest "the composer
+    /// exists now". Without it, every session idle since an app relaunch read as
+    /// still-booting forever, because SessionStart was the one report nothing latched.
+    private(set) var hasHeardFromProcess = false
+
     /// Whether a turn is open: begun, and not yet reported finished.
     private var turnInFlight = false
 
@@ -115,7 +149,26 @@ final class SessionActivityTracker {
     ///
     /// Held apart from the turn because the two are independent — the flag can be raised and
     /// lowered several times inside one turn.
+    ///
+    /// This is the *inferred* half of asking: it comes from a runtime's own notice, which cannot
+    /// say what it is waiting for, so being looked at and fresh output are both allowed to lower
+    /// it. `openAsks` is the half that is known outright and obeys neither.
     private var awaitsUser = false
+
+    /// Ask-shaped tool calls that have opened and not yet closed, keyed by the call.
+    ///
+    /// The fact `awaitsUser` cannot carry. A tool whose result *is* the user's answer has
+    /// stopped the turn for as long as it is open, and nothing about the terminal changes that:
+    /// the question is drawn by the same process that would be "producing output", and the user
+    /// arrowing through its options repaints the whole box. Both of those lower `awaitsUser`,
+    /// correctly, and both would be wrong here — so this is settled ahead of it and cleared only
+    /// by the call ending.
+    ///
+    /// Keyed rather than counted so a close pairs with its own open. Out-of-order or duplicated
+    /// hooks then converge: inserting an id twice is one entry, and removing an id that was
+    /// never inserted is nothing at all, where a counter would drift a session permanently into
+    /// or out of the mark.
+    private var openAsks: Set<String> = []
 
     /// Whether the agent ended its turn on work it had just started, which will wake it again.
     ///
@@ -129,6 +182,35 @@ final class SessionActivityTracker {
     /// Tells work this turn started from work parked in an earlier one — see
     /// `BackgroundWorkLedger`, which is where that judgement and its reasoning live.
     private var backgroundWork = BackgroundWorkLedger()
+
+    /// How the provider's rate limit has parked this session, if it has.
+    ///
+    /// A fifth fact, for `pausedOnOwnWork`'s reason: the refused turn genuinely ended (the
+    /// transcript writes its `turn_duration`), but `Stop` never fires for it — measured in
+    /// [`limit-recovery.md`](../../../docs/architecture/limit-recovery.md) — so without this
+    /// the session strands `working` on a turn nothing will ever close. It is not an
+    /// `openAsks` entry because nothing ever closes the CLI's chooser: answering it raises no
+    /// hook, and the mark would never come down. And it is not `awaitsUser` inside an open
+    /// turn, because being looked at would return a latched session — which has no quiet
+    /// timer left — to `working` forever.
+    enum LimitPark {
+        /// No limit in force.
+        case none
+
+        /// The limit hit and nothing is handling it. Reads `limitReached`: not a question the
+        /// user can answer, not a turn to be interrupted, and not work — a session that stopped
+        /// for a reason it has to be told, since nothing on the row could otherwise say why an
+        /// agent went quiet mid-plan.
+        case flagged
+
+        /// The limit hit and a continuation is armed. The process is sitting at its prompt
+        /// with nothing owed and the composer's strip already names the arranged send, so the
+        /// session reads `idle`: no beam, no mark, no notification. The mark exists to explain
+        /// an *unexplained* stop, and this one is accounted for.
+        case recovering
+    }
+
+    private var limitPark: LimitPark = .none
 
     /// Whether the session owns no process at all, which outranks both of the above.
     private var isDormant = false
@@ -189,6 +271,10 @@ final class SessionActivityTracker {
             // bytes at a time never adds up to an answer.
             bytesSinceQuiet = 0
 
+            // A limit park is deliberately not lowered here. A burst in front of the user is
+            // the CLI repainting around its chooser as readily as it is the agent carrying on,
+            // and only one of those means the session can work again — the transcript says
+            // which, so nothing has to be inferred from bytes.
             guard isVisible, turnInFlight, awaitsUser else { return }
             awaitsUser = false
             settle()
@@ -210,13 +296,22 @@ final class SessionActivityTracker {
         suppressOutputUntil = Date().addingTimeInterval(ActivityDefaults.resizeQuietPeriod)
     }
 
-    /// Notes that a scroll was forwarded to the process as mouse input.
+    /// Notes that a mouse report — a wheel tick or a pointer move — was forwarded to the
+    /// process.
     ///
-    /// A program tracking the mouse answers each wheel report by repainting its content —
-    /// output we caused, exactly like a resize. Each event extends the window, so it covers
-    /// a whole momentum gesture and ends soon after the last one.
-    func noteScrollForwarded() {
-        suppressOutputUntil = Date().addingTimeInterval(ActivityDefaults.scrollQuietPeriod)
+    /// A program tracking the mouse answers each report by repainting its content — output we
+    /// caused, exactly like a resize. Each event extends the window, so it covers a whole
+    /// momentum gesture or pointer sweep and ends soon after the last one.
+    ///
+    /// **Motion is the loud half, not the wheel.** Claude Code turns on any-event tracking
+    /// (`\u{1b}[?1003h`), so merely moving the pointer across the terminal reports every cell
+    /// the pointer crosses, and the CLI answers each one by redrawing the row under it —
+    /// far over the byte threshold for a sweep of a few cells. Without this the session went
+    /// `working` while the user moved the mouse over a finished turn, and a reporting session
+    /// took it the other way: a burst inside a flagged turn is read as the user having
+    /// answered where they stood, which a hover highlight is not.
+    func noteMouseReportForwarded() {
+        suppressOutputUntil = Date().addingTimeInterval(ActivityDefaults.pointerQuietPeriod)
     }
 
     private var isSuppressed: Bool {
@@ -236,6 +331,12 @@ final class SessionActivityTracker {
         adoptOwnReports()
         turnInFlight = true
         awaitsUser = false
+        // A new prompt is proof the user is past whatever the last turn was asking, so an ask
+        // whose close never arrived ends here rather than outliving the turn it belonged to.
+        openAsks.removeAll()
+        // A turn beginning is the limit lifting, whoever typed it — the scheduled continuation
+        // landing is exactly this edge.
+        limitPark = .none
         settle()
     }
 
@@ -244,14 +345,18 @@ final class SessionActivityTracker {
     /// Finishing while the session is on screen needs no flag; the user watched it happen.
     ///
     /// `backgroundWork` is the agent's own account of what it left running — a backgrounded
-    /// shell, a detached child, an MCP monitor — by identity. Work this turn started is work
-    /// the turn is waiting on, so it has not finished anything: claiming otherwise posts a
-    /// notification for an answer that has not been given yet, and drops the session's mark
-    /// while the agent is about to speak again. Work carried over from an earlier turn is
-    /// parked, and this turn really did end. `BackgroundWorkLedger` draws that line.
-    func noteTurnFinished(backgroundWork inFlight: [String] = []) {
+    /// shell, a delegated child, an MCP monitor — by identity and kind. A delegated child is
+    /// work the turn handed off and has not heard back from; standing work is the turn's own if
+    /// this turn started it, and parked if an earlier one did. Either way, claiming the session
+    /// finished posts a notification for an answer nobody has given yet and drops the mark while
+    /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
+    func noteTurnFinished(backgroundWork inFlight: [BackgroundTask] = []) {
         adoptOwnReports()
         turnInFlight = false
+        // The turn cannot have ended around an open question, so an ask still held here is one
+        // whose close was lost. Believed over the ask, because `Stop` is the stronger statement:
+        // the agent is back at its prompt, and a mark saying otherwise would never come down.
+        openAsks.removeAll()
         pausedOnOwnWork = backgroundWork.turnEnded(leaving: inFlight)
         // Not merely unflagged — *nothing* is waiting to be read, so an off-screen session must
         // not take the unread mark either.
@@ -280,11 +385,92 @@ final class SessionActivityTracker {
         settle()
     }
 
+    /// The agent called a tool whose result is the user's answer — see `TurnBlockingTools`.
+    ///
+    /// The turn is parked from here until that call ends, and unlike `noteAwaitingUser` this
+    /// survives both being looked at and the terminal repainting. Those two lower the inferred
+    /// flag because answering a CLI's own prompt happens in the terminal and raises no hook, so
+    /// output is the only evidence there is that it was answered. Here the evidence exists: the
+    /// call is open, and the hook that closes it is already registered.
+    func noteBlockingAskOpened(id: String?) {
+        adoptOwnReports()
+        // Unlike the runtime's own notice, an unattended launch is no reason to ignore this: a
+        // boot repaint cannot call a tool, so nothing about a relaunch produces one of these.
+        openAsks.insert(askKey(id))
+        settle()
+    }
+
+    /// The asking tool returned — answered, dismissed or interrupted.
+    ///
+    /// `awaitsUser` is cleared with it: a runtime raising its own notice *about this question*
+    /// is the ordinary case (Claude does, six seconds after the keyboard goes quiet in front of
+    /// it), and leaving that behind would move the session from blocked straight to blocked.
+    func noteBlockingAskClosed(id: String?) {
+        adoptOwnReports()
+        openAsks.remove(askKey(id))
+        awaitsUser = false
+        settle()
+    }
+
+    /// The provider refused the turn over a rate limit — read from the session's own
+    /// transcript, because `Stop` does not fire for a refused turn (measured in
+    /// `limit-recovery.md`) and without this the session strands `working` forever.
+    ///
+    /// Ends the stranded turn on the transcript's authority: the file's `turn_duration` is the
+    /// boundary the missing hook never delivered. Deliberately does **not** latch
+    /// `reportsOwnActivity` — this is Threading's own reading, not the agent reporting — and
+    /// clears the ask set the way `noteTurnFinished` does, since a turn cannot have ended
+    /// around an open question.
+    ///
+    /// `recoveryArmed` says whether something is handling it: armed reads `idle` (nothing owed,
+    /// nothing running), unarmed flags the loud mark (a turn stopped dead on the CLI's
+    /// chooser). The park clears on the next turn start, on the process ending or relaunching,
+    /// or — unarmed only — on the user looking at it, the same guess `awaitsUser` makes.
+    func noteLimitParked(recoveryArmed: Bool) {
+        quietTimer?.invalidate()
+        quietTimer = nil
+        bytesSinceQuiet = 0
+        turnInFlight = false
+        awaitsUser = false
+        openAsks.removeAll()
+        limitPark = recoveryArmed ? .recovering : .flagged
+        settle()
+    }
+
+    /// The session's own record no longer ends on a refusal: the conversation has spoken since,
+    /// so whatever the limit was, it is not what this session is doing now.
+    ///
+    /// The only thing that lowers a park besides a turn starting and the process lifecycle, and
+    /// it is not a guess: `ObservedUsageLimit` answers nil the moment a newer message record
+    /// exists, which is the same evidence the park was raised on. Hooks cannot serve here —
+    /// nothing fires for a refusal, and nothing fires for its lifting either.
+    func noteLimitCleared() {
+        guard limitPark != .none else { return }
+        limitPark = .none
+        settle()
+    }
+
+    /// An ask that named no call still has to pair with its close, and the same stand-in on both
+    /// sides does that. Two unidentified asks overlapping would collapse into one — a shape that
+    /// does not occur, since a question tool is answered through a modal the runtime shows one
+    /// of at a time.
+    private func askKey(_ id: String?) -> String {
+        guard let id, !id.isEmpty else { return ActivityDefaults.unidentifiedAsk }
+        return id
+    }
+
+    /// Records the process announcing itself — the `SessionStart` hook. Proof the CLI is up;
+    /// not yet a turn boundary, so the output heuristic stays on.
+    func noteSessionStarted() {
+        hasHeardFromProcess = true
+    }
+
     /// Switches this session off the output heuristic, the first time it reports anything.
     private func adoptOwnReports() {
         guard !reportsOwnActivity else { return }
 
         reportsOwnActivity = true
+        hasHeardFromProcess = true
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
@@ -317,7 +503,9 @@ final class SessionActivityTracker {
         isDormant = true
         turnInFlight = false
         awaitsUser = false
+        openAsks.removeAll()
         pausedOnOwnWork = false
+        limitPark = .none
         backgroundWork.forget()
         settle()
     }
@@ -340,10 +528,13 @@ final class SessionActivityTracker {
     func markRunning() {
         bytesSinceQuiet = 0
         reportsOwnActivity = false
+        hasHeardFromProcess = false
         isDormant = false
         turnInFlight = false
         awaitsUser = false
+        openAsks.removeAll()
         pausedOnOwnWork = false
+        limitPark = .none
         backgroundWork.forget()
         settle()
     }
@@ -363,9 +554,25 @@ final class SessionActivityTracker {
     /// Work the agent left running keeps the session out of `idle` without opening a turn.
     /// Those are not the same fact, and reusing the turn for it would have made Claude's
     /// idle-prompt notice — which arrives with no turn to hold up — read as a blocked one.
+    ///
+    /// An open ask outranks everything but dormancy, and does not consult the turn. A tool call
+    /// that has not returned *is* a turn stopped on the user however the turn's own boundaries
+    /// were reported, and a session with no terminal has no ask left to hold — `markDormant`
+    /// clears them, so the first branch cannot be reached with one open.
+    /// A limit park sits between the asks and the inferred flag. Flagged is `limitReached`
+    /// however the turn's boundaries read: the account is spent, and no amount of turn
+    /// bookkeeping changes what the row has to say. An armed recovery is `idle`, and both
+    /// outrank `pausedOnOwnWork` deliberately — work the refused turn left running cannot wake
+    /// a limited agent, and `working` would be a lie the sidebar holds for hours.
     private func settle() {
         if isDormant {
             activity = .dormant
+        } else if !openAsks.isEmpty {
+            activity = .awaitingUser
+        } else if limitPark == .flagged {
+            activity = .limitReached
+        } else if limitPark == .recovering {
+            activity = .idle
         } else if awaitsUser {
             activity = turnInFlight ? .awaitingUser : .needsAttention
         } else {
@@ -412,6 +619,11 @@ enum ActivityDefaults {
     /// window only covers the final repaint once the drag ends.
     static let resizeQuietPeriod: TimeInterval = 0.75
 
-    /// How long a forwarded scroll's repaint is ignored, extended by each wheel event.
-    static let scrollQuietPeriod: TimeInterval = 0.5
+    /// How long a forwarded mouse report's repaint is ignored, extended by each wheel tick or
+    /// pointer move.
+    static let pointerQuietPeriod: TimeInterval = 0.5
+
+    /// Stands in for the tool call of an ask whose hook named none, so its open and its close
+    /// still pair up.
+    static let unidentifiedAsk = "unidentified-ask"
 }

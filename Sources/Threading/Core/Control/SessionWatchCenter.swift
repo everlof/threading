@@ -1,0 +1,316 @@
+import Foundation
+
+// MARK: - Session Watch Center
+
+/// Holds one session's request to be told when another session settles, and spends it once.
+///
+/// **The point is that nobody polls.** Without this, a session waiting on a sibling's result can
+/// only call `list_sessions` again and again — every call spending a turn of its own usage to
+/// learn nothing, and the interval between calls deciding how late the answer arrives. A watch
+/// costs one delivery, at the moment the fact becomes true.
+///
+/// **The boundary watched is the app's existing answer to "is it finished"** — the edge out of
+/// `hasTurnInFlight` that `SessionArchiveScheduler` already fires on, plus the two endings that
+/// are not a finished turn but are just as final for a caller waiting on one: the agent exiting
+/// (`.dormant`) and the account's usage window being spent (`.limitReached`). A watch that
+/// ignored those would keep an agent waiting on a session that will never speak again.
+///
+/// **In memory, one-shot, and bounded.** A watch dies with the app run: the notice is only worth
+/// delivering to a live conversation, and a durable one would fire into a session resumed hours
+/// later about a turn nobody remembers. It fires at most once and is then spent, expires after
+/// `ControlWatchDefaults.expiry` with a notice saying so rather than silently, and one watcher
+/// may hold at most `ControlWatchDefaults.maximumPerWatcher` — the bounded-work rule, and a bound
+/// on being woken, since every notice spends a turn of the watcher's own usage.
+///
+/// The notice itself is written here, in Threading's own voice, and deliberately *not* under the
+/// `[Cross-session message …]` header: that header states the body was written by the sending
+/// session's agent, which for a watch notice would be a lie about who is speaking.
+@MainActor
+final class SessionWatchCenter {
+
+    // MARK: - Dependencies
+
+    struct Dependencies {
+        let activity: (SessionID) -> SessionActivity
+        /// Read at fire time, not at arm time: a session is renamed by its own agent mid-turn,
+        /// and a notice naming what the row said half an hour ago names something the watcher
+        /// cannot find in `list_sessions`.
+        let sessionTitle: (SessionID) -> String?
+        /// Hands the notice to the watcher's live surface — the same receipt-backed seam a
+        /// cross-session send uses, so an undeliverable notice is known to be undeliverable
+        /// rather than assumed to have landed.
+        let deliverNotice: (
+            String, SessionID, @escaping @MainActor (SessionMessageDelivery.Outcome) -> Void
+        ) -> Void
+    }
+
+    // MARK: - Arming
+
+    /// What became of an ask to watch, before the plane dresses it in scope.
+    enum WatchArmOutcome: Equatable {
+        case armed(expiresAfter: TimeInterval)
+        /// This watcher already watches this target. Coalesced rather than doubled: two watches
+        /// on one edge would deliver the same notice twice, spending two of the watcher's turns
+        /// on one fact.
+        case alreadyWatching
+        /// The target has no turn in flight *now*. Refused rather than held for a future turn:
+        /// a watch armed on an idle session would fire on whatever it is asked to do next,
+        /// which is not the work the watcher was waiting on.
+        case targetAlreadySettled
+        case watcherAtCapacity(limit: Int)
+    }
+
+    // MARK: - Properties
+
+    /// The live lookups are assembled here rather than as defaults on `Dependencies`, for the
+    /// reason `WorkspaceControlPlane.live` is: this type is main-actor isolated, and a static on
+    /// the nested struct would be a global holding non-`Sendable` closures.
+    static let shared = SessionWatchCenter(
+        dependencies: Dependencies(
+            activity: { AgentRuntime.shared.activity(sessionID: $0) },
+            sessionTitle: { ProjectStore.shared.session(withID: $0)?.displayTitle },
+            deliverNotice: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) }
+        )
+    )
+
+    /// Settable for the reason `SessionArchiveScheduler.requestExpiry` is: a test cannot wait
+    /// half an hour to prove a watch that never fired is retired with a notice.
+    var expiry: TimeInterval = ControlWatchDefaults.expiry
+
+    private struct WatchKey: Hashable {
+        let watcher: SessionID
+        let target: SessionID
+    }
+
+    private struct Watch {
+        let armedAt: Date
+        let timer: Timer
+    }
+
+    private var watches: [WatchKey: Watch] = [:]
+
+    /// Notices that fired while the watcher could not take them — mid-turn at its own
+    /// terminal, most commonly, which is exactly when a manager's worker settles. Held rather
+    /// than dropped, because the fact a notice carries stays true, and the watcher's own next
+    /// settle edge is already on the one event stream this type observes. Only an *ambiguous*
+    /// delivery is never retried: `.typedUnconfirmed` means the first copy may have landed,
+    /// and a manager handed the same conclusion twice will act on it twice.
+    private var heldNotices: [SessionID: [String]] = [:]
+
+    private let observations: AppEventObservations
+    private let dependencies: Dependencies
+    private let now: () -> Date
+
+    // MARK: - Initialization
+
+    /// The centre, the clock and the lookups are injected so this can be exercised without a
+    /// live agent, a store, or the running app's own event traffic.
+    init(
+        center: NotificationCenter = .default,
+        now: @escaping () -> Date = { Date() },
+        dependencies: Dependencies
+    ) {
+        self.dependencies = dependencies
+        self.now = now
+        self.observations = AppEventObservations(center: center)
+
+        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+            self?.activityChanged(for: event.sessionID)
+        }
+    }
+
+    // MARK: - Public Methods
+
+    /// Arms one watcher's one-shot watch on one target.
+    ///
+    /// Every answer other than `.armed` is a refusal to pretend: an agent told a watch exists
+    /// will stop and wait for it, so a coalesced, settled or over-budget ask has to say so.
+    @discardableResult
+    func arm(watcher: SessionID, target: SessionID) -> WatchArmOutcome {
+        let key = WatchKey(watcher: watcher, target: target)
+        guard watches[key] == nil else { return .alreadyWatching }
+
+        guard dependencies.activity(target).hasTurnInFlight else {
+            return .targetAlreadySettled
+        }
+
+        let held = watches.keys.filter { $0.watcher == watcher }.count
+        guard held < ControlWatchDefaults.maximumPerWatcher else {
+            return .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)
+        }
+
+        watches[key] = Watch(
+            armedAt: now(),
+            timer: Timer.scheduledTimer(withTimeInterval: expiry, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.expire(key) }
+            }
+        )
+        return .armed(expiresAfter: expiry)
+    }
+
+    func isWatching(watcher: SessionID, target: SessionID) -> Bool {
+        watches[WatchKey(watcher: watcher, target: target)] != nil
+    }
+
+    // MARK: - Private Methods
+
+    /// One session's activity moved. It may be a watched target — several watchers may hold a
+    /// watch on it, each spent or retired on its own terms — and it may itself be a watcher
+    /// owed notices held from while it was busy; its settle edge is the retry moment.
+    private func activityChanged(for target: SessionID) {
+        let activity = dependencies.activity(target)
+
+        // Drain before anything else: a dormant or limit-parked session cannot take a
+        // delivery, so those states hold rather than spend an attempt that must fail.
+        if !activity.hasTurnInFlight, activity != .dormant, activity != .limitReached {
+            drainHeldNotices(for: target)
+        }
+
+        let ending: Ending
+        switch activity {
+        case .dormant:
+            ending = .agentExited
+        case .limitReached:
+            ending = .usageLimit
+        case .working, .awaitingUser, .idle, .needsAttention:
+            guard !activity.hasTurnInFlight else { return }
+            ending = .turnFinished
+        }
+
+        for key in watches.keys.filter({ $0.target == target }) {
+            // A watch whose timer has not been serviced — the run loop was blocked, the machine
+            // slept — is retired rather than spent on an edge it has already outlived.
+            guard let watch = watches[key],
+                  now().timeIntervalSince(watch.armedAt) < expiry else {
+                expire(key)
+                continue
+            }
+            fire(key, notice: Self.notice(for: ending, title: title(of: target), target: target))
+        }
+    }
+
+    /// Delivers a notice and spends the watch. The watch is removed *before* the delivery: a
+    /// delivery that synchronously moves the watcher's own activity must not re-enter here and
+    /// find the same watch still armed.
+    private func fire(_ key: WatchKey, notice: String) {
+        watches.removeValue(forKey: key)?.timer.invalidate()
+        attemptDelivery(notice, to: key.watcher)
+    }
+
+    private func expire(_ key: WatchKey) {
+        guard watches[key] != nil else { return }
+        let notice = Self.expiryNotice(
+            title: title(of: key.target),
+            target: key.target,
+            after: expiry
+        )
+        fire(key, notice: notice)
+    }
+
+    /// One try at the watcher's surface, and an honest disposition for each way it can answer.
+    ///
+    /// A watcher that cannot take the notice *yet* — mid-turn at its terminal, briefly dormant,
+    /// its input held — gets the notice held for its own settle edge. Only `.typedUnconfirmed`
+    /// ends the story with a ledger record: the first copy may have landed, and the one thing
+    /// worse than a manager not hearing a conclusion is a manager acting on it twice.
+    private func attemptDelivery(_ notice: String, to watcher: SessionID) {
+        dependencies.deliverNotice(notice, watcher) { [weak self] outcome in
+            switch outcome {
+            case .sentNow, .queuedBehindTurn:
+                return
+            case .busyTerminal, .noLiveSurface, .notTaken:
+                self?.hold(notice, for: watcher, after: outcome)
+            case .typedUnconfirmed:
+                EventLog.shared.record(.session, "Session watch notice was not delivered", [
+                    "watcher": watcher.uuidString.lowercased(),
+                    "outcome": String(describing: outcome),
+                ])
+            }
+        }
+    }
+
+    private func hold(_ notice: String, for watcher: SessionID, after outcome: SessionMessageDelivery.Outcome) {
+        var held = heldNotices[watcher, default: []]
+        guard held.count < ControlWatchDefaults.maximumHeldNotices else {
+            EventLog.shared.record(.session, "Session watch notice was dropped — held queue full", [
+                "watcher": watcher.uuidString.lowercased(),
+                "outcome": String(describing: outcome),
+            ])
+            return
+        }
+        held.append(notice)
+        heldNotices[watcher] = held
+    }
+
+    private func drainHeldNotices(for watcher: SessionID) {
+        guard let held = heldNotices.removeValue(forKey: watcher), !held.isEmpty else { return }
+        // Each failure re-holds itself through `attemptDelivery`; attempts happen only on
+        // edges, so a surface that stays unavailable costs one try per settle, not a loop.
+        for notice in held {
+            attemptDelivery(notice, to: watcher)
+        }
+    }
+
+    /// The record can be gone by the time the watch fires — deleted while the turn ran. The
+    /// notice is still worth delivering, since the fact it carries is that the work ended, so
+    /// the id does the naming and the title says plainly that there is no row left to look at.
+    private static let missingTitle = "a session no longer in the sidebar"
+
+    private func title(of sessionID: SessionID) -> String {
+        dependencies.sessionTitle(sessionID).map(WorkspaceControlPlane.safeHeaderTitle)
+            ?? Self.missingTitle
+    }
+
+    // MARK: - Wording
+
+    /// How the watched session stopped. The three endings a watcher can be waiting for, kept
+    /// apart because "answer it" and "resume it" and "wait for the window to reset" are three
+    /// different next moves.
+    private enum Ending {
+        case turnFinished
+        case agentExited
+        case usageLimit
+    }
+
+    /// Threading's own frame, not the cross-session one.
+    ///
+    /// `[Cross-session message …]` states that the body was written by the named session's
+    /// agent. Nothing here was: the target never asked for this to be sent and may not know a
+    /// watch existed. Reusing that header would be a false claim about who is speaking, so the
+    /// notice carries its own frame and says outright whose words these are.
+    private static func notice(for ending: Ending, title: String, target: SessionID) -> String {
+        let body: String
+        switch ending {
+        case .turnFinished:
+            body = "finished its turn and is idle."
+        case .agentExited:
+            body = """
+                — its agent exited; the session is dormant. Resuming it is the user's decision.
+                """
+        case .usageLimit:
+            body = """
+                stopped at its usage limit; nothing runs there until the window resets or the \
+                user moves the conversation.
+                """
+        }
+
+        return """
+            [Session watch — Threading] “\(title)” (\(target.uuidString.lowercased())) \(body) \
+            One-shot notice from watch_session; the watch is spent. This is Threading speaking, \
+            not that session's agent.
+            """
+    }
+
+    private static func expiryNotice(
+        title: String,
+        target: SessionID,
+        after expiry: TimeInterval
+    ) -> String {
+        """
+        [Session watch — Threading] The watch on “\(title)” \
+        (\(target.uuidString.lowercased())) expired after \(Int((expiry / 60).rounded())) \
+        minutes with the turn still running. Re-arm it if you still need the signal. This is \
+        Threading speaking, not that session's agent.
+        """
+    }
+}

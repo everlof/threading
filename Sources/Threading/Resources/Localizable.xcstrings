@@ -1,6 +1,1523 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Watch a session": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bevaka en session" } } }
+    },
+    "One notice when a sibling settles, exits, or hits its limit.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En avisering när en syskonsession blir klar, avslutas eller når sin gräns." } } }
+    },
+    "A stop nobody typed — the mark a session wears when its account’s usage limit is spent. Negative and warning roles, and corners taken from the theme: square a style’s panels and this squares with them.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett stopp ingen skrev — märket en session bär när kontots användningsgräns är förbrukad. Negativ- och varningsroller, och hörn tagna från temat: gör en stils paneler kantiga så blir det här kantigt med dem." } } }
+    },
+    "Add lines to chat": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till rader i chatten" } } }
+    },
+    "Answer the chooser and continue at reset": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Besvara väljaren och fortsätt vid återställning" } } }
+    },
+    "Asks the release feed whether a newer Threading exists.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Frågar utgåveflödet om en nyare Threading finns." } } }
+    },
+    "Checking for Updates…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Söker efter uppdateringar…" } } }
+    },
+    "Comment on lines…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera rader…" } } }
+    },
+    "Copy selected text to the clipboard": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kopiera markerad text till urklipp" } } }
+    },
+    "Downloading Update…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hämtar uppdatering…" } } }
+    },
+    "Flag the session and wait for you": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Flagga sessionen och vänta på dig" } } }
+    },
+    "Hide panel": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dölj panelen" } } }
+    },
+    "Hide the Display Panel": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dölj visningspanelen" } } }
+    },
+    "Install Update": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera uppdatering" } } }
+    },
+    "Install and Relaunch": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera och starta om" } } }
+    },
+    "Installing Update…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installerar uppdatering…" } } }
+    },
+    "Later": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senare" } } }
+    },
+    "Learn More…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läs mer…" } } }
+    },
+    "Limit recovery": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränsåterhämtning" } } }
+    },
+    "Loading release notes…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in versionsinformation…" } } }
+    },
+    "PaneNoticeView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "PaneNoticeView" } } }
+    },
+    "Preparing Update…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förbereder uppdatering…" } } }
+    },
+    "Ready to Install": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo att installera" } } }
+    },
+    "Release notes could not be loaded.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Versionsinformationen kunde inte läsas in." } } }
+    },
+    "Remind Me Later": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Påminn mig senare" } } }
+    },
+    "Selecting with the mouse copies, the way it does in a Linux terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a separate selection, so this replaces what you copied last, which is why it is off until you ask for it. Selecting nothing changes nothing, and programs that track the mouse themselves keep taking the drag.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Att markera med musen kopierar, som i en Linux-terminal — inget ⌘C efteråt. macOS har ett enda urklipp snarare än en separat markering, så det här ersätter det du senast kopierade, vilket är varför det är av tills du ber om det. Att markera ingenting ändrar ingenting, och program som själva följer musen tar fortfarande draget." } } }
+    },
+    "Send Result to Parent": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka resultatet till föräldern" } } }
+    },
+    "Call send_to_session with session_id %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anropa send_to_session med session_id %@ — sessionen som den här sidokonversationen förgrenades från — och rapportera din slutsats: vad som hittades eller beslutades, i några meningar, inte transkriptet. Svara sedan här med en rad om vad du skickade." } } }
+    },
+    "Skip This Version": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppa över den här versionen" } } }
+    },
+    "The pane's content.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Panelens innehåll." } } }
+    },
+    "The pane's third band: a standing condition it found on its own, with the ways to answer it and the way out on the same line. Press Show to put one up — the content below moves down by the band's height rather than disappearing under it. Restore and ✕ both take it away; a notice waits as long as it takes to be read, since nobody clicked for it.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Panelens tredje band: ett stående tillstånd den själv upptäckt, med sätten att besvara det och vägen ut på samma rad. Tryck på Visa för att sätta upp ett — innehållet nedanför flyttas ned med bandets höjd i stället för att försvinna under det. Återställ och ✕ tar båda bort det; en notis väntar så länge det tar att läsa den, eftersom ingen klickade fram den." } } }
+    },
+    "The refusal is read and the session is marked as stopped; nothing is typed and nothing is scheduled.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avslaget läses och sessionen markeras som stoppad; inget skrivs och inget schemaläggs." } } }
+    },
+    "ThemedWarningMark": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedWarningMark" } } }
+    },
+    "Threading %@ is available.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading %@ finns tillgänglig." } } }
+    },
+    "Threading %@ is ready to download. You have %@.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading %@ är redo att hämtas. Du har %@." } } }
+    },
+    "Threading chooses “Stop and wait”, schedules “continue” for the window's reset, and the session resumes on its own.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading väljer ”Stoppa och vänta”, schemalägger ”fortsätt” till fönstrets återställning, och sessionen återupptas av sig själv." } } }
+    },
+    "Threading is now running the new version.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading kör nu den nya versionen." } } }
+    },
+    "Threading will quit and reopen as the new version.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading avslutas och öppnas igen som den nya versionen." } } }
+    },
+    "Threading will quit in a moment.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading avslutas om en stund." } } }
+    },
+    "Update Available": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdatering tillgänglig" } } }
+    },
+    "Update Installed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdatering installerad" } } }
+    },
+    "When a session hits its usage limit": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När en session når sin användningsgräns" } } }
+    },
+    "clipboard": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "urklipp" } } }
+    },
+    "copy on select": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "kopiera vid markering" } } }
+    },
+    "terminal selection": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "terminalmarkering" } } }
+    },
+    "That session is no longer in Threading's sidebar.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sessionen finns inte längre i Threadings sidofält." } } }
+    },
+    "That session was archived before this was due.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sessionen arkiverades innan det här skulle skickas." } } }
+    },
+    "Waiting for the session to be free": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar på att sessionen ska bli ledig" } } }
+    },
+    "Its agent is not running. Threading will not type into a terminal it cannot see.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess agent körs inte. Threading skriver inte i en terminal det inte kan se." } } }
+    },
+    "Its agent could not be started.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess agent kunde inte startas." } } }
+    },
+    "Its project is no longer in Threading.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess projekt finns inte längre i Threading." } } }
+    },
+    "Its folder is missing: %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess mapp saknas: %@" } } }
+    },
+    "Its checkout for %@ is gone.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess utcheckning för %@ är borta." } } }
+    },
+    "Its session could not be created.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess session kunde inte skapas." } } }
+    },
+    "It was typed into the session, which never confirmed a turn started.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det skrevs in i sessionen, som aldrig bekräftade att en tur började." } } }
+    },
+    "A scheduled message was sent": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett schemalagt meddelande skickades" } } }
+    },
+    "A scheduled message could not be sent": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett schemalagt meddelande kunde inte skickas" } } }
+    },
+    "In an hour": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om en timme" } } }
+    },
+    "Tomorrow at %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I morgon %@" } } }
+    },
+    "Monday at %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "På måndag %@" } } }
+    },
+    "When the %@ window resets": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När %@-fönstret nollställs" } } }
+    },
+    "Send it anyway": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka det ändå" } } }
+    },
+    "Wait once for the new reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vänta en gång på den nya nollställningen" } } }
+    },
+    "Wait until the window actually resets": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vänta tills fönstret faktiskt nollställs" } } }
+    },
+    "Sends at the time you picked. If the reading was stale the agent meets the limit immediately and the turn is spent for nothing.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickar vid tiden du valde. Om avläsningen var inaktuell möter agenten gränsen omedelbart och turen förbrukas i onödan." } } }
+    },
+    "Checks again when the moment arrives, stands aside once if the window has moved, then sends.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar igen när stunden kommer, står över en gång om fönstret har flyttats, och skickar sedan." } } }
+    },
+    "Keeps waiting until the window frees. Most likely to land on a fresh window, and can send noticeably later than the time you picked.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätter vänta tills fönstret frigörs. Störst chans att landa i ett färskt fönster, och kan skicka märkbart senare än tiden du valde." } } }
+    },
+    "Send later": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka senare" } } }
+    },
+    "Custom time…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Egen tid…" } } }
+    },
+    "Schedule message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalägg meddelande" } } }
+    },
+    "Schedule Message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalägg meddelande" } } }
+    },
+    "Schedule session": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalägg session" } } }
+    },
+    "Time zone: %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tidszon: %@" } } }
+    },
+    "Sends while Threading is running.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skickas medan Threading är igång." } } }
+    },
+    "Today": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I dag" } } }
+    },
+    "Tomorrow": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I morgon" } } }
+    },
+    "Send now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka nu" } } }
+    },
+    "Unschedule this message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avschemalägg det här meddelandet" } } }
+    },
+    "Messages scheduled to be sent later": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Meddelanden schemalagda att skickas senare" } } }
+    },
+    "%@ · in %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · om %@" } } }
+    },
+    "Missed while Threading was closed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Missades medan Threading var stängt" } } }
+    },
+    "There is nothing here to schedule.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns inget här att schemalägga." } } }
+    },
+    "%lld messages are already scheduled here. Send or remove one first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld meddelanden är redan schemalagda här. Skicka eller ta bort ett först." } } }
+    },
+    "%lld messages are already scheduled. Send or remove one first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld meddelanden är redan schemalagda. Skicka eller ta bort ett först." } } }
+    },
+    "That moment has already passed.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den tidpunkten har redan passerat." } } }
+    },
+    "Scheduled messages could not be saved, so this was not taken.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagda meddelanden kunde inte sparas, så det här togs inte emot." } } }
+    },
+    "Start this session later": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Starta den här sessionen senare" } } }
+    },
+    "Write the brief first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skriv uppdraget först." } } }
+    },
+    "Images can't be scheduled — they are temporary files.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilder kan inte schemaläggas — de är tillfälliga filer." } } }
+    },
+    "Couldn't schedule this": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte schemalägga det här" } } }
+    },
+    "ScheduledMessageStripView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ScheduledMessageStripView" } } }
+    },
+    "Messages waiting for a later moment, above the queue waiting only for this turn. Ordered by the clock rather than by hand, so no row drags — click one to open it, ✕ to unschedule it, and Send now where the clock has stopped being the thing to say.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Meddelanden som väntar på en senare tidpunkt, ovanför kön som bara väntar på den här turen. Ordnade efter klockan snarare än för hand, så ingen rad dras — klicka på en för att öppna den, ✕ för att avschemalägga den, och Skicka nu där klockan har slutat vara det som är värt att säga." } } }
+    },
+    "Scheduled sends": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagda utskick" } } }
+    },
+    "If the window has not reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om fönstret inte har nollställts" } } }
+    },
+    "  (default)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "  (standard)"
+          }
+        }
+      }
+    },
+    "%@ working": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ arbetar"
+          }
+        }
+      }
+    },
+    "%@: %lld windows used, %@ working, %@ waiting.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %lld fönster använda, %@ arbetar, %@ väntar."
+          }
+        }
+      }
+    },
+    "+%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%@"
+          }
+        }
+      }
+    },
+    "5-hour window": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5-timmarsfönster"
+          }
+        }
+      }
+    },
+    "A poke just ran; waiting for the reading.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En puff kördes nyss; väntar på avläsningen."
+          }
+        }
+      }
+    },
+    "A session is busy, so its next message opens the window anyway.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En session är upptagen, så dess nästa meddelande öppnar fönstret ändå."
+          }
+        }
+      }
+    },
+    "A usage window opens with the first message you send and resets a fixed time later, so where its boundaries fall is decided by when you happened to start. Threading can send one very small message earlier, on the days you choose, to put those boundaries where your working day can use them.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ett användningsfönster öppnas med det första meddelandet du skickar och nollställs en bestämd tid senare, så var dess gränser hamnar avgörs av när du råkade börja. Threading kan skicka ett mycket litet meddelande tidigare, på de dagar du väljer, så att gränserna hamnar där din arbetsdag har nytta av dem."
+          }
+        }
+      }
+    },
+    "A window is open until %@, %@ from now.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ett fönster är öppet till %@, %@ från nu."
+          }
+        }
+      }
+    },
+    "Accept": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acceptera"
+          }
+        }
+      }
+    },
+    "Add to queue · Return": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg i kön · Retur"
+          }
+        }
+      }
+    },
+    "Add to queue · Return   Send to this turn · ⌘Return": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg i kön · Retur   Skicka till denna tur · ⌘Retur"
+          }
+        }
+      }
+    },
+    "Already opened %lld today.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Har redan öppnat %lld idag."
+          }
+        }
+      }
+    },
+    "Breathing": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Andas"
+          }
+        }
+      }
+    },
+    "Bring Back to Panel": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta tillbaka till panelen"
+          }
+        }
+      }
+    },
+    "Cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avbruten"
+          }
+        }
+      }
+    },
+    "Compare with": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jämför med"
+          }
+        }
+      }
+    },
+    "Connecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluter"
+          }
+        }
+      }
+    },
+    "ControlRowView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ControlRowView"
+          }
+        }
+      }
+    },
+    "ConversationOutboxRailView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ConversationOutboxRailView"
+          }
+        }
+      }
+    },
+    "Copy File": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera fil"
+          }
+        }
+      }
+    },
+    "Days": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dagar"
+          }
+        }
+      }
+    },
+    "Deliver a message to a project sibling, named as coming from this one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Levererar ett meddelande till en syskonsession i projektet, märkt som skickat från den här."
+          }
+        }
+      }
+    },
+    "Dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng"
+          }
+        }
+      }
+    },
+    "Drop to compare": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Släpp för att jämföra"
+          }
+        }
+      }
+    },
+    "Every day": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Varje dag"
+          }
+        }
+      }
+    },
+    "Exited with status %lld.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avslutades med status %lld."
+          }
+        }
+      }
+    },
+    "Exited with status %lld: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avslutades med status %lld: %@"
+          }
+        }
+      }
+    },
+    "Failed at %@ · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Misslyckades %@ · %@"
+          }
+        }
+      }
+    },
+    "Focus Window": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fokusera fönstret"
+          }
+        }
+      }
+    },
+    "I start at": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jag börjar"
+          }
+        }
+      }
+    },
+    "I stop at": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jag slutar"
+          }
+        }
+      }
+    },
+    "Its session stayed busy, so this was never sent.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dess session förblev upptagen, så detta skickades aldrig."
+          }
+        }
+      }
+    },
+    "Jumps to the exchange before the one at the top of the conversation.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppar till turen före den som ligger överst i konversationen." } } }
+    },
+    "Jumps to the previous tool call, within a turn that is showing its work.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppar till föregående verktygsanrop, inom en tur som visar sitt arbete." } } }
+    },
+    "Let a session list the project’s other sessions and send them messages.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låt en session lista projektets övriga sessioner och skicka meddelanden till dem."
+          }
+        }
+      }
+    },
+    "List project sessions": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista projektets sessioner"
+          }
+        }
+      }
+    },
+    "Measured from this account: about %@ of work spends a window, so the window opens %@ before you start.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppmätt från detta konto: ungefär %@ arbete förbrukar ett fönster, så fönstret öppnas %@ innan du börjar."
+          }
+        }
+      }
+    },
+    "Message another session": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka meddelande till en annan session"
+          }
+        }
+      }
+    },
+    "Messages waiting to be sent. Drag a waiting row to reorder it, click one to edit it, ⌘↑/⌘↓ from the keyboard. The row already handed to the agent offers neither, because it is no longer ours to withdraw.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meddelanden som väntar på att skickas. Dra en väntande rad för att ändra ordningen, klicka på en för att redigera den, ⌘↑/⌘↓ från tangentbordet. Raden som redan lämnats över till agenten erbjuder ingetdera, eftersom den inte längre är vår att dra tillbaka."
+          }
+        }
+      }
+    },
+    "Move to Main Window": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flytta till huvudfönstret"
+          }
+        }
+      }
+    },
+    "New Browser Tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny webbläsarflik"
+          }
+        }
+      }
+    },
+    "New browser tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny webbläsarflik"
+          }
+        }
+      }
+    },
+    "Next Step": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa steg" } } }
+    },
+    "Next Turn": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa tur" } } }
+    },
+    "No login was found on a runtime whose window can be opened this way.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen inloggning hittades på en runtime vars fönster kan öppnas på det här sättet."
+          }
+        }
+      }
+    },
+    "No window has been watched being spent on this account yet, so this assumes %@ of work per window and opens %@ early. The lead is re-derived once there is a measurement.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget fönster har ännu setts förbrukas på detta konto, så detta antar %@ arbete per fönster och öppnar %@ tidigt. Försprånget räknas om när det finns en mätning."
+          }
+        }
+      }
+    },
+    "Not enabled for this account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte aktiverat för detta konto."
+          }
+        }
+      }
+    },
+    "Not one of today's scheduled days.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idag är inte en schemalagd dag."
+          }
+        }
+      }
+    },
+    "One height across every control in the row, the two runs held at opposite edges, and the outer two aligned by ink. The height is the theme's: switch the style above and every member follows the chooser.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En och samma höjd för varje kontroll i raden, de två grupperna hållna mot var sin kant, och de två yttersta linjerade efter bläcket. Höjden är temats: byt stil ovanför så följer varje medlem väljaren."
+          }
+        }
+      }
+    },
+    "Open a window before I start": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna ett fönster innan jag börjar"
+          }
+        }
+      }
+    },
+    "Open in New Window": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna i nytt fönster"
+          }
+        }
+      }
+    },
+    "Open the day's window when your day starts, not when you get to it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna dagens fönster när din dag börjar, inte när du hinner dit."
+          }
+        }
+      }
+    },
+    "Opened a queued message for editing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppnade ett köat meddelande för redigering."
+          }
+        }
+      }
+    },
+    "Opened a window at %@ · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppnade ett fönster %@ · %@"
+          }
+        }
+      }
+    },
+    "Opens at %@. Windows then start at %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppnar %@. Fönster börjar då %@."
+          }
+        }
+      }
+    },
+    "Other sessions": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Andra sessioner"
+          }
+        }
+      }
+    },
+    "Poke now": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puffa nu"
+          }
+        }
+      }
+    },
+    "Poked at %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puffade %@"
+          }
+        }
+      }
+    },
+    "Previous Step": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Föregående steg" } } }
+    },
+    "Previous Turn": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Föregående tur" } } }
+    },
+    "Queue a message for when this turn finishes": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Köa ett meddelande till när denna tur är klar"
+          }
+        }
+      }
+    },
+    "Queue a message, or ⌘Return to add it to this turn": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Köa ett meddelande, eller ⌘Retur för att lägga till det i denna tur"
+          }
+        }
+      }
+    },
+    "Queued": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Köad"
+          }
+        }
+      }
+    },
+    "Queued message %lld of %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Köat meddelande %lld av %lld"
+          }
+        }
+      }
+    },
+    "Read the project’s sessions — names, ids, agents, and who is working.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs projektets sessioner — namn, id:n, agenter och vem som arbetar."
+          }
+        }
+      }
+    },
+    "Ready to open a window.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redo att öppna ett fönster."
+          }
+        }
+      }
+    },
+    "Recent pokes": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste puffarna"
+          }
+        }
+      }
+    },
+    "Remove from queue": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från kön"
+          }
+        }
+      }
+    },
+    "Removed a queued message.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tog bort ett köat meddelande."
+          }
+        }
+      }
+    },
+    "Reorder": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ändra ordning"
+          }
+        }
+      }
+    },
+    "Reordered the queue.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ändrade ordningen i kön."
+          }
+        }
+      }
+    },
+    "Runs on the days below, for the accounts you allow.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Körs på dagarna nedan, för de konton du tillåter."
+          }
+        }
+      }
+    },
+    "Schedule": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schema"
+          }
+        }
+      }
+    },
+    "Send · Return": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka · Retur"
+          }
+        }
+      }
+    },
+    "Sending": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skickar"
+          }
+        }
+      }
+    },
+    "Show Crash Report": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa kraschrapport"
+          }
+        }
+      }
+    },
+    "Standing down: the weekly limit is %lld%% spent, ahead of the clock.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avvaktar: veckogränsen är %lld%% förbrukad, före klockan."
+          }
+        }
+      }
+    },
+    "Stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppa"
+          }
+        }
+      }
+    },
+    "Stop · Esc": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppa · Esc"
+          }
+        }
+      }
+    },
+    "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Rest, then Weave, Breathe and Orbit from left to right; Preview holds Weave through its box turn, while Replay shows the launch stitch.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading-märket ritat live: varumärkets trådar under System, temats accent under en stil. Vila, sedan Väv, Andning och Omlopp från vänster till höger; Förhandsvisning håller Väv genom sitt boxvarv, medan Repris visar startsömmen."
+          }
+        }
+      }
+    },
+    "The poke timed out.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puffen fick timeout."
+          }
+        }
+      }
+    },
+    "The queue is full at %lld messages. Send or remove one before adding another.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kön är full vid %lld meddelanden. Skicka eller ta bort ett innan du lägger till fler."
+          }
+        }
+      }
+    },
+    "There is nothing running to stop.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget körs som går att stoppa."
+          }
+        }
+      }
+    },
+    "This account never reaches its short limit, so moving it would gain nothing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detta konto når aldrig sin korta gräns, så att flytta den skulle inte ge något."
+          }
+        }
+      }
+    },
+    "This agent cannot stop a turn in progress.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Denna agent kan inte stoppa en pågående tur."
+          }
+        }
+      }
+    },
+    "This raises no limit. The same window still holds the same allowance, and the weekly cap above it does not move at all: an extra window pulled into the day is a week spent faster, which is why the poke stands down when the weekly limit is running ahead of the clock. It never fires while a window is already open, while a session is busy, or more than three times a day. Offered for Claude only, because Claude is the runtime whose short window has been measured to open on the first message rather than slide continuously, and there is nothing to move on a window that slides.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detta höjer ingen gräns. Samma fönster rymmer fortfarande samma tilldelning, och veckotaket ovanför flyttas inte alls: ett extra fönster indraget i dagen är en vecka som förbrukas snabbare, och därför avvaktar puffen när veckogränsen ligger före klockan. Den utlöses aldrig medan ett fönster redan är öppet, medan en session är upptagen, eller mer än tre gånger per dag. Erbjuds endast för Claude, eftersom Claude är den runtime vars korta fönster har uppmätts öppna vid första meddelandet i stället för att glida kontinuerligt, och det finns inget att flytta i ett fönster som glider."
+          }
+        }
+      }
+    },
+    "Threading could not reach Codex to stop it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte nå Codex för att stoppa den."
+          }
+        }
+      }
+    },
+    "Threading quit unexpectedly last time. Its open session and browser windows were not reopened.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading avslutades oväntat förra gången. Dess öppna sessions- och webbläsarfönster öppnades inte igen."
+          }
+        }
+      }
+    },
+    "Today's plan": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dagens plan"
+          }
+        }
+      }
+    },
+    "Too little of the working day is left to spend a fresh window.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För lite av arbetsdagen återstår för att förbruka ett nytt fönster."
+          }
+        }
+      }
+    },
+    "Usage Windows": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Användningsfönster"
+          }
+        }
+      }
+    },
+    "Waiting for a usage reading before deciding anything.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntar på en användningsavläsning innan något avgörs."
+          }
+        }
+      }
+    },
+    "Waiting until %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntar till %@."
+          }
+        }
+      }
+    },
+    "Weaving": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väver"
+          }
+        }
+      }
+    },
+    "Weekdays": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vardagar"
+          }
+        }
+      }
+    },
+    "Without a poke": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utan puff"
+          }
+        }
+      }
+    },
+    "poke": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "puff"
+          }
+        }
+      }
+    },
+    "rate limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "användningsgräns"
+          }
+        }
+      }
+    },
+    "relaunch": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "omstart"
+          }
+        }
+      }
+    },
+    "reopen": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "återöppna"
+          }
+        }
+      }
+    },
+    "resume automatically": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "återuppta automatiskt"
+          }
+        }
+      }
+    },
+    "running at quit": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "kördes vid avslut"
+          }
+        }
+      }
+    },
+    "schedule": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "schema"
+          }
+        }
+      }
+    },
+    "session limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sessionsgräns"
+          }
+        }
+      }
+    },
+    "took %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tog %@"
+          }
+        }
+      }
+    },
+    "weekly limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "veckogräns"
+          }
+        }
+      }
+    },
+    "workday": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "arbetsdag"
+          }
+        }
+      }
+    },
+    "working hours": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "arbetstid"
+          }
+        }
+      }
+    },
+    "you start %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "du börjar %@"
+          }
+        }
+      }
+    },
+    "“%@” requests %@, but neither it nor its fallback fonts are installed. Using the system font.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "”%@” begär %@, men varken det eller dess reservtypsnitt är installerade. Använder systemtypsnittet."
+          }
+        }
+      }
+    },
+    "“%@” requests %@, which is not installed. Using %@. Install a legitimately licensed copy of %@ to use it automatically.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "”%@” begär %@, som inte är installerat. Använder %@. Installera ett korrekt licensierat exemplar av %@ för att använda det automatiskt."
+          }
+        }
+      }
+    },
     "Weaving…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väver…" } } }
     },
@@ -22136,6 +23653,26 @@
         }
       }
     },
+    "ThemedRadioButton": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedRadioButton"
+          }
+        }
+      }
+    },
+    "Selected, empty, disabled, and radio-group accessibility.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vald, tom, inaktiverad och radiogruppens hjälpmedelsstöd."
+          }
+        }
+      }
+    },
     "Off, on, mixed for a group that disagrees, and disabled.": {
       "localizations": {
         "sv": {
@@ -24900,39 +26437,61 @@
         }
       }
     },
-    "Later": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senare"}}}},
-    "Checking for Updates…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Söker efter uppdateringar…"}}}},
-    "Update Available": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdatering tillgänglig"}}}},
-    "Downloading Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hämtar uppdateringen…"}}}},
-    "Preparing Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbereder uppdateringen…"}}}},
-    "Ready to Install": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Redo att installera"}}}},
-    "Install Update": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installera uppdateringen"}}}},
-    "Install and Relaunch": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installera och starta om"}}}},
-    "Remind Me Later": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Påminn mig senare"}}}},
-    "Skip This Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hoppa över den här versionen"}}}},
-    "Learn More…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läs mer…"}}}},
-    "Loading release notes…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser in versionsinformationen…"}}}},
-    "Release notes could not be loaded.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Versionsinformationen kunde inte läsas in."}}}},
-    "Installing Update…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installerar uppdateringen…"}}}},
-    "Update Installed": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdateringen är installerad"}}}},
-    "Threading %@ is ready to download. You have %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading %@ är redo att hämtas. Du har %@."}}}},
-    "Threading %@ is available.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading %@ är tillgänglig."}}}},
-    "Threading will quit and reopen as the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas och öppnas igen som den nya versionen."}}}},
-    "Threading will quit in a moment.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading avslutas om en stund."}}}},
-    "Threading is now running the new version.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kör nu den nya versionen."}}}},
-    "Asks the release feed whether a newer Threading exists.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frågar utgåvoflödet om det finns en nyare version av Threading."}}}},
-    "Copy selected text to the clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera markerad text till urklipp"}}}},
-    "Selecting with the mouse copies, the way it does in a Linux terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a separate selection, so this replaces what you copied last, which is why it is off until you ask for it. Selecting nothing changes nothing, and programs that track the mouse themselves keep taking the drag.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Att markera med musen kopierar, precis som i en Linux-terminal – inget ⌘C efteråt. macOS har ett enda urklipp i stället för en separat markering, så det här ersätter det du kopierade senast, och därför är det avstängt tills du ber om det. Att markera ingenting ändrar ingenting, och program som själva följer musen fortsätter att ta dragningen."}}}},
-    "terminal selection": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalmarkering"}}}},
-    "copy on select": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "kopiera vid markering"}}}},
-    "clipboard": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "urklipp"}}}},
     "Compact Tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kompakt träd"}}}},
     "Starts every sidebar row at the same edge, separating projects with spacing and a rule instead of indentation.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låter varje rad i sidofältet börja vid samma kant och skiljer projekt åt med luft och en linje i stället för indrag."}}}},
     "Compact tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kompakt träd"}}}},
     "Every sidebar row starts at the same edge. Projects separate with spacing and a rule instead of indentation.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Varje rad i sidofältet börjar vid samma kant. Projekt skiljs åt med luft och en linje i stället för indrag."}}}},
     "compact tree": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "kompakt träd"}}}},
     "indentation": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "indrag"}}}},
-    "sidebar density": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "sidofältets täthet"}}}}
+    "sidebar density": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "sidofältets täthet"}}}},
+    "Session stopped at its usage limit": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionen stoppades vid sin användningsgräns"}}}},
+    "Stopped · usage limit reached": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppad · användningsgränsen nådd"}}}},
+    "Stopped · usage limit resets %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppad · användningsgränsen återställs %@"}}}},
+    "Usage limit reached": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Användningsgränsen nådd"}}}},
+    "Threading has quit unexpectedly more than once, so its open session and browser windows were not reopened.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading har avslutats oväntat mer än en gång, så dess öppna sessions- och webbläsarfönster öppnades inte igen."}}}},
+    "Oldest First": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Äldsta först"}}}},
+    "Newest First": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nyaste först"}}}},
+    "Most Recent First": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senast aktiva först"}}}},
+    "Least Recent First": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Äldst aktiva först"}}}},
+    "A to Z": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "A till Ö"}}}},
+    "Z to A": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ö till A"}}}},
+    "Applying the theme": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillämpar temat"}}}},
+    "Building the window": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bygger fönstret"}}}},
+    "Continue in Recovery Mode": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fortsätt i återställningsläge"}}}},
+    "Create Support Report…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa supportrapport…"}}}},
+    "Disable Extensions for Next Launch": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng av tillägg vid nästa start"}}}},
+    "Extensions Will Stay Off Next Launch": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillägg förblir avstängda vid nästa start"}}}},
+    "Extensions and their companions stay off for the next launch only.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillägg och deras följeslagare är avstängda endast vid nästa start."}}}},
+    "Extensions did not start this launch. They start again the next time Threading opens.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillägg startades inte den här gången. De startar igen nästa gång Threading öppnas."}}}},
+    "Forgets the window size, the sidebar width and the panel widths.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Glömmer fönstrets storlek, sidofältets bredd och panelernas bredd."}}}},
+    "If it keeps happening": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Om det fortsätter hända"}}}},
+    "Move App Data Aside…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta undan appdata…"}}}},
+    "Moves your projects, sessions and settings into a dated folder you can put back.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flyttar dina projekt, sessioner och inställningar till en datummärkt mapp som du kan lägga tillbaka."}}}},
+    "Open Extensions Settings": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna inställningar för tillägg"}}}},
+    "Opening your projects": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppnar dina projekt"}}}},
+    "Reading the old data folder": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser den gamla datamappen"}}}},
+    "Recovery Mode": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställningsläge"}}}},
+    "Reset Window Layout": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ fönsterlayout"}}}},
+    "Restoring your session": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställer din session"}}}},
+    "Reveal Crash Report": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa kraschrapport"}}}},
+    "Running normally": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kör normalt"}}}},
+    "Show Options": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa alternativ"}}}},
+    "Showing recovery mode": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visar återställningsläge"}}}},
+    "Showing the window": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visar fönstret"}}}},
+    "Starting extensions": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Startar tillägg"}}}},
+    "Starting the tool listener": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Startar verktygslyssnaren"}}}},
+    "The last launch stopped after: %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den senaste starten stannade efter: %@"}}}},
+    "The last launch stopped before it recorded anything.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den senaste starten stannade innan den hann anteckna något."}}}},
+    "The recovery launch did not come back either, so nothing automatic has been started.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställningsstarten kom inte tillbaka den heller, så inget automatiskt har startats."}}}},
+    "This session stays closed until Threading starts normally.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här sessionen förblir stängd tills Threading startar normalt."}}}},
+    "Threading has quit unexpectedly more than once, so it started in recovery mode.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading har avslutats oväntat mer än en gång, så det startade i återställningsläge."}}}},
+    "Threading is in recovery mode.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading är i återställningsläge."}}}},
+    "Threading started in recovery mode.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading startade i återställningsläge."}}}},
+    "Threading was started with the recovery flag.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading startades med återställningsflaggan."}}}},
+    "Try Normal Launch Once": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Prova en normal start"}}}},
+    "Writes a share-safe diagnostics file and reveals it.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriver en delningssäker diagnosfil och visar den."}}}},
+    "You held Option at launch, so Threading started in recovery mode.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Du höll ned alt vid start, så Threading startade i återställningsläge."}}}},
+    "Recovery mode is showing the stock appearance. Your saved theme is still %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställningsläget visar standardutseendet. Ditt sparade tema är fortfarande %@."}}}}
   },
   "version": "1.0"
 }

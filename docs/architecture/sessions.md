@@ -121,8 +121,16 @@ and a **cycle** is refused outright, since the outline view asks for children la
 recurse forever.
 
 What fork does *not* give is a merge back. Transcripts do not merge; the honest operation is
-pasting a conclusion into the parent as a message, which is not built. And the first turn
-replays the whole copied context, so forking a large conversation costs real tokens.
+pasting a conclusion into the parent as a message, and both routes to it now exist. The agent's
+is `send_to_session`, which delivers a side chat's conclusion to its parent as an ordinary,
+provenance-prefixed turn (see [`control-plane.md`](control-plane.md)). The user's is the row's
+**Send Result to Parent** — `SessionRenameRequest`'s twin (`SessionReportBackRequest`): one
+line sent into the side chat naming the tool and the parent's id outright, because an agent
+asked in prose to "tell your parent" answers in prose and the parent hears nothing. It is
+absent rather than disabled unless the row is a side chat whose parent is still an unarchived
+row, the agent is between turns, delivery would land (`SessionMessageDelivery.isReadyForDelivery`),
+and the workspace tool group is on. And the first turn replays the
+whole copied context, so forking a large conversation costs real tokens.
 
 ## Shell Drawers and Standalone Terminals
 
@@ -241,6 +249,11 @@ Three decisions worth keeping (they predate the tabs and survived them):
   injects this as the drawer host's `directoryProvider`, since only it can ask the PTY.
 - **It takes the session's resolved profile** (`ThemeAssignments.profile(for:)`) — the same call
   the agent's own terminal makes — so a themed session's drawer matches the surface above it.
+  And the same `TerminalPadding` inset, painted in the terminal's own background: the drawer's
+  shell was the one flush terminal, its first row on the strip's rule and its first column on
+  the pane's edge. Its host also observes `AppThemeDidChange` like the other two terminal
+  panes, or a "Follow App Theme" session's margin would keep the old palette across an
+  app-theme switch while the terminal repaints.
 - **The process is the feature.** A shell starts on first reveal (a drawer never opened costs
   nothing — and "revealed" means on screen, so fixtures never spawn one), survives session
   switches, and ends with its *tab* or its session. A shell that forgot its directory and
@@ -250,6 +263,14 @@ The pane is not a split view: the conversation fills it and the drawer is a stri
 bottom, always installed and zero-high when closed, so every session surface pins its bottom to
 the drawer's top and opening one is a change of constant. A split view would have brought its own
 collapse behaviour, delegate and priorities, all of which would need arguing out of the way.
+The divider's grab strip overlaps the surface above it — the surface's bottom edge and the
+strip occupy the same 5pt band — so a surface must also be attached *below* the divider in the
+sibling order. It was slotted in directly under the git overlay instead, which covered the
+seam's rule and swallowed the strip's hover, cursor and drags, and every drag test kept
+passing because those drive the divider's callbacks rather than the pointer; the hit-test in
+`ThemedControlTests` and the in-pane render in `ToolbarChromeRenderTests` now pin the seam
+itself, and the rule draws at the strip's bottom edge — where the drawer actually begins —
+rather than floating its own height above the tab strip.
 
 That change of constant moves the way every pane in the window moves. The gestures — the
 toggle, the drag spring, a moved-in tab's reveal — run it through `PaneTransition`
@@ -340,11 +361,14 @@ randomness injected, so tests pass a fixed date and a seeded generator; producti
 clock only at the call site. The hero hides below a height threshold
 (`viewDidLayout`) — half a greeting peeking from behind the prompt reads as a defect.
 
-**The prompt box is the same box the conversation replies in** — `SubmitPlacement.footer`, with
-model, mode and catalog-backed effort on the leading side of its bottom row and the account's
-usage reading, the surface and the send on the trailing side. Return sends, following `AppSettings.promptReturnKey`
-exactly as a reply does; ⌘Return sends under every setting. There is no Start button: the glyph
-that closes the row is the send, disabled with a stated reason while no project is chosen.
+**The prompt box carries the same control row the conversation replies with** — model, mode and
+catalog-backed effort on the leading side of its bottom row, the account's usage reading and the
+surface on the trailing side. The send is what differs: a brief is several lines, so Return
+breaks the line and the send is the **Start session** button under the box, at the trailing end
+of the row the import offer leads (`SubmitPlacement.outside`, and see
+[`design-system.md`](design-system.md) for the commit that put it on the footer instead and took
+Return away from the text). ⌘Return sends under every setting, drawn on the button's face; with
+no project chosen the button and the box are disabled together with a stated reason.
 
 **So it becomes that box rather than being replaced by it.** Starting a session swaps two whole
 surfaces, and the box is the one thing on both of them, which makes an instant swap read as a
@@ -390,11 +414,12 @@ does not leak back the other way. With projects present but nothing selected, th
 "No Session Selected" placeholder stays — the composer is the way *in*, not the idle state.
 
 The second chip is the **identity**: the agent's brand mark, and `<agent> · <login>` wherever
-that agent has more than one login to choose between. Its menu is the selected agent's accounts
-(with their usage readings, see [`accounts.md`](accounts.md)), a separator, then the *other*
-runtimes — the selected one is what the chip is showing, so a row for it would be the one row
-in the section that changed nothing. Switching login keeps the agent and clears the model;
-switching agent additionally moves to that agent's preferred account.
+that agent has more than one login to choose between. Its menu is **one flat list of every
+runtime's logins**, each carrying its runtime's mark and its usage reading (see
+[`accounts.md`](accounts.md), which holds the reasoning and the `ComposerIdentity` contract). A
+runtime gets a row of its own only where it offers no login to name. Choosing any row sets the
+runtime and the login together and clears the model and effort — both belong to a catalog the
+new login may not publish.
 
 ## Session Names
 
@@ -404,16 +429,14 @@ the conversation. `SessionNaming` holds the rules; three names remain, resolved 
 `displayTitle`:
 
 1. `customTitle` — an explicit rename, which wins and stops following the agent
-2. `agentTitle` — the agent's own name for the conversation, by whichever transport last
-   reported it: the terminal title while a PTY is attached, or the transcript's title records
-   read when the session stops working — which is what names a *native* session and what
-   survives a surface switch. Retained after the agent exits. (Stored under the old
-   `terminalTitle` key, so existing records decode unchanged.) The slot carries a source
-   (`AgentTitleSource`, persisted beside it): a name *chosen* through `set_session_name`
-   is not displaced by what a transport merely *reports* — the terminal title re-asserts
-   the CLI's old `ai-title` within seconds and the turn-end read re-reads the same record,
-   and both used to put the old name straight back over a rename the user had just asked
-   for. Only another chosen name moves a chosen name.
+2. `agentTitle` — the agent's own name for the conversation, from terminal presentation,
+   transcript title records, or canonical provider metadata. It is what names a *native*
+   session and what survives a surface switch, and is retained after the agent exits. (Stored
+   under the old `terminalTitle` key, so existing records decode unchanged.) The slot carries a
+   persisted `AgentTitleSource` with an explicit authority order: `reported < provider < chosen`.
+   Codex's canonical name therefore survives its TUI re-asserting a stale OSC caption, while a
+   name chosen through `set_session_name` survives every automatic source. Only another chosen
+   name moves a chosen name.
 3. `title` — derived from the **first prompt** (first line, capped): set at creation when the
    composer has the prompt, or by the first `UserPromptSubmit` hook report for a prompt typed
    straight into the terminal. Empty until then; the display falls back to "New Session".
@@ -423,7 +446,15 @@ across this machine's transcripts rather than assumed: `ai-title` is the CLI's o
 re-appended every turn (so the *last* one is current, and `SessionNaming` reads the file's
 tail rather than scanning the conversation); `custom-title` is written by `/rename` — after a
 mid-conversation rename both keep being appended, interleaved, so *presence* of a custom
-title decides, not order. Codex records no title at all; its sessions keep their prompt name.
+title decides, not order.
+
+Codex's rollout JSONL still records no title. Current releases instead keep one canonical
+`{id, thread_name, updated_at}` record per conversation in `<CODEX_HOME>/session_index.jsonl`;
+`/rename` rewrites that index. Native app-server returns the same value as `Thread.name` and
+publishes changes through `thread/name/updated`. Threading reads the native fields directly,
+refreshes a terminal session's index after a quiet edge in TUI output, and scans each account's
+index once at launch so a rename made while Threading was closed also reaches a dormant row. The
+TUI's human confirmation sentence is never parsed.
 
 **`ai-title` is written once and then almost never rewritten**, which is the fact the rest of
 this section turns on. Counted across the twelve largest transcripts here: each carries 34–422
@@ -592,6 +623,68 @@ agent to rename it — the opposite of what an instruction such as “give this 
 name” is for. Imports receive nothing because they are existing conversations, and resumes
 receive nothing because the opening was already persisted in the provider transcript.
 
+### Who owns the child processes
+
+A natively rendered conversation is an ordinary child process with three pipes — no PTY, no
+terminal. That made it the one launch path with nobody holding the other end when Threading
+died: `AgentRuntime.terminateAll()` runs from `applicationShouldTerminate`, which a crash or a
+`SIGKILL` never reaches, so the CLI reparented to launchd and stayed there — alive, unowned,
+unreaped, holding a model conversation open, with nothing anywhere recording that it existed.
+
+**PTY sessions are deliberately excluded.** SwiftTerm launches through `forkpty`, so that child
+already leads its own session with a controlling terminal, and the kernel sends it `SIGHUP` when
+the master descriptor closes with the app. The ending is already owned; a second mechanism over
+the top would only be a second thing to get wrong.
+
+Three pieces close it for the native path, and all three are shared — there is no per-runtime
+branch anywhere in them, because "this process is ours and it is still running" is not a fact
+about which CLI is at the other end.
+
+- **Its own process group.** `Process` cannot set one, which is the whole reason
+  `AgentChildProcess` spawns through `ChildProcessSpawn` — `posix_spawn` with
+  `POSIX_SPAWN_SETPGROUP` and a pgid of zero, the same primitive `ExtensionChildSpawner` was
+  already built on. The child's group id is its pid, so `kill(-pid, …)` reaches it *and* the
+  shells and subagents it started. Teardown signals the group: interrupting only the parent
+  leaves a backgrounded fleet running, and teardown is reached for exactly when a fleet has run
+  away. Closing stdin stays the first move on every transport that has one — Codex's app-server
+  shuts down on end-of-input — so the group signal is the escalation, not the greeting.
+- **A ledger of what is live.** `AgentChildLedger` writes one small record per child under
+  Application Support the moment it is spawned, and removes it the moment it is reaped. What
+  survives a launch is whatever had not been reaped when it ended: after a clean quit, at most
+  the children whose exit the app outran, all of them long gone by the time anyone looks; after
+  a crash, the orphans themselves. The file cannot tell those apart and does not try — that is
+  the sweep's job, and it is why the sweep verifies rather than assumes. The record carries the
+  pid, the kernel's own start timestamp for it, the session id and the
+  launched file's name — lifecycle facts, nothing about what was said. It is bounded
+  (`maximumRecords`), written atomically through `RecoverableFileStore` at
+  `.rebuildableCache`, and **missing, readable and unreadable stay three different answers**: a
+  ledger nobody could read must never be acted on as "there were no children".
+- **A sweep at the next launch.** `OrphanedAgentChildSweep.run()` is called from
+  `applicationDidFinishLaunching`, after `EventLog.beginLaunch()` — so it has somewhere to
+  report — and before anything can start a conversation, because it decides by pid and a pid is
+  only unambiguous while nothing new has been spawned. It sits below both the hosted-test
+  bail-out and the single-instance lock: neither a test host nor an instance that lost the lock
+  may signal processes it does not own. A verified orphan gets `SIGKILL` rather than the
+  `SIGTERM` teardown uses — the grace period has already elapsed, however long ago the app died,
+  and a deferred escalation would have to signal a group id whose leader may have been reaped
+  in between.
+
+**The pid is never enough.** macOS hands pids out again, so a record from a crash three days ago
+may name a browser now. The sweep kills only on an exact match of the pid *and* the
+`pbi_start_tvsec`/`pbi_start_tvusec` pair the kernel reports — microseconds included, because two
+processes starting in the same second is ordinary at login. Everything else fails closed: a
+start-time mismatch, an identity that could not be read, a process already gone, and an
+unreadable ledger all mean *do nothing*, and every one of them is journalled to `EventLog`
+alongside every kill. A sweep that quietly does nothing is otherwise indistinguishable from a
+sweep that is broken.
+
+Reading the start time immediately after `posix_spawn` is race-free for the same reason the
+sweep needs it: a child is reaped exactly once, and until that reap the kernel cannot hand its
+pid to anyone else. The reap itself is one `DispatchSourceProcess` and one `waitpid` on the
+child's own serial queue, cancelling the source inside the handler — the arrangement the crash
+of 22 July 2026 established, where a manual `waitpid` racing a still-registered source made
+libdispatch treat `EV_VANISHED` as a fatal client bug.
+
 ### The sessions that come back on their own
 
 Quitting with agents running keeps the records and loses the processes — that is the app's
@@ -661,6 +754,76 @@ Everything else is deliberately the ordinary machinery: the background launch us
 `AgentRuntime` caches and the same container delegate as a click, so the sidebar's dot, exit
 handling and the eventual attach (`show` finds the surface cached and only attaches) cannot
 drift from the selected path.
+
+### The launch after a crash asks before it opens anything
+
+`EventLog.beginLaunch` has always known that the previous launch died — its marker was still
+lying there — and nothing consumed the fact. So the launch after a crash did what every other
+launch does: reopened the previously selected session and ordered every detached browser window
+back on screen. Both of those run *because the app started*, which is the wrong reason when the
+last start ended by dying: the session that comes back may be the one that took the app down,
+and it comes back silently, so the user's only evidence is the app dying a second time.
+
+`EventLog.PreviousLaunchOutcome` is the fact, typed. `.clean`, `.unclean(crashReport:)`, and
+`.unknown` — and *unknown* is load-bearing rather than a third way of saying nothing: no marker
+**and** no journal is a machine the app has never run on, which is a first launch with nothing
+to restore, not a crash worth mentioning. It replaced a `Bool?` that meant three things at three
+call sites. `previousLaunchEndedCleanly` is now derived from it, because
+`MacSupportReportDetails` reports the same fact in that older shape.
+
+Two orderings inside `beginLaunch` are load-bearing:
+
+- **The outcome is read before the retention sweep.** A missing marker is either "quit cleanly"
+  or "never ran here", and only a surviving journal separates them, so the question has to be
+  put while the evidence is still on disk. Pruning first, a machine left alone for longer than
+  the fortnight retention window came back reporting that the app had never run on it.
+- **The marker is consumed on read**, which it already was. That is where the one-shot lifetime
+  comes from: nothing new is written down to give the notice one, and there is no new persistent
+  state anywhere in this feature.
+
+`LaunchRestorationPlan` maps the outcome onto what a launch may bring back, and
+`LaunchRestoration` runs it. The split from `AppDelegate.restoreSelectedSessionIfReady` is
+deliberate: the gate still decides **when** — `mcpServerHasStarted && !isOnboardingActive` — and
+this decides **how much**. Hanging the offer off that same gate is also what keeps the notice out
+of the three places it must never appear, none of which ever reach it: the onboarding walkthrough
+(which defers the main window), the hosted test bundle (which returns before startup), and an
+instance that lost the single-instance lock (which terminates above it). The actions are closures,
+so the decision is tested without a window, an MCP listener or a store.
+
+**The relaunch of the sessions that were running at the last quit is deliberately not part of the
+decision.** It is already crash-safe by construction, for the reason recorded above: the record is
+consumed on read by the launch that then crashed, so after a crash there is nothing left in it to
+fire. Suppressing it here would instead hold back the ordinary case — a clean quit with agents
+running — which is not what the notice is about. It also stays unconditional so that a list
+written under one setting cannot fire under a later one.
+
+The notice is `PaneNoticeView`, put up by `MainWindowController.presentUncleanExitNotice` through
+`TerminalContainerViewController.showNotice` — a band between the pane's header and its content,
+which **pushes** the content down rather than covering it. A band and not an alert: a launch that
+stops to ask a question asks it before the user has asked the app for anything, and what it would
+be asking about is the *previous* launch, so nothing is waiting on the answer. Restore performs
+exactly the two calls that were held back, in the order `run` would have made them — the selected
+session first, so the detached windows it brings with it are not built twice. The report is
+*revealed* in the Finder rather than opened, because an `.ips` opens in Console and what someone
+filing a bug needs is the file, ready to attach; the action is absent entirely when macOS filed
+nothing, which is the ordinary case for a kill or a power loss.
+
+The offer is one-shot **per launch**, held in memory on the `LaunchRestoration` instance. The gate
+can fire twice in one launch (the walkthrough re-run from Settings ▸ Advanced finishes and asks
+again), and a second run restores in full rather than holding the same workspace back again with
+nothing on screen to say so.
+
+Deliberately not here: a recovery mode, and any decision this file makes about repetition. A
+launch after a crash is one held workspace and one band, and an interrupted prompt is never
+resubmitted. Crashes *are* counted now, one layer down and without changing what this does:
+`LaunchLedger` records how far each launch got and `CrashLoopPolicy` reads the run of them, and
+the only thing that reaches here is which of two sentences the band carries
+(`UncleanExitEscalation`). See [`persistence.md`](persistence.md).
+
+A restart the user asked for is no longer one of the crashes. The reset flows leave without the
+quit path, so the marker survived them and Reset Settings — which does not move the support
+directory — read as an unclean exit here: held workspace, crash notice, for a button the user had
+just pressed. `PreviousLaunchOutcome.intentional` restores in full and says nothing.
 
 ### Permission mode, per conversation
 
@@ -734,12 +897,23 @@ allows file changes and still asks about commands) and returns nil for Manual, P
 which are enforced inside the CLI and promise nothing about the sheet. Being wrong there costs an
 extra question rather than an unasked-for action.
 
-**The record is the launch mode, not a live mirror.** A terminal session's own Shift+Tab is
-invisible to Threading, and changing the mode on a running session restates nothing — the flags
-belong to the process. The broker is the exception, since it is ours: it re-reads the store on
-every call. Claude does expose a `set_permission_mode` control request on the stream transport
-(present in the binary beside `set_model`), so live switching on the native surface is a clean
-follow-on rather than a rewrite.
+**The record is the launch mode, not a live mirror.** Changing the mode on a running terminal
+session restates nothing — the flags belong to the process. The broker is the exception, since it
+is ours: it re-reads the store on every call. Claude does expose a `set_permission_mode` control
+request on the stream transport (present in the binary beside `set_model`), so live switching on
+the native surface is a clean follow-on rather than a rewrite.
+
+**Reading the live posture back is a different question, and Claude answers it.** A terminal's own
+Shift+Tab still tells Threading nothing, but Claude writes each assertion of the posture into the
+session's transcript as `{"type":"permission-mode","permissionMode":…}`, so what a session is
+*in* can be observed even though it cannot be set. `ObservedPermissionMode` is the seam every
+reporting surface asks — never the record, since a posture read off a stale launch flag is the
+one fact where being confidently wrong costs the most — and
+`AgentCapabilities.transcriptPermissionModeRecord` is what a runtime claims to join it. Claude
+only today; Codex, Grok and OpenCode record nothing equivalent and therefore report nothing. The
+values that come back are Claude's own, `default` for Manual included, which is why
+`AgentPermissionMode(externalValue:for:)` exists beside the flag values it inverts. See
+[`git.md`](git.md) for the surface that shows it.
 
 ### Claude's Remote Control, per conversation
 
@@ -983,11 +1157,49 @@ Reading these files has two traps, both of which cost real coverage before they 
   further still — past 500 KB in ordinary sessions. `forEachRecord` therefore streams and lets
   the caller stop, so the usual file costs one chunk while a buried turn is still found.
 
-Titles come from the record that holds only what the user typed: Claude's `ai-title`, and
-Codex's `event_msg`/`user_message` — *not* the `user`-role messages, which replay the CLI's
-own instruction blocks. A transcript with no user turn is not offered at all: Codex writes a
-rollout for its approval reviewer against the same project directory, and those are machine
-turns nobody can meaningfully reopen.
+**A transcript's modification date is not when its conversation happened.** Both CLIs write
+bookkeeping into transcripts long after the fact — Claude re-appends `last-prompt` and
+`bridge-session` records, none of them timestamped, and a launch rewrites them across a whole
+directory at once — so mtimes collapse onto whenever an agent was last started rather than
+spreading out over when people were talking. The sheet showed this project seven conversations
+reading "4 min ago", sorted above one another by nothing: their last real turns were eight to
+nine hours apart and exactly one was live. `SessionImporter.lastActivity` reads *backwards*
+from the end for the newest record that carries a timestamp, which is both the right answer and
+a cheap one — the bookkeeping is precisely what has no timestamp, and 273 of this project's 276
+Claude transcripts answer within 7 KB of the end (the deepest Codex rollout, 220 KB). The scan
+is bounded by `ImportDefaults.activityTailLimit` and falls back to the modification date, so a
+transcript with nothing stamped in its tail is not read to the top. Onboarding's whole-disk
+scan reads it the same way, where the value also decides what starts pre-checked.
+
+**One row per conversation, not per copy of it.** A conversation moved between logins exists
+under both accounts and is found under both: 13 of this project's were offered twice, identical
+but for which copy had been written to last, and both rows resume the same transcript.
+`SessionImporter.deduplicated` keeps the newest, run over the list already sorted, so the
+surviving row belongs to the account whose copy has the most in it. Identity is
+`ImportableSession.id` — kind and transcript id — the same rule `GlobalSessionScan.grouped`
+dedupes on; the per-project path simply had no equivalent.
+
+**The sheet adopts several at once, and a selection outlives a search.** Rebuilding a project's
+history means taking a search's worth of conversations at a time, so the table takes multiple
+selection and `ProjectStore.importSessions` writes them in one save — one notification, one
+sidebar reload, which is what keeps a large import from stuttering. The chosen ids are held by
+the controller rather than by the table, because `reloadData` selects nothing: search, take,
+search again, take more, and the earlier choices are still there. What that costs is a
+selection the current query can hide, so the Import button carries the count — it is the only
+thing on screen saying that six conversations are about to be adopted when one row is visible.
+
+**What is still not offered: Grok and OpenCode.** `discover` scans Claude and Codex only, so a
+Grok conversation (`~/.grok/sessions/<url-encoded cwd>/<id>/`) cannot be adopted by any path in
+the app, and neither can an OpenCode session. Both runtimes are otherwise first-class, and both
+keep their conversations somewhere this file's rules do not reach — Grok's listing is a CLI
+command rather than a directory of transcripts.
+
+Titles prefer the provider's retained name: Claude's `ai-title`, or Codex's account-wide
+`session_index.jsonl`. The first real user prompt is the fallback, read from Codex's
+`event_msg`/`user_message` — *not* the `user`-role messages, which replay the CLI's own
+instruction blocks. A transcript with no user turn is not offered at all even if an index name
+exists: Codex writes a rollout for its approval reviewer against the same project directory, and
+those are machine turns nobody can meaningfully reopen.
 
 **A chat is attributed by which worktree it ran in, not by a raw path.** Every transcript
 records the directory it launched in — Codex's `session_meta.cwd`, and Claude's per-record

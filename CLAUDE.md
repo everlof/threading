@@ -50,18 +50,21 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
 
 ## Dependencies
 
-Three local Swift packages are referenced as `XCLocalSwiftPackageReference`s. ThinkingOrbs and
-LabelMorph are git submodules; SwiftTerm is vendored directly in this repository. **All three
-are our forks — modify their source directly** rather than working around them.
+Four local Swift packages are referenced as `XCLocalSwiftPackageReference`s. ThinkingOrbs,
+LabelMorph and BorderBeamKit are git submodules; SwiftTerm is vendored directly in this
+repository. **All four are our forks — modify their source directly** rather than working
+around them.
 
 | | Location / upstream | What it draws |
 |---|---|---|
 | **SwiftTerm** | `./SwiftTerm/` — [migueldeicaza/SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulation: VT100/xterm, ANSI parsing, PTY. The iOS folder is excluded on macOS builds. |
 | **ThinkingOrbs** | `./ThinkingOrbs/` — [everlof/thinking-orbs-swift](https://github.com/everlof/thinking-orbs-swift) | The dotted "working" orb beside the conversation status. AppKit `ThinkingOrbView` only; the app stays AppKit-only. |
 | **LabelMorph** | `./LabelMorph/` — [everlof/LabelMorph](https://github.com/everlof/LabelMorph) | The label that morphs a name character by character — every session, project and checkout name. |
+| **BorderBeamKit** | `./BorderBeamKit/` — [Jakubantalik/border-beam](https://github.com/Jakubantalik/border-beam) (its `ports/ios` tree, extracted) | The breathing agent-activity ring over the composer. AppKit `BorderBeamHostView` only; the SwiftUI + Metal half stays inside the package. |
 
-Each has a seam that is ours (ThinkingOrbs' `tint`, LabelMorph's truncation) plus the theme
-wrapper that drives it: see [`docs/architecture/dependencies.md`](docs/architecture/dependencies.md).
+Each has a seam that is ours (ThinkingOrbs' `tint`, LabelMorph's truncation, BorderBeamKit's
+AppKit host) plus the theme wrapper that drives it: see
+[`docs/architecture/dependencies.md`](docs/architecture/dependencies.md).
 
 ## Architecture
 
@@ -136,16 +139,20 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
-| Session state (`dormant`/`idle`/`working`/`needsAttention`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
+| Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
 | The runtime capability matrix, side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
+| Writing a message now and sending it later: the record, the store, the clock, waking a dormant session, the usage-reset presets | [`scheduled-messages.md`](docs/architecture/scheduled-messages.md) |
+| A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
+| The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`send_to_session`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
 | Opening a checkout or a file in another app: the registry, LaunchServices detection, line numbers, the header's split control | [`external-apps.md`](docs/architecture/external-apps.md) |
-| Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings | [`accounts.md`](docs/architecture/accounts.md) |
+| Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings, the usage-window poke | [`accounts.md`](docs/architecture/accounts.md) |
 | The GitHub credential chain (app connection, `gh`, credential helper), the device-flow sign-in, filing issues from the inspector and Help ▸ Report a Problem, the `network.brokered` extension fetch and its grant rules | [`github.md`](docs/architecture/github.md) |
 | The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts, where state lives on disk and the Advanced page's resets | [`persistence.md`](docs/architecture/persistence.md) |
+| A launch that did not come back: the marker, the launch ledger and its two-step open, the crash-loop policy, held-back restoration, Recovery Mode and its one-shot launch flags | [`crash-recovery.md`](docs/architecture/crash-recovery.md) |
 | Performance spans, main-thread stalls, MetricKit payloads, `sample`/`xctrace`, and the full/full+ sweep | [`performance.md`](docs/architecture/performance.md) |
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
@@ -203,6 +210,8 @@ interface, report the missing node as an SDK requirement rather than bypassing t
 renderer.
 
 ## Code Style Guidelines
+
+**Fix the root cause each time, no band-aids.**
 
 ### Constants & Configuration
 
@@ -324,6 +333,14 @@ the following cases genuinely need to be visible, and they are skipped by name i
 - `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
   offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
   `BrowserAgentBridgeTests`, needs no window and stays in `fast`.
+- `BrowserOffScreenCaptureTests` (the whole class) — measures what an agent can still capture
+  from a browser whose window is miniaturized, moved off the visible frame, or fully occluded,
+  which needs a real window ordered on screen to *stop* being visible in each of those ways. It
+  is a platform tripwire rather than a behaviour test: `browser_screenshot` and the remote
+  workspace preview both go through `WKSnapshotConfiguration.afterScreenUpdates = true`, and
+  the detached-browser-window work rests on that still returning pixels. Today it does in all
+  three conditions; the class exists so a macOS update changing that is a failing test rather
+  than an agent quietly reading blank pages.
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.
@@ -356,11 +373,22 @@ against a button that no click could reach in the app — `NSOutlineView` was sw
 [`design-system.md`](docs/architecture/design-system.md)). When a component's behaviour depends on
 its host, put the host in the fixture, and assert the host's own answer beside ours.
 
+**A detached fixture with a frame constrains nothing.** `NSView(frame:)` outside a window pins no
+width, so Auto Layout lays the subtree out at the width it would *prefer* and a child may come out
+wider than the view holding it — with no "unable to simultaneously satisfy" to say so, because
+nothing was violated. Two tests measured a control row that way and reported it overflowing a pane
+it had never been asked to fit; the compression they were accusing it of skipping worked the whole
+time, and one of them had been passing on a fixture that proved nothing. A fixture standing in for
+a pane states its size the way a split view does — `widthAnchor`/`heightAnchor` constraints — and
+insets its content, since a control aligned by ink reaches past the margin its glyph sits on.
+
 **Rendered-state tests are how appearance is reviewed here.** `ConversationRenderTests`,
-`GitReviewRenderTests`, `ThemeSettingsRenderTests`, `CodeStatsRenderTests` and
-`ToolbarChromeRenderTests` draw real fixtures to PNGs, light and dark (`THREADING_RENDER_OUT`
-redirects the output). Several bugs in this codebase were visible in a picture and in no
-assertion anyone would have written.
+`GitReviewRenderTests`, `ThemeSettingsRenderTests`, `CodeStatsRenderTests`,
+`ToolbarChromeRenderTests` and `SessionAttachmentComparisonTests/testRendersTheDropAffordance`
+draw real fixtures to PNGs, light and dark (`THREADING_RENDER_OUT` redirects the output). Several
+bugs in this codebase were visible in a picture and in no assertion anyone would have written —
+including a drop affordance whose every assertion passed while it drew a saturated plate over the
+row it was naming, louder than the window's own selection.
 
 ## Documentation
 
