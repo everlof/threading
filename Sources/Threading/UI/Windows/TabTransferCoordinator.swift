@@ -17,6 +17,15 @@ final class TabTransferCoordinator {
         self.host = host
     }
 
+    /// The host itself, for a caller that needs to *read* one — the window asking which tab it
+    /// is about to move before it builds somewhere to put it.
+    ///
+    /// Not named `host`: that would shadow the stored closure inside its own body and call
+    /// itself forever.
+    func resolve(_ hostID: TabHostID) -> TabHosting? {
+        host(hostID)
+    }
+
     /// Whether the tab could move — what a menu asks before offering the item.
     func canMove(
         tabID: UUID,

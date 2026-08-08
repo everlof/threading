@@ -223,7 +223,7 @@ extension AgentToolCoordinator {
                         }
                         // Choosing a file is always user-owned. Bring the shared browser forward
                         // before WebKit opens its native file panel.
-                        self.revealDisplayPane(for: sessionID)
+                        self.revealBrowserPane(for: sessionID)
                     }
                     var allowsFormSubmission = false
                     if target.isSubmit, button == "left" {
@@ -236,7 +236,8 @@ extension AgentToolCoordinator {
                         let allowed = await self.confirmSensitiveBrowserAction(
                             "Submit a form",
                             target: target,
-                            browser: browser
+                            browser: browser,
+                            for: sessionID
                         )
                         guard allowed else {
                             completion(.failure("The user declined the form submission."))
@@ -305,7 +306,15 @@ extension AgentToolCoordinator {
         where visibleSessionID() != sessionID {
             await Task.yield()
         }
-        revealDisplayPane(for: sessionID)
+        revealBrowserPane(for: sessionID)
+        // **The one place an agent may take the keyboard**, and the reason is the user: this
+        // hands them a focused password field to type into, and universal autofill fills the
+        // *frontmost* app's *key* window's focused field. Ordering the window forward — which is
+        // all `revealBrowserPane` does, deliberately, so a tool acting on a page never steals
+        // focus from what is being typed into — would offer the field while the keystrokes went
+        // somewhere else. A browser in a detached window on its own Space is switched to for the
+        // same reason: the user cannot complete a sign-in they cannot see.
+        browser.view.window?.makeKeyAndOrderFront(nil)
         browser.webView.window?.makeFirstResponder(browser.webView)
         do {
             return try await browser.preparePasswordFieldForUser(
@@ -376,7 +385,8 @@ extension AgentToolCoordinator {
                         let allowed = await self.confirmSensitiveBrowserAction(
                             "Enter text and submit a form",
                             target: target,
-                            browser: browser
+                            browser: browser,
+                            for: sessionID
                         )
                         guard allowed else {
                             completion(.failure("The user declined the form submission."))
@@ -658,7 +668,7 @@ extension AgentToolCoordinator {
                             return
                         }
                         if target.tag == "input", target.inputType == "file" {
-                            self.revealDisplayPane(for: sessionID)
+                            self.revealBrowserPane(for: sessionID)
                             completion(.failure(
                                 "Field \(index + 1) is a file input. File selection remains "
                                     + "user-controlled through the visible browser."
@@ -816,7 +826,8 @@ extension AgentToolCoordinator {
                                 ? "Press Enter on a form control"
                                 : "Press Space on a submit control",
                             target: target,
-                            browser: browser
+                            browser: browser,
+                            for: sessionID
                         )
                         guard allowed else {
                             completion(.failure("The user declined the form submission."))

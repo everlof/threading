@@ -243,12 +243,12 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(
             frame.minY,
-            Design.Spacing.small - 0.5,
+            Design.Spacing.inset - 0.5,
             "the footer was pushed out of the pane"
         )
         XCTAssertLessThanOrEqual(
             frame.minY,
-            Design.Spacing.small + 1,
+            Design.Spacing.inset + 1,
             "a short pane left slack under the footer instead of giving it to the preview"
         )
     }
@@ -265,7 +265,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
         XCTAssertEqual(
             frame.minY,
-            Design.Spacing.small,
+            Design.Spacing.inset,
             accuracy: 1,
             "a document's preview no longer fills the pane"
         )
@@ -386,12 +386,12 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(
             frame.minY,
-            Design.Spacing.small - 0.5,
+            Design.Spacing.inset - 0.5,
             "the rows pushed the footer out of the pane"
         )
         XCTAssertLessThanOrEqual(
             frame.minY,
-            Design.Spacing.small + 1,
+            Design.Spacing.inset + 1,
             "a short pane left slack under the footer instead of giving it to the preview"
         )
         XCTAssertEqual(

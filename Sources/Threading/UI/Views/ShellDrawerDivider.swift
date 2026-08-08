@@ -43,9 +43,12 @@ final class ShellDrawerDivider: BackdropOverlay {
         // The *rule* ink: this strip is a rule between two panes, the same decision the pane
         // headers' separators and the split's seam take, and the one place the ink budget is
         // enforced. Over a backdrop the two inks coincide; the name is the point.
+        //
+        // Drawn at the *bottom* edge — the strip overlaps the surface above, so its bottom is
+        // where the drawer actually begins. At the top edge the line floated its own height
+        // above the tab strip, with a band of the conversation showing between rule and tabs.
         ink.rule.setFill()
-        let width = Design.Radius.border
-        NSRect(x: 0, y: bounds.maxY - width, width: bounds.width, height: width).fill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: Design.Radius.border).fill()
     }
 
     override func updateTrackingAreas() {

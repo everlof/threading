@@ -35,7 +35,14 @@ final class DisplayPaneStoreMigrationTests: XCTestCase {
         XCTAssertEqual(panel.activeTabID, "11111111-1111-1111-1111-111111111111")
     }
 
-    func testReencodingALegacyLayoutMakesItsVersionExplicit() throws {
+    /// Re-encoding states a version where the legacy document stated none — but the version the
+    /// document *needs*, not the newest this build knows.
+    ///
+    /// A layout with no detached window is byte-identical to what version 1 always wrote, and an
+    /// older build reads it perfectly. Stamping 2 on it would make that build refuse a document it
+    /// understands, and that build has no quarantine: refusing means its next save wipes the panel,
+    /// the drawer and every window slice. The bump costs only the sessions that used the feature.
+    func testReencodingALegacyLayoutStatesTheVersionItNeeds() throws {
         let panel = try JSONDecoder().decode(
             PersistedPanel.self,
             from: Data(legacyJSON.utf8)
@@ -45,10 +52,38 @@ final class DisplayPaneStoreMigrationTests: XCTestCase {
                 as? [String: Any]
         )
 
-        XCTAssertEqual(
-            object["formatVersion"] as? Int,
-            PersistedPanel.currentFormatVersion
+        XCTAssertEqual(object["formatVersion"] as? Int, 1)
+        XCTAssertEqual(panel.requiredFormatVersion, 1)
+        XCTAssertLessThan(
+            panel.requiredFormatVersion,
+            PersistedPanel.currentFormatVersion,
+            "This test is only meaningful while the two can differ"
         )
+    }
+
+    /// The other half: a layout that actually uses a detached window declares the version that
+    /// carries it, so a build without the feature refuses rather than silently dropping the window.
+    func testALayoutWithADetachedWindowDeclaresTheNewerVersion() throws {
+        let windowID = UUID()
+        let panel = PersistedPanel(
+            tabs: [
+                PersistedTab(
+                    id: "w1", kind: .browser, title: nil, subtitle: "",
+                    url: "https://example.com", html: nil, cacheFile: nil,
+                    host: PersistedTab.detachedWindowHost(windowID)
+                )
+            ],
+            activeTabID: nil,
+            observedSignature: nil,
+            detachedWindows: [
+                PersistedDetachedWindow(id: windowID.uuidString, frame: nil, activeTabID: "w1")
+            ]
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(panel)) as? [String: Any]
+        )
+        XCTAssertEqual(object["formatVersion"] as? Int, PersistedPanel.currentFormatVersion)
     }
 
     func testFutureLayoutVersionIsRefused() throws {

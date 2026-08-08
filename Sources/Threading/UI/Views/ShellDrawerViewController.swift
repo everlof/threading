@@ -82,16 +82,38 @@ final class ShellDrawerViewController: NSViewController {
         session.terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(session.terminalView)
 
+        // The same inset every terminal pane takes: SwiftTerm draws its first row hard
+        // against the strip's rule and its first column against the pane's edge, and this
+        // was the one flush terminal left. `applyBackground` paints the margin in the
+        // terminal's own colour, so it reads as the terminal's air rather than a gap
+        // around it.
         NSLayoutConstraint.activate([
-            session.terminalView.topAnchor.constraint(equalTo: view.topAnchor),
-            session.terminalView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            session.terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            session.terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            session.terminalView.topAnchor.constraint(
+                equalTo: view.topAnchor,
+                constant: TerminalPadding.top
+            ),
+            session.terminalView.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -TerminalPadding.bottom
+            ),
+            session.terminalView.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor,
+                constant: TerminalPadding.leading
+            ),
+            session.terminalView.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -TerminalPadding.trailing
+            )
         ])
 
         applyBackground()
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.applyProfile() }
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in self?.applyProfile() }
+        // A session set to "Follow App Theme" draws with a palette the app theme owns, so an
+        // app theme switch is a terminal theme switch for it — the other terminal hosts
+        // already listen, and without this the margin painted above would keep the old
+        // palette while the terminal repaints.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyProfile() }
     }
 
     // MARK: - Public Methods
@@ -100,6 +122,13 @@ final class ShellDrawerViewController: NSViewController {
     /// opened should cost no process.
     func startIfNeeded() {
         guard !hasStarted else { return }
+        // The drawer's shell is the fourth process this app can start, and recovery starts none
+        // of the four. Refused before `hasStarted` is set, so the drawer opens for real on the
+        // next normal launch rather than believing it already has.
+        guard !RecoveryMode.isActive else {
+            RecoveryMode.refuse("a shell drawer start")
+            return
+        }
         hasStarted = true
         session.delegate = self
         session.startShell(initialDirectory: directory())
@@ -174,7 +203,7 @@ final class ShellDrawerViewController: NSViewController {
             custom: nil,
             reported: session.reportedTitle,
             directory: directory,
-            projectRoot: ProjectStore.shared.project(forSessionID: sessionID)?.folderPath,
+            projectRoot: ProjectStore.shared.workingDirectory(forSessionID: sessionID),
             foregroundProcess: session.foregroundProcessName,
             shellPath: ProfileStorage.shared.defaultProfile.shellPath
         )
@@ -252,5 +281,11 @@ enum ShellDrawerHeight {
         set {
             UserDefaults.standard.set(Double(newValue), forKey: key)
         }
+    }
+
+    /// Forgets the height. On `.standard` like the value itself — this one is not routed through
+    /// `PreferenceStore`, and a reset that cleared a different domain would clear nothing.
+    static func reset() {
+        UserDefaults.standard.removeObject(forKey: key)
     }
 }

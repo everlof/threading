@@ -110,18 +110,50 @@ final class DisplayPaneStore {
 
   // MARK: Layout
 
+  /// Sessions whose stored layout exists but could not be decoded.
+  ///
+  /// A layout this build cannot read is not the same as no layout, and the difference is a
+  /// whole document. `loadLayout` answers nil for both, and every writer here rebuilds from
+  /// that answer — so without this, opening a session written by a *newer* build (a detached
+  /// window under format 2, read by a build that knows only 1) would read as "nothing stored"
+  /// and the first save would replace the user's panel, drawer and windows alike with whatever
+  /// this build happened to be showing. `persistence.md` states the rule this keeps: the store
+  /// refuses to write over state it could not read.
+  private var quarantined: Set<SessionID> = []
+
   func loadLayout(for sessionID: SessionID) -> PersistedPanel? {
-    guard let payload = StateManager.shared.loadPanelPayload(for: sessionID) else { return nil }
-    return try? decoder.decode(PersistedPanel.self, from: Data(payload.utf8))
+    guard let payload = StateManager.shared.loadPanelPayload(for: sessionID) else {
+      quarantined.remove(sessionID)
+      return nil
+    }
+    do {
+      let panel = try decoder.decode(PersistedPanel.self, from: Data(payload.utf8))
+      quarantined.remove(sessionID)
+      return panel
+    } catch {
+      if quarantined.insert(sessionID).inserted {
+        ThreadingLogger.mcp.error(
+          "Display panel could not be read and will not be overwritten: \(error.localizedDescription, privacy: .public)"
+        )
+      }
+      return nil
+    }
   }
 
-  /// Replaces the stored *panel* tabs and selection, preserving the drawer's tabs and the
-  /// observed signature (which tracks the agent's awareness, not the layout).
+  /// Whether the session's stored layout is being preserved because it could not be read.
+  func isQuarantined(_ sessionID: SessionID) -> Bool {
+    quarantined.contains(sessionID)
+  }
+
+  /// Replaces the stored *panel* tabs and selection, preserving the drawer's tabs, any detached
+  /// windows' tabs, and the observed signature (which tracks the agent's awareness, not the
+  /// layout).
   func saveLayout(tabs: [PersistedTab], activeID: String?, for sessionID: SessionID) {
     var panel =
       loadLayout(for: sessionID)
       ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
-    panel.tabs = tabs + panel.drawerTabs
+    guard !isQuarantined(sessionID) else { return }
+    panel.tabs = tabs + panel.drawerTabs + panel.detachedWindowTabs
     panel.activeTabID = activeID
     write(panel, for: sessionID)
   }
@@ -138,9 +170,45 @@ final class DisplayPaneStore {
     var panel =
       loadLayout(for: sessionID)
       ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
-    panel.tabs = panel.panelTabs + tabs
+    guard !isQuarantined(sessionID) else { return }
+    panel.tabs = panel.panelTabs + tabs + panel.detachedWindowTabs
     panel.drawerActiveTabID = activeID
     if let open { panel.drawerOpen = open }
+    write(panel, for: sessionID)
+  }
+
+  /// One detached window's slice: its own tabs, its selection, and what the window itself knows.
+  ///
+  /// Every writer here rebuilds `tabs` from the slices it is not replacing, which is what keeps
+  /// three hosts in one flat list honest — a slice no writer preserves is one the next save
+  /// silently drops.
+  func saveDetachedWindowLayout(
+    _ window: PersistedDetachedWindow,
+    tabs: [PersistedTab],
+    for sessionID: SessionID
+  ) {
+    guard let windowID = UUID(uuidString: window.id) else { return }
+    var panel =
+      loadLayout(for: sessionID)
+      ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
+    guard !isQuarantined(sessionID) else { return }
+
+    let others = panel.detachedWindowTabs.filter { $0.detachedWindowID != windowID }
+    panel.tabs = panel.panelTabs + panel.drawerTabs + others + tabs
+    panel.detachedWindows.removeAll { $0.id == window.id }
+    // A window with no tabs left is no window: keeping the record would restore an empty one.
+    if !tabs.isEmpty {
+      panel.detachedWindows.append(window)
+    }
+    write(panel, for: sessionID)
+  }
+
+  /// Forgets one detached window entirely — its record and its tabs — for a window the user
+  /// closed rather than emptied.
+  func removeDetachedWindow(_ windowID: UUID, for sessionID: SessionID) {
+    guard var panel = loadLayout(for: sessionID), !isQuarantined(sessionID) else { return }
+    panel.tabs.removeAll { $0.detachedWindowID == windowID }
+    panel.detachedWindows.removeAll { $0.id == windowID.uuidString }
     write(panel, for: sessionID)
   }
 

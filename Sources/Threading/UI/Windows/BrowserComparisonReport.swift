@@ -241,8 +241,11 @@ struct BrowserComparisonReport {
     private static func baselineConditions(
         of source: AgentToolCoordinator.BaselineSource
     ) -> BrowserBaselineConditions? {
-        guard case .stored(_, _, let revision) = source else { return nil }
-        return revision.conditions
+        switch source {
+        case .stored(_, _, let revision): return revision.conditions
+        case .previous(let entry): return entry.conditions
+        case .path, .tab: return nil
+        }
     }
 
     private static func percentage(_ fraction: Double) -> String {

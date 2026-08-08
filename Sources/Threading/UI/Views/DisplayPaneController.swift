@@ -15,11 +15,7 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Properties
 
-  private lazy var headerView: NSView = {
-    let header = NSView()
-    header.translatesAutoresizingMaskIntoConstraints = false
-    return header
-  }()
+  private lazy var headerView = PaneHeaderView(margin: .paneEdge)
 
   /// Opens a new tab. It sits at the trailing edge of the tab row rather than inside the
   /// scrolling strip, so a pane full of tabs scrolls sideways *under* it instead of carrying
@@ -34,6 +30,28 @@ final class DisplayPaneController: NSViewController {
     button.translatesAutoresizingMaskIntoConstraints = false
     button.isBordered = false
     button.toolTip = L10n.string("New tab")
+    return button
+  }()
+
+  /// Shuts the panel from its own corner — the same collapse the toolbar's toggle and
+  /// **View ▸ Display Panel** perform, offered where the eye already is when the panel is the
+  /// thing in the way.
+  ///
+  /// It only ever *hides*: a control that is gone with its pane cannot bring the pane back, so
+  /// reopening stays the toolbar's and the command's job. The tabs are untouched — they are
+  /// waiting when the panel is next opened, as a dormant session's scrollback is. It sits
+  /// outermost with `+` beside it, in the slot a close occupies in every corner of this app,
+  /// and it is the *pane's*: a tab chip's own ✕ closes that tab and is drawn on the chip.
+  private lazy var closeButton: ThemedButton = {
+    let button = ThemedButton(
+      symbol: "xmark",
+      accessibility: L10n.string("Hide panel"),
+      target: self,
+      action: #selector(closeButtonClicked(_:))
+    )
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.isBordered = false
+    button.toolTip = L10n.string("Hide the Display Panel")
     return button
   }()
   private lazy var headerCustomizationView = DisplayPaneHeaderCustomizationView(
@@ -178,7 +196,9 @@ final class DisplayPaneController: NSViewController {
     return activeTab(for: currentSessionID)?.browser
   }
 
-  /// Called when the user closes the pane's last content tab.
+  /// Called when the panel should shut: the corner's ✕, or the user closing the pane's last
+  /// content tab. One way out for both, because collapsing the split item is the window's to do
+  /// and neither caller wants anything else done differently.
   var onClose: (() -> Void)?
 
   /// The window's way in for the `+` menu's Current Theme entry: it uncollapses this pane and
@@ -269,7 +289,7 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Setup
 
-  /// The pane's one top row: its tabs, and the control that adds another.
+  /// The pane's one top row: its tabs, the control that adds another, and the pane's own close.
   ///
   /// There was a titled header above the strip, which spent a row of a narrow pane restating
   /// the name of the tab directly beneath it — and the toolbar already names the page. The
@@ -278,19 +298,16 @@ final class DisplayPaneController: NSViewController {
   private func setupHeader() {
     headerView.addSubview(headerCustomizationView)
     headerView.addSubview(newTabButton)
-
-    // The rule under the header belongs to the header, not to the tab strip inside it: the
-    // strip ends where the customization slot and `+` begin, and a rule pinned there
-    // stopped short of the pane's edge.
-    let separator = SeparatorView()
-    headerView.addSubview(separator)
-    NSLayoutConstraint.activate([
-      separator.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
-      separator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
-      separator.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
-    ])
+    headerView.addSubview(closeButton)
 
     view.addSubview(headerView)
+  }
+
+  /// Asks the window to collapse the panel. Unset — the pane standing on its own in a fixture
+  /// or a detached host — there is no pane to collapse and the press is a no-op, which is the
+  /// same answer `onClose` already gives when the last tab is closed.
+  @objc private func closeButtonClicked(_ sender: NSView) {
+    onClose?()
   }
 
   @objc private func newTabButtonClicked(_ sender: NSView) {
@@ -483,45 +500,66 @@ final class DisplayPaneController: NSViewController {
       equalTo: view.safeAreaLayoutGuide.topAnchor
     )
     headerBottom.priority = .init(999)
+    let gap = DisplayPaneDefaults.controlGap
     let regularTabBarTrailing = tabBar.trailingAnchor.constraint(
       equalTo: headerCustomizationView.leadingAnchor,
-      constant: -4
+      constant: -gap
     )
     regularTabBarTrailingConstraint = regularTabBarTrailing
     globalTabBarTrailingConstraint = tabBar.trailingAnchor.constraint(
-      equalTo: headerView.trailingAnchor,
-      constant: -padding
+      equalTo: closeButton.leadingAnchor,
+      constant: -gap
     )
+
+    // **Where the strip ends is not a requirement.** The pane's floor is its two trailing
+    // controls and the margin around them (`DisplayPaneDefaults.slimmestWidth`), and at that
+    // width there is nothing left for the strip: required, this constraint would ask the strip
+    // for a negative width and AppKit would break *something* to grant it. Just below required
+    // it yields instead, and the strip — which scrolls, and already refuses to be read as a
+    // measurement of its host (see `ThemedTabStripView`) — closes to nothing while `+` and the
+    // close stay whole. Both trailing constraints yield, since either may be the active one.
+    [regularTabBarTrailing, globalTabBarTrailingConstraint].forEach {
+      $0?.priority = .init(999)
+    }
 
     NSLayoutConstraint.activate([
       headerView.topAnchor.constraint(equalTo: view.topAnchor),
       headerBottom,
       headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      headerView.heightAnchor.constraint(
-        greaterThanOrEqualToConstant: ThemedTabStripView.bandHeight
-      ),
 
-      // The strip takes the row and gives up only what `+` needs, so a pane full of tabs
-      // scrolls sideways rather than pushing the control that adds one off the edge.
+      // The strip takes the row and gives up only what the trailing controls need, so a pane
+      // full of tabs scrolls sideways rather than pushing the control that adds one, or the
+      // one that shuts the pane, off the edge. It never takes a negative width for them.
       tabBar.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
       tabBar.topAnchor.constraint(equalTo: headerView.topAnchor),
       tabBar.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
+      tabBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
       regularTabBarTrailing,
 
       headerCustomizationView.trailingAnchor.constraint(
         equalTo: newTabButton.leadingAnchor,
-        constant: -4
+        constant: -gap
       ),
-      headerCustomizationView.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+      headerCustomizationView.centerYAnchor.constraint(
+        equalTo: headerView.contentCenterYAnchor
+      ),
       headerCustomizationView.heightAnchor.constraint(
         lessThanOrEqualTo: headerView.heightAnchor
       ),
       newTabButton.trailingAnchor.constraint(
-        equalTo: headerView.trailingAnchor, constant: -padding),
-      newTabButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+        equalTo: closeButton.leadingAnchor, constant: -gap),
+      newTabButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
       newTabButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
       newTabButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
+
+      // The close in the corner, the margin its own — `+` measures from it, and the strip and
+      // the customization slot from `+`, so the row is one chain from the pane's edge inwards.
+      closeButton.trailingAnchor.constraint(
+        equalTo: headerView.trailingAnchor, constant: -padding),
+      closeButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
+      closeButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
+      closeButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
 
       // Content anchors under the one header row.
       imageView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: padding),
@@ -687,12 +725,14 @@ final class DisplayPaneController: NSViewController {
     var tabs = tabsBySession[sessionID] ?? []
 
     if let activeID = activeTabIDBySession[sessionID],
-      let active = tabs.first(where: { $0.id == activeID })?.browser
+      let activeTab = tabs.first(where: { $0.id == activeID }),
+      activeTab.holdsAgentDrivableBrowser,
+      let active = activeTab.browser
     {
       activeBrowserTabIDBySession[sessionID] = activeID
       return active
     }
-    if let existing = tabs.first(where: { $0.browser != nil }),
+    if let existing = tabs.first(where: \.holdsAgentDrivableBrowser),
       let browser = existing.browser
     {
       activeTabIDBySession[sessionID] = existing.id
@@ -724,10 +764,10 @@ final class DisplayPaneController: NSViewController {
   ) -> BrowserViewController? {
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
-    guard
-      tabs.lazy.filter({ $0.browser != nil }).count
-        < DisplayPaneDefaults.maximumBrowserTabs
-    else {
+    // Across every host, not this pane's own: see `sessionBrowserCount`.
+    let existing = sessionBrowserCount?(sessionID)
+      ?? tabs.lazy.filter { $0.browser != nil }.count
+    guard existing < DisplayPaneDefaults.maximumBrowserTabs else {
       return nil
     }
 
@@ -809,31 +849,17 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  /// Consulted when the panel holds no browser for the session — wired by the window to the
-  /// drawer host, so an agent's `browser_*` tools keep finding a browser the user moved.
-  var browserFallback: ((SessionID) -> BrowserViewController?)?
-
-  /// The most recently selected browser. A content tool may put a screenshot or document in
-  /// front of it, but that output must not change which independent browser receives the next
-  /// browser action.
+  /// The panel's own most recently selected browser. A content tool may put a screenshot or
+  /// document in front of it, but that output must not change which independent browser
+  /// receives the next browser action.
+  ///
+  /// Host-local on purpose: a browser the user moved to another pane is found by
+  /// `SessionBrowserResolver`, which asks every host. This answers only for the panel, so the
+  /// two cannot disagree about what "the panel holds" the way a fallback living here did.
   func browser(for sessionID: SessionID) -> BrowserViewController? {
-    restoreIfNeeded(sessionID)
-    let tabs = tabsBySession[sessionID] ?? []
-    if let activeID = activeTabIDBySession[sessionID],
-      let active = tabs.first(where: { $0.id == activeID })?.browser
-    {
-      activeBrowserTabIDBySession[sessionID] = activeID
-      return active
+    preferredBrowserTabID(for: sessionID).flatMap { id in
+      (tabsBySession[sessionID] ?? []).first { $0.id == id }?.browser
     }
-    if let browserID = activeBrowserTabIDBySession[sessionID],
-      let recent = tabs.first(where: { $0.id == browserID })?.browser
-    {
-      return recent
-    }
-    if let own = tabs.first(where: { $0.browser != nil })?.browser {
-      return own
-    }
-    return browserFallback?(sessionID)
   }
 
   // MARK: - Public — Review Tab
@@ -913,7 +939,7 @@ final class DisplayPaneController: NSViewController {
   /// Builds an info view controller for the session's project folder. Returns nil for a session
   /// with no project — there is no directory to describe.
   private func makeInfo(for sessionID: SessionID) -> SessionInfoViewController? {
-    guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+    guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
     let controller = SessionInfoViewController(sessionID: sessionID, folderPath: project.folderPath)
     addChild(controller)
@@ -1060,7 +1086,7 @@ final class DisplayPaneController: NSViewController {
   /// mode. Returns nil for a session with no project — nothing to diff.
   private func makeReview(for sessionID: SessionID, mode: GitReviewMode) -> GitReviewViewController?
   {
-    guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+    guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
     let controller = GitReviewViewController(
       sessionID: sessionID,
@@ -1104,7 +1130,7 @@ final class DisplayPaneController: NSViewController {
   /// cannot see the terminal container that owns the PTY to ask it over OSC 7, and the folder
   /// is the same fallback the shell drawer already documents.
   private func makeTerminal(for sessionID: SessionID) -> ShellDrawerViewController? {
-    guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+    guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
     let folder = project.folderPath
     let controller = ShellDrawerViewController(
@@ -1151,7 +1177,7 @@ final class DisplayPaneController: NSViewController {
   /// Builds a file tree rooted at the session's project folder. Nil for a session with no
   /// project — there is no directory to show.
   private func makeFiles(for sessionID: SessionID) -> FileTreeViewController? {
-    guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+    guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
     let controller = FileTreeViewController(folderPath: project.folderPath)
     addChild(controller)
@@ -1205,6 +1231,19 @@ final class DisplayPaneController: NSViewController {
     guard ProjectStore.shared.project(forSessionID: sessionID) != nil else { return nil }
     let controller = SessionAttachmentsViewController(sessionID: sessionID)
     addChild(controller)
+
+    // Two of the list's own files, held against each other. It goes through the same door an
+    // agent's `display_compare_files` does — the tab that already holds this pair is reused and
+    // re-read — so asking twice from the list does not grow a second tab saying the same thing.
+    controller.onCompare = { [weak self] old, new in
+      self?.addCompareTab(
+        for: sessionID,
+        oldPath: old.url.path,
+        newPath: new.url.path,
+        oldTitle: old.name,
+        newTitle: new.name
+      )
+    }
     return controller
   }
 
@@ -1457,9 +1496,22 @@ final class DisplayPaneController: NSViewController {
 
   /// Whether a window point lands where a dropped tab would join this pane — the header
   /// band, full width, since an emptier strip is narrower than the drop it invites.
-  func dropBandContains(windowPoint: NSPoint) -> Bool {
-    guard isViewLoaded, view.window != nil, !isShowingCurrentTheme else { return false }
-    return headerView.bounds.contains(headerView.convert(windowPoint, from: nil))
+  /// Not gated on the window being *visible*: screen coordinates already answer that. A
+  /// hidden or off-screen window's band simply does not contain the pointer's screen point,
+  /// and requiring visibility as well would refuse a drop on a fixture window that is built
+  /// but never shown — which is how every test here is required to build one.
+  var isDropBandVisible: Bool {
+    isViewLoaded && view.window != nil && !isShowingCurrentTheme
+  }
+
+  func dropBandContains(screenPoint: NSPoint) -> Bool {
+    guard isDropBandVisible, let point = windowPoint(from: screenPoint) else { return false }
+    return headerView.bounds.contains(headerView.convert(point, from: nil))
+  }
+
+  /// A screen point in this pane's own window, or nil when it has none to convert into.
+  private func windowPoint(from screenPoint: NSPoint) -> NSPoint? {
+    view.window.map { $0.convertPoint(fromScreen: screenPoint) }
   }
 
   /// The wash on this pane's strip while another pane's chip would land here.
@@ -1468,16 +1520,30 @@ final class DisplayPaneController: NSViewController {
     tabBar.isDropTarget = highlighted
   }
 
-  /// The slot a drop at this window point takes, by the strip's own midpoint rule.
-  func dropInsertionIndex(windowPoint: NSPoint) -> Int {
-    guard isViewLoaded else { return 0 }
-    return tabBar.insertionIndex(forWindowPoint: windowPoint)
+  func dropInsertionIndex(screenPoint: NSPoint) -> Int {
+    guard isViewLoaded, let point = windowPoint(from: screenPoint) else { return 0 }
+    return tabBar.insertionIndex(forWindowPoint: point)
   }
 
   /// What else can be done with a tab, offered by the strip on secondary click and through
   /// accessibility — the pointerless route to reordering and to movement.
-  private func tabContextEntries(for id: UUID) -> [ThemedMenuEntry] {
+  func tabContextEntries(for id: UUID) -> [ThemedMenuEntry] {
     guard id != Self.currentThemeTabID else { return [] }
+    // A proxy's menu is about the window it points at, not about a tab this pane holds — so it
+    // replaces the standard entries rather than joining them. "Close Other Tabs" beside a chip
+    // that is not one of the tabs would be answering a different question.
+    if let proxy = detachedWindowProxy(id) {
+      return [
+        .item(ThemedMenuItem(
+          title: L10n.string("Focus Window"),
+          onChoose: proxy.onFocus
+        )),
+        .item(ThemedMenuItem(
+          title: L10n.string("Bring Back to Panel"),
+          onChoose: proxy.onBringBack
+        ))
+      ]
+    }
     guard let sessionID = currentSessionID else { return [] }
     var entries = standardTabEntries(for: id, sessionID: sessionID)
     guard !entries.isEmpty else { return [] }
@@ -1570,6 +1636,10 @@ final class DisplayPaneController: NSViewController {
 
   private func userActivatedTab(_ id: UUID) {
     guard id != Self.currentThemeTabID else { return }
+    if let proxy = detachedWindowProxy(id) {
+      proxy.onFocus()
+      return
+    }
     guard let currentSessionID else { return }
     activateTab(id: id, for: currentSessionID)
   }
@@ -1580,8 +1650,49 @@ final class DisplayPaneController: NSViewController {
       onClose?()
       return
     }
+    // A proxy draws no ✕, so this cannot arrive for one — and if it ever did, standing for a
+    // window is not holding it, and closing it here would end pages this chip only points at.
+    guard detachedWindowProxy(id) == nil else { return }
     guard let sessionID = currentSessionID else { return }
     closeTab(id: id, for: sessionID)
+  }
+
+  // MARK: - Detached Window Proxies
+
+  /// A chip standing in for a page that is now in a window of its own.
+  ///
+  /// Supplied by the window, because which windows exist is the window's knowledge. Deliberately
+  /// **not** a `PaneTab`: the panel does not hold this page, and `panel_list_tabs` must keep
+  /// saying so — a tab moved out disappears from the agent's list exactly as a closed one does.
+  /// This is the answer to "where did it go", which is a question the *user* asks.
+  struct DetachedWindowProxy {
+    let windowID: UUID
+    let title: String
+    let onFocus: () -> Void
+    let onBringBack: () -> Void
+  }
+
+  /// How many browsers the session has across every host — supplied by the window, which is the
+  /// only thing that sees them all. Nil falls back to this pane's own count.
+  var sessionBrowserCount: ((SessionID) -> Int)?
+
+  var detachedWindowProxies: ((SessionID) -> [DetachedWindowProxy])? {
+    didSet { render() }
+  }
+
+  /// Redraws the strip because the set of detached windows changed. Deliberately *not*
+  /// `showSessionTabs`, which also puts the app-theme document away.
+  func refreshDetachedWindowProxies() {
+    render()
+  }
+
+  private func proxies(for sessionID: SessionID?) -> [DetachedWindowProxy] {
+    guard !isShowingCurrentTheme, let sessionID else { return [] }
+    return detachedWindowProxies?(sessionID) ?? []
+  }
+
+  private func detachedWindowProxy(_ id: UUID) -> DetachedWindowProxy? {
+    proxies(for: currentSessionID).first { $0.windowID == id }
   }
 
   /// Detaches a live tab's view controller. Content tabs need nothing.
@@ -1647,6 +1758,10 @@ final class DisplayPaneController: NSViewController {
 
   /// The global document owns the whole row. Session-only extension decoration and `+` both
   /// disappear, and the strip takes their space rather than leaving a blank reservation behind.
+  ///
+  /// The close is not theirs to take. The two that go are the ones that act on *this chat's*
+  /// tabs, which the global document is not one of; the close acts on the pane, and the pane is
+  /// on screen either way.
   private func updateHeaderForCurrentTheme() {
     if isShowingCurrentTheme {
       regularTabBarTrailingConstraint?.isActive = false
@@ -1686,16 +1801,30 @@ final class DisplayPaneController: NSViewController {
     let target = ExtensionComponentTarget.displayTabHeader(
       sessionID: currentSessionID?.uuidString.lowercased()
     )
-    tabBar.update(
-      items: tabs.map {
-        DisplayTabBarItem(
-          id: $0.id,
-          title: $0.title,
-          symbolName: $0.symbolName,
-          isActive: $0.id == active?.id,
-          customizationTarget: target
-        )
-      })
+    // Proxies last, after the pane's own tabs: they are not tabs of this pane, and putting one
+    // among them would read as the page still being here.
+    let ownItems = tabs.map {
+      DisplayTabBarItem(
+        id: $0.id,
+        title: $0.title,
+        symbolName: $0.symbolName,
+        isActive: $0.id == active?.id,
+        customizationTarget: target
+      )
+    }
+    let proxyItems = proxies(for: currentSessionID).map {
+      DisplayTabBarItem(
+        id: $0.windowID,
+        title: $0.title,
+        // The window glyph, not the globe: this chip is about *where* the page is, and a second
+        // globe beside the pane's own browser tabs would say there are two pages here.
+        symbolName: "macwindow",
+        isActive: false,
+        customizationTarget: target,
+        showsClose: false
+      )
+    }
+    tabBar.update(items: ownItems + proxyItems)
   }
 
   private func renderContent(active: DisplayTab?) {
@@ -2103,7 +2232,7 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID
   ) {
     guard !images.isEmpty,
-      let project = ProjectStore.shared.project(forSessionID: sessionID)
+      let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
     else { return }
 
     var wasShowingOne = false
@@ -2395,6 +2524,14 @@ extension DisplayPaneController: TabHosting {
   func adopt(_ tab: PaneTab, at index: Int?, for sessionID: SessionID?) {
     guard let session = resolvedSession(sessionID) else { return }
     restoreIfNeeded(session)
+    // See `DetachedBrowserHostViewController.adoptPageHook`: a browser's page hook captures the
+    // host that built it, so an adopted one has to be re-pointed here or navigations are
+    // reported to — and persisted by — whichever pane it came from.
+    tab.browser?.onPageChange = { [weak self] in
+      guard let self else { return }
+      persist(session)
+      if session == currentSessionID { render() }
+    }
     var state = TabListState(
       tabs: tabsBySession[session] ?? [],
       activeTabID: activeTabIDBySession[session]
@@ -2410,3 +2547,38 @@ extension DisplayPaneController: TabHosting {
     if session == currentSessionID { render() }
   }
 }
+
+// MARK: - Session Browser Hosting
+
+extension DisplayPaneController: SessionBrowserHosting {
+
+  /// Ungated by `isShowingCurrentTheme`, unlike the strip's `tabs(for:)`: the panel showing the
+  /// app-theme document draws no session tabs and still holds the browser the agent is driving.
+  /// Answering "none" here would have handed that browser to the next host in line.
+  func browserTabs(for sessionID: SessionID) -> [PaneTab] {
+    restoreIfNeeded(sessionID)
+    return (tabsBySession[sessionID] ?? []).filter { $0.browser != nil }
+  }
+
+  func preferredBrowserTabID(for sessionID: SessionID) -> UUID? {
+    restoreIfNeeded(sessionID)
+    let tabs = tabsBySession[sessionID] ?? []
+
+    if let activeID = activeTabIDBySession[sessionID],
+      tabs.first(where: { $0.id == activeID })?.holdsAgentDrivableBrowser == true
+    {
+      activeBrowserTabIDBySession[sessionID] = activeID
+      return activeID
+    }
+    if let browserID = activeBrowserTabIDBySession[sessionID],
+      tabs.first(where: { $0.id == browserID })?.holdsAgentDrivableBrowser == true
+    {
+      return browserID
+    }
+    return tabs.first(where: \.holdsAgentDrivableBrowser)?.id
+  }
+}
+
+// MARK: - Drop Band Hosting
+
+extension DisplayPaneController: TabDropBandHosting {}

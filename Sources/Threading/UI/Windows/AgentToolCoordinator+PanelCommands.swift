@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 @MainActor
 extension AgentToolCoordinator {
@@ -35,6 +36,8 @@ extension AgentToolCoordinator {
                 kind = "attachments"
             } else if tab.subagents != nil {
                 kind = "subagents"
+            } else if tab.extensionPanel != nil {
+                kind = "extension panel"
             } else if tab.compare != nil {
                 kind = "compare"
             } else if case .image? = tab.content?.body {
@@ -84,8 +87,35 @@ extension AgentToolCoordinator {
         }
 
         revealDisplayPane(for: sessionID)
-        let title = displayPaneController.tabs(for: sessionID)
-            .first { $0.id == displayPaneController.activeTabID(for: sessionID) }?.title ?? "the tab"
+        let tab = displayPaneController.tabs(for: sessionID)
+            .first { $0.id == displayPaneController.activeTabID(for: sessionID) }
+        let title = tab?.title ?? "the tab"
+        if let panel = tab?.extensionPanel {
+            guard let reference = dependencies.notificationTargets.issue(
+                .extensionPanel(
+                    extensionIdentifier: panel.extensionIdentifier,
+                    panelID: panel.panelID
+                ),
+                for: sessionID
+            ) else { return .success("Activated \"\(title)\".") }
+            return .targeted(
+                "Activated \"\(title)\".",
+                reference: reference,
+                kind: "extensionPanel"
+            )
+        }
+        if let browser = tab?.browser,
+           let location = browserResolver.location(of: browser, for: sessionID) {
+            guard let reference = dependencies.notificationTargets.issue(
+                .browserTab(id: location.tabID.uuidString.lowercased()),
+                for: sessionID
+            ) else { return .success("Activated \"\(title)\".") }
+            return .targeted(
+                "Activated \"\(title)\".",
+                reference: reference,
+                kind: "browserTab"
+            )
+        }
         return .success("Activated \"\(title)\".")
     }
 
@@ -97,6 +127,35 @@ extension AgentToolCoordinator {
         if isVisible {
             displayPaneController.showSession(sessionID)
             setPaneVisible(true)
+        }
+        return isVisible
+    }
+
+    /// The same courtesy for a tool that drove *the browser* rather than filled the panel:
+    /// opens whichever pane holds it, resolving that itself.
+    ///
+    /// Most browser tools know only that they acted on the session's browser, so this is the
+    /// form nearly all of them want. A session with no browser at all falls back to the panel,
+    /// which is where one would be built.
+    @discardableResult
+    func revealBrowserPane(for sessionID: SessionID) -> Bool {
+        guard let location = browserResolver.location(for: sessionID) else {
+            return revealDisplayPane(for: sessionID)
+        }
+        return revealBrowserPane(for: sessionID, hostID: location.hostID)
+    }
+
+    /// The form for a caller that has just resolved a location and should not pay to resolve it
+    /// twice. Showing the panel after driving a browser the user keeps in the drawer would open
+    /// an unrelated pane and leave the page that moved off screen.
+    @discardableResult
+    func revealBrowserPane(for sessionID: SessionID, hostID: TabHostID) -> Bool {
+        let isVisible = sessionID == visibleSessionID()
+        if isVisible {
+            if hostID == .displayPanel {
+                displayPaneController.showSession(sessionID)
+            }
+            revealBrowserHost(hostID)
         }
         return isVisible
     }

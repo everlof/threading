@@ -354,6 +354,129 @@ final class DisplayPaneLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - The Panel's Own Close
+
+    /// Pressing the ✕ in the panel's corner shuts the panel — the same collapse the toolbar's
+    /// toggle and **View ▸ Display Panel** perform, through the one route the window already
+    /// exposes for the last tab closing.
+    func testTheCornerCloseCollapsesThePanel() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+
+        controller.setDisplayPaneVisible(true)
+        window.layoutIfNeeded()
+        settle()
+
+        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        XCTAssertFalse(item.isCollapsed, "the panel never opened, so nothing was closed")
+
+        let close = try XCTUnwrap(
+            descendant(in: item.viewController.view, accessibilityLabel: L10n.string("Hide panel")),
+            "the panel's header has no close in its corner"
+        )
+        XCTAssertTrue(close.accessibilityPerformPress())
+        settle()
+
+        XCTAssertTrue(item.isCollapsed, "the corner close did not shut the panel")
+    }
+
+    /// The tabs are not thrown away with the pane. The close hides the panel; reopening it finds
+    /// the same surfaces waiting, exactly as a dormant session's scrollback is.
+    func testTheCornerCloseKeepsTheTabsItHides() throws {
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.addContentTab(
+            DisplayContent(
+                body: .html("<p>Kept while hidden</p>"),
+                title: "Fixture",
+                subtitle: "Fixture document"
+            ),
+            for: sessionID
+        )
+        pane.view.layoutSubtreeIfNeeded()
+
+        var hidden = 0
+        pane.onClose = { hidden += 1 }
+
+        let close = try XCTUnwrap(
+            descendant(in: pane.view, accessibilityLabel: L10n.string("Hide panel"))
+        )
+        XCTAssertTrue(close.accessibilityPerformPress())
+
+        XCTAssertEqual(hidden, 1, "the corner close did not ask the window to shut the panel")
+        XCTAssertTrue(pane.hasContent(for: sessionID), "hiding the panel discarded its tabs")
+    }
+
+    /// The global theme document takes the row from the controls that act on *this chat's* tabs.
+    /// The close is not one of them: it acts on the pane, and the pane is on screen either way.
+    func testTheCloseStaysWhileTheGlobalDocumentTakesTheRow() throws {
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.showCurrentTheme()
+        pane.view.layoutSubtreeIfNeeded()
+
+        let newTab = try XCTUnwrap(
+            descendant(in: pane.view, accessibilityLabel: L10n.string("New tab"))
+        )
+        let close = try XCTUnwrap(
+            descendant(in: pane.view, accessibilityLabel: L10n.string("Hide panel"))
+        )
+
+        XCTAssertTrue(newTab.isHidden, "the chat-scoped + remained beside Current Theme")
+        XCTAssertFalse(close.isHidden, "the way out of the panel went with the chat's controls")
+
+        pane.showSessionTabs(sessionID)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(newTab.isHidden)
+        XCTAssertFalse(close.isHidden)
+    }
+
+    /// The floor is the row's two trailing controls and the margin around them, so at
+    /// `slimmestWidth` both are still whole and inside the pane.
+    ///
+    /// The tab strip is what yields: its trailing constraint sits just below required precisely
+    /// so this width closes it to nothing instead of asking it for a negative one and having
+    /// AppKit break a constraint to grant it.
+    func testBothTrailingControlsFitThePanesFloor() throws {
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(
+            x: 0, y: 0,
+            width: DisplayPaneDefaults.slimmestWidth,
+            height: 400
+        )
+        pane.showSession(SessionID())
+        pane.view.layoutSubtreeIfNeeded()
+
+        let newTab = try XCTUnwrap(
+            descendant(in: pane.view, accessibilityLabel: L10n.string("New tab"))
+        )
+        let close = try XCTUnwrap(
+            descendant(in: pane.view, accessibilityLabel: L10n.string("Hide panel"))
+        )
+
+        for control in [newTab, close] {
+            let frame = control.convert(control.bounds, to: pane.view)
+            XCTAssertEqual(
+                frame.width, DisplayPaneDefaults.buttonSize, accuracy: 0.5,
+                "a trailing control was squeezed out of shape at the pane's floor"
+            )
+            XCTAssertGreaterThanOrEqual(
+                frame.minX, 0,
+                "a trailing control hung over the pane's leading edge at its floor"
+            )
+            XCTAssertLessThanOrEqual(frame.maxX, pane.view.bounds.width)
+        }
+        XCTAssertFalse(
+            pane.view.hasAmbiguousLayout,
+            "the header row has no single answer at the pane's floor"
+        )
+    }
+
     // MARK: - The Current Theme Is Global
 
     /// The inspector occupies the panel beside a chat, but belongs to neither that chat nor the
@@ -712,9 +835,9 @@ final class DisplayPaneLayoutTests: XCTestCase {
         XCTAssertEqual(try preview(in: attachments.view).fileURL?.lastPathComponent, "chart.png")
     }
 
-    /// A regenerated chart is the same row, not a second one — the store dedupes by source path,
-    /// and the pane has to land on that row again rather than on whatever it was showing.
-    func testShowingTheSameImageTwiceKeepsOneRowAndReselectsIt() throws {
+    /// Display is an immutable capture: a regenerated chart keeps both versions, and the pane
+    /// lands on the newest captured bytes rather than whichever source path now contains.
+    func testShowingTheSameImageTwiceKeepsBothCapturesAndSelectsTheNewest() throws {
         let fixture = try projectSession()
         defer { fixture.tearDown() }
         let first = try writePNG(in: fixture.folder, named: "one.png", color: .systemRed)
@@ -734,11 +857,22 @@ final class DisplayPaneLayoutTests: XCTestCase {
         XCTAssertEqual(tabs.count, 1, "three images grew more than the one list")
         let attachments = try XCTUnwrap(tabs.first?.attachments)
         let table = try attachmentsTable(in: attachments.view)
-        XCTAssertEqual(table.numberOfRows, 2, "the same file was filed twice")
+        XCTAssertEqual(table.numberOfRows, 3, "an immutable display capture was deduplicated")
+        XCTAssertEqual(table.selectedRow, 0, "the newest capture was not selected")
         XCTAssertEqual(
             try preview(in: attachments.view).fileURL?.lastPathComponent,
             "one.png",
             "the image shown again is not the one being previewed"
+        )
+
+        let recorded = SessionAttachmentStore.shared.attachments(for: fixture.sessionID)
+        XCTAssertEqual(Set(recorded.map(\.id)).count, 3)
+        let firstCaptures = recorded.filter { $0.sourcePath == first.path }
+        XCTAssertEqual(firstCaptures.count, 2)
+        XCTAssertEqual(
+            Set(firstCaptures.map { $0.url.standardizedFileURL.path }).count,
+            2,
+            "two display moments still point at one mutable set of bytes"
         )
     }
 

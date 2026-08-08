@@ -99,6 +99,31 @@ Three deliberate choices in the launch line:
   Both clients consume those server instructions, so a separate system-prompt flag is not
   needed.
 
+### Agent-facing discovery text
+
+An MCP client may decide whether to load an individual tool schema from only the beginning of
+the server's `initialize.instructions`. OpenAI's [MCP guidance](https://learn.chatgpt.com/docs/extend/mcp)
+therefore requires the first 512 characters to be self-contained. `MCPToolCatalog.decisionPrefix`
+owns that leading slice, and `MCPInstructionDefaults.decisionPrefixCharacterLimit` names the
+budget. The all-groups regression test must fail if the prefix grows past it; do not truncate the
+text at runtime, because a sentence cut in half is not guidance.
+
+The prefix is a routing layer, not a miniature copy of the catalogue. It always tells an agent
+that Threading tools may load lazily and that it must discover a matching tool before claiming an
+in-app action is unavailable. It conditionally names only exceptional triggers whose miss is
+costly or hard to recover from: visual output, the user's explicit request to close this chat, and
+safe disk-full recovery. A disabled group contributes no promise. Reordering whole groups to put
+one workflow first merely trades that miss for another and is not a discovery fix.
+
+The 512-character budget applies to the server instructions, not separately to every tool
+description. Individual descriptions still begin with the action and the words a user is likely
+to say, because those openings are what semantic or deferred tool discovery has to match. Put the
+decisive trigger and outcome first ("close/archive this chat", "notify me", "No space left on
+device"); put mechanics, examples, return shape, and edge cases afterward. Group instructions hold
+cross-tool sequencing and constraints. State each rule once at the narrowest layer that can carry
+it, and promote it into the decision prefix only when an agent must know the route before its
+schema is loaded.
+
 Tool results are **plain text, with one exception**. A display tool has already drawn its image,
 so the result costs a sentence rather than an image's worth of tokens — and it sidesteps the
 undocumented question of what Claude Code does with an image returned from a tool.
@@ -221,17 +246,29 @@ strip closes to nothing instead of being asked for a negative width and having A
 required constraint to grant it. That is the same rule the strip already follows for
 `fittingSize` (below), stated in the one other place the pane could still charge for it.
 
-**A shown image is a row in the Attachments list, not a tab of its own.** Every `display_image`
+**Shown image and HTML output are attachments, not a second presentation model.** Every `display_image`
 used to open a tab that coexisted with the ones before it, so an afternoon of charts left a strip
 of identical `photo` glyphs whose titles truncated to nothing in a 300pt pane — and the same call
 had *already* recorded the file into `SessionAttachmentStore` before opening the tab. The panel was
 stating one fact twice: once as a strip that could not be read, and once as a list that could. The
 list is the chronology — newest first, dated, capped, persisted, pruned when a file goes; the
-pane's preview and `MediaInspectorView` are the closeup. `display_html`, `display_scene` and
-`display_compare_files` are unchanged, each being a document with nowhere else to live, and so is
-a **browser capture** (`browser_screenshot`, an isolated run's final frame): those are evidence of
-a page rather than a file this session exchanged, the store never recorded one, and their caption
-is the page's own title — which a list identifying rows by file name would drop.
+pane's preview and `MediaInspectorView` are the closeup. HTML is the same kind of durable evidence:
+`display_html` writes the supplied bytes into the session attachment store and the Attachments pane
+previews them in a non-persistent `WKWebView`. `display_scene` and `display_compare_files` remain
+live panel documents, and so does a **browser capture** (`browser_screenshot`, an isolated run's
+final frame): those are panel state rather than a file this session exchanged.
+
+This distinction is the notification boundary too. A generated image or HTML document is copied
+as an **immutable capture**, even when its source is already in the checkout. Reusing
+`progress.png` for ten steps produces ten attachment identities and ten preserved byte sequences;
+a notification for step three must never reopen step ten's overwritten chart. Hosted work is not
+turned into synthetic HTML: `browser_navigate` points at the live browser tab that loaded its URL.
+Extension panels remain semantic live panels. On iPhone, the process continues to run on the Mac
+while the existing `ExtensionPanel` tree is rendered with native SwiftUI controls and actions are
+relayed against the generation that produced it. A companion `remoteSurface` is deliberately not
+mirrored as pixels; its required semantic root is the portable fallback. There is no
+`Presentation`, `Inspection`, or generic web-payload object beside Attachments just to make these
+things addressable.
 
 Three consequences worth keeping:
 
@@ -242,7 +279,7 @@ Three consequences worth keeping:
   caller never saw. Being asked to show a picture is an instruction, so it also resets the
   All/Agent/You filter when that filter would hide the row; the filter is a convenience.
 - **A session with no project keeps the old tab.** `makeAttachments` needs a folder to belong to,
-  so there is no list to route to. `DisplayContent.Body.image` and the image branch of
+  so there is no list to route to. `DisplayContent.Body.image` / `.html` and their branches of
   `addContentTab` remain for exactly that fallback and for nothing else.
 - **A persisted image tab converts on restore.** Its source is recorded through the declared door
   and the tab is dropped with its cached PNG; a source that has since been deleted drops the tab
@@ -469,6 +506,14 @@ index an agent memorised can go stale the same way it already could when a tab c
 `id` is the stable name, and `panel_activate_tab` by id is the reliable spelling. The
 extension contract anticipated this: `tabOrder` has been `hostOwnedBehavior` since the
 catalogue first named it.
+
+Activation returns a notification `target_ref` only where the tab has a real identity beyond
+its current presentation: a Browser tab has its host-owned UUID, and an extension panel has its
+registered extension and panel ids. There is intentionally no generic "whatever is painted in
+this tab" route. If a transient scene or comparison is evidence that must survive until a later
+notification tap, the agent captures it as an image or HTML Attachment; if it is an ongoing tool,
+it belongs in a Browser or extension panel. That keeps notification routing from quietly turning
+the tab implementation into a second attachment system.
 
 **Tabs move between hosts, and the agent contract holds still.** `TabTransferCoordinator`
 (window-owned — only the window sees both hosts) reparents the same `PaneTab` between the
@@ -756,12 +801,13 @@ run, which is the vanishing-attachments bug wearing a new hat. Copying also *res
 property containment was really providing, more strongly than before: every file in the list now
 sits somewhere the app controls, the checkout or its own store.
 
-Two consequences worth keeping:
+Two consequences worth keeping for ordinary declared and scanned attachments:
 
 - **The dedupe key is the source path, not the row's own path.** A copy's path is minted per
   attachment, so matching on it would file every regenerated chart as a new row. A second
   declaration of the same source keeps the row's slot — and therefore its identity on the remote
-  wire — and overwrites the bytes underneath it.
+  wire — and overwrites the bytes underneath it. The immutable capture door used by
+  `display_image` and `display_html` deliberately bypasses this dedupe.
 - **Custody ends where the row does.** A row evicted by the cap, and every row of a session that
   `retainOnly` forgets, takes its copied bytes with it. A *referenced* file is never deleted:
   it belongs to the checkout, and losing a row is not a reason to touch the user's file.

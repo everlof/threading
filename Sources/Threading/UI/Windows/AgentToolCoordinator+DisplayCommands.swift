@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingExtensionKit
+import ThreadingRemoteKit
 
 @MainActor
 extension AgentToolCoordinator {
@@ -34,11 +35,10 @@ extension AgentToolCoordinator {
     // thing to point at — nil only when the session has no project to record against, or when
     // the store could not take custody of the bytes.
     var recorded: SessionAttachment?
-    if let project = dependencies.projects.project(forSessionID: sessionID) {
-      recorded = dependencies.attachments.record(
-        declared: url,
+    if dependencies.projects.executionProject(forSessionID: sessionID) != nil {
+      recorded = dependencies.attachments.recordSnapshot(
+        of: url,
         sessionID: sessionID,
-        projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true),
         origin: .agent
       )
     }
@@ -50,7 +50,11 @@ extension AgentToolCoordinator {
       let attachments = displayPaneController.activateAttachments(for: sessionID)
     {
       attachments.showAttachment(at: recorded.url)
-      return .success("Showing \(description) \(attachmentsLocation(for: sessionID)).")
+      return targetedSuccess(
+        "Showing \(description) \(attachmentsLocation(for: sessionID)).",
+        destination: .attachment(id: recorded.id),
+        for: sessionID
+      )
     }
 
     // The fallback, and the only remaining route to an image tab: a session with no project
@@ -163,6 +167,22 @@ extension AgentToolCoordinator {
         """)
     }
 
+    if dependencies.projects.executionProject(forSessionID: sessionID) != nil,
+      let recorded = dependencies.attachments.recordGeneratedHTML(
+        html,
+        title: arguments.title,
+        sessionID: sessionID
+      ),
+      let attachments = displayPaneController.activateAttachments(for: sessionID)
+    {
+      attachments.showAttachment(at: recorded.url)
+      return targetedSuccess(
+        "Showing the document \(attachmentsLocation(for: sessionID)).",
+        destination: .attachment(id: recorded.id),
+        for: sessionID
+      )
+    }
+
     return present(
       DisplayContent(
         body: .html(html),
@@ -221,7 +241,7 @@ extension AgentToolCoordinator {
     }
 
     if oldKind == .image,
-      let project = dependencies.projects.project(forSessionID: sessionID)
+      let project = dependencies.projects.executionProject(forSessionID: sessionID)
     {
       dependencies.attachments.record(
         declared: [oldURL, newURL],
@@ -294,6 +314,17 @@ extension AgentToolCoordinator {
       : "in this session's display panel, which opens when the user selects it"
   }
 
+  func targetedSuccess(
+    _ text: String,
+    destination: RemoteNotificationDestinationDTO,
+    for sessionID: SessionID
+  ) -> MCPToolResult {
+    guard let reference = dependencies.notificationTargets.issue(destination, for: sessionID) else {
+      return .success(text)
+    }
+    return .targeted(text, reference: reference, kind: destination.kind.rawValue)
+  }
+
   // MARK: Helpers
 
   /// Resolves a tool's path argument, which may be relative to the session's project.
@@ -303,7 +334,7 @@ extension AgentToolCoordinator {
     var candidates = [URL(fileURLWithPath: expanded)]
 
     if !expanded.hasPrefix("/"),
-      let project = dependencies.projects.project(forSessionID: sessionID)
+      let project = dependencies.projects.executionProject(forSessionID: sessionID)
     {
       candidates.insert(project.folderURL.appendingPathComponent(expanded), at: 0)
     }

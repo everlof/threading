@@ -1,7 +1,8 @@
 import AppKit
 import ImageIO
+import WebKit
 
-/// A session's visual deliverables: a compact list above an in-place image/PDF preview.
+/// A session's inspectable deliverables: a compact list above an in-place preview.
 ///
 /// The controller holds no file bytes. The referenced project file stays authoritative, so a
 /// second mention after an overwrite refreshes the preview in place.
@@ -11,6 +12,25 @@ final class SessionAttachmentsViewController: NSViewController {
 
     let sessionID: SessionID
     private let appEvents = AppEventObservations()
+
+    /// Opens two of this session's files against each other, in the panel's own Compare tab.
+    ///
+    /// A closure rather than a reach into the display pane: this pane is a child of that
+    /// controller and could walk up to it, but the comparison is the *panel's* to place — it
+    /// decides which tab holds the pair and whether one already does — and a list that knew that
+    /// would be a list that has to be given a whole panel to be tested.
+    var onCompare: ((_ old: SessionAttachment, _ new: SessionAttachment) -> Void)?
+
+    /// Where a file dropped on this list belongs, which decides whether it is referenced or
+    /// copied into custody.
+    ///
+    /// Read through a closure rather than straight out of `ProjectStore` for the reason
+    /// `PreferenceStore` exists: this bundle's tests are hosted in the app, so a fixture that
+    /// registered a project to exercise a drop would leave a row in the developer's own sidebar.
+    /// The default is the real answer, and the pane only ever exists for a session that has one.
+    lazy var projectRootProvider: () -> URL? = { [sessionID] in
+        ProjectStore.shared.workingDirectory(forSessionID: sessionID).map(URL.init(fileURLWithPath:))
+    }
 
     /// Everything recorded for the session, and the subset the filter is showing. Both are kept:
     /// the filter decides whether it belongs on screen at all by looking at the whole list, so a
@@ -122,10 +142,15 @@ final class SessionAttachmentsViewController: NSViewController {
             guard let self else { return nil }
             let row = self.tableView.selectedRow
             guard self.attachments.indices.contains(row) else { return nil }
-            let items = self.attachments.map {
+            let selectedID = self.attachments[row].id
+            let inspectable = self.attachments.filter { $0.kind != .html }
+            guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
+                return nil
+            }
+            let items = inspectable.map {
                 MediaInspectorItem(url: $0.url, title: $0.name)
             }
-            return MediaInspectorSelection(items: items, selectedIndex: row)
+            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
         }
         image.translatesAutoresizingMaskIntoConstraints = false
         return image
@@ -134,6 +159,14 @@ final class SessionAttachmentsViewController: NSViewController {
         let pdf = MediaInspectorDocumentView()
         pdf.translatesAutoresizingMaskIntoConstraints = false
         return pdf
+    }()
+    private lazy var htmlView: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isHidden = true
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        return webView
     }()
     private lazy var previewMessage: NSTextField = {
         let label = NSTextField(wrappingLabelWithString: "")
@@ -180,9 +213,17 @@ final class SessionAttachmentsViewController: NSViewController {
         action: #selector(showChatActions)
     )
     private var chatMenuSession: AnyObject?
+    private var contextMenuSession: AnyObject?
+
+    /// Which row is currently saying it would take the drop, or `-1` for none.
+    ///
+    /// Held rather than read back off the rows because the *transitions* are what the affordance
+    /// costs: a drag reports its position continuously, and asking every visible row to hide four
+    /// labels sixty times a second is a list relaying itself while the pointer moves.
+    private var dropTargetRow = -1
     private lazy var emptyLabel: NSTextField = {
         let label = NSTextField(wrappingLabelWithString:
-            L10n.string("Images and PDFs mentioned by this session will appear here.")
+            L10n.string("Images, documents, and HTML from this session will appear here.")
         )
         label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
@@ -238,6 +279,15 @@ final class SessionAttachmentsViewController: NSViewController {
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             self?.refresh()
         }
+        // Whether anything can be handed an attachment is a fact about the *agent*, not about
+        // the list, and it changes without the list changing: a dormant session has no door
+        // until it launches, and loses it again when it exits. Only the one control is touched
+        // — activity churns several times a turn, and re-reading the store for each would be a
+        // pane rebuilding itself while the agent thinks.
+        appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.updateChatAvailability()
+        }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyPreviewTheme()
         }
@@ -277,11 +327,34 @@ final class SessionAttachmentsViewController: NSViewController {
         view.addSubview(headerRow)
         view.addSubview(scrollView)
         view.addSubview(emptyLabel)
+
+        tableView.onContextMenu = { [weak self] row, anchor in
+            self?.presentContextMenu(forRow: row, anchor: anchor) ?? false
+        }
+        // A drag that leaves without landing has to lower the affordance it raised; the delegate
+        // is told about neither exit. See `ThemedTableView.onDraggingExited`.
+        tableView.onDraggingExited = { [weak self] in self?.markDropTarget(row: -1) }
+
+        // Out of the list: a row carries its own file, which is what lets it be dropped on Finder,
+        // on a composer, or on another row of this same list. In: a picture from anywhere, which
+        // is the other half of the same gesture — see `tableView(_:validateDrop:…)`.
+        tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        // Both, in the app: this list answers a row-onto-row drag with `.generic` — nothing is
+        // being copied, a question is being asked about two pictures — while a composer answers
+        // the same drag with `.copy`, and a destination may only return an operation the source
+        // allowed. Naming one of them here is how the promise in the comment above becomes a
+        // gesture that quietly does nothing at the other end.
+        tableView.setDraggingSourceOperationMask([.copy, .generic], forLocal: true)
+        tableView.registerForDraggedTypes([.fileURL, .png, .tiff])
+        // The rows draw the drop themselves — a row says *what* dropping there would do, which a
+        // blue ring around it cannot. See `SessionAttachmentRowView.isDropTarget`.
+        tableView.draggingDestinationFeedbackStyle = .none
     }
 
     private func setupPreview() {
         previewHost.addSubview(imageView)
         previewHost.addSubview(pdfView)
+        previewHost.addSubview(htmlView)
         previewHost.addSubview(previewMessage)
         view.addSubview(previewHost)
 
@@ -338,6 +411,11 @@ final class SessionAttachmentsViewController: NSViewController {
             pdfView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
             pdfView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
 
+            htmlView.topAnchor.constraint(equalTo: previewHost.topAnchor),
+            htmlView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
+            htmlView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
+            htmlView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
+
             previewMessage.centerXAnchor.constraint(equalTo: previewHost.centerXAnchor),
             previewMessage.centerYAnchor.constraint(equalTo: previewHost.centerYAnchor),
             previewMessage.leadingAnchor.constraint(
@@ -359,9 +437,14 @@ final class SessionAttachmentsViewController: NSViewController {
             pathLabel.leadingAnchor.constraint(equalTo: fileLabel.leadingAnchor),
             pathLabel.trailingAnchor.constraint(equalTo: fileLabel.trailingAnchor),
 
+            // Wider than the two points holding the path under the name: those two lines are one
+            // block naming the file, and the row beneath them is a different kind of thing — a set
+            // of things to *do* to it. At the row spacing they all shared, the block read as four
+            // stacked items rather than a caption with actions under it, and a 26pt bordered row
+            // sat as close to the path as the path sits to the name it belongs with.
             openButton.topAnchor.constraint(
                 equalTo: pathLabel.bottomAnchor,
-                constant: Design.Spacing.small
+                constant: Design.Spacing.medium
             ),
             openButton.leadingAnchor.constraint(equalTo: fileLabel.leadingAnchor),
             revealButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
@@ -395,15 +478,19 @@ final class SessionAttachmentsViewController: NSViewController {
         //
         // Stated twice because the floor moves: with the scope band installed the actions stop
         // above it, and one set is active at a time.
+        //
+        // The pane's own inset, the one the block already keeps on its left and right: at half of
+        // it the buttons hugged the bottom edge, which is the other half of why this footer read
+        // as crowded. It is the clearance `ConversationViewController` leaves at the same edge.
         actionsToPaneBottom = Self.floorConstraints(
             for: openButton,
             above: view.safeAreaLayoutGuide.bottomAnchor,
-            inset: Design.Spacing.small
+            inset: inset
         )
         actionsToScopeBand = Self.floorConstraints(
             for: openButton,
             above: scopeBand.topAnchor,
-            inset: Design.Spacing.small
+            inset: inset
         )
         NSLayoutConstraint.activate(actionsToPaneBottom)
 
@@ -566,6 +653,9 @@ final class SessionAttachmentsViewController: NSViewController {
             Int64(attachments.count)
         )
         tableView.reloadData()
+        // The rows the mark was held on are gone, so the mark is too — stated rather than assumed,
+        // or the next drag over the same index would find nothing to change and stay silent.
+        dropTargetRow = -1
         updateListHeight()
         emptyLabel.stringValue = emptyStateMessage()
         updateFilterControl()
@@ -580,8 +670,7 @@ final class SessionAttachmentsViewController: NSViewController {
         openButton.isHidden = !hasAttachments
         revealButton.isHidden = !hasAttachments
         copyButton.isHidden = !hasAttachments
-        chatButton.isHidden = !hasAttachments
-            || AgentRuntime.shared.conversation(for: sessionID) == nil
+        updateChatAvailability()
         emptyLabel.isHidden = hasAttachments
 
         guard hasAttachments else {
@@ -603,6 +692,17 @@ final class SessionAttachmentsViewController: NSViewController {
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
         showSelected()
+    }
+
+    /// Draws **Chat…** only when there is something on the other side of it.
+    ///
+    /// Not "is this session rendered natively" but "is anything listening": a terminal session
+    /// is handed the same attachment by paste, which is the case this pane was silently missing
+    /// for every OpenCode session and every session with native Chat turned off — the button was
+    /// there, and pressing it did nothing at all.
+    private func updateChatAvailability() {
+        chatButton.isHidden = attachments.isEmpty
+            || !SessionContextHandoff.canReceiveContext(for: sessionID)
     }
 
     /// Whether a row names `path`, which has already been standardized and resolved.
@@ -747,6 +847,7 @@ final class SessionAttachmentsViewController: NSViewController {
             }
             pdfView.clear()
             pdfView.isHidden = true
+            clearHTMLPreview()
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
@@ -758,7 +859,19 @@ final class SessionAttachmentsViewController: NSViewController {
             }
             imageView.image = nil
             imageView.isHidden = true
+            clearHTMLPreview()
             pdfView.isHidden = false
+
+        case .html:
+            imageView.image = nil
+            imageView.isHidden = true
+            pdfView.clear()
+            pdfView.isHidden = true
+            htmlView.loadFileURL(
+                attachment.url,
+                allowingReadAccessTo: attachment.url.deletingLastPathComponent()
+            )
+            htmlView.isHidden = false
         }
 
         updatePreviewHeight()
@@ -769,6 +882,7 @@ final class SessionAttachmentsViewController: NSViewController {
         imageView.isHidden = true
         pdfView.clear()
         pdfView.isHidden = true
+        clearHTMLPreview()
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
         fileLabel.stringValue = ""
@@ -781,6 +895,7 @@ final class SessionAttachmentsViewController: NSViewController {
         imageView.isHidden = true
         pdfView.clear()
         pdfView.isHidden = true
+        clearHTMLPreview()
         previewMessage.stringValue = message
         previewMessage.isHidden = false
         updatePreviewHeight()
@@ -790,6 +905,12 @@ final class SessionAttachmentsViewController: NSViewController {
         guard isViewLoaded else { return }
         previewHost.applySurface(fill: Design.Surface.ground, radius: .panel)
         pdfView.applyTheme()
+        htmlView.underPageBackgroundColor = Design.Surface.ground
+    }
+
+    private func clearHTMLPreview() {
+        htmlView.stopLoading()
+        htmlView.isHidden = true
     }
 
     private func detail(for attachment: SessionAttachment) -> String {
@@ -817,34 +938,303 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     @objc private func showChatActions() {
-        guard chatMenuSession == nil,
-              let attachment = selectedAttachment,
-              let conversation = AgentRuntime.shared.conversation(for: sessionID) else { return }
-        let context = conversation.attachmentContext(
-            path: attachment.url.path,
-            displayPath: attachment.relativePath
-        )
-        let entries: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: L10n.string("Add attachment to chat"),
-                onChoose: { [weak conversation] in
-                    conversation?.stageContextAttachment(context)
-                }
-            )),
-            .item(ThemedMenuItem(
-                title: L10n.string("Comment on attachment…"),
-                onChoose: { [weak conversation] in
-                    conversation?.requestComment(on: context)
-                }
-            ))
-        ]
+        guard chatMenuSession == nil, let attachment = selectedAttachment else { return }
+        let entries = chatEntries(for: attachment)
+        guard !entries.isEmpty else { return }
+
         chatMenuSession = ThemedMenuPresenter.present(
-            ThemedMenuPresentation(entries: entries, minimumWidth: 200),
+            ThemedMenuPresentation(
+                entries: entries,
+                minimumWidth: SessionAttachmentsDefaults.menuWidth
+            ),
             from: chatButton,
             selectedEntryIndex: nil,
             onChoose: { _, item in item.onChoose?() },
             onDismiss: { [weak self] in self?.chatMenuSession = nil }
         )
+    }
+
+    /// The two things a session can be handed a file for, in the one place both surfaces read
+    /// them from: the **Chat…** button under the preview, and the row's own menu.
+    ///
+    /// Empty when nothing is listening — the same question `updateChatAvailability` asks, and the
+    /// reason the menu can simply append what comes back without asking it a second time.
+    private func chatEntries(for attachment: SessionAttachment) -> [ThemedMenuEntry] {
+        guard SessionContextHandoff.canReceiveContext(for: sessionID) else { return [] }
+
+        // The store-relative path, not the machine's own, for exactly the reason the attachment
+        // record keeps one: it is what travels to a transcript and to a paired phone. The real
+        // file goes alongside it as `fileURL`, which only the terminal path reads.
+        let context = ConversationContextAttachment(
+            kind: .reference,
+            source: .attachment,
+            title: attachment.name,
+            excerpt: attachment.relativePath,
+            locator: attachment.relativePath
+        )
+        let fileURL = attachment.url
+        let sessionID = self.sessionID
+        return [
+            .item(ThemedMenuItem(
+                title: L10n.string("Add attachment to chat"),
+                onChoose: {
+                    SessionContextHandoff.stage(context, fileURL: fileURL, for: sessionID)
+                }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Comment on attachment…"),
+                onChoose: {
+                    ContextCommentAlert.request(on: context, fileURL: fileURL, for: sessionID)
+                }
+            ))
+        ]
+    }
+
+    // MARK: - Context Menu
+
+    /// The row's menu, built per click for the row under the pointer.
+    ///
+    /// The pane's own four buttons say it for the *selected* file; this says the same four for the
+    /// row you actually pointed at, and adds the one thing no button under a single preview can:
+    /// another row's name. Every item captures the attachment it was built for, so a menu left
+    /// open cannot act on a list that changed underneath it — the same rule the file tree's rows
+    /// follow.
+    @discardableResult
+    private func presentContextMenu(forRow row: Int, anchor: ThemedMenuAnchor) -> Bool {
+        guard contextMenuSession == nil, attachments.indices.contains(row) else { return false }
+        let attachment = attachments[row]
+
+        // The click also selects, and that is not ceremony: the preview under this list is what
+        // "this file" means in this pane, so a menu acting on one row while the picture below it
+        // shows another is the pane disagreeing with itself in front of the person using it.
+        if tableView.selectedRow != row {
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+
+        // Anchored to the row itself where there is one, so the menu belongs to what it is about
+        // rather than to a list that scrolls under it.
+        let source = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) ?? tableView
+        contextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: contextMenuEntries(for: attachment),
+                minimumWidth: SessionAttachmentsDefaults.menuWidth
+            ),
+            from: source,
+            anchor: anchor,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.contextMenuSession = nil }
+        )
+        return contextMenuSession != nil
+    }
+
+    /// What that menu holds, for one file.
+    ///
+    /// Apart from the presentation because this is the part with decisions in it — which items a
+    /// PDF loses, what a session with no listener loses, what a lone picture cannot be compared
+    /// against — and every one of them is a sentence a test can read back. Presenting a real
+    /// dropdown needs a key window; the rules do not.
+    func contextMenuEntries(for attachment: SessionAttachment) -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Open"),
+                onChoose: { NSWorkspace.shared.open(attachment.url) }
+            ))
+        ]
+        if let openIn = OpenInMenu.submenuEntry(for: .file(attachment.url, line: nil)) {
+            entries.append(openIn)
+        }
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Reveal in Finder"),
+            onChoose: { NSWorkspace.shared.activateFileViewerSelecting([attachment.url]) }
+        )))
+
+        if let comparison = compareEntry(for: attachment) {
+            entries.append(.separator)
+            entries.append(comparison)
+        }
+
+        let chat = chatEntries(for: attachment)
+        if !chat.isEmpty {
+            entries.append(.separator)
+            entries.append(contentsOf: chat)
+        }
+
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: attachment.kind == .image
+                ? L10n.string("Copy Image")
+                : L10n.string("Copy File"),
+            onChoose: { Self.copy(attachment) }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Path"),
+            onChoose: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(attachment.url.path, forType: .string)
+            }
+        )))
+        return entries
+    }
+
+    /// **Compare with**, naming every other picture the session holds — the pointerless twin of
+    /// dragging one row onto another, which is the design system's rule rather than a courtesy.
+    ///
+    /// Built from the whole list rather than the filtered one: the filter is a convenience about
+    /// *provenance*, and "how does the one I sent differ from the one it made" is the question it
+    /// would otherwise make unanswerable. Absent, not disabled, when there is nothing to name — a
+    /// session holding one picture, or a PDF row, which cannot be a side of a comparison at all.
+    private func compareEntry(for attachment: SessionAttachment) -> ThemedMenuEntry? {
+        let others = AttachmentComparison.candidates(for: attachment, in: allAttachments)
+        guard !others.isEmpty else { return nil }
+
+        return .item(ThemedMenuItem(
+            title: L10n.string("Compare with"),
+            submenu: others.map { other in
+                .item(ThemedMenuItem(
+                    title: other.name,
+                    onChoose: { [weak self] in self?.compare(attachment, with: other) }
+                ))
+            }
+        ))
+    }
+
+    /// The pasteboard answer for one row: the picture where there is one to give, the file
+    /// otherwise. `MediaInspector`'s own rule, so the two surfaces that offer this in the same
+    /// pane mean the same thing by it.
+    private static func copy(_ attachment: SessionAttachment) {
+        NSPasteboard.general.clearContents()
+        if attachment.kind == .image,
+           let image = NSImage(contentsOf: attachment.url), image.isValid {
+            NSPasteboard.general.writeObjects([image])
+            return
+        }
+        NSPasteboard.general.writeObjects([attachment.url as NSURL])
+    }
+
+    // MARK: - Comparison
+
+    /// Opens the pair in the panel's Compare tab, oldest on the left
+    /// (`AttachmentComparison.ordered`).
+    ///
+    /// The whole list goes with the pair, because two files recorded in one batch share a
+    /// timestamp to the microsecond and the list's own order is what settles them.
+    private func compare(_ attachment: SessionAttachment, with other: SessionAttachment) {
+        let pair = AttachmentComparison.ordered(attachment, other, in: allAttachments)
+        onCompare?(pair.old, pair.new)
+    }
+
+    /// The other side of a comparison, from whatever a drag was carrying.
+    ///
+    /// A row of this list is already an attachment and is simply found again. Anything else is
+    /// **filed first**, through the same door a picture dropped on a composer goes through, and
+    /// that is not incidental: a Compare tab is persisted by path, and a screenshot dragged out of
+    /// Preview lives in a temporary directory macOS will reap — so a comparison drawn against a
+    /// mere reference would come back empty some morning. Filing it also puts the picture you just
+    /// dropped into the list you dropped it on, which is where anyone would look for it next.
+    ///
+    /// A drag carrying several pictures files all of them and compares against the first that is
+    /// not the row it landed on.
+    func comparisonSource(
+        from pasteboard: NSPasteboard,
+        excluding target: SessionAttachment
+    ) -> SessionAttachment? {
+        let dragged = draggedFiles(in: pasteboard, excluding: target)
+
+        // Already listed, and *still itself*: a referenced row is the file on disk, so the row and
+        // the drag name the same current bytes and there is nothing to refresh.
+        if let path = dragged.first,
+           let listed = allAttachments.first(where: { matches($0, path: path) }),
+           listed.sourcePath == listed.url.path {
+            return listed
+        }
+
+        guard let projectRoot = projectRootProvider() else { return nil }
+        // `paths` is what writes a dragged-but-fileless picture to disk, which is why nothing on
+        // the validation path may call it: a drag is answered on every frame of the pointer's
+        // travel, and this is the one moment there is a drop to answer.
+        //
+        // A file already listed as a *copy* comes through here rather than being handed back as it
+        // stands, and that is the difference between a row and a reference: custody froze the bytes
+        // at the moment it took them, so a screenshot regenerated at the same path since would be
+        // compared as it was that morning. Re-declaring refreshes the copy in its own slot, which
+        // is what the store's dedupe-by-source rule is for.
+        let paths = PromptAttachment.paths(from: pasteboard).filter {
+            AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: $0)) == .image
+        }
+        let recorded = PromptAttachment.record(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        )
+        discardMintedOriginals(of: recorded, whenDragCarriedNoFiles: paths, in: pasteboard)
+        return recorded.first { $0.id != target.id } ?? recorded.first
+    }
+
+    /// The dragged pictures that could be the other side of a comparison with `target`, resolved
+    /// and with the target's own file removed.
+    ///
+    /// A file cannot be compared with itself, and that is asked of the *file* rather than of the
+    /// row index: the same picture dragged in from Finder is the same picture, whichever way it
+    /// arrived, and asking once covers a row dragged onto itself as well. Asked of *every* file in
+    /// the drag rather than only the first, or a two-picture drag that happened to lead with this
+    /// row's own file would be refused while holding a perfectly good other side.
+    private func draggedFiles(
+        in pasteboard: NSPasteboard,
+        excluding target: SessionAttachment
+    ) -> [String] {
+        AttachmentComparisonDrop.imageURLs(from: pasteboard)
+            .map { $0.standardizedFileURL.resolvingSymlinksInPath().path }
+            .filter { !matches(target, path: $0) }
+    }
+
+    /// Deletes the temporary file a fileless drag was written to, once its bytes are in custody.
+    ///
+    /// A picture dragged straight out of another app has no path, so `PromptAttachment.paths`
+    /// mints one under the temporary directory. The composer keeps that file because a CLI is
+    /// about to be handed the path; nothing here is, and the store copied the bytes into its own
+    /// directory as it recorded them. Guarded twice — the minted name, and custody actually having
+    /// been taken — because the same code path is one step away from deleting a file the user
+    /// dragged out of their own Pictures folder.
+    private func discardMintedOriginals(
+        of recorded: [SessionAttachment],
+        whenDragCarriedNoFiles paths: [String],
+        in pasteboard: NSPasteboard
+    ) {
+        guard !AttachmentComparisonDrop.carriesFiles(pasteboard) else { return }
+        for attachment in recorded where paths.contains(attachment.sourcePath)
+            && attachment.url.path != attachment.sourcePath
+            && URL(fileURLWithPath: attachment.sourcePath).lastPathComponent
+                .hasPrefix(PromptViewDefaults.attachmentPrefix) {
+            try? FileManager.default.removeItem(atPath: attachment.sourcePath)
+        }
+    }
+
+    /// Whether a drag carrying `pasteboard` would open a comparison against `target`.
+    func canDrop(_ pasteboard: NSPasteboard, on target: SessionAttachment) -> Bool {
+        guard AttachmentComparison.canCompare(target) else { return false }
+
+        if AttachmentComparisonDrop.carriesFiles(pasteboard) {
+            return !draggedFiles(in: pasteboard, excluding: target).isEmpty
+        }
+        return AttachmentComparisonDrop.canRead(pasteboard)
+    }
+
+    /// Raises the drop affordance on one row and lowers it on every other. `-1` clears the list.
+    ///
+    /// Two surfaces, because the affordance is two things: the *row* carries the wash, so it takes
+    /// the same silhouette as the selection it may be sitting beside (`ThemedTableRowView`), and
+    /// the *cell* carries the sentence, because the labels are its.
+    private func markDropTarget(row: Int) {
+        guard isViewLoaded, dropTargetRow != row else { return }
+        dropTargetRow = row
+        for index in 0..<tableView.numberOfRows {
+            let isTarget = index == row
+            let rowView = tableView.rowView(atRow: index, makeIfNecessary: false)
+            (rowView as? ThemedTableRowView)?.isDropTarget = isTarget
+            let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+            (cell as? SessionAttachmentRowView)?.isDropTarget = isTarget
+        }
     }
 }
 
@@ -854,6 +1244,70 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
 
     func numberOfRows(in tableView: NSTableView) -> Int {
         attachments.count
+    }
+
+    /// A row *is* its file, so it is dragged as one: onto Finder, onto a composer, onto a message
+    /// — and onto another row of this same list, which is where the file URL it carries becomes
+    /// the other half of a comparison.
+    func tableView(
+        _ tableView: NSTableView,
+        pasteboardWriterForRow row: Int
+    ) -> NSPasteboardWriting? {
+        guard attachments.indices.contains(row) else { return nil }
+        return attachments[row].url as NSURL
+    }
+
+    /// Every drop here lands **on** a row.
+    ///
+    /// There is no order to insert into — the list is a chronology, and it is not the user's to
+    /// rewrite — so the only question a drop can answer is *which picture, against which*. A
+    /// pointer that AppKit puts between two rows is therefore aimed at the nearer of them rather
+    /// than refused, which is what makes a 42-point row a target anyone can hit.
+    func tableView(
+        _ tableView: NSTableView,
+        validateDrop info: NSDraggingInfo,
+        proposedRow row: Int,
+        proposedDropOperation dropOperation: NSTableView.DropOperation
+    ) -> NSDragOperation {
+        let target = min(max(row, 0), tableView.numberOfRows - 1)
+        guard attachments.indices.contains(target),
+              canDrop(info.draggingPasteboard, on: attachments[target]) else {
+            markDropTarget(row: -1)
+            return []
+        }
+        if dropOperation != .on || target != row {
+            tableView.setDropRow(target, dropOperation: .on)
+        }
+        markDropTarget(row: target)
+        // Generic where the source allows it: nothing is being copied *into the list* as far as
+        // the person dragging is concerned — they are asking a question about two pictures — and a
+        // green `+` badge over a row would promise a filing gesture instead of a comparison.
+        return info.draggingSourceOperationMask.contains(.generic) ? .generic : .copy
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        acceptDrop info: NSDraggingInfo,
+        row: Int,
+        dropOperation: NSTableView.DropOperation
+    ) -> Bool {
+        markDropTarget(row: -1)
+        guard attachments.indices.contains(row) else { return false }
+
+        // Asked again, not taken on trust from the validation that lit the row up. The list is
+        // live: a terminal scan's debounce is a main-queue timer, and event tracking is a common
+        // run-loop mode, so an attachment recorded between the last `draggingUpdated` and the
+        // release inserts at the top and slides every row down one. The drop would then land on
+        // the row *above* the one that said "Drop to compare" — and if that row is a PDF, on the
+        // dead-end comparison `canCompare` exists to prevent.
+        let target = attachments[row]
+        guard canDrop(info.draggingPasteboard, on: target),
+              let source = comparisonSource(from: info.draggingPasteboard, excluding: target),
+              source.id != target.id else {
+            return false
+        }
+        compare(target, with: source)
+        return true
     }
 }
 
@@ -881,7 +1335,48 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
 
 // MARK: - Row
 
-private final class SessionAttachmentRowView: NSView {
+final class SessionAttachmentRowView: NSView {
+
+    /// A drag is over this row and would open a comparison against it.
+    ///
+    /// **The row stays the row.** What makes an unfamiliar gesture learnable is the sentence, not
+    /// the highlight — a highlight only answers *here*, which the pointer already said. But the
+    /// first version of this said the sentence by *replacing* the row: thumbnail and name gave
+    /// their place to a saturated accent plate, so the list opened a hole exactly where the
+    /// picture you were aiming at had been, and the plate shouted over the window's own selection
+    /// two rows above it. Two things were wrong at once — the row stopped being legible, and a
+    /// pointer affordance outranked a state the user had chosen.
+    ///
+    /// So only the *secondary* line changes. The thumbnail and the name stay, because which
+    /// picture is under the pointer is the whole question the affordance answers; the path — the
+    /// one line nobody is reading mid-drag — becomes what dropping here would do, in the accent
+    /// that means "the thing you are aiming at" everywhere else in the window.
+    ///
+    /// The wash behind it belongs to the **row**, not here (`ThemedTableRowView.isDropTarget`):
+    /// this cell is inset within its row, so a plate drawn from these bounds stood as tall as the
+    /// selection above it and visibly narrower than it.
+    var isDropTarget = false {
+        didSet {
+            guard isDropTarget != oldValue else { return }
+            pathLabel?.isHidden = isDropTarget
+            dropLabel.isHidden = !isDropTarget
+            needsDisplay = true
+        }
+    }
+
+    /// The line the drop caption takes the place of.
+    private var pathLabel: NSView?
+
+    private lazy var dropLabel: NSTextField = {
+        let label = NSTextField(labelWithString: L10n.string("Drop to compare"))
+        label.applyFont(.caption)
+        label.textColor = Design.Surface.accent
+        label.lineBreakMode = .byTruncatingTail
+        label.isHidden = true
+        label.setAccessibilityElement(false)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
 
     init(attachment: SessionAttachment) {
         super.init(frame: .zero)
@@ -921,7 +1416,7 @@ private final class SessionAttachmentRowView: NSView {
         // rows carry no time is a list whose order the reader has to take on trust — and the
         // order is the whole reason the images stopped being tabs.
         let moment = NSTextField(
-            labelWithString: SessionAttachmentRowView.description(of: attachment.referencedAt)
+            labelWithString: AttachmentMoment.description(of: attachment.referencedAt)
         )
         moment.applyFont(.caption)
         moment.textColor = Design.Text.quaternary
@@ -934,6 +1429,8 @@ private final class SessionAttachmentRowView: NSView {
         addSubview(path)
         addSubview(origin)
         addSubview(moment)
+        addSubview(dropLabel)
+        pathLabel = path
 
         // One element, read as one sentence: four separate labels would be announced as four
         // unrelated strings with no hint that the last two are the provenance and the moment of
@@ -983,31 +1480,18 @@ private final class SessionAttachmentRowView: NSView {
             name.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
 
             path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: Design.Spacing.hairline)
+            path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: Design.Spacing.hairline),
+
+            // Exactly where the path it replaces sat, so a row crossed by the pointer reads as
+            // the same row saying something else — not as the list shifting under the drag.
+            dropLabel.leadingAnchor.constraint(equalTo: path.leadingAnchor),
+            dropLabel.firstBaselineAnchor.constraint(equalTo: path.firstBaselineAnchor),
+            dropLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: origin.leadingAnchor,
+                constant: -Design.Spacing.small
+            )
         ])
     }
-
-    /// Terse on purpose: a column of full timestamps is a column of the same date said 32 times.
-    /// Today's rows say the time, everything older says the day — which is the distinction the
-    /// reader is actually making when they scan for the picture from this morning.
-    private static func description(of date: Date) -> String {
-        Calendar.current.isDateInToday(date)
-            ? timeFormatter.string(from: date)
-            : dateFormatter.string(from: date)
-    }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("dMMM")
-        return formatter
-    }()
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
@@ -1141,6 +1625,11 @@ extension SessionAttachment.Origin {
 enum SessionAttachmentsDefaults {
     static let columnIdentifier = NSUserInterfaceItemIdentifier("SessionAttachmentsColumn")
     static let rowHeight: CGFloat = 42
+
+    /// One width for both of this pane's menus — the row's and the **Chat…** button's — because
+    /// they carry the same items and a narrower one under the button would read as a different
+    /// menu saying the same thing.
+    static let menuWidth: CGFloat = 220
     static let iconSize: CGFloat = 26
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
 

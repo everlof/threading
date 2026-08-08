@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Attachment
@@ -13,6 +14,7 @@ struct SessionAttachment: Equatable, Identifiable {
     enum Kind: String, Codable {
         case image
         case pdf
+        case html
     }
 
     /// Which side of the conversation put the file in front of the other.
@@ -27,8 +29,9 @@ struct SessionAttachment: Equatable, Identifiable {
         case user
     }
 
-    /// Relative paths are stable across a moved checkout and are safe to put on the remote wire.
-    var id: String { relativePath }
+    /// Opaque identity used by notifications and remote fetches. A path remains presentation
+    /// metadata; it is neither authority nor identity once two captures can come from one file.
+    let id: String
 
     let sessionID: SessionID
 
@@ -53,10 +56,13 @@ struct SessionAttachment: Equatable, Identifiable {
     /// depending on any of them noticing a setting changed. A declared file is never marked,
     /// because a handoff was never governed by the rule in the first place.
     let isOutsideProject: Bool
+    /// Generated display output is copied once and never refreshed underneath its row.
+    let isImmutableSnapshot: Bool
     let referencedAt: Date
 
     init(
         sessionID: SessionID,
+        id: String = UUID().uuidString.lowercased(),
         root: URL,
         url: URL,
         relativePath: String,
@@ -64,9 +70,11 @@ struct SessionAttachment: Equatable, Identifiable {
         kind: Kind,
         origin: Origin,
         isOutsideProject: Bool = false,
+        isImmutableSnapshot: Bool = false,
         referencedAt: Date
     ) {
         self.sessionID = sessionID
+        self.id = id
         self.root = root
         self.url = url
         self.relativePath = relativePath
@@ -74,6 +82,7 @@ struct SessionAttachment: Equatable, Identifiable {
         self.kind = kind
         self.origin = origin
         self.isOutsideProject = isOutsideProject
+        self.isImmutableSnapshot = isImmutableSnapshot
         self.referencedAt = referencedAt
     }
 
@@ -399,6 +408,75 @@ final class SessionAttachmentStore {
         ).first
     }
 
+    /// Captures one displayed file as immutable attachment bytes.
+    ///
+    /// Unlike an ordinary declared attachment this always takes custody, including for a file
+    /// already inside the checkout, and never reuses the source's previous row. A build can write
+    /// `progress.png` ten times and every notification still opens the version it announced.
+    @discardableResult
+    func recordSnapshot(
+        of url: URL,
+        sessionID: SessionID,
+        origin: SessionAttachment.Origin,
+        preferredName: String? = nil
+    ) -> SessionAttachment? {
+        loadIfNeeded(sessionID)
+        let attachment = copiedAttachment(
+            at: url,
+            sessionID: sessionID,
+            origin: origin,
+            preferredName: preferredName,
+            isOutsideProject: false,
+            referencedAt: now(),
+            isImmutableSnapshot: true
+        )
+        return attachment.flatMap { admit([$0], for: sessionID).first }
+    }
+
+    /// Records generated HTML in the same custody store and chronology as images and PDFs.
+    @discardableResult
+    func recordGeneratedHTML(
+        _ html: String,
+        title: String?,
+        sessionID: SessionID,
+        origin: SessionAttachment.Origin = .agent
+    ) -> SessionAttachment? {
+        loadIfNeeded(sessionID)
+        guard let root = copiesRoot(for: sessionID) else { return nil }
+
+        let id = UUID().uuidString.lowercased()
+        let suppliedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let base = suppliedTitle.isEmpty ? "Document" : Self.safeGeneratedName(suppliedTitle)
+        let relativePath = "\(UUID().uuidString)/\(base).html"
+        let destination = root.appendingPathComponent(relativePath)
+        do {
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(html.utf8).write(to: destination, options: .atomic)
+        } catch {
+            ThreadingLogger.session.error(
+                "Failed to keep generated HTML: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+
+        let attachment = SessionAttachment(
+            sessionID: sessionID,
+            id: id,
+            root: root,
+            url: destination,
+            relativePath: relativePath,
+            sourcePath: "generated-html:\(id)",
+            kind: .html,
+            origin: origin,
+            isImmutableSnapshot: true,
+            referencedAt: now()
+        )
+        return admit([attachment], for: sessionID).first
+    }
+
     // MARK: The scope the scanned door is held to
 
     /// Remembers a refused path so the pane can say what the narrow scope is costing.
@@ -494,8 +572,16 @@ final class SessionAttachmentStore {
         loadIfNeeded(sessionID)
         var current = attachmentsBySession[sessionID] ?? []
         for attachment in made {
-            let superseded = current.filter { $0.sourcePath == attachment.sourcePath }
-            current.removeAll { $0.sourcePath == attachment.sourcePath }
+            let superseded = attachment.isImmutableSnapshot
+                ? []
+                : current.filter {
+                    !$0.isImmutableSnapshot && $0.sourcePath == attachment.sourcePath
+                }
+            if !attachment.isImmutableSnapshot {
+                current.removeAll {
+                    !$0.isImmutableSnapshot && $0.sourcePath == attachment.sourcePath
+                }
+            }
             // A copy that kept its slot is the same file on disk, now overwritten; only one that
             // lost its slot leaves bytes behind.
             discardCopies(in: superseded.filter { $0.relativePath != attachment.relativePath })
@@ -538,6 +624,8 @@ final class SessionAttachmentStore {
                 origin: $0.origin,
                 sourcePath: $0.sourcePath,
                 isOutsideProject: $0.isOutsideProject,
+                id: $0.id,
+                isImmutableSnapshot: $0.isImmutableSnapshot,
                 referencedAt: $0.referencedAt
             )
         }
@@ -553,6 +641,10 @@ final class SessionAttachmentStore {
         relativePath: String
     ) -> SessionAttachment? {
         attachments(for: sessionID).first { $0.relativePath == relativePath }
+    }
+
+    func attachment(for sessionID: SessionID, id: String) -> SessionAttachment? {
+        attachments(for: sessionID).first { $0.id == id }
     }
 
     func retainOnly(sessionIDs: Set<SessionID>) {
@@ -587,6 +679,11 @@ final class SessionAttachmentStore {
             let url = root.appendingPathComponent(entry.relativePath)
             return SessionAttachment(
                 sessionID: sessionID,
+                id: entry.id ?? Self.legacyID(
+                    sessionID: sessionID,
+                    root: entry.root,
+                    relativePath: entry.relativePath
+                ),
                 root: root,
                 url: url,
                 relativePath: entry.relativePath,
@@ -598,6 +695,7 @@ final class SessionAttachmentStore {
                 // A payload written before the scope was configurable holds only files that
                 // passed the narrow rule, so absent reads as "inside" rather than as unknown.
                 isOutsideProject: entry.isOutsideProject ?? false,
+                isImmutableSnapshot: entry.isImmutableSnapshot ?? false,
                 referencedAt: entry.referencedAt
             )
         }
@@ -607,12 +705,14 @@ final class SessionAttachmentStore {
         guard let savePayload else { return }
         let entries = attachments.map {
             PersistedSessionAttachment(
+                id: $0.id,
                 root: $0.root.path,
                 relativePath: $0.relativePath,
                 sourcePath: $0.sourcePath,
                 kind: $0.kind,
                 origin: $0.origin,
                 isOutsideProject: $0.isOutsideProject ? true : nil,
+                isImmutableSnapshot: $0.isImmutableSnapshot ? true : nil,
                 referencedAt: $0.referencedAt
             )
         }
@@ -632,6 +732,8 @@ final class SessionAttachmentStore {
         origin: SessionAttachment.Origin,
         sourcePath: String? = nil,
         isOutsideProject: Bool = false,
+        id: String? = nil,
+        isImmutableSnapshot: Bool = false,
         referencedAt: Date
     ) -> SessionAttachment? {
         let base = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -649,6 +751,7 @@ final class SessionAttachmentStore {
 
         return SessionAttachment(
             sessionID: sessionID,
+            id: id ?? UUID().uuidString.lowercased(),
             root: base,
             url: file,
             relativePath: relativePath,
@@ -656,6 +759,7 @@ final class SessionAttachmentStore {
             kind: kind,
             origin: origin,
             isOutsideProject: isOutsideProject,
+            isImmutableSnapshot: isImmutableSnapshot,
             referencedAt: referencedAt
         )
     }
@@ -704,7 +808,8 @@ final class SessionAttachmentStore {
         origin: SessionAttachment.Origin,
         preferredName: String?,
         isOutsideProject: Bool,
-        referencedAt: Date
+        referencedAt: Date,
+        isImmutableSnapshot: Bool = false
     ) -> SessionAttachment? {
         let file = url.standardizedFileURL.resolvingSymlinksInPath()
 
@@ -719,8 +824,9 @@ final class SessionAttachmentStore {
         // its identity — and therefore its place on the remote wire — while the bytes are
         // refreshed underneath it.
         let name = preferredName.map { sanitized($0, matching: file) } ?? file.lastPathComponent
-        let existing = attachmentsBySession[sessionID]?.first {
-            $0.sourcePath == file.path && AttachmentReferenceDetector.contains($0.url, inside: root)
+        let existing = isImmutableSnapshot ? nil : attachmentsBySession[sessionID]?.first {
+            !$0.isImmutableSnapshot && $0.sourcePath == file.path
+                && AttachmentReferenceDetector.contains($0.url, inside: root)
         }
         let relativePath = existing?.relativePath ?? "\(UUID().uuidString)/\(name)"
         let destination = root.appendingPathComponent(relativePath)
@@ -729,6 +835,7 @@ final class SessionAttachmentStore {
 
         return SessionAttachment(
             sessionID: sessionID,
+            id: existing?.id ?? UUID().uuidString.lowercased(),
             root: root,
             url: destination,
             relativePath: relativePath,
@@ -736,8 +843,28 @@ final class SessionAttachmentStore {
             kind: kind,
             origin: origin,
             isOutsideProject: isOutsideProject,
+            isImmutableSnapshot: isImmutableSnapshot,
             referencedAt: referencedAt
         )
+    }
+
+    private static func legacyID(
+        sessionID: SessionID,
+        root: String,
+        relativePath: String
+    ) -> String {
+        let value = "\(sessionID.uuidString)|\(root)|\(relativePath)"
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func safeGeneratedName(_ value: String) -> String {
+        let forbidden = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
+        let result = value.unicodeScalars.map {
+            forbidden.contains($0) ? "-" : String($0)
+        }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        let bounded = String(result.prefix(80))
+        return bounded.isEmpty ? "Document" : bounded
     }
 
     // MARK: Copies
@@ -822,7 +949,8 @@ enum AttachmentReferenceDetector {
     }
 
     private static let extensions = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp", "pdf"
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp", "pdf",
+        "html", "htm"
     ]
     private static let extensionAlternation = extensions.joined(separator: "|")
 
@@ -899,7 +1027,9 @@ enum AttachmentReferenceDetector {
     static func kind(for url: URL) -> SessionAttachment.Kind? {
         let ext = url.pathExtension.lowercased()
         guard extensions.contains(ext) else { return nil }
-        return ext == "pdf" ? .pdf : .image
+        if ext == "pdf" { return .pdf }
+        if ext == "html" || ext == "htm" { return .html }
+        return .image
     }
 
     static func contains(_ file: URL, inside root: URL) -> Bool {
@@ -1106,7 +1236,7 @@ final class TerminalAttachmentObserver {
 // MARK: - Defaults
 
 enum SessionAttachmentDefaults {
-    static let maximumPerSession = 32
+    static let maximumPerSession = 64
 
     /// How many refused paths one session remembers. Smaller than the list itself on purpose:
     /// this is a *hint* about a setting, not a queue, and "12 files outside this project" and

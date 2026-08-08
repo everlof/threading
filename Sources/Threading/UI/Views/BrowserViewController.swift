@@ -1307,7 +1307,13 @@ final class BrowserViewController: NSViewController {
         layoutWebViews(resetScrollPosition: true)
     }
 
-    func resetResponsiveViewportToPanel() {
+    /// Stops emulating a viewport, so the page fills whatever is hosting this browser.
+    ///
+    /// Named for the *host*, not the panel, because the emulated viewport is orthogonal to the
+    /// window: clearing it does not mean "the size of the display panel", it means "no
+    /// emulation". A browser in a detached window — fullscreen on a second display — gets that
+    /// screen's worth of pixels from exactly this call, and nothing here has to know it moved.
+    func resetResponsiveViewportToHost() {
         _ = view
         agentViewportSize = nil
         syncDeviceToolbar()
@@ -1435,7 +1441,7 @@ final class BrowserViewController: NSViewController {
             if let width, let height {
                 setResponsiveViewport(width: width, height: height)
             } else {
-                resetResponsiveViewportToPanel()
+                resetResponsiveViewportToHost()
             }
         }
     }
@@ -2219,8 +2225,6 @@ final class BrowserViewController: NSViewController {
                 )
             }
         }
-        // Restored after the snapshot, not before it: a capture is not a navigation, and whoever is
-        // looking at the page was looking at a particular part of it.
         defer {
             if let restoreScroll {
                 Task { @MainActor [weak self] in
@@ -2600,8 +2604,14 @@ final class BrowserViewController: NSViewController {
             current: annotation.note,
             placeholder: L10n.string("What should the agent notice?")
         )
+        // Saving is the only thing this sheet does, so both affirmatives mean it. A page
+        // annotation is *pulled* — the agent reads it through `browser_annotations` when it
+        // looks, rather than being handed a turn — so there is no "send it now" for a second
+        // affirmative to mean. The request asks for no accelerated button and `.immediate`
+        // cannot arrive here; it is written out rather than defaulted so this reads as a
+        // decision about page annotations instead of as a case nobody thought about.
         switch TextPromptAlert.ask(request) {
-        case .text(let note):
+        case .text(let note), .immediate(let note):
             annotationsByPage[key]?[index] = BrowserAnnotation(
                 id: annotation.id,
                 note: note,
@@ -2639,7 +2649,7 @@ final class BrowserViewController: NSViewController {
     }
 
     @objc private func resetResponsiveViewport() {
-        resetResponsiveViewportToPanel()
+        resetResponsiveViewportToHost()
     }
 
     @objc private func showDeviceToolbar() {
@@ -2665,7 +2675,7 @@ final class BrowserViewController: NSViewController {
         deviceToolbarHeightConstraint?.constant = 0
         applyRuleWeights()
         if resetViewport {
-            resetResponsiveViewportToPanel()
+            resetResponsiveViewportToHost()
         }
         view.needsLayout = true
     }

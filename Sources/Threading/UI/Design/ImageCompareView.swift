@@ -47,6 +47,11 @@ final class ImageCompareView: NSView {
         let title: String
     }
 
+    /// The scale the surface's own row stands at, and the one a host placing these controls
+    /// puts them in — so the comparison reads the same whether its modes sit under the canvas
+    /// or up in a tab's header.
+    static let controlScale: ControlRowScale = .compact
+
     private let canvas = ImageCompareCanvas()
     private let modeChip = ChipView()
     private lazy var expandButton = ThemedIconButton(
@@ -54,6 +59,15 @@ final class ImageCompareView: NSView {
         accessibility: L10n.string("Open comparison"),
         target: .inline,
         inkSource: .chrome
+    )
+    /// The chip at one edge, the way to open the comparison at the other. The row is what makes
+    /// the two stand at one height: the chip is the theme's `choiceHeight` and the button used
+    /// to be a fixed 20, which is the six points the pair sat out of level by under the System
+    /// theme and four points the *other* way under Platinum.
+    private lazy var controlRow = ControlRowView(
+        scale: Self.controlScale,
+        leading: [modeChip],
+        trailing: [expandButton]
     )
 
     /// Answered when the user picks a different mode, so a host can persist it.
@@ -122,8 +136,9 @@ final class ImageCompareView: NSView {
     /// The height the surface wants at `width`: the fitted canvas (capped), the controls row,
     /// and the spacing between them. What a review row uses to size an expanded body.
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
-        let showsRow = carriesControls && showsControls
-        let controls = showsRow ? Design.Size.chipHeight + Design.Spacing.small : 0
+        let controls = showsRow
+            ? ControlRowView.height(for: Self.controlScale) + Design.Spacing.small
+            : 0
         return canvas.preferredCanvasHeight(forWidth: width) + controls
     }
 
@@ -143,10 +158,11 @@ final class ImageCompareView: NSView {
     func hostControls() -> (mode: NSView, expansion: NSView) {
         guard carriesControls else { return (modeChip, expandButton) }
         carriesControls = false
-        modeChip.removeFromSuperview()
-        expandButton.removeFromSuperview()
-        NSLayoutConstraint.deactivate(attachedConstraints)
-        NSLayoutConstraint.activate(hostedConstraints)
+        // Emptying the row is what gives the two views up: it takes them out of its runs and
+        // out of its view tree in one act, so neither can be left half-held by a row that is
+        // no longer on screen. The host puts them in a row of its own — see `controlScale`.
+        controlRow.configure(leading: [], trailing: [])
+        controlRow.removeFromSuperview()
         updateControls()
         return (modeChip, expandButton)
     }
@@ -179,7 +195,6 @@ final class ImageCompareView: NSView {
 
     private func setupViews() {
         canvas.translatesAutoresizingMaskIntoConstraints = false
-        modeChip.translatesAutoresizingMaskIntoConstraints = false
 
         modeChip.itemsProvider = { [weak self] in self?.modeMenuEntries() ?? [] }
         modeChip.onSelect = { [weak self] item in
@@ -193,37 +208,30 @@ final class ImageCompareView: NSView {
         }
 
         addSubview(canvas)
-        addSubview(modeChip)
-        addSubview(expandButton)
+        addSubview(controlRow)
 
         NSLayoutConstraint.activate([
             canvas.topAnchor.constraint(equalTo: topAnchor),
             canvas.leadingAnchor.constraint(equalTo: leadingAnchor),
             canvas.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
-        NSLayoutConstraint.activate(attachedConstraints)
 
         updateControls()
     }
 
     /// The canvas and the row beneath it, which is the surface as it ships.
     private lazy var attachedConstraints: [NSLayoutConstraint] = [
-        modeChip.topAnchor.constraint(
+        controlRow.topAnchor.constraint(
             equalTo: canvas.bottomAnchor, constant: Design.Spacing.small
         ),
-        modeChip.leadingAnchor.constraint(equalTo: leadingAnchor),
-        modeChip.bottomAnchor.constraint(equalTo: bottomAnchor),
-        // The row is the chip's height, so the shorter button centres on it rather than
-        // deciding a second baseline of its own.
-        expandButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-        expandButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
-        expandButton.leadingAnchor.constraint(
-            greaterThanOrEqualTo: modeChip.trailingAnchor, constant: Design.Spacing.small
-        )
+        controlRow.leadingAnchor.constraint(equalTo: leadingAnchor),
+        controlRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+        controlRow.bottomAnchor.constraint(equalTo: bottomAnchor)
     ]
 
-    /// The canvas alone, once a host has taken the controls: nothing is left to reserve a row
-    /// for, so the surface is exactly the comparison.
+    /// The canvas alone: a host has taken the controls, or there is only one image and there
+    /// are none to show. Either way nothing is left to reserve a row for, so the surface is
+    /// exactly the comparison.
     private lazy var hostedConstraints: [NSLayoutConstraint] = [
         canvas.bottomAnchor.constraint(equalTo: bottomAnchor)
     ]
@@ -234,10 +242,28 @@ final class ImageCompareView: NSView {
     /// to switch the mode of, and nothing an inspector would show that the row does not.
     private var showsControls: Bool { canvas.old != nil && canvas.new != nil }
 
+    /// Whether the surface is currently drawing a row of its own, which is the one condition
+    /// `preferredHeight(forWidth:)` reserves room for.
+    private var showsRow: Bool { carriesControls && showsControls }
+
     private func updateControls() {
         modeChip.isHidden = !showsControls
         expandButton.isHidden = !showsControls || !allowsExpansion
+        updateRowAttachment()
         updateModeChip()
+    }
+
+    /// Pins the canvas either above the row or straight to the bottom.
+    ///
+    /// Stated as one decision because it used to be two: the chip was *hidden* for a single
+    /// image while its constraints went on holding a chip's height under the canvas, and
+    /// `preferredHeight(forWidth:)` — correctly — reported a height with no row in it. An added
+    /// file was therefore fitted into a box a row shorter than the surface asked for, and paid
+    /// for it in the picture.
+    private func updateRowAttachment() {
+        NSLayoutConstraint.deactivate(showsRow ? hostedConstraints : attachedConstraints)
+        NSLayoutConstraint.activate(showsRow ? attachedConstraints : hostedConstraints)
+        controlRow.isHidden = !showsRow
     }
 
     private func modeMenuEntries() -> [ThemedMenuEntry] {

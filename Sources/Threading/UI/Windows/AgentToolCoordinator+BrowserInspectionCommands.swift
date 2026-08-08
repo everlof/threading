@@ -351,34 +351,61 @@ extension AgentToolCoordinator {
         }
     }
 
+    /// Where a prompt about this session's browser belongs: the window actually showing that
+    /// browser, and the app's main window only when nothing else can be named.
+    ///
+    /// The origin grant is the whole of the security this feature offers — an agent reaching a
+    /// signed-in browser is stopped by one alert, and everything downstream trusts the answer.
+    /// An alert raised over a *different* window than the page it describes is an alert the user
+    /// answers about something they cannot see, which is the same as not asking.
+    func browserPresentationWindow(for sessionID: SessionID) -> NSWindow? {
+        browserResolver.window(for: sessionID) ?? windowProvider()
+    }
+
+    /// The browser a navigation drives, and the host it lives in: the session's own, brought to
+    /// the front of whichever strip holds it, and a fresh panel tab only when the session has
+    /// none at all. The panel is where a session's first browser is built, which is why it is
+    /// the only host this creates in.
+    func activateSessionBrowser(
+        for sessionID: SessionID
+    ) -> (browser: BrowserViewController, hostID: TabHostID) {
+        if let location = browserResolver.location(for: sessionID) {
+            browserResolver.activate(location, for: sessionID)
+            return (location.browser, location.hostID)
+        }
+        return (displayPaneController.activateBrowser(for: sessionID), .displayPanel)
+    }
+
     /// The session's browser tab, but only once it actually has a page — so the DOM tools fail
     /// with a clear instruction rather than acting on a blank browser.
     func loadedBrowser(for sessionID: SessionID) -> BrowserViewController? {
-        guard let browser = displayPaneController.browser(for: sessionID), browser.currentURL != nil else {
+        guard let browser = browserResolver.browser(for: sessionID), browser.currentURL != nil else {
             return nil
         }
         return browser
     }
 
+    /// The tab is looked up through the resolver, not the panel: the lease's job is to name
+    /// *this* browser and page, and a browser the user moved to another pane is still the
+    /// session's. Resolving the browser across hosts while confirming its tab in the panel
+    /// alone refused every page that had been moved — the tools reported "No authorized page
+    /// is loaded" about a page plainly on screen.
     func currentBrowserPageLease(for sessionID: SessionID) -> BrowserPageLease? {
         guard let browser = loadedBrowser(for: sessionID),
               let page = browser.agentPageIdentity,
-              let tab = displayPaneController.tabs(for: sessionID).first(where: {
-                  $0.browser === browser
-              }) else {
+              let location = browserResolver.location(of: browser, for: sessionID) else {
             return nil
         }
-        return BrowserPageLease(browser: browser, tabID: tab.id, page: page)
+        return BrowserPageLease(browser: browser, tabID: location.tabID, page: page)
     }
 
     func browserPageLeaseIsCurrent(
         _ lease: BrowserPageLease,
         for sessionID: SessionID
     ) -> Bool {
-        guard displayPaneController.browser(for: sessionID) === lease.browser,
-              displayPaneController.tabs(for: sessionID).contains(where: {
-                  $0.id == lease.tabID && $0.browser === lease.browser
-              }) else {
+        guard browserResolver.browser(for: sessionID) === lease.browser,
+              let location = browserResolver.location(of: lease.browser, for: sessionID),
+              location.tabID == lease.tabID else {
             return false
         }
         return lease.browser.agentPageIdentity == lease.page
@@ -476,7 +503,10 @@ extension AgentToolCoordinator {
             style: .informational
         )
 
-        ConfirmationAlert.choose(request, in: windowProvider()) { chosen in
+        ConfirmationAlert.choose(
+            request,
+            in: browserPresentationWindow(for: sessionID)
+        ) { chosen in
             switch chosen {
             case 0: applyDecision(.allowOnce)
             case 1: applyDecision(.allowPersistently)
@@ -541,7 +571,7 @@ extension AgentToolCoordinator {
             try? await Task.sleep(nanoseconds: 120_000_000)
         } while browser.webView.isLoading && Date() < deadline
 
-        guard displayPaneController.browser(for: sessionID) === browser else {
+        guard browserResolver.browser(for: sessionID) === browser else {
             return .failure(
                 "\(outcome.message), but a different browser tab became active before its "
                     + "result was read; retry against the tab now selected."
@@ -570,7 +600,7 @@ extension AgentToolCoordinator {
                     + "result was being decided; retry against the current page."
             )
         }
-        guard displayPaneController.browser(for: sessionID) === browser else {
+        guard browserResolver.browser(for: sessionID) === browser else {
             return .failure(
                 "\(outcome.message), but a different browser tab became active while access "
                     + "to its result was being decided."
@@ -580,7 +610,7 @@ extension AgentToolCoordinator {
         do {
             let snapshot = try await browser.agentSnapshot()
             guard browser.agentPageIdentity == authorizedPage,
-                  displayPaneController.browser(for: sessionID) === browser else {
+                  browserResolver.browser(for: sessionID) === browser else {
                 return .failure(
                     "\(outcome.message), but the browser document changed while its result "
                         + "was being read; retry against the current page."
@@ -595,7 +625,7 @@ extension AgentToolCoordinator {
             ))
         } catch {
             guard browser.agentPageIdentity == authorizedPage,
-                  displayPaneController.browser(for: sessionID) === browser else {
+                  browserResolver.browser(for: sessionID) === browser else {
                 return .failure(
                     "\(outcome.message), but the browser document or selected tab changed while "
                         + "its result was being read; retry against the current page."
@@ -612,7 +642,8 @@ extension AgentToolCoordinator {
     func confirmSensitiveBrowserAction(
         _ action: String,
         target: BrowserTargetDescription,
-        browser: BrowserViewController
+        browser: BrowserViewController,
+        for sessionID: SessionID
     ) async -> Bool {
         let host = browser.currentURL?.host ?? L10n.string("this page")
         let label = target.name.flatMap { name in
@@ -653,7 +684,10 @@ extension AgentToolCoordinator {
                 cancelTitle: L10n.string("Deny")
             )
             return await withCheckedContinuation { continuation in
-                ConfirmationAlert.ask(request, in: windowProvider()) { allowed in
+                ConfirmationAlert.ask(
+                    request,
+                    in: self.browserPresentationWindow(for: sessionID)
+                ) { allowed in
                     continuation.resume(returning: allowed)
                 }
             }
@@ -682,7 +716,10 @@ extension AgentToolCoordinator {
         )
 
         return await withCheckedContinuation { continuation in
-            ConfirmationAlert.choose(request, in: windowProvider()) { chosen in
+            ConfirmationAlert.choose(
+                request,
+                in: self.browserPresentationWindow(for: sessionID)
+            ) { chosen in
                 switch chosen {
                 case 0:
                     continuation.resume(returning: true)

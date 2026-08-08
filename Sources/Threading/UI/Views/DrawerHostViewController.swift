@@ -71,9 +71,17 @@ final class DrawerHostViewController: NSViewController {
 
     /// Whether a window point lands where a dropped tab would join this host — the strip
     /// band, full width, since an emptier strip is narrower than the drop it invites.
-    func dropBandContains(windowPoint: NSPoint) -> Bool {
-        guard isViewLoaded, view.window != nil else { return false }
-        let point = view.convert(windowPoint, from: nil)
+    /// Not gated on the window being *visible*: screen coordinates already answer that. A
+    /// hidden or off-screen window's band simply does not contain the pointer's screen point,
+    /// and requiring visibility as well would refuse a drop on a fixture window that is built
+    /// but never shown — which is how every test here is required to build one.
+    var isDropBandVisible: Bool {
+        isViewLoaded && view.window != nil
+    }
+
+    func dropBandContains(screenPoint: NSPoint) -> Bool {
+        guard isDropBandVisible, let window = view.window else { return false }
+        let point = view.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
         guard view.bounds.contains(point) else { return false }
         return point.y >= view.bounds.maxY - ThemedTabStripView.bandHeight
     }
@@ -84,10 +92,11 @@ final class DrawerHostViewController: NSViewController {
         strip.isDropTarget = highlighted
     }
 
-    /// The slot a drop at this window point takes, by the strip's own midpoint rule.
-    func dropInsertionIndex(windowPoint: NSPoint) -> Int {
-        guard isViewLoaded else { return 0 }
-        return strip.insertionIndex(forWindowPoint: windowPoint)
+    func dropInsertionIndex(screenPoint: NSPoint) -> Int {
+        guard isViewLoaded, let window = view.window else { return 0 }
+        return strip.insertionIndex(
+            forWindowPoint: window.convertPoint(fromScreen: screenPoint)
+        )
     }
 
     // MARK: - Initialization
@@ -192,9 +201,7 @@ final class DrawerHostViewController: NSViewController {
         NSLayoutConstraint.activate([
             strip.topAnchor.constraint(equalTo: view.topAnchor),
             strip.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            strip.heightAnchor.constraint(equalToConstant: ThemedTabStripView.bandHeight),
-
-            newTabButton.centerYAnchor.constraint(equalTo: strip.centerYAnchor),
+            newTabButton.centerYAnchor.constraint(equalTo: strip.contentCenterYAnchor),
             newTabButton.leadingAnchor.constraint(
                 equalTo: strip.trailingAnchor,
                 constant: Design.Spacing.tight
@@ -284,13 +291,12 @@ final class DrawerHostViewController: NSViewController {
     }
 
     /// The drawer's answer to "which browser is the session's": the active tab if it is one,
-    /// else the first. Consulted by the panel's resolution as a fallback, so `browser_*` tools
-    /// keep finding a browser the user moved down here.
+    /// else the first. One of the hosts `SessionBrowserResolver` asks, so `browser_*` tools keep
+    /// finding a browser the user moved down here.
     func browser(for sessionID: SessionID) -> BrowserViewController? {
-        restoreIfNeeded(sessionID)
-        guard let state = statesBySession[sessionID] else { return nil }
-        if let active = state.activeTab?.browser { return active }
-        return state.tabs.first(where: { $0.browser != nil })?.browser
+        preferredBrowserTabID(for: sessionID).flatMap { id in
+            statesBySession[sessionID]?.tabs.first { $0.id == id }?.browser
+        }
     }
 
     func focusActiveTab() {
@@ -672,6 +678,12 @@ extension DrawerHostViewController: TabHosting {
     func adopt(_ tab: PaneTab, at index: Int?, for sessionID: SessionID?) {
         guard let session = resolvedSession(sessionID) else { return }
         restoreIfNeeded(session)
+        // The adopted browser reports here now — see the panel's `adopt` for why.
+        tab.browser?.onPageChange = { [weak self] in
+            guard let self else { return }
+            persist(session)
+            if session == self.currentSessionID { render() }
+        }
         if let controller = tab.hostedController {
             addChild(controller)
         }
@@ -683,3 +695,24 @@ extension DrawerHostViewController: TabHosting {
         if session == currentSessionID { render() }
     }
 }
+
+// MARK: - Session Browser Hosting
+
+extension DrawerHostViewController: SessionBrowserHosting {
+
+    func browserTabs(for sessionID: SessionID) -> [PaneTab] {
+        restoreIfNeeded(sessionID)
+        return (statesBySession[sessionID]?.tabs ?? []).filter { $0.browser != nil }
+    }
+
+    func preferredBrowserTabID(for sessionID: SessionID) -> UUID? {
+        restoreIfNeeded(sessionID)
+        guard let state = statesBySession[sessionID] else { return nil }
+        if let active = state.activeTab, active.holdsAgentDrivableBrowser { return active.id }
+        return state.tabs.first(where: \.holdsAgentDrivableBrowser)?.id
+    }
+}
+
+// MARK: - Drop Band Hosting
+
+extension DrawerHostViewController: TabDropBandHosting {}

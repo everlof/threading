@@ -242,7 +242,10 @@ final class ImageCompareTests: XCTestCase {
         let canvas = view.subviews.compactMap { $0 as? ImageCompareCanvas }.first
         XCTAssertNotNil(canvas)
         XCTAssertFalse(canvas?.acceptsFirstResponder ?? true)
-        let chip = view.subviews.compactMap { $0 as? ChipView }.first
+        // Searched through the tree rather than among the surface's own subviews: the chip and
+        // the expand button stand in the surface's `ControlRowView`, which is what makes them
+        // one height. The claim is unchanged — one image, no mode to choose.
+        let chip = Self.descendant(ChipView.self, in: view)
         XCTAssertEqual(chip?.isHidden, true)
     }
 
@@ -590,6 +593,16 @@ final class ImageCompareTests: XCTestCase {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
         return rep.colorAt(x: 4, y: 4)
+    }
+
+    /// The first control of a kind anywhere under `root`.
+    @MainActor
+    private static func descendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+        for view in root.subviews {
+            if let match = view as? T { return match }
+            if let match = descendant(type, in: view) { return match }
+        }
+        return nil
     }
 
     @MainActor

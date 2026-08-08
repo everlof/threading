@@ -78,17 +78,19 @@ final class CompareViewController: NSViewController {
     /// (`ImageCompareView.hostControls`), not copies: below the canvas they were part of the
     /// scrolled content and left the screen exactly when a tall screenshot had been read far
     /// enough to want another mode.
-    private lazy var headerRow: NSStackView = {
-        let row = NSStackView(views: [captionLabel, exportButton])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.tight
-        row.translatesAutoresizingMaskIntoConstraints = false
-        return row
-    }()
+    ///
+    /// A `ControlRowView` rather than a stack, because a stack made this row wrong in both
+    /// axes: the chip stood six points taller than the two buttons beside it, and the actions
+    /// sat against the chip instead of at the pane's trailing edge — the caption was doing duty
+    /// as a spring and an empty label is not one. The row states the height its members take
+    /// and pins its two runs to opposite edges, so neither is a thing this file decides.
+    private lazy var headerRow = ControlRowView(
+        scale: ImageCompareView.controlScale,
+        leading: [captionLabel],
+        trailing: [exportButton]
+    )
 
     /// Names the pair where the surface does not name it itself — a text diff, or a message.
-    /// It doubles as the row's flexible slack, which is why it stays in the row when empty.
     private lazy var captionLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.caption)
@@ -383,10 +385,14 @@ final class CompareViewController: NSViewController {
                 self?.onChange?()
             }
             // The surface's own controls move up into this tab's header, which is also what
-            // stops the surface reserving a row for them under the canvas.
+            // stops the surface reserving a row for them under the canvas. The row sizes them
+            // to itself as they arrive, so they stand level with each other and with the
+            // caption whatever height the current theme gives a chooser.
             let controls = compare.hostControls()
-            headerRow.insertArrangedSubview(controls.mode, at: 0)
-            headerRow.addArrangedSubview(controls.expansion)
+            headerRow.configure(
+                leading: [controls.mode, captionLabel],
+                trailing: [exportButton, controls.expansion]
+            )
 
             compareView = compare
             stack.addArrangedSubview(compare)
@@ -449,12 +455,8 @@ final class CompareViewController: NSViewController {
     private func updateHeader(for comparison: Comparison) {
         // Whatever the last comparison hosted is not this one's: a re-read that turns a pair of
         // images into a message would otherwise leave its mode chip in the header, switching the
-        // mode of a surface that no longer exists.
-        for control in headerRow.arrangedSubviews where control !== captionLabel
-            && control !== exportButton {
-            headerRow.removeArrangedSubview(control)
-            control.removeFromSuperview()
-        }
+        // mode of a surface that no longer exists. `render` puts the new one back.
+        headerRow.configure(leading: [captionLabel], trailing: [exportButton])
 
         switch comparison {
         case .images:

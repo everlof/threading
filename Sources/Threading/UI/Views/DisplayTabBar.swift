@@ -11,6 +11,8 @@ struct DisplayTabBarItem {
     let symbolName: String
     let isActive: Bool
     let customizationTarget: ExtensionComponentTarget
+    /// Nil for an ordinary tab; see `TabStripItem.showsClose`.
+    var showsClose: Bool? = nil
 }
 
 // MARK: - Display Tab Bar
@@ -147,7 +149,8 @@ final class DisplayTabBar: NSView {
                 title: $0.title,
                 symbolName: $0.symbolName,
                 isActive: $0.isActive,
-                identity: $0.id
+                identity: $0.id,
+                showsClose: $0.showsClose
             )
         })
     }

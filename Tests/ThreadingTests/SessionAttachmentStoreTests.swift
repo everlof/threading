@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingRemoteKit
 @testable import Threading
 
 /// The two doors into the attachment list, and the custody rule that lets the second one exist.
@@ -156,6 +157,72 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(recorded.name, "Pasted image.png")
+    }
+
+    func testDisplayedSnapshotsKeepEachAnnouncedRevisionAndOpaqueIdentity() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let progress = elsewhere.appendingPathComponent("progress.png")
+        try write([0x01], to: progress)
+
+        let first = try XCTUnwrap(store.recordSnapshot(
+            of: progress,
+            sessionID: session,
+            origin: .agent
+        ))
+        try write([0x02], to: progress)
+        let second = try XCTUnwrap(store.recordSnapshot(
+            of: progress,
+            sessionID: session,
+            origin: .agent
+        ))
+
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertNotEqual(first.relativePath, second.relativePath)
+        XCTAssertEqual(try Data(contentsOf: first.url), Data([0x01]))
+        XCTAssertEqual(try Data(contentsOf: second.url), Data([0x02]))
+        XCTAssertTrue(first.isImmutableSnapshot)
+        XCTAssertTrue(second.isImmutableSnapshot)
+        XCTAssertEqual(store.attachment(for: session, id: first.id), first)
+
+        let relaunched = makeStore()
+        XCTAssertEqual(relaunched.attachment(for: session, id: first.id)?.id, first.id)
+        XCTAssertEqual(relaunched.attachment(for: session, id: second.id)?.id, second.id)
+    }
+
+    func testGeneratedHTMLIsAnInspectableAttachmentRatherThanAPanelOnlyValue() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let html = "<main><h1>Step 2</h1><progress value='2' max='3'></progress></main>"
+
+        let attachment = try XCTUnwrap(store.recordGeneratedHTML(
+            html,
+            title: "Progress / Step: 2",
+            sessionID: session
+        ))
+
+        XCTAssertEqual(attachment.kind, .html)
+        XCTAssertTrue(attachment.name.hasSuffix(".html"))
+        XCTAssertFalse(attachment.name.contains("/"))
+        XCTAssertEqual(String(decoding: try Data(contentsOf: attachment.url), as: UTF8.self), html)
+        XCTAssertEqual(makeStore().attachment(for: session, id: attachment.id)?.id, attachment.id)
+    }
+
+    func testNotificationTargetReferencesAreScopedOpaqueAndExpiring() throws {
+        var instant = Date(timeIntervalSince1970: 1_000)
+        let registry = NotificationTargetRegistry(now: { instant })
+        let session = SessionID()
+        let otherSession = SessionID()
+        let destination = RemoteNotificationDestinationDTO.attachment(id: "attachment-1")
+
+        let reference = try XCTUnwrap(registry.issue(destination, for: session))
+
+        XCTAssertFalse(reference.contains("attachment-1"))
+        XCTAssertEqual(registry.resolve(reference, for: session), destination)
+        XCTAssertNil(registry.resolve(reference, for: otherSession))
+
+        instant.addTimeInterval(NotificationTargetDefaults.lifetime + 1)
+        XCTAssertNil(registry.resolve(reference, for: session))
     }
 
     /// Without somewhere to put a copy the store may only hold references, so it refuses rather

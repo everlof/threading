@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 @MainActor
 extension AgentToolCoordinator {
@@ -49,10 +50,12 @@ extension AgentToolCoordinator {
                 return
             }
 
-            // The browser is a tab in this session's display panel — created if the session has
-            // none, and brought to the front. It sits beside the terminal, not over it.
-            let browser = self.displayPaneController.activateBrowser(for: sessionID)
-            self.revealDisplayPane(for: sessionID)
+            // The session's browser, wherever it lives — brought to the front of its own host,
+            // and created in the display panel only when the session has none. Reaching
+            // straight for the panel here built a *second* browser beside the one the user had
+            // moved to the drawer, then navigated that invisible one instead.
+            let (browser, hostID) = self.activateSessionBrowser(for: sessionID)
+            self.revealBrowserPane(for: sessionID, hostID: hostID)
 
             browser.navigate(to: approved, waitUntil: readiness) { [weak self] success, message in
                 self?.finishBrowserNavigation(
@@ -168,7 +171,7 @@ extension AgentToolCoordinator {
 
             Task { @MainActor in
                 let outcome = await browser.agentStopLoading(expectedURL: target)
-                _ = self.revealDisplayPane(for: sessionID)
+                _ = self.revealBrowserPane(for: sessionID)
                 completion(await self.browserActionResult(
                     outcome,
                     browser: browser,
@@ -299,7 +302,8 @@ extension AgentToolCoordinator {
 
             self.confirmBrowserSiteDataClear(
                 origin: origin,
-                context: lease.browser.contextKind
+                context: lease.browser.contextKind,
+                for: sessionID
             ) { [weak self] confirmed in
                 guard let self else { return }
                 guard confirmed else {
@@ -343,6 +347,7 @@ extension AgentToolCoordinator {
     func confirmBrowserSiteDataClear(
         origin: BrowserOrigin,
         context: BrowserContextKind,
+        for sessionID: SessionID,
         completion: @escaping (Bool) -> Void
     ) {
         if let browserSiteDataDecisionProvider {
@@ -372,7 +377,11 @@ extension AgentToolCoordinator {
             message: message,
             confirmTitle: L10n.string("Clear Website Data")
         )
-        ConfirmationAlert.ask(request, in: windowProvider(), completion: completion)
+        ConfirmationAlert.ask(
+            request,
+            in: browserPresentationWindow(for: sessionID),
+            completion: completion
+        )
     }
 
     func browserTrace(
@@ -385,7 +394,7 @@ extension AgentToolCoordinator {
               ["start", "stop", "status", "export", "clear"].contains(action) else {
             return .failure("action must be start, stop, status, export, or clear.")
         }
-        guard let browser = displayPaneController.browser(for: sessionID) else {
+        guard let browser = browserResolver.browser(for: sessionID) else {
             return .failure("No browser tab exists. Create one with browser_tabs first.")
         }
 
@@ -501,7 +510,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            self.revealDisplayPane(for: sessionID)
+            self.revealBrowserPane(for: sessionID)
             Task { @MainActor in
                 do {
                     let outcome = try await browser.agentChooseFiles(
@@ -547,7 +556,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            self.revealDisplayPane(for: sessionID)
+            self.revealBrowserPane(for: sessionID)
             Task { @MainActor in
                 do {
                     let outcome = try await browser.agentRequestDownload(
@@ -616,7 +625,7 @@ extension AgentToolCoordinator {
     }
 
     func browserCapabilities(for sessionID: SessionID) -> MCPToolResult {
-        let browser = displayPaneController.browser(for: sessionID)
+        let browser = browserResolver.browser(for: sessionID)
         let activeTab = browser.map {
             BrowserCapabilitiesPayload.ActiveTab(
                 backend: "webkit_in_app",
@@ -1109,7 +1118,7 @@ extension AgentToolCoordinator {
             }
         }
 
-        guard let browser = displayPaneController.browser(for: sessionID) else {
+        guard let browser = browserResolver.browser(for: sessionID) else {
             completion(.failure(
                 "No browser tab is open. Use browser_tabs with action new or browser_navigate first."
             ))
@@ -1125,16 +1134,16 @@ extension AgentToolCoordinator {
                     panel is pannable when that surface is larger than the pane.
                     """
             } else {
-                message = "Reset the active browser viewport to fit the shared panel."
+                message = "Reset the active browser viewport to fit its window."
             }
 
             guard browser.currentURL != nil else {
                 if let width = arguments.width, let height = arguments.height {
                     browser.setResponsiveViewport(width: width, height: height)
                 } else {
-                    browser.resetResponsiveViewportToPanel()
+                    browser.resetResponsiveViewportToHost()
                 }
-                _ = self.revealDisplayPane(for: sessionID)
+                _ = self.revealBrowserPane(for: sessionID)
                 completion(.success(message))
                 return
             }
@@ -1146,7 +1155,7 @@ extension AgentToolCoordinator {
                 let outcome = guarded.ok
                     ? BrowserActionOutcome(ok: true, message: message)
                     : guarded
-                _ = self.revealDisplayPane(for: sessionID)
+                _ = self.revealBrowserPane(for: sessionID)
                 completion(await self.browserActionResult(
                     outcome,
                     browser: browser,
@@ -1241,7 +1250,7 @@ extension AgentToolCoordinator {
             return
         }
 
-        guard let browser = displayPaneController.browser(for: sessionID) else {
+        guard let browser = browserResolver.browser(for: sessionID) else {
             completion(.failure(
                 "No browser tab is open. Use browser_tabs with action new or browser_navigate first."
             ))
@@ -1260,7 +1269,7 @@ extension AgentToolCoordinator {
                 if let mediaType {
                     browser.setEmulatedMediaType(mediaType)
                 }
-                _ = self.revealDisplayPane(for: sessionID)
+                _ = self.revealBrowserPane(for: sessionID)
                 completion(.success(Self.browserEmulationMessage(
                     colorScheme: colorScheme,
                     userAgent: userAgent,
@@ -1275,7 +1284,7 @@ extension AgentToolCoordinator {
                     userAgent: userAgent,
                     mediaType: mediaType
                 )
-                _ = self.revealDisplayPane(for: sessionID)
+                _ = self.revealBrowserPane(for: sessionID)
                 completion(await self.browserActionResult(
                     outcome,
                     browser: browser,
@@ -1386,9 +1395,19 @@ extension AgentToolCoordinator {
                 + note
             if let snapshot = try? await browser.agentSnapshot(),
                browser.agentPageIdentity == authorizedPage {
-                completion(.success(browser.scrubFilledSecrets(
-                    receipt + "\n\n" + snapshot.agentText
-                )))
+                let text = browser.scrubFilledSecrets(receipt + "\n\n" + snapshot.agentText)
+                if let location = self.browserResolver.location(
+                    of: browser,
+                    for: sessionID
+                ) {
+                    completion(self.targetedSuccess(
+                        text,
+                        destination: .browserTab(id: location.tabID.uuidString.lowercased()),
+                        for: sessionID
+                    ))
+                } else {
+                    completion(.success(text))
+                }
             } else {
                 completion(.failure(
                     "The browser document changed while the navigation result was being read; "

@@ -182,6 +182,102 @@ final class BrowserBaselineUITests: XCTestCase {
         XCTAssertEqual(library.view.frame.width, BrowserBaselineLibraryDefaults.width)
     }
 
+    /// Loads the library through a fresh store so disk discovery, thumbnail construction, the
+    /// retained row hierarchy, viewport drawing, and an event-driven whole-list rebuild remain
+    /// separately visible. The production quota is 200, so that is also the largest valid point.
+    func testStressBaselineLibraryWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(
+            environment["THREADING_BASELINE_LIBRARY_STRESS"] == "1",
+            "Set THREADING_BASELINE_LIBRARY_STRESS=1 to run the baseline library sweep."
+        )
+        let baselineCount = environment["THREADING_BASELINE_LIBRARY_STRESS_COUNT"]
+            .flatMap(Int.init)
+            .map { min(max($0, 1), BrowserBaselineDefaults.maximumBaselinesPerProject) }
+            ?? BrowserBaselineDefaults.maximumBaselinesPerProject
+        let themeID = AppThemeID(
+            environment["THREADING_BASELINE_LIBRARY_STRESS_THEME"] ?? "system"
+        )
+        let theme = try XCTUnwrap(AppThemeLibrary.theme(withID: themeID))
+        _ = NSApplication.shared
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(theme)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "BaselineLibraryStress-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectID = ProjectID()
+        let png = try BrowserBaselineStoreTests.png(width: 320, height: 200, red: 120)
+
+        let fixtureStarted = DispatchTime.now().uptimeNanoseconds
+        var writer: BrowserBaselineStore? = BrowserBaselineStore(root: root)
+        for index in 0..<baselineCount {
+            _ = try writer?.createBaseline(
+                BrowserBaselineStoreTests.request(
+                    name: String(format: "Baseline %03d", index),
+                    png: png
+                ),
+                in: projectID
+            )
+        }
+        writer = nil
+        let fixtureEnded = DispatchTime.now().uptimeNanoseconds
+        let baselineMemory = Self.physicalFootprintBytes()
+
+        let store = BrowserBaselineStore(root: root)
+        let controllerStarted = DispatchTime.now().uptimeNanoseconds
+        let library = BrowserBaselineLibraryViewController(
+            projectID: projectID,
+            projectName: "Stress Project",
+            store: store
+        )
+        let controllerEnded = DispatchTime.now().uptimeNanoseconds
+        let page = library.view
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+        let coldDescendants = Self.descendants(of: page).count
+
+        let scroll = try XCTUnwrap(
+            Self.descendants(of: page).compactMap { $0 as? NSScrollView }.first
+        )
+        let documentHeight = scroll.documentView?.bounds.height ?? 0
+        let draw = try scrollAndDraw(scroll, host: host, frames: 48)
+
+        let first = try XCTUnwrap(store.baselines(for: projectID).first)
+        let mutationStarted = DispatchTime.now().uptimeNanoseconds
+        _ = try store.setAgentReadable(!first.isAgentReadable, for: first.id, in: projectID)
+        let mutationRendered = DispatchTime.now().uptimeNanoseconds
+        host.layoutSubtreeIfNeeded()
+        let mutationLaidOut = DispatchTime.now().uptimeNanoseconds
+        let renderedMemory = Self.physicalFootprintBytes()
+
+        print(
+            "THREADING_PERF baseline-library "
+                + "theme=\(themeID.rawValue) baselines=\(baselineCount) "
+                + "fixture_ms=\(Self.milliseconds(fixtureEnded - fixtureStarted)) "
+                + "controller_ms=\(Self.milliseconds(controllerEnded - controllerStarted)) "
+                + "render_ms=\(Self.milliseconds(renderEnded - controllerEnded)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "mutation_render_ms=\(Self.milliseconds(mutationRendered - mutationStarted)) "
+                + "mutation_layout_ms=\(Self.milliseconds(mutationLaidOut - mutationRendered)) "
+                + "document_height=\(Int(documentHeight)) descendants=\(coldDescendants) "
+                + "scroll_ms=\(Self.milliseconds(draw.scroll / 48)) "
+                + "scroll_layout_ms=\(Self.milliseconds(draw.layout / 48)) "
+                + "draw_ms=\(Self.milliseconds(draw.draw / 48)) "
+                + "footprint_mb=\(Self.megabytes(Self.positiveDifference(renderedMemory, baselineMemory)))"
+        )
+
+        XCTAssertGreaterThan(documentHeight, scroll.contentSize.height)
+        XCTAssertGreaterThan(coldDescendants, baselineCount)
+        withExtendedLifetime((window, library, store)) {}
+    }
+
     /// The comparison *is* pane content, so it is the surface the display panel's protected 260pt
     /// minimum applies to.
     func testTheComparisonSurvivesTheNarrowPane() throws {
@@ -293,5 +389,76 @@ final class BrowserBaselineUITests: XCTestCase {
 
     private static func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func performanceWindow(_ page: NSView) -> NSWindow {
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: BrowserBaselineLibraryDefaults.width,
+            height: BrowserBaselineLibraryDefaults.height
+        ))
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        return window
+    }
+
+    private func scrollAndDraw(
+        _ scroll: NSScrollView,
+        host: NSView,
+        frames: UInt64
+    ) throws -> (scroll: UInt64, layout: UInt64, draw: UInt64) {
+        let document = try XCTUnwrap(scroll.documentView)
+        let viewport = scroll.bounds
+        let overflow = max(document.bounds.height - scroll.contentSize.height, 0)
+        let bitmap = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: viewport))
+        var scrollNanoseconds: UInt64 = 0
+        var layoutNanoseconds: UInt64 = 0
+        var drawNanoseconds: UInt64 = 0
+        for frame in 0..<frames {
+            let fraction = CGFloat(frame) / CGFloat(max(frames - 1, 1))
+            let started = DispatchTime.now().uptimeNanoseconds
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: overflow * fraction))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let scrolled = DispatchTime.now().uptimeNanoseconds
+            host.layoutSubtreeIfNeeded()
+            let laidOut = DispatchTime.now().uptimeNanoseconds
+            scroll.cacheDisplay(in: viewport, to: bitmap)
+            let drawn = DispatchTime.now().uptimeNanoseconds
+            scrollNanoseconds += scrolled - started
+            layoutNanoseconds += laidOut - scrolled
+            drawNanoseconds += drawn - laidOut
+        }
+        return (scrollNanoseconds, layoutNanoseconds, drawNanoseconds)
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = pid_t(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func positiveDifference(_ larger: UInt64, _ smaller: UInt64) -> UInt64 {
+        larger >= smaller ? larger - smaller : 0
+    }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
     }
 }

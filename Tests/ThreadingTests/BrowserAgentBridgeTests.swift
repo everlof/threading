@@ -436,21 +436,46 @@ final class BrowserAgentBridgeTests: XCTestCase {
             groups: [],
             browserAccessStore: store
         )
-        _ = controller.view
-        var labels = descendants(in: controller.view)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = controller
+        let table = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? ThemedGroupedTableView }.first
+        )
+        // With the injected empty tool catalogue the fixed Website Access section is row three.
+        // Reach it through the production viewport rather than assuming a virtualized page has
+        // eagerly built every row below the fold.
+        XCTAssertGreaterThan(table.numberOfRows, 3)
+        table.scrollRowToVisible(3)
+        window.contentView?.layoutSubtreeIfNeeded()
+        var websiteCell = try XCTUnwrap(
+            table.view(atColumn: 0, row: 3, makeIfNecessary: true),
+            "the virtualized Website Access row was not materialized"
+        )
+        var labels = descendants(in: websiteCell)
             .compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(labels.contains(first.key))
         XCTAssertTrue(labels.contains(second.key))
 
         let revoke = try XCTUnwrap(
-            descendants(in: controller.view)
+            descendants(in: websiteCell)
                 .compactMap { $0 as? ThemedButton }
                 .first { $0.title == "Revoke" }
         )
         _ = revoke.sendAction(revoke.action, to: revoke.target)
 
         XCTAssertEqual(store.allowedOrigins, [second.key])
-        labels = descendants(in: controller.view)
+        table.scrollRowToVisible(3)
+        window.contentView?.layoutSubtreeIfNeeded()
+        websiteCell = try XCTUnwrap(
+            table.view(atColumn: 0, row: 3, makeIfNecessary: true),
+            "the reloaded Website Access row was not materialized"
+        )
+        labels = descendants(in: websiteCell)
             .compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertFalse(labels.contains(first.key))
         XCTAssertTrue(labels.contains(second.key))
@@ -2578,8 +2603,6 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             .browserVisualCompare(.init(
                 baselinePath: baselineURL.path,
                 fullPage: false,
-                ref: nil,
-                selector: nil,
                 channelThreshold: 0,
                 maximumDifferentRatio: 0,
                 show: false,
@@ -2589,7 +2612,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         XCTAssertFalse(matching.isError, matching.text)
         XCTAssertTrue(matching.text.contains("Visual comparison: MATCH"), matching.text)
-        XCTAssertTrue(matching.text.contains("Different pixels: 0"), matching.text)
+        XCTAssertTrue(matching.text.contains("0 of"), matching.text)
 
         _ = try await browser.evaluate(
             "document.body.style.background = 'rgb(180, 20, 30)'"
@@ -2600,8 +2623,6 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             .browserVisualCompare(.init(
                 baselinePath: baselineURL.path,
                 fullPage: false,
-                ref: nil,
-                selector: nil,
                 channelThreshold: 0,
                 maximumDifferentRatio: 0,
                 show: false,
@@ -4094,7 +4115,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             "Viewport screenshots must capture the same responsive surface the page measures"
         )
 
-        browser.resetResponsiveViewportToPanel()
+        browser.resetResponsiveViewportToHost()
         browser.view.layoutSubtreeIfNeeded()
         XCTAssertNil(browser.responsiveViewport)
         let resetViewport = try await browser.agentSnapshot()
@@ -5289,7 +5310,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             blockedResize.message
         )
         XCTAssertEqual(browser.currentURL?.path, "/form")
-        browser.resetResponsiveViewportToPanel()
+        browser.resetResponsiveViewportToHost()
 
         let snapshot = try await browser.agentSnapshot()
         let buttonRef = try XCTUnwrap(

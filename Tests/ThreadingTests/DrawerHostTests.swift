@@ -279,18 +279,60 @@ final class DrawerHostTests: XCTestCase {
         window.contentView?.addSubview(host.view)
         window.contentView?.layoutSubtreeIfNeeded()
 
+        // Asked in screen coordinates, because the gesture now crosses windows — the fixture
+        // converts through its own window exactly as the strip does.
+        func onScreen(_ point: NSPoint) -> NSPoint { window.convertPoint(toScreen: point) }
+
         let inBand = NSPoint(x: 200, y: 300 - ThemedTabStripView.bandHeight / 2)
-        XCTAssertTrue(host.dropBandContains(windowPoint: inBand))
+        XCTAssertTrue(host.dropBandContains(screenPoint: onScreen(inBand)))
         XCTAssertFalse(
-            host.dropBandContains(windowPoint: NSPoint(x: 200, y: 100)),
+            host.dropBandContains(screenPoint: onScreen(NSPoint(x: 200, y: 100))),
             "The shell below the band is the tab's content, not a drop zone"
         )
-        XCTAssertFalse(host.dropBandContains(windowPoint: NSPoint(x: 500, y: inBand.y)))
+        XCTAssertFalse(
+            host.dropBandContains(screenPoint: onScreen(NSPoint(x: 500, y: inBand.y)))
+        )
 
+        let outside = onScreen(inBand)
         host.view.removeFromSuperview()
         XCTAssertFalse(
-            host.dropBandContains(windowPoint: inBand),
+            host.dropBandContains(screenPoint: outside),
             "Off the window there is no band to hit"
+        )
+    }
+
+    // MARK: - Shell Inset
+
+    /// The drawer's shell was the one flush terminal in the app: its first row sat on the
+    /// strip's rule and its first column on the pane's edge. It takes the same
+    /// `TerminalPadding` the agent and project terminals take, and the margin is painted the
+    /// terminal's own background so it reads as the terminal's air, not a gap around it.
+    /// No process starts: the shell spawns on reveal, and nothing here reveals it.
+    func testTheShellTerminalIsInsetInsideItsOwnBackground() throws {
+        let shell = ShellDrawerViewController(
+            sessionID: SessionID(),
+            directory: { URL(fileURLWithPath: NSTemporaryDirectory()) }
+        )
+        shell.view.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
+        shell.view.layoutSubtreeIfNeeded()
+
+        let terminal = try XCTUnwrap(
+            shell.view.subviews.compactMap { $0 as? EmojiFixedTerminalView }.first,
+            "the drawer's shell hosts its terminal view directly"
+        )
+        XCTAssertEqual(terminal.frame.minX, TerminalPadding.leading)
+        XCTAssertEqual(
+            shell.view.bounds.maxX - terminal.frame.maxX,
+            TerminalPadding.trailing
+        )
+        // Unflipped host: the frame's minY is the bottom margin, under the strip's is the top.
+        XCTAssertEqual(terminal.frame.minY, TerminalPadding.bottom)
+        XCTAssertEqual(shell.view.bounds.maxY - terminal.frame.maxY, TerminalPadding.top)
+
+        XCTAssertEqual(
+            shell.view.layer?.backgroundColor,
+            terminal.nativeBackgroundColor.cgColor,
+            "the margin must be the terminal's exact background, or it reads as a border"
         )
     }
 
