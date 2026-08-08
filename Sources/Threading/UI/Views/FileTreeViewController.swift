@@ -1,5 +1,11 @@
 import AppKit
 
+typealias FileTreeActivityLookup = @MainActor (
+    AgentWorkTarget,
+    [AgentWorkTreePath],
+    @escaping @MainActor @Sendable ([String: AgentWorkTreeItem]) -> Void
+) -> Void
+
 // MARK: - File Node
 
 /// One entry in the tree. A reference type because the outline view identifies rows by object,
@@ -74,7 +80,7 @@ final class FileNode: NSObject {
 
 // MARK: - File Tree View Controller
 
-/// The project's files, as a lazily-loaded tree.
+/// The project's files and the selected session's observed work, as a lazily-loaded tree.
 ///
 /// Lazy is the whole design: a project root reached recursively is unbounded — `node_modules`
 /// alone can be a hundred thousand entries — so a directory is read when it is opened and not
@@ -82,9 +88,18 @@ final class FileNode: NSObject {
 /// construction: a tab restored into a background session costs nothing until it is looked at.
 final class FileTreeViewController: NSViewController {
 
+    private enum Limits {
+        /// Several screenfuls, enough to avoid churn during short scrolls and independent of the
+        /// number of expanded files.
+        static let activityRows = 256
+    }
+
     // MARK: - Properties
 
     let folderPath: String
+    private let workTarget: AgentWorkTarget?
+    private let activityLookup: FileTreeActivityLookup
+    private let appEvents = AppEventObservations()
 
     private lazy var root = FileNode(
         url: URL(fileURLWithPath: folderPath),
@@ -116,14 +131,32 @@ final class FileTreeViewController: NSViewController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         return scroll
     }()
+    private lazy var workSummary = AgentWorkSummaryView(target: workTarget)
+    private let summarySeparator = SeparatorView()
     private var hasLoaded = false
+    private var activityCache: [String: AgentWorkTreeItem] = [:]
+    private var resolvedActivityPaths: Set<String> = []
+    private var activityCacheOrder: [String] = []
+    private var pendingActivityPaths: [String: AgentWorkTreePath] = [:]
+    private var isActivityRequestScheduled = false
+    private var activityGeneration = 0
     /// Holds the row context menu while it is up; released from its own dismissal.
     private var contextMenuSession: AnyObject?
 
     // MARK: - Initialization
 
-    init(folderPath: String) {
+    init(
+        folderPath: String,
+        workTarget: AgentWorkTarget? = nil,
+        activityLookup: FileTreeActivityLookup? = nil
+    ) {
         self.folderPath = folderPath
+        self.workTarget = workTarget
+        self.activityLookup = activityLookup ?? { target, paths, completion in
+            AgentWorkTraceStore.shared.treeItems(
+                for: target, paths: paths, completion: completion
+            )
+        }
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -141,6 +174,7 @@ final class FileTreeViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupOutlineView()
+        observeActivity()
     }
 
     // MARK: - Setup
@@ -148,12 +182,56 @@ final class FileTreeViewController: NSViewController {
     private func setupOutlineView() {
         view.addSubview(scrollView)
 
+        guard workTarget != nil else {
+            NSLayoutConstraint.activate([
+                scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+            return
+        }
+
+        workSummary.setAccessibilityIdentifier("activity.summary")
+        summarySeparator.setAccessibilityIdentifier("activity.summary-separator")
+        view.addSubview(workSummary)
+        view.addSubview(summarySeparator)
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            workSummary.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                constant: Design.Spacing.inset
+            ),
+            workSummary.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            workSummary.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -Design.Spacing.inset
+            ),
+            summarySeparator.topAnchor.constraint(
+                equalTo: workSummary.bottomAnchor,
+                constant: Design.Spacing.inset
+            ),
+            summarySeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            summarySeparator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: summarySeparator.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    private func observeActivity() {
+        guard let workTarget else { return }
+        appEvents.observe(AgentWorkDidChange.self) { [weak self] event in
+            guard let self,
+                  event.projectID == workTarget.projectID,
+                  workTarget.sessionID == nil || workTarget.sessionID == event.sessionID else {
+                return
+            }
+            self.invalidateActivityRows()
+        }
     }
 
     override func viewDidLayout() {
@@ -221,6 +299,89 @@ final class FileTreeViewController: NSViewController {
         let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
         guard row >= 0 else { return nil }
         return outlineView.item(atRow: row) as? FileNode
+    }
+
+    private func relativePath(for node: FileNode) -> String? {
+        if let direct = AgentWorkPath.relative(node.url.path, root: folderPath) {
+            return direct
+        }
+        // Foundation can canonicalize `/var` to `/private/var` while enumerating a directory.
+        // Resolve both sides only as a fallback so a symlink *inside* an ordinary project keeps
+        // the checkout-relative identity the agent reported.
+        let resolvedRoot = URL(fileURLWithPath: folderPath).resolvingSymlinksInPath().path
+        let resolvedPath = node.url.resolvingSymlinksInPath().path
+        return AgentWorkPath.relative(resolvedPath, root: resolvedRoot)
+    }
+
+    /// Coalesces AppKit's row requests into one worker lookup on the next main-loop turn.
+    private func scheduleActivity(for node: FileNode) {
+        guard workTarget != nil, let path = relativePath(for: node),
+              !resolvedActivityPaths.contains(path) else { return }
+        pendingActivityPaths[path] = AgentWorkTreePath(
+            relativePath: path, isDirectory: node.isDirectory
+        )
+        guard !isActivityRequestScheduled else { return }
+        isActivityRequestScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.requestPendingActivity() }
+    }
+
+    private func requestPendingActivity() {
+        isActivityRequestScheduled = false
+        guard let workTarget, !pendingActivityPaths.isEmpty else { return }
+        let paths = Array(pendingActivityPaths.values)
+        pendingActivityPaths.removeAll(keepingCapacity: true)
+        let generation = activityGeneration
+        activityLookup(workTarget, paths) { [weak self] items in
+            guard let self, self.activityGeneration == generation else { return }
+            for path in paths {
+                self.resolvedActivityPaths.insert(path.relativePath)
+                self.activityCacheOrder.removeAll { $0 == path.relativePath }
+                self.activityCacheOrder.append(path.relativePath)
+                self.activityCache[path.relativePath] = items[path.relativePath]
+            }
+            self.trimActivityCache()
+            self.applyActivityToVisibleRows()
+        }
+    }
+
+    private func trimActivityCache() {
+        while activityCacheOrder.count > Limits.activityRows {
+            let path = activityCacheOrder.removeFirst()
+            resolvedActivityPaths.remove(path)
+            activityCache.removeValue(forKey: path)
+        }
+    }
+
+    private func invalidateActivityRows() {
+        activityGeneration += 1
+        activityCache.removeAll(keepingCapacity: true)
+        resolvedActivityPaths.removeAll(keepingCapacity: true)
+        activityCacheOrder.removeAll(keepingCapacity: true)
+        pendingActivityPaths.removeAll(keepingCapacity: true)
+        requestVisibleActivity()
+    }
+
+    private func requestVisibleActivity() {
+        let rows = outlineView.rows(in: outlineView.visibleRect)
+        guard rows.location != NSNotFound else { return }
+        for row in rows.location..<(rows.location + rows.length) {
+            guard let node = outlineView.item(atRow: row) as? FileNode else { continue }
+            scheduleActivity(for: node)
+        }
+    }
+
+    /// Never enumerates all expanded rows: only views intersecting the scroll viewport are read.
+    private func applyActivityToVisibleRows() {
+        let rows = outlineView.rows(in: outlineView.visibleRect)
+        guard rows.location != NSNotFound else { return }
+        for row in rows.location..<(rows.location + rows.length) {
+            guard let node = outlineView.item(atRow: row) as? FileNode,
+                  let path = relativePath(for: node),
+                  let rowView = outlineView.view(
+                    atColumn: 0, row: row, makeIfNecessary: false
+                  ) as? FileTreeRowView else { continue }
+            rowView.setActivity(activityCache[path])
+        }
     }
 
     // MARK: - Actions
@@ -325,7 +486,12 @@ extension FileTreeViewController: NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
-        return FileTreeRowView(node: node)
+        let row = FileTreeRowView(node: node)
+        if let path = relativePath(for: node) {
+            row.setActivity(activityCache[path])
+        }
+        scheduleActivity(for: node)
+        return row
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -335,11 +501,15 @@ extension FileTreeViewController: NSOutlineViewDelegate {
 
 // MARK: - Row
 
-/// One row: the file's themed icon and its name. System keeps Finder artwork; authored themes use
-/// the semantic design-system renderer described in `ThemedFileIconView`.
-private final class FileTreeRowView: NSView {
+/// One row: the file's themed icon, name, and exact observed read/edit totals. System keeps Finder
+/// artwork; authored themes use the semantic renderer described in `ThemedFileIconView`.
+final class FileTreeRowView: NSView {
+
+    private let node: FileNode
+    private let activityLabel = NSTextField(labelWithString: "")
 
     init(node: FileNode) {
+        self.node = node
         super.init(frame: .zero)
 
         let icon = ThemedFileIconView(url: node.url, isDirectory: node.isDirectory)
@@ -351,8 +521,22 @@ private final class FileTreeRowView: NSView {
         label.usesSingleLineMode = true
         label.translatesAutoresizingMaskIntoConstraints = false
 
+        activityLabel.applyFont(.numericDetail())
+        activityLabel.textColor = Design.Text.tertiary
+        activityLabel.lineBreakMode = .byTruncatingTail
+        activityLabel.usesSingleLineMode = true
+        activityLabel.isHidden = true
+        activityLabel.setContentHuggingPriority(.required, for: .horizontal)
+        activityLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        activityLabel.setAccessibilityIdentifier("activity.file-status")
+        activityLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         addSubview(icon)
         addSubview(label)
+        addSubview(activityLabel)
 
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -361,9 +545,42 @@ private final class FileTreeRowView: NSView {
             icon.heightAnchor.constraint(equalToConstant: FileTreeDefaults.iconSize),
 
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: Design.Spacing.tight),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+            label.trailingAnchor.constraint(
+                lessThanOrEqualTo: activityLabel.leadingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            activityLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            activityLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+    }
+
+    func setActivity(_ item: AgentWorkTreeItem?) {
+        guard let item, item.work.isTouched else {
+            activityLabel.stringValue = ""
+            activityLabel.isHidden = true
+            activityLabel.setAccessibilityLabel("")
+            setAccessibilityLabel(node.name)
+            return
+        }
+
+        let reads = item.work.readCount
+        let edits = item.work.editCount
+        let compact = item.isDirectory
+            ? L10n.format("%d files · R %d · E %d", item.touchedFileCount, reads, edits)
+            : L10n.format("R %d · E %d", reads, edits)
+        activityLabel.stringValue = compact
+        activityLabel.textColor = edits > 0 ? Design.Text.secondary : Design.Text.tertiary
+        activityLabel.isHidden = false
+
+        let spoken = item.isDirectory
+            ? L10n.format(
+                "%d files, %d reads, %d edits", item.touchedFileCount, reads, edits
+            )
+            : L10n.format("%d reads, %d edits", reads, edits)
+        activityLabel.setAccessibilityLabel(spoken)
+        setAccessibilityLabel(node.name + ", " + spoken)
     }
 
     required init?(coder: NSCoder) {

@@ -256,7 +256,7 @@ final class PaneTab {
     case .terminal(let terminal):
       return terminal.currentTitle
     case .files:
-      return "Files"
+      return L10n.string("Activity")
     case .attachments:
       return "Attachments"
     case .subagents:

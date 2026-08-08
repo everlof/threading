@@ -225,7 +225,7 @@ final class ComponentGalleryViewController: NSViewController {
         (UUID(), L10n.string("Terminal"), "terminal"),
         (UUID(), L10n.string("Browser"), "globe"),
         (UUID(), L10n.string("Review"), "plus.forwardslash.minus"),
-        (UUID(), L10n.string("Files"), "folder")
+        (UUID(), L10n.string("Activity"), "folder")
     ]
     private var stripActiveTabID: UUID?
     private let activityMapView = FileActivityMapView()
@@ -1481,7 +1481,7 @@ final class ComponentGalleryViewController: NSViewController {
                 ),
                 story(
                     "AgentWorkSummaryView",
-                    "The detailed, bounded project aggregate behind a sidebar workprint: the "
+                    "The bounded Activity overview above the filesystem tree: the "
                         + "repository atlas, action ribbon, counts, and recent agents share one "
                         + "stable file axis even when the checkout has thousands of files.",
                     makeAgentWorkSummarySample()

@@ -221,7 +221,7 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "t", modifiers: .command), isEditable: true),
         AppCommand(id: ID.browser, group: .view, title: "Browser",
                    defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .shift]), isEditable: true),
-        AppCommand(id: ID.files, group: .view, title: "Files",
+        AppCommand(id: ID.files, group: .view, title: "Activity",
                    defaultShortcut: KeyboardShortcut(key: "p", modifiers: .command), isEditable: true),
         AppCommand(id: ID.review, group: .view, title: "Git Review",
                    defaultShortcut: KeyboardShortcut(key: "r", modifiers: [.command, .shift]), isEditable: true),

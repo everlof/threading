@@ -63,8 +63,8 @@ extension PersistedPanel {
           + "cannot type into it, and what they run there is not in your transcript)"
       case .files:
         detail =
-          "a file tree of the project folder (the user is browsing the files "
-          + "you are working in)"
+          "the Activity tree for this conversation (the user is browsing the project "
+          + "filesystem with your exact read and edit counts)"
       case .attachments:
         detail = "visual files referenced in this session (images and PDFs)"
       case .extensionPanel:

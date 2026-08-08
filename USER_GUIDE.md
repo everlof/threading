@@ -1831,7 +1831,7 @@ that slot. Let go anywhere else and everything springs back. The same move is in
 secondary-click menu — **Move to Shell Drawer** on a panel tab, **Move to Display Panel** on
 a drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
 browser keeps its page — and the new home survives a relaunch. The panel-only surfaces
-(Review, Info, Files, comparisons) stay where they are one of a kind.
+(Review, Info, Activity, comparisons) stay where they are one of a kind.
 
 ### The session header
 
@@ -1863,7 +1863,7 @@ installed are listed, and a terminal is only ever offered a folder. The control 
 Settings page, which has no checkout.
 
 The same **Open in ▸** submenu appears wherever a folder or a file is named: on a project row
-and a session row in the sidebar, on a row of the **Files** tab, and — the useful one — on a
+and a session row in the sidebar, on a row of the **Activity** tab, and — the useful one — on a
 right-click in **Git Review**, where it opens the file *at the first line the diff changes*.
 
 Four buttons sit at the header's right edge:
@@ -1876,6 +1876,14 @@ Four buttons sit at the header's right edge:
   chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
+
+Open **Activity** from the display panel's **+** menu (or press **Cmd+P**) to see what the selected
+agent has done in the checkout. The overview at the top shows the repository-wide shape of the
+work and its recent actions; below it, the ordinary filesystem hierarchy carries exact read/edit
+counts. A folder's count is the total for the touched files below it, so expanding `Sources`, for
+example, moves naturally from the aggregate into the individual files. Untouched files remain in
+the tree without a badge. Closed folders stay lazy and only visible rows ask for activity, so a
+large checkout does not have to be built merely to open the pane.
 
 Five kinds of content:
 
@@ -2591,12 +2599,11 @@ not show it at all. Requires macOS 14.
 ### Sidebar
 - **Cmd+Ctrl+S**, or the toggle button at the left of the header: show/hide the sidebar
 
-Each agent row has a tiny workprint along its lower edge showing where that agent has read and
-edited files in the project. Hover the row for the expanded repository map, work counts and recent
-action ribbon. The project row uses the same map for all of its agents together; overlap marks show
-where several agents have worked in the same region, and the expanded card names recent agents.
-The map stays a fixed visual size even in very large projects, and new files collect in a stable
-end cell rather than rearranging the existing file layout.
+Agent and project rows stay visually quiet: their lower edge is no longer an activity strip and
+hovering them only shows the ordinary row information. Open the display panel's **Activity** tab
+for the repository map, recent action ribbon, work counts, and exact filesystem hierarchy for the
+selected agent. The map stays a fixed visual size even in very large projects, and new files
+collect in a stable end cell rather than rearranging the existing file layout.
 
 ### Text and terminal size
 
@@ -3372,7 +3379,7 @@ screen says so and leads with the offers further down the list instead.
 | Headings for Lone Branches | Cmd+Option+B |
 | Terminal (display panel tab) | Cmd+T |
 | Browser | Cmd+Shift+B |
-| Files (display panel tab) | Cmd+P |
+| Activity (display panel tab) | Cmd+P |
 | Git Review | Cmd+Shift+R |
 | Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
 | Session Info | Cmd+Shift+I |

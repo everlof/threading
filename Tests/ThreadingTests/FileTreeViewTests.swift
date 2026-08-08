@@ -90,6 +90,98 @@ final class FileTreeViewTests: XCTestCase {
         XCTAssertNotNil(Self.node(at: feature.appendingPathComponent("Two.swift"), in: outline))
     }
 
+    func testActivityTreeShowsFolderAndFileReadEditCounts() throws {
+        let fixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-activity-tree-\(UUID().uuidString)", isDirectory: true)
+        let sources = fixture.appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        try makeFile(named: "One.swift", in: sources)
+        try makeFile(named: "Two.swift", in: sources)
+
+        let projectID = ProjectID()
+        let sessionID = SessionID()
+        let target = AgentWorkTarget.session(
+            projectID: projectID,
+            sessionID: sessionID,
+            rootPath: fixture.path,
+            detailed: true
+        )
+        let items = [
+            "Sources": treeItem("Sources", directory: true, reads: 3, edits: 1, files: 2),
+            "Sources/One.swift": treeItem(
+                "Sources/One.swift", directory: false, reads: 2, edits: 1, files: 1
+            ),
+            "Sources/Two.swift": treeItem(
+                "Sources/Two.swift", directory: false, reads: 1, edits: 0, files: 1
+            )
+        ]
+        var requestedPaths: Set<String> = []
+        let controller = FileTreeViewController(
+            folderPath: fixture.path,
+            workTarget: target,
+            activityLookup: { _, paths, completion in
+                requestedPaths.formUnion(paths.map(\.relativePath))
+                completion(Dictionary(uniqueKeysWithValues: paths.compactMap { path in
+                    items[path.relativePath].map { (path.relativePath, $0) }
+                }))
+            }
+        )
+        _ = controller.view
+        let host = ThemedSurfaceView()
+        host.frame = NSRect(x: 0, y: 0, width: 420, height: 420)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        let summary = try XCTUnwrap(Self.firstDescendant(AgentWorkSummaryView.self, in: host))
+        summary.setPresentation(activityPresentation(sessionID: sessionID))
+        controller.refresh()
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+
+        let outline = try XCTUnwrap(Self.firstDescendant(NSOutlineView.self, in: host))
+        outline.expandItem(try XCTUnwrap(Self.node(at: sources, in: outline)))
+        host.layoutSubtreeIfNeeded()
+        for row in 0..<outline.numberOfRows {
+            _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+        host.layoutSubtreeIfNeeded()
+
+        let labels = Set(
+            Self.descendants(NSTextField.self, in: host).map(\.stringValue)
+        )
+        XCTAssertEqual(
+            requestedPaths,
+            ["Sources", "Sources/One.swift", "Sources/Two.swift"]
+        )
+        XCTAssertTrue(labels.contains("2 files · R 3 · E 1"), "\(labels.sorted())")
+        XCTAssertTrue(labels.contains("R 2 · E 1"), "\(labels.sorted())")
+        XCTAssertTrue(labels.contains("R 1 · E 0"), "\(labels.sorted())")
+        let spokenActivity = Set(
+            Self.descendants(NSTextField.self, in: host)
+                .filter { $0.accessibilityIdentifier() == "activity.file-status" }
+                .compactMap { $0.accessibilityLabel() }
+        )
+        XCTAssertTrue(spokenActivity.contains("2 files, 3 reads, 1 edits"))
+        XCTAssertTrue(spokenActivity.contains("2 reads, 1 edits"))
+        XCTAssertTrue(spokenActivity.contains("1 reads, 0 edits"))
+        XCTAssertEqual(summary.accessibilityIdentifier(), "activity.summary")
+        try writeActivityRender(host)
+    }
+
     /// The same ordinary tree under the platform identity and three deliberately different
     /// authored materials. `THREADING_RENDER_OUT` redirects the PNGs for visual review.
     func testRendersFileIconsAcrossContrastingThemes() throws {
@@ -327,6 +419,61 @@ final class FileTreeViewTests: XCTestCase {
         guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
+    }
+
+    private func treeItem(
+        _ path: String,
+        directory: Bool,
+        reads: Int,
+        edits: Int,
+        files: Int
+    ) -> AgentWorkTreeItem {
+        var work = AgentFileWork()
+        for _ in 0..<reads { work.record(.read, at: .distantPast) }
+        for _ in 0..<edits { work.record(.edit, at: .distantPast) }
+        return AgentWorkTreeItem(
+            relativePath: path,
+            isDirectory: directory,
+            work: work,
+            touchedFileCount: files,
+            contributorCount: 1
+        )
+    }
+
+    private func activityPresentation(sessionID: SessionID) -> AgentWorkPresentation {
+        let files = ["Sources/One.swift", "Sources/Two.swift"]
+        var trace = AgentSessionWorkTrace()
+        trace.sessionTitle = "Build Activity pane"
+        trace.agentLabel = "Codex"
+        _ = trace.recordFile(.read, path: files[0], root: nil, at: Date())
+        _ = trace.recordFile(.read, path: files[0], root: nil, at: Date())
+        _ = trace.recordFile(.edit, path: files[0], root: nil, at: Date())
+        _ = trace.recordFile(.read, path: files[1], root: nil, at: Date())
+        trace.recordAction(
+            category: .shell,
+            operation: "test",
+            at: Date(),
+            sessionID: sessionID
+        )
+        return AgentWorkPresentation.session(
+            trace,
+            sessionID: sessionID,
+            atlas: RepositoryFileAtlas(files: files),
+            detailed: true
+        )
+    }
+
+    private func writeActivityRender(_ view: NSView) throws {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        try data.write(to: directory.appendingPathComponent("activity-filesystem-tree.png"))
+        print("Rendered Activity tree to \(directory.path)")
     }
 
     private static func firstDescendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {

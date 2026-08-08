@@ -87,6 +87,23 @@ struct AgentFileWork: Codable, Equatable, Sendable {
     }
 }
 
+/// A path requested by the Activity tree. Directories mean "all touched files below here";
+/// files mean the exact path. The UI sends only paths with materialized outline rows.
+struct AgentWorkTreePath: Hashable, Sendable {
+    let relativePath: String
+    let isDirectory: Bool
+}
+
+/// Exact sparse work for one visible filesystem row. Directory values are incremental descendant
+/// aggregates, so reading one never walks either the checkout or a session trace.
+struct AgentWorkTreeItem: Equatable, Sendable {
+    let relativePath: String
+    let isDirectory: Bool
+    let work: AgentFileWork
+    let touchedFileCount: Int
+    let contributorCount: Int
+}
+
 /// Everything retained for one conversation. File state is sparse: a 100,000-file repository
 /// with twelve touched files stores twelve entries, not a second copy of the repository.
 struct AgentSessionWorkTrace: Codable, Equatable, Sendable {
@@ -166,6 +183,21 @@ enum AgentWorkPath {
     static func parent(of path: String) -> String {
         guard let slash = path.lastIndex(of: "/") else { return "" }
         return String(path[..<slash])
+    }
+
+    /// Root plus every containing directory, nearest last. The file itself is not included.
+    /// `Sources/UI/Button.swift` therefore contributes to `""`, `Sources`, and `Sources/UI`.
+    static func directoryAncestors(of path: String) -> [String] {
+        var ancestors = [""]
+        var components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count > 1 else { return ancestors }
+        components.removeLast()
+        var current = ""
+        for component in components {
+            current = current.isEmpty ? String(component) : current + "/" + component
+            ancestors.append(current)
+        }
+        return ancestors
     }
 
     private static func normalizedRoot(_ suppliedRoot: String?) -> String? {

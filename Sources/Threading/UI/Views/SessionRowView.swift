@@ -77,9 +77,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private let accountChipView = NSImageView()
 
     private let titleLabel = MorphingTitleLabel()
-    /// A bounded projection of this conversation's observed file work. It is host-owned state,
-    /// so extension replacement of the title subtree cannot hide or accidentally rebuild it.
-    private let workprint = FileActivityMapView()
     /// Pinning is stronger than every sidebar sort, so it remains visible beside the title
     /// rather than being communicated only by the row's position.
     private let pinnedIndicator = NSImageView()
@@ -258,7 +255,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         setupTrailingSlot()
         setupCustomizableContent()
-        setupWorkprint()
 
         // `textField` is deliberately left unset. Assigning it lets the table restyle the
         // label on selection, which tints an unemphasized source-list row with the accent
@@ -388,24 +384,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         _ = identityCustomizationHost
         _ = customizationHost
-    }
-
-    private func setupWorkprint() {
-        workprint.translatesAutoresizingMaskIntoConstraints = false
-        workprint.setAccessibilityIdentifier("sidebar.session.workprint")
-        addSubview(workprint)
-        NSLayoutConstraint.activate([
-            workprint.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SidebarRowDefaults.leadingInset
-            ),
-            workprint.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -SidebarRowDefaults.trailingInset
-            ),
-            workprint.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
-            workprint.heightAnchor.constraint(equalToConstant: 3)
-        ])
     }
 
     /// The slot sits at the trailing edge, where it reads as status rather than as another
@@ -693,18 +671,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let account = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
         applyAgentIcon(for: session, account: account)
         applyTextColors()
-
-        if let project = ProjectStore.shared.project(forSessionID: session.id),
-           let root = ProjectStore.shared.workingDirectory(forSessionID: session.id) {
-            workprint.bind(to: .session(
-                projectID: project.id,
-                sessionID: session.id,
-                rootPath: root,
-                detailed: false
-            ))
-        } else {
-            workprint.bind(to: nil)
-        }
 
         identityCustomizationHost.updateTarget(
             .sessionIdentity(sessionID: session.id.uuidString.lowercased())

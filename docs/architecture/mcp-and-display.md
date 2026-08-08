@@ -218,13 +218,22 @@ The panel normally belongs to the selected session and presents that session's p
 strip with one non-persisted inspector while leaving both per-session tab lists untouched. It is
 not offered by the tab `+`, cannot be reordered or transferred, and stays visible when the user
 selects another conversation. An explicit request for a session surface — Browser, Review,
-Terminal, Files, Info, Attachments, Subagents, or a transferred tab — exits the inspector and
+Terminal, Activity, Info, Attachments, Subagents, or a transferred tab — exits the inspector and
 returns to the selected session's tabs. This lets a conversation remain alongside the theme being
 discussed without pretending an app-wide document belongs to that conversation.
 
 `DisplayContent.Body` is an enum, so the panel shows a `ThemedImagePreview`, a `WKWebView`, or a
 native semantic scene and the `⋯` menu offers only the actions that fit — an image and a document
 share almost nothing worth acting on.
+
+**Activity is the filesystem-shaped account of agent work.** The former Files tab keeps its
+persisted `.files` body and `view.files` command identity for layout and shortcut compatibility,
+but presents as Activity. `AgentWorkSummaryView` supplies the bounded repository atlas and recent
+action overview above `FileTreeViewController`; the outline below remains the ordinary lazy file
+browser and annotates its visible rows with exact read/edit totals. A directory total is maintained
+incrementally from file events, not computed by walking its subtree. Row queries contain only the
+current viewport, cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker.
+Closed directories are neither enumerated nor represented by views merely because the pane opened.
 
 **The panel's one header row ends in two controls: `+`, and the pane's own close.** The `xmark`
 sits outermost, in the slot a close occupies in every corner of this app, with `+` beside it; it

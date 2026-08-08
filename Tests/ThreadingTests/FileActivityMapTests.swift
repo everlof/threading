@@ -384,6 +384,94 @@ final class FileActivityMapTests: XCTestCase {
         XCTAssertEqual(restored.bins.reduce(0) { $0 + $1.editCount }, 1)
     }
 
+    @MainActor
+    func testTreeItemsReturnExactFilesAndIncrementalDirectoryAggregates() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentWorkTreeTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let projectID = ProjectID()
+        let first = AgentSession(kind: .codex, title: "Build the UI")
+        let second = AgentSession(kind: .claude, title: "Review the UI")
+        let root = "/repo"
+        let store = AgentWorkTraceStore(directory: directory)
+
+        func record(
+            _ kind: AgentFileActivityKind,
+            path: String,
+            callID: String,
+            session: AgentSession
+        ) {
+            store.record(
+                providerEvent: ProviderExecutionEvent(
+                    category: .filesystem,
+                    phase: .requested,
+                    operation: kind == .read ? "Read" : "Edit",
+                    callID: callID,
+                    input: .object(["file_path": .string(root + "/" + path)]),
+                    output: nil,
+                    fidelity: .exact
+                ),
+                projectID: projectID,
+                session: session,
+                rootPath: root,
+                at: now
+            )
+        }
+
+        record(.edit, path: "Sources/UI/Button.swift", callID: "edit", session: first)
+        record(.read, path: "Sources/UI/Button.swift", callID: "read-button", session: first)
+        record(.read, path: "Sources/Model.swift", callID: "read-model", session: first)
+        record(.read, path: "Sources/UI/Button.swift", callID: "review", session: second)
+
+        let paths = [
+            AgentWorkTreePath(relativePath: "Sources", isDirectory: true),
+            AgentWorkTreePath(relativePath: "Sources/UI", isDirectory: true),
+            AgentWorkTreePath(relativePath: "Sources/UI/Button.swift", isDirectory: false),
+            AgentWorkTreePath(relativePath: "README.md", isDirectory: false)
+        ]
+        let sessionItems = await treeItems(
+            in: store,
+            target: .session(
+                projectID: projectID,
+                sessionID: first.id,
+                rootPath: root,
+                detailed: true
+            ),
+            paths: paths
+        )
+        XCTAssertEqual(sessionItems["Sources"]?.touchedFileCount, 2)
+        XCTAssertEqual(sessionItems["Sources"]?.work.readCount, 2)
+        XCTAssertEqual(sessionItems["Sources"]?.work.editCount, 1)
+        XCTAssertEqual(sessionItems["Sources/UI"]?.touchedFileCount, 1)
+        XCTAssertEqual(sessionItems["Sources/UI/Button.swift"]?.work.readCount, 1)
+        XCTAssertNil(sessionItems["README.md"])
+
+        let projectItems = await treeItems(
+            in: store,
+            target: .project(projectID: projectID, rootPath: root, detailed: true),
+            paths: paths
+        )
+        XCTAssertEqual(projectItems["Sources"]?.touchedFileCount, 2)
+        XCTAssertEqual(projectItems["Sources"]?.work.readCount, 3)
+        XCTAssertEqual(projectItems["Sources/UI"]?.contributorCount, 2)
+        XCTAssertEqual(projectItems["Sources/UI/Button.swift"]?.work.readCount, 2)
+        XCTAssertEqual(projectItems["Sources/UI/Button.swift"]?.work.editCount, 1)
+        XCTAssertEqual(projectItems["Sources/UI/Button.swift"]?.contributorCount, 2)
+
+        store.remove(sessionID: second.id, projectID: projectID)
+        let afterRemoval = await treeItems(
+            in: store,
+            target: .project(projectID: projectID, rootPath: root, detailed: true),
+            paths: paths
+        )
+        XCTAssertEqual(afterRemoval["Sources"]?.work.readCount, 2)
+        XCTAssertEqual(afterRemoval["Sources"]?.touchedFileCount, 2)
+        XCTAssertEqual(afterRemoval["Sources/UI"]?.contributorCount, 1)
+        XCTAssertEqual(afterRemoval["Sources/UI/Button.swift"]?.work.readCount, 1)
+        XCTAssertEqual(afterRemoval["Sources/UI/Button.swift"]?.contributorCount, 1)
+    }
+
     /// Opt-in fixture used by `scripts/profile_threading.sh agent-work-stress`.
     func testAgentWorkProjectionStressBenchmark() throws {
         try XCTSkipUnless(
@@ -426,6 +514,29 @@ final class FileActivityMapTests: XCTestCase {
         let aggregate = AgentProjectWorkAggregate(traces: traces)
         let aggregateEnded = DispatchTime.now().uptimeNanoseconds
 
+        let directoryIndexStarted = DispatchTime.now().uptimeNanoseconds
+        var sessionDirectories: [SessionID: [String: AgentDirectoryWork]] = [:]
+        var projectDirectories: [String: AgentDirectoryWork] = [:]
+        for (sessionID, trace) in traces {
+            for (path, work) in trace.files {
+                for directory in AgentWorkPath.directoryAncestors(of: path) {
+                    sessionDirectories[sessionID, default: [:]][
+                        directory, default: AgentDirectoryWork()
+                    ].merge(work, touchedFileCount: 1, contributors: [sessionID])
+                }
+            }
+        }
+        for (path, fileWork) in aggregate.files {
+            for directory in AgentWorkPath.directoryAncestors(of: path) {
+                projectDirectories[directory, default: AgentDirectoryWork()].merge(
+                    fileWork.work,
+                    touchedFileCount: 1,
+                    contributors: fileWork.contributors
+                )
+            }
+        }
+        let directoryIndexEnded = DispatchTime.now().uptimeNanoseconds
+
         let projectionStarted = DispatchTime.now().uptimeNanoseconds
         let projection = AgentWorkPresentation.project(
             aggregate,
@@ -439,17 +550,28 @@ final class FileActivityMapTests: XCTestCase {
         var liveTrace = AgentSessionWorkTrace()
         var liveAggregate = AgentProjectWorkAggregate()
         var liveProjection = projection
+        var liveSessionDirectories: [String: AgentDirectoryWork] = [:]
+        var liveProjectDirectories: [String: AgentDirectoryWork] = [:]
         let liveSessionID = SessionID()
         let liveEventCount = 100_000
         let liveStarted = DispatchTime.now().uptimeNanoseconds
         for event in 0..<liveEventCount {
             let path = files[(event * 101) % fileCount]
             let kind: AgentFileActivityKind = event.isMultiple(of: 5) ? .edit : .read
+            let firstSession = liveTrace.files[path]?.isTouched != true
             liveTrace.files[path, default: AgentFileWork()].record(kind, at: now)
             let firstProject = liveAggregate.files[path]?.work.isTouched != true
             liveAggregate.recordFile(
                 kind, path: path, sessionID: liveSessionID, at: now
             )
+            for directory in AgentWorkPath.directoryAncestors(of: path) {
+                liveSessionDirectories[directory, default: AgentDirectoryWork()].record(
+                    kind, at: now, isFirstTouch: firstSession, contributor: liveSessionID
+                )
+                liveProjectDirectories[directory, default: AgentDirectoryWork()].record(
+                    kind, at: now, isFirstTouch: firstProject, contributor: liveSessionID
+                )
+            }
             let bin = try XCTUnwrap(atlas.binIndex(for: path, detail: true))
             liveProjection.bins[bin].record(
                 kind, at: now, isFirstTouch: firstProject
@@ -460,6 +582,10 @@ final class FileActivityMapTests: XCTestCase {
         XCTAssertLessThanOrEqual(projection.bins.count, RepositoryFileAtlas.Limits.detailBins)
         XCTAssertEqual(projection.repositoryFileCount, fileCount)
         XCTAssertEqual(projection.recentContributors.count, 8)
+        XCTAssertEqual(sessionDirectories.count, agentCount)
+        XCTAssertEqual(projectDirectories[""]?.touchedFileCount, aggregate.files.count)
+        XCTAssertEqual(liveSessionDirectories[""]?.touchedFileCount, fileCount)
+        XCTAssertEqual(liveProjectDirectories[""]?.contributors, Set([liveSessionID]))
 
         func milliseconds(_ start: UInt64, _ end: UInt64) -> String {
             String(format: "%.2f", Double(end - start) / 1_000_000)
@@ -470,6 +596,7 @@ final class FileActivityMapTests: XCTestCase {
                 + "atlas_ms=\(milliseconds(atlasStarted, atlasEnded)) "
                 + "mutations_ms=\(milliseconds(mutationStarted, mutationEnded)) "
                 + "aggregate_ms=\(milliseconds(aggregateStarted, aggregateEnded)) "
+                + "directory_index_ms=\(milliseconds(directoryIndexStarted, directoryIndexEnded)) "
                 + "project_projection_ms=\(milliseconds(projectionStarted, projectionEnded)) "
                 + "live_100k_ms=\(milliseconds(liveStarted, liveEnded)) "
                 + "rail_bins=\(atlas.rail.seeds.count) detail_bins=\(projection.bins.count)"
@@ -488,5 +615,18 @@ final class FileActivityMapTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(25))
         }
         throw NSError(domain: "FileActivityMapTests", code: 1)
+    }
+
+    @MainActor
+    private func treeItems(
+        in store: AgentWorkTraceStore,
+        target: AgentWorkTarget,
+        paths: [AgentWorkTreePath]
+    ) async -> [String: AgentWorkTreeItem] {
+        await withCheckedContinuation { continuation in
+            store.treeItems(for: target, paths: paths) {
+                continuation.resume(returning: $0)
+            }
+        }
     }
 }

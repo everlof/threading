@@ -993,13 +993,13 @@ model depth no longer determines the window's constraint-graph size.
 
 ## Agent work atlas scaling contract
 
-The sidebar workprint and its expanded hover card must handle large repositories without making
-sidebar cost proportional to repository size or the number of agents watching a project. The
-reference stress shape is 100,000 repository files, 64 agents and 64,000 observed file touches;
-the ordinary design point is about 5,000 files, four agents and 1,000 touches.
+The Activity pane must handle large repositories without making display cost proportional to
+repository size or the number of agents watching a project. The reference stress shape is 100,000
+repository files, 64 agents and 64,000 observed file touches; the ordinary design point is about
+5,000 files, four agents and 1,000 touches.
 
 One immutable `RepositoryFileAtlas` is built asynchronously per checkout and shared by every
-agent and the project aggregate. It sorts the repository once and projects it into 192 sidebar
+agent and the project aggregate. It sorts the repository once and projects it into 192 compact
 bins or 512 detailed bins plus a permanent new-file bin. Session traces stay sparse — untouched
 files occupy no per-agent storage — while the project trace is maintained incrementally. A live
 file event changes one session entry, one project entry and at most the already-materialized
@@ -1014,20 +1014,23 @@ projection in flight cannot trigger a Swift copy-on-write clone on the next live
 Presentation caches are capped at 256 targets, atlas caches at 32 roots,
 recent actions at 96 per session/project and call-ID deduplication at 4,096 IDs per session.
 Persistence trails the last event by one second so a streaming tool call cannot turn into a disk
-write per delta. Collapsing a project does not construct the detailed card; the 3pt workprint uses
-only its bounded rail projection.
+write per delta. The Activity filesystem adds one sparse directory index per session and one for
+the project aggregate. A live file event updates only that file's ancestors; opening or scrolling
+the pane asks the worker for exact totals for visible rows, caches at most 256 paths, and never
+walks a closed directory or all expanded rows.
 
 `scripts/profile_threading.sh agent-work-stress` runs the opt-in production-model benchmark. Keep
 the `THREADING_PERF agent-work` line with release evidence; specifically watch atlas construction,
-64,000 sparse mutations, aggregate construction, detailed project projection and the 100,000-event
-bounded live update loop. A new surface must not increase the 192/512 bin limits to follow input
-size or put repository enumeration back on row configuration.
+64,000 sparse mutations, aggregate and directory-index construction, detailed project projection,
+and the 100,000-event bounded live update loop. A new surface must not increase the 192/512 bin
+limits to follow input size or put repository enumeration back on row configuration.
 
-Five Debug executions on 2026-08-08 measured medians of 249 ms for the off-main 100,000-file atlas,
-55 ms for 64,000 sparse session mutations, 62 ms for the complete 64-agent aggregate, 32 ms for the
-off-main detailed project projection, and 214 ms for 100,000 bounded live updates (about 2.14 µs per
-event). The latter loop deliberately performs the same session entry, project entry and bin update
-as the live path; it does not include notification delivery or drawing.
+A Debug execution on 2026-08-08 after adding the Activity tree measured 365 ms for the off-main
+100,000-file atlas, 98 ms for 64,000 sparse session mutations, 96 ms for the complete 64-agent
+aggregate, 986 ms for all session/project directory indexes, 58 ms for the detailed project
+projection, and 1,095 ms for 100,000 bounded live updates (about 10.95 µs per event). The live
+loop performs the same session entry, project entry, ancestor-directory updates, and bin update as
+the live path. It does not include notification delivery or drawing.
 
 ## Project sidebar stress target
 

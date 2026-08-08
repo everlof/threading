@@ -89,7 +89,7 @@ final class TabStripRenderTests: XCTestCase {
         ("Terminal", "terminal"),
         ("Browser", "globe"),
         ("Review", "plus.forwardslash.minus"),
-        ("Files", "folder"),
+        ("Activity", "folder"),
         ("Info", "info.circle"),
         ("Compare", "rectangle.on.rectangle")
     ]

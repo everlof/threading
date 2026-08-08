@@ -83,7 +83,7 @@ header's Context button. A second list that quietly held fewer apps is the drift
 | The content pane's header, as a split control | the visible page's checkout |
 | ⌘O, and Project ▸ Open in External App | the same checkout, in the app used last |
 | A project row's menu, and a session row's | that project's checkout |
-| The Files tab's rows | a folder, or a file at no particular line |
+| The Activity tab's filesystem rows | a folder, or a file at no particular line |
 | A Git Review file row's right-click | **the file at the first line the diff changes** |
 
 That last row is the one that earns the feature. A review is the only surface in the app that

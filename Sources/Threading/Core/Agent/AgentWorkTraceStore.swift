@@ -147,6 +147,31 @@ final class AgentWorkTraceStore {
         presentations[target]
     }
 
+    /// Resolves exact activity for only the filesystem rows the outline has materialized. Trace
+    /// ownership stays on the worker queue; the main actor receives at most one screenful.
+    func treeItems(
+        for target: AgentWorkTarget,
+        paths: [AgentWorkTreePath],
+        completion: @escaping @MainActor @Sendable ([String: AgentWorkTreeItem]) -> Void
+    ) {
+        guard !paths.isEmpty,
+              !removedProjects.contains(target.projectID),
+              target.sessionID.map({ !removedSessions.contains($0) }) ?? true else {
+            completion([:])
+            return
+        }
+        prepareProject(target.projectID)
+        let generation = projectGenerations[target.projectID, default: 0]
+        worker.treeItems(target: target, paths: paths) { [weak self] items in
+            guard let self,
+                  self.projectGenerations[target.projectID, default: 0] == generation else {
+                completion([:])
+                return
+            }
+            completion(items)
+        }
+    }
+
     // MARK: Live capture
 
     func record(
@@ -526,6 +551,35 @@ final class AgentWorkTraceStore {
 
 // MARK: - Utility worker
 
+/// Incremental descendant totals for one directory. Kept as a value so the worker owns every
+/// mutation, while the scaling benchmark can exercise the same update primitive as live capture.
+struct AgentDirectoryWork: Sendable {
+    var work = AgentFileWork()
+    var touchedFileCount = 0
+    var contributors: Set<SessionID> = []
+
+    mutating func merge(
+        _ other: AgentFileWork,
+        touchedFileCount: Int,
+        contributors: Set<SessionID>
+    ) {
+        work.merge(other)
+        self.touchedFileCount += touchedFileCount
+        self.contributors.formUnion(contributors)
+    }
+
+    mutating func record(
+        _ kind: AgentFileActivityKind,
+        at date: Date,
+        isFirstTouch: Bool,
+        contributor: SessionID
+    ) {
+        work.record(kind, at: date)
+        if isFirstTouch { touchedFileCount += 1 }
+        contributors.insert(contributor)
+    }
+}
+
 /// A serial owner for filesystem and total-content work. Keeping it outside the main-actor store
 /// makes the isolation boundary explicit and testable by construction.
 private final class AgentWorkWorker: @unchecked Sendable {
@@ -544,11 +598,39 @@ private final class AgentWorkWorker: @unchecked Sendable {
     private final class ProjectMemory {
         var file: AgentProjectWorkFile
         var aggregate: AgentProjectWorkAggregate
+        var sessionDirectories: [SessionID: [String: AgentDirectoryWork]] = [:]
+        var projectDirectories: [String: AgentDirectoryWork] = [:]
         var revision = 0
 
         init(file: AgentProjectWorkFile) {
             self.file = file
             aggregate = AgentProjectWorkAggregate(traces: file.sessions)
+            rebuildDirectories()
+        }
+
+        func rebuildDirectories() {
+            sessionDirectories = [:]
+            projectDirectories = [:]
+
+            for (sessionID, trace) in file.sessions {
+                for (path, work) in trace.files {
+                    for directory in AgentWorkPath.directoryAncestors(of: path) {
+                        sessionDirectories[sessionID, default: [:]][
+                            directory, default: AgentDirectoryWork()
+                        ]
+                            .merge(work, touchedFileCount: 1, contributors: [sessionID])
+                    }
+                }
+            }
+            for (path, fileWork) in aggregate.files {
+                for directory in AgentWorkPath.directoryAncestors(of: path) {
+                    projectDirectories[directory, default: AgentDirectoryWork()].merge(
+                        fileWork.work,
+                        touchedFileCount: 1,
+                        contributors: fileWork.contributors
+                    )
+                }
+            }
         }
     }
 
@@ -627,6 +709,55 @@ private final class AgentWorkWorker: @unchecked Sendable {
             }
             let revision = memory.revision
             Task { @MainActor in completion(presentation, revision) }
+        }
+    }
+
+    func treeItems(
+        target: AgentWorkTarget,
+        paths: [AgentWorkTreePath],
+        completion: @escaping @MainActor @Sendable ([String: AgentWorkTreeItem]) -> Void
+    ) {
+        queue.async { [self] in
+            let memory = memory(for: target.projectID)
+            var items: [String: AgentWorkTreeItem] = [:]
+            items.reserveCapacity(paths.count)
+
+            for path in paths {
+                if path.isDirectory {
+                    let directory = target.sessionID.flatMap {
+                        memory.sessionDirectories[$0]?[path.relativePath]
+                    } ?? (target.sessionID == nil
+                        ? memory.projectDirectories[path.relativePath]
+                        : nil)
+                    guard let directory, directory.work.isTouched else { continue }
+                    items[path.relativePath] = AgentWorkTreeItem(
+                        relativePath: path.relativePath,
+                        isDirectory: true,
+                        work: directory.work,
+                        touchedFileCount: directory.touchedFileCount,
+                        contributorCount: directory.contributors.count
+                    )
+                } else if let sessionID = target.sessionID,
+                          let work = memory.file.sessions[sessionID]?.files[path.relativePath] {
+                    items[path.relativePath] = AgentWorkTreeItem(
+                        relativePath: path.relativePath,
+                        isDirectory: false,
+                        work: work,
+                        touchedFileCount: work.isTouched ? 1 : 0,
+                        contributorCount: work.isTouched ? 1 : 0
+                    )
+                } else if target.sessionID == nil,
+                          let file = memory.aggregate.files[path.relativePath] {
+                    items[path.relativePath] = AgentWorkTreeItem(
+                        relativePath: path.relativePath,
+                        isDirectory: false,
+                        work: file.work,
+                        touchedFileCount: file.work.isTouched ? 1 : 0,
+                        contributorCount: file.contributors.count
+                    )
+                }
+            }
+            Task { @MainActor in completion(items) }
         }
     }
 
@@ -714,6 +845,17 @@ private final class AgentWorkWorker: @unchecked Sendable {
 
             let firstProject = memory.aggregate.files[path]?.work.isTouched != true
             memory.aggregate.recordFile(kind, path: path, sessionID: sessionID, at: date)
+            for directory in AgentWorkPath.directoryAncestors(of: path) {
+                memory.sessionDirectories[sessionID, default: [:]][
+                    directory, default: AgentDirectoryWork()
+                ]
+                    .record(
+                        kind, at: date, isFirstTouch: firstSession, contributor: sessionID
+                    )
+                memory.projectDirectories[directory, default: AgentDirectoryWork()].record(
+                    kind, at: date, isFirstTouch: firstProject, contributor: sessionID
+                )
+            }
             memory.revision += 1
             return .file(
                 sessionID: sessionID, path: path, kind: kind, date: date,
@@ -755,6 +897,7 @@ private final class AgentWorkWorker: @unchecked Sendable {
             guard current.files.isEmpty, current.categoryCounts.isEmpty else { return nil }
             memory.file.sessions[sessionID] = seed
             memory.aggregate.merge(seed, sessionID: sessionID)
+            memory.rebuildDirectories()
             memory.revision += 1
             return .rebuilt(sessionID: sessionID)
 
@@ -767,6 +910,7 @@ private final class AgentWorkWorker: @unchecked Sendable {
                 sessionID: sessionID,
                 remainingTraces: memory.file.sessions
             )
+            memory.rebuildDirectories()
             memory.revision += 1
             return .rebuilt(sessionID: sessionID)
         }

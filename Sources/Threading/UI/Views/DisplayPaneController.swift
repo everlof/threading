@@ -365,7 +365,7 @@ final class DisplayPaneController: NSViewController {
         }
       ),
       (
-        "Files", "folder", true,
+        "Activity", "folder", true,
         {
           [weak self] in _ = self?.activateFiles(for: sessionID)
         }
@@ -1147,10 +1147,10 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  // MARK: - Public — Files Tab
+  // MARK: - Public — Activity Tab
 
-  /// Returns the session's file tree, creating and activating one if it has none. One project
-  /// has one tree; a second would show the same directory twice.
+  /// Returns the session's activity tree, creating and activating one if it has none. A second
+  /// tree would show the same session and directory twice.
   @discardableResult
   func activateFiles(for sessionID: SessionID) -> FileTreeViewController? {
     restoreIfNeeded(sessionID)
@@ -1174,12 +1174,20 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  /// Builds a file tree rooted at the session's project folder. Nil for a session with no
-  /// project — there is no directory to show.
+  /// Builds an activity tree rooted at the session's project folder. Nil for a session with no
+  /// project — there is no directory or trace scope to show.
   private func makeFiles(for sessionID: SessionID) -> FileTreeViewController? {
     guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
-    let controller = FileTreeViewController(folderPath: project.folderPath)
+    let controller = FileTreeViewController(
+      folderPath: project.folderPath,
+      workTarget: .session(
+        projectID: project.id,
+        sessionID: sessionID,
+        rootPath: project.folderPath,
+        detailed: true
+      )
+    )
     addChild(controller)
     return controller
   }
@@ -1585,7 +1593,7 @@ final class DisplayPaneController: NSViewController {
     render()
   }
 
-  /// An explicit session-surface command (Browser, Review, Files, and their peers) leaves the
+  /// An explicit session-surface command (Browser, Review, Activity, and their peers) leaves the
   /// global inspector first. Ordinary session selection uses `showSession` and intentionally
   /// preserves it.
   func showSessionTabs(_ sessionID: SessionID?) {

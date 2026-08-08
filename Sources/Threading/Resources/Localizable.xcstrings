@@ -17,6 +17,10 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitetsringen visar tre agenter, inklusive högsta arbetsinsats." } } }
     },
+    "Activity": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitet" } } }
+    },
     "AgentActivityBeamView": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "AgentActivityBeamView" } } }
@@ -49,9 +53,9 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Systemtemats aktivitetsring runt en aktiv yta. Växla mellan inaktiv, en agent och tre agenter med högsta arbetsinsats; formgivna teman avstår avsiktligt från den." } } }
     },
-    "The detailed, bounded project aggregate behind a sidebar workprint: the repository atlas, action ribbon, counts, and recent agents share one stable file axis even when the checkout has thousands of files.": {
+    "The bounded Activity overview above the filesystem tree: the repository atlas, action ribbon, counts, and recent agents share one stable file axis even when the checkout has thousands of files.": {
       "extractionState": "manual",
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den detaljerade, begränsade projektsammanställningen bakom sidofältets arbetsavtryck: kodförrådets atlas, åtgärdsband, antal och senaste agenter delar en stabil filaxel även när arbetskopian har tusentals filer." } } }
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den begränsade aktivitetsöversikten ovanför filsystemsträdet: kodförrådets atlas, åtgärdsband, antal och senaste agenter delar en stabil filaxel även när arbetskopian har tusentals filer." } } }
     },
     "ThemedGroupedTableView & ThemedVirtualTableCell": {
       "extractionState": "manual",
@@ -81,9 +85,21 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d åtgärder · %d skal · %d webb · %d underagenter" } } }
     },
+    "%d files · R %d · E %d": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d filer · L %d · R %d" } } }
+    },
+    "%d files, %d reads, %d edits": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d filer, %d läsningar, %d redigeringar" } } }
+    },
     "%d of %d files · %d reads · %d edits": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d av %d filer · %d läsningar · %d redigeringar" } } }
+    },
+    "%d reads, %d edits": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d läsningar, %d redigeringar" } } }
     },
     "Agent work map": {
       "extractionState": "manual",
@@ -120,6 +136,10 @@
     "Recent agents: %@": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senaste agenter: %@" } } }
+    },
+    "R %d · E %d": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "L %d · R %d" } } }
     },
     "Thin marks are reads; solid marks are edits.": {
       "extractionState": "manual",

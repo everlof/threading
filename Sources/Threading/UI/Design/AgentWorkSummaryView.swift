@@ -1,7 +1,7 @@
 import AppKit
 
-/// The detailed reading behind a sidebar workprint: a bounded repository atlas, a chronological
-/// ribbon for non-file actions, exact counts, and (for project scope) recent agent provenance.
+/// The bounded overview above the Activity tree: a repository atlas, a chronological ribbon for
+/// non-file actions, exact counts, and (for project scope) recent agent provenance.
 final class AgentWorkSummaryView: NSView, ThemedComponent {
     private enum Layout {
         static let atlasHeight: CGFloat = 94
@@ -88,7 +88,6 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.contentWidth),
             atlas.widthAnchor.constraint(equalTo: stack.widthAnchor),
             atlas.heightAnchor.constraint(equalToConstant: Layout.atlasHeight),
             ribbon.widthAnchor.constraint(equalTo: stack.widthAnchor),
