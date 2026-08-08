@@ -135,10 +135,14 @@ struct ConversationTimeline {
         /// clears a plan whose provider explicitly replaced it with an empty list.
         case runProgress(RunProgress?)
 
-        /// The turn that opened at this row index finished. `interrupted` marks one that was
-        /// stopped or failed rather than completed — the view folds a settled turn, but an
-        /// interrupted one stays expanded so the user keeps their place; the next turn folds it.
-        case turnSettled(startIndex: Int, interrupted: Bool)
+        /// The turn that opened at this row index finished, and how it ended.
+        ///
+        /// The view folds a completed turn at once, but keeps an incomplete one expanded so the
+        /// user keeps their place; the next turn folds it. Carrying the whole outcome rather
+        /// than an `interrupted` flag is what lets the fold say **You stopped after 42s** for a
+        /// turn the user ended and something else for one that broke — with a flag it said the
+        /// first for both.
+        case turnSettled(startIndex: Int, outcome: TurnOutcome)
 
         /// The identifier the CLI settled on, which for a resume is not necessarily the one we
         /// asked for.
@@ -174,6 +178,14 @@ struct ConversationTimeline {
     private var turnStartIndices: [Int] = []
     private var compactedUserTextByRow: [Int: String] = [:]
     private var compactedAssistantTextByRow: [Int: String] = [:]
+
+    /// Row indices of the tool calls each turn ran, keyed by the row that opened the turn.
+    ///
+    /// A turn's *steps*, which is what a reader scrolling inside a long one is actually moving
+    /// between. Recorded as calls append rather than derived on demand for the same reason the
+    /// compacted previews are: the rail and the sticky header ask for this on every viewport
+    /// change, and scanning the turn each time would make a scroll cost the turn's length.
+    private var toolCallRowsByTurnStart: [Int: [Int]] = [:]
 
     /// Row index of the user message that opened the turn currently in flight, so its
     /// terminal event can be attributed to it.
@@ -250,11 +262,11 @@ struct ConversationTimeline {
             append(runProgressReducer.apply(plan: steps), to: &changes)
             return changes
 
-        case .turnFinished(let text, let isError, let metrics):
+        case .turnFinished(let text, let outcome, let metrics):
             var changes = clearStreaming()
             changes.append(contentsOf: settleUnansweredToolCalls())
             if let text, !text.isEmpty {
-                if isError {
+                if outcome.isError {
                     changes.append(append(.notice(text, kind: .error)))
                 } else if !hasAssistantMessageInCurrentTurn {
                     // Session commands such as Claude's /context return their useful output only
@@ -269,7 +281,7 @@ struct ConversationTimeline {
                 if let duration = metrics.duration {
                     turnDurations[startIndex] = duration
                 }
-                changes.append(.turnSettled(startIndex: startIndex, interrupted: isError))
+                changes.append(.turnSettled(startIndex: startIndex, outcome: outcome))
                 currentTurnStartIndex = nil
             }
             changes.append(.status(.ready(
@@ -313,6 +325,40 @@ struct ConversationTimeline {
             assistantText: conclusion.text,
             duration: turnDurations[index]
         )
+    }
+
+    // MARK: - Steps
+
+    /// The rows of the tool calls a turn ran, in the order it ran them.
+    ///
+    /// A turn is one exchange to the rail; inside a long one these are the places worth landing
+    /// on. Empty for a turn that only talked, which is the common short turn and correctly has
+    /// no interior to navigate.
+    func steps(inTurnStartingAt startIndex: Int) -> [Int] {
+        toolCallRowsByTurnStart[startIndex] ?? []
+    }
+
+    /// The tool call a row sits under: the nearest one at or before it **within the same turn**.
+    ///
+    /// Nil when the walk reaches the turn's own user message first, which is the honest answer
+    /// for the top of a turn — nothing has been done yet, so there is no step to name. The walk
+    /// is bounded by one turn, and stops at the first call it meets going back, so it is short
+    /// except in a turn that ran no tools at all.
+    func currentStep(atOrBefore rowIndex: Int) -> Int? {
+        guard rows.indices.contains(rowIndex) else { return nil }
+
+        var index = rowIndex
+        while index >= 0 {
+            switch rows[index] {
+            case .userMessage:
+                return nil
+            case .toolCall:
+                return index
+            default:
+                index -= 1
+            }
+        }
+        return nil
     }
 
     /// The last assistant message between this user turn and the next, with where the turn's
@@ -398,6 +444,12 @@ struct ConversationTimeline {
             )
             let change = append(.toolCall(call))
             pendingToolRows[id] = rows.count - 1
+            // Attributed to the newest turn rather than to `currentTurnStartIndex`, which a
+            // terminal event clears: a provider that emits one more call after reporting the
+            // turn finished would otherwise contribute a step that belongs to no turn at all.
+            if let turnStart = turnStartIndices.last {
+                toolCallRowsByTurnStart[turnStart, default: []].append(rows.count - 1)
+            }
             var changes = [change]
             append(
                 runProgressReducer.apply(toolUseID: id, tool: tool, input: foundationInput),

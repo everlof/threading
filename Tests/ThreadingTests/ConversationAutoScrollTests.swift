@@ -47,6 +47,13 @@ final class ConversationAutoScrollTests: XCTestCase {
         XCTAssertFalse(scroll.followsNewContent)
     }
 
+    func testJumpingToTheBottomResumesFollowing() {
+        var scroll = ConversationAutoScroll()
+        scroll.noteUserScrolled(nearBottom: false)
+        scroll.noteJumpedToBottom()
+        XCTAssertTrue(scroll.followsNewContent)
+    }
+
     func testOnlyAGestureEndsTheAnchor() {
         // Programmatic scrolls cannot change the mode at all — the controller only reports
         // gestures here. A gesture near the bottom resumes following; one anywhere else
@@ -66,5 +73,88 @@ final class ConversationAutoScrollTests: XCTestCase {
         scroll.noteUserScrolled(nearBottom: false)
         scroll.noteReplayFinished()
         XCTAssertTrue(scroll.followsNewContent)
+    }
+}
+
+@MainActor
+final class ConversationAutoScrollLayoutTests: XCTestCase {
+
+    func testADeepNewMessageIsBroughtIntoTheViewport() throws {
+        let controller = makeDeepConversationController()
+
+        controller.autoScroll.noteMessageSent()
+        let newIndex = controller.timeline.rows.count
+        controller.apply(controller.timeline.appendUserMessage(
+            ConversationUserMessage(text: "Newest question")
+        ))
+        controller.anchorSentMessage(at: newIndex)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let tableRow = try XCTUnwrap(controller.presentationRow(forTimelineIndex: newIndex))
+        let rowRect = controller.tableView.rect(ofRow: tableRow)
+        let visibleRect = controller.scrollView.contentView.documentVisibleRect
+        XCTAssertTrue(
+            rowRect.intersects(visibleRect),
+            "The newly sent message \(rowRect) remained outside \(visibleRect)"
+        )
+    }
+
+    func testFloatingEndControlReturnsToLatestMessageAndResumesFollowing() {
+        let controller = makeDeepConversationController()
+        let maximumOffset = controller.maximumConversationScrollOffsetY()
+        XCTAssertGreaterThan(maximumOffset, 0)
+
+        controller.scrollView.contentView.scroll(to: .zero)
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.autoScroll.noteUserScrolled(nearBottom: false)
+        controller.updateScrollToEndControl()
+
+        XCTAssertFalse(controller.jumpToEndButton.isHidden)
+
+        controller.scrollToConversationEnd()
+
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            maximumOffset,
+            accuracy: 0.5
+        )
+        XCTAssertTrue(controller.jumpToEndButton.isHidden)
+        XCTAssertTrue(controller.autoScroll.followsNewContent)
+    }
+
+    private func makeDeepConversationController() -> ConversationViewController {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(kind: .codex, title: "Scroll anchor", usesNativeUI: true),
+            project: Project(
+                name: "Scroll anchor",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 500)
+        controller.isReplaying = true
+        for turn in 0..<30 {
+            for change in controller.timeline.apply(.userMessage("Question \(turn)")) {
+                controller.apply(change)
+            }
+            for change in controller.timeline.apply(.assistantMessage(
+                blocks: [.text(String(repeating: "Answer \(turn). ", count: 30))]
+            )) {
+                controller.apply(change)
+            }
+            for change in controller.timeline.apply(.turnFinished(
+                text: nil,
+                outcome: .completed,
+                metrics: TurnMetrics(duration: 1)
+            )) {
+                controller.apply(change)
+            }
+        }
+        controller.finishReplayRendering()
+        controller.isReplaying = false
+        controller.view.layoutSubtreeIfNeeded()
+        return controller
     }
 }

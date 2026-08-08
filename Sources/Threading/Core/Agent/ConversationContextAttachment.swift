@@ -68,6 +68,49 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
         return locator ?? title
     }
 
+    /// The anchor as a person would write it, for a surface with no sidecar to draw a chip in.
+    ///
+    /// A message's locator is `conversation-row:3` — Threading's own timeline row, which names
+    /// nothing the agent can open — so the title stands in. Code and attachments name a path,
+    /// which is the thing worth saying, with the line range folded back on because the transport
+    /// carries it in separate fields.
+    var plainAnchor: String {
+        switch source {
+        case .message:
+            return title
+        case .code, .attachment:
+            guard let locator, !locator.isEmpty else { return title }
+            guard let lineStart else { return locator }
+            guard let lineEnd, lineEnd > lineStart else { return "\(locator):\(lineStart)" }
+            return "\(locator):\(lineStart)-\(lineEnd)"
+        }
+    }
+
+    /// The whole context as plain prose, for pasting into an agent's own TUI.
+    ///
+    /// Deliberately **not** `ConversationPrompt.transportText`'s JSON envelope. That shape
+    /// exists so a native transport can hand the typed value back to Threading intact; a
+    /// terminal session has nothing to hand it back to, and a CLI's input box is the last place
+    /// to put 400 characters of JSON. What a TUI needs is the sentence the person would have
+    /// typed by hand, which is the whole of what this feature saves them.
+    ///
+    /// `omittingAnchor` is for the caller that has already put the anchor in the terminal
+    /// itself — the attachments pane pastes the file's real path first, on its own, because
+    /// that is the only form Claude and Codex read as an attached image.
+    func plainText(omittingAnchor: Bool = false) -> String {
+        var lines: [String] = []
+        let anchor = plainAnchor
+        if !omittingAnchor { lines.append(anchor) }
+        if let excerpt, !excerpt.isEmpty, excerpt != anchor {
+            lines.append(contentsOf: excerpt.components(separatedBy: .newlines).map { "> \($0)" })
+        }
+        if let comment, !comment.isEmpty {
+            if !lines.isEmpty { lines.append("") }
+            lines.append(comment)
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func commenting(_ body: String) -> ConversationContextAttachment {
         ConversationContextAttachment(
             kind: .comment,

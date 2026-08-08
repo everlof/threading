@@ -22,7 +22,12 @@ final class TurnFoldView: NSView {
             systemSymbolName: "chevron.right",
             accessibilityDescription: nil
         )
-        image.contentTintColor = Design.Text.quaternary
+        // The same ink as the label beside it. At `quaternary` the disclosure was fainter than the
+        // words it discloses, so the one control that opens a turn's work read as a label with a
+        // smudge in front of it rather than as one object. Its *quietness* is intended — the row
+        // takes its plate on hover, which is the "quiet until relevant" contract — but quiet is a
+        // level, and the two halves of a control should be on the same one.
+        image.contentTintColor = Design.Text.tertiary
         image.symbolConfiguration = Design.Symbol.configuration(
             Design.Symbol.chevron,
             weight: .semibold
@@ -44,18 +49,18 @@ final class TurnFoldView: NSView {
     // MARK: - Initialization
 
     /// `duration` is the turn's measured length, when its terminal event carried one.
-    /// `stopped` marks a turn that was interrupted rather than completed — it reads
-    /// "Stopped after 42s", t3code's rule, so an abandoned turn does not claim to have worked.
+    /// `outcome` decides the verb — t3code's rule, so an abandoned turn does not claim to have
+    /// worked, and a broken one does not claim the user abandoned it.
     init(
         duration: TimeInterval?,
-        stopped: Bool,
+        outcome: TurnOutcome,
         folding views: [NSView],
         expanded: Bool = false,
         onExpansionChanged: ((TurnFoldView, Bool) -> Void)? = nil
     ) {
         self.foldedViews = views
         self.onExpansionChanged = onExpansionChanged
-        self.label = Self.title(duration: duration, stopped: stopped)
+        self.label = Self.title(duration: duration, outcome: outcome)
         self.isExpanded = expanded
         super.init(frame: .zero)
         setupViews()
@@ -115,12 +120,22 @@ final class TurnFoldView: NSView {
 
     // MARK: - Private Methods
 
-    private static func title(duration: TimeInterval?, stopped: Bool) -> String {
-        let verb = stopped ? "Stopped" : "Worked"
+    /// Three readings, not two. A turn the user stopped and a turn that broke both end early,
+    /// and while the fold carried one `stopped` flag they were drawn identically — a network
+    /// fault said "Stopped after 42s", which reads as something the user did.
+    ///
+    /// "for" against "after" is the whole distinction between a turn that spent its time and one
+    /// whose time simply elapsed before it was cut short.
+    private static func title(duration: TimeInterval?, outcome: TurnOutcome) -> String {
+        let verb = switch outcome {
+        case .completed: "Worked"
+        case .stopped: "Stopped"
+        case .failed: "Failed"
+        }
         guard let duration else { return verb }
-        return stopped
-            ? "\(verb) after \(TurnStatusText.duration(duration))"
-            : "\(verb) for \(TurnStatusText.duration(duration))"
+        return outcome == .completed
+            ? "\(verb) for \(TurnStatusText.duration(duration))"
+            : "\(verb) after \(TurnStatusText.duration(duration))"
     }
 
     @objc private func toggle() {

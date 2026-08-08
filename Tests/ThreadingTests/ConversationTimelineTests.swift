@@ -257,7 +257,9 @@ final class ConversationTimelineTests: XCTestCase {
         var timeline = ConversationTimeline(sessionID: SessionID())
         let opening = timeline.apply(.userMessage("run the tests in the background"))
 
-        let changes = timeline.apply(.backgroundWork(inFlight: ["b4vc22id4"]))
+        let changes = timeline.apply(.backgroundWork(
+            inFlight: [BackgroundTask(id: "b4vc22id4", kind: .standing)]
+        ))
 
         XCTAssertTrue(changes.isEmpty)
         XCTAssertEqual(timeline.rows.count, opening.count)
@@ -546,7 +548,7 @@ final class ConversationTimelineTests: XCTestCase {
         _ = succeeded.apply(.assistantMessage(blocks: [.text("All done.")]))
         _ = succeeded.apply(.turnFinished(
             text: "All done.",
-            isError: false,
+            outcome: .completed,
             metrics: .empty
         ))
         XCTAssertEqual(succeeded.rows, [
@@ -557,7 +559,7 @@ final class ConversationTimelineTests: XCTestCase {
         var command = ConversationTimeline(sessionID: SessionID())
         _ = command.apply(.turnFinished(
             text: "## Context\n42% remaining",
-            isError: false,
+            outcome: .completed,
             metrics: .empty
         ))
         XCTAssertEqual(command.rows, [
@@ -567,7 +569,7 @@ final class ConversationTimelineTests: XCTestCase {
         var failed = ConversationTimeline(sessionID: SessionID())
         _ = failed.apply(.turnFinished(
             text: "Rate limited.",
-            isError: true,
+            outcome: .failed,
             metrics: .empty
         ))
         XCTAssertEqual(failed.rows, [.notice("Rate limited.", kind: .error)])
@@ -625,7 +627,7 @@ final class ConversationTimelineTests: XCTestCase {
         _ = timeline.apply(.assistantMessage(blocks: [
             .toolUse(id: "call-1", tool: .bash, input: ["command": "sleep 100"])
         ]))
-        let changes = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+        let changes = timeline.apply(.turnFinished(text: nil, outcome: .completed, metrics: .empty))
 
         XCTAssertTrue(changes.contains(.resultAttached(index: 0)))
         guard case .toolCall(let call) = timeline.rows[0] else {
@@ -641,7 +643,7 @@ final class ConversationTimelineTests: XCTestCase {
         _ = timeline.apply(.assistantMessage(blocks: [
             .toolUse(id: "call-1", tool: .bash, input: ["command": "make"])
         ]))
-        _ = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+        _ = timeline.apply(.turnFinished(text: nil, outcome: .completed, metrics: .empty))
         let changes = timeline.apply(.toolResults([
             ToolResult(toolUseID: "call-1", text: "ok", isError: false)
         ]))
@@ -697,12 +699,12 @@ final class ConversationTimelineTests: XCTestCase {
         _ = timeline.apply(.userMessage("Q"))
         let changes = timeline.apply(.turnFinished(
             text: nil,
-            isError: false,
+            outcome: .completed,
             metrics: TurnMetrics(duration: 42)
         ))
 
         XCTAssertEqual(timeline.turns.first?.duration, 42)
-        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, interrupted: false)))
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, outcome: .completed)))
     }
 
     func testAnInterruptedTurnSettlesAsInterrupted() {
@@ -710,16 +712,16 @@ final class ConversationTimelineTests: XCTestCase {
         // change carrying `interrupted` is what tells it to.
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.userMessage("Q"))
-        let changes = timeline.apply(.turnFinished(text: nil, isError: true, metrics: .empty))
+        let changes = timeline.apply(.turnFinished(text: nil, outcome: .failed, metrics: .empty))
 
-        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, interrupted: true)))
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, outcome: .failed)))
     }
 
     func testATurnEndWithNoOpenTurnSettlesNothing() {
         // A replay window can open mid-turn: its first synthetic turn end has no user message
         // to attribute to, and must not invent one.
         var timeline = ConversationTimeline(sessionID: SessionID())
-        let changes = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+        let changes = timeline.apply(.turnFinished(text: nil, outcome: .completed, metrics: .empty))
 
         XCTAssertFalse(changes.contains {
             if case .turnSettled = $0 { return true } else { return false }

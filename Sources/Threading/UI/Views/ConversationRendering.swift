@@ -21,11 +21,11 @@ extension ConversationViewController {
             let startsTurn: Bool
             if case .userMessage = row { startsTurn = true } else { startsTurn = false }
 
-            // A turn that stayed expanded because it was interrupted folds the moment the next
-            // one begins — the user has moved on, and t3code's rule is exactly this handoff.
+            // A turn that stayed expanded because it ended early folds the moment the next one
+            // begins — the user has moved on, and t3code's rule is exactly this handoff.
             if startsTurn, let pending = pendingFold {
                 pendingFold = nil
-                foldTurn(startingAt: pending.startIndex, stopped: pending.interrupted)
+                foldTurn(startingAt: pending.startIndex, outcome: pending.outcome)
             }
 
             // Not before the first turn: a rule at the very top of the pane separates the
@@ -109,14 +109,14 @@ extension ConversationViewController {
                 delegate?.conversationDidChangeActivity(self)
             }
 
-        case .turnSettled(let startIndex, let interrupted):
-            // A settled turn folds at once. An interrupted one stays expanded so the user
-            // keeps their place, and the *next* turn folds it — but it reads "Stopped after"
-            // rather than claiming to have worked.
-            if interrupted {
-                pendingFold = (startIndex, true)
+        case .turnSettled(let startIndex, let outcome):
+            // A completed turn folds at once. One that ended early stays expanded so the user
+            // keeps their place, and the *next* turn folds it — reading "Stopped after" or
+            // "Failed after" rather than claiming to have worked.
+            if outcome.isIncomplete {
+                pendingFold = (startIndex, outcome)
             } else {
-                foldTurn(startingAt: startIndex, stopped: false)
+                foldTurn(startingAt: startIndex, outcome: .completed)
             }
             if !isReplaying { noteMinimapTurnSettled(at: startIndex) }
             appendChangedFilesCard(forTurnStartingAt: startIndex)
@@ -138,7 +138,7 @@ extension ConversationViewController {
     /// The canonical rows stay in `timeline`; only their presentation entries leave the table.
     /// Permission cards deliberately stay visible — a decided card is the record of what was
     /// allowed, which is worth more than the symmetry.
-    func foldTurn(startingAt startIndex: Int, stopped: Bool) {
+    func foldTurn(startingAt startIndex: Int, outcome: TurnOutcome) {
         guard !foldedTurnStarts.contains(startIndex),
               let turn = timeline.turn(startingAt: startIndex),
               turn.endIndex > turn.rowIndex,
@@ -171,7 +171,7 @@ extension ConversationViewController {
                 turnStart: startIndex,
                 hiddenIndices: hiddenIndices,
                 duration: turn.duration,
-                stopped: stopped
+                outcome: outcome
             ),
             opensTurn: false
         ), at: insertion)
@@ -268,7 +268,7 @@ extension ConversationViewController {
     func appendChangedFilesCard(forTurnStartingAt startIndex: Int) {
         guard !isReplaying,
               !changedFilesCardTurns.contains(startIndex),
-              let project = ProjectStore.shared.project(forSessionID: agentSession.id),
+              let project = ProjectStore.shared.executionProject(forSessionID: agentSession.id),
               let root = GitInfo.repositoryRoot(for: project.folderPath),
               let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: agentSession.id)
         else { return }
@@ -286,12 +286,23 @@ extension ConversationViewController {
             let tree = ChangedFilesTree.build(from: files.map {
                 ChangedFilesTree.File(path: $0.path, added: $0.added, removed: $0.removed)
             })
-            self.insertChangedFilesCard(tree, after: anchor)
+            // The same read answers both questions the card asks: what changed, and — for the
+            // row under the pointer — what the change *was*. Bounded per file, because the
+            // card outlives the turn that made it.
+            self.insertChangedFilesCard(
+                tree,
+                previews: ChangedFileDiffPreview.previews(from: files),
+                after: anchor
+            )
         }
     }
 
-    private func insertChangedFilesCard(_ tree: ChangedFilesTree, after anchor: PresentationID?) {
-        let card = ChangedFilesCardView(tree: tree) { [weak self] in
+    private func insertChangedFilesCard(
+        _ tree: ChangedFilesTree,
+        previews: [String: ChangedFileDiffPreview],
+        after anchor: PresentationID?
+    ) {
+        let card = ChangedFilesCardView(tree: tree, previews: previews) { [weak self] in
             guard let self else { return }
             self.delegate?.conversationDidRequestTurnDiff(self)
         }
@@ -458,15 +469,28 @@ extension ConversationViewController {
     func scrollToBottom() {
         // Following is a mode, not a reflex: while the user reads elsewhere (`free`) or their
         // sent message holds the top (`anchored`), new content must not move the view.
-        guard !isReplaying, autoScroll.followsNewContent else { return }
+        guard !isReplaying else { return }
 
-        // After layout, or the scroll targets the table height from before this message.
+        // The sent-row anchor already owns the next main-queue landing. Scheduling a visibility
+        // pass ahead of it adds a competing layout turn exactly when the virtual table is still
+        // measuring the new row. Reply growth will drive `viewDidLayout`, which refreshes the
+        // arrow without putting another task in front of the anchor.
+        guard autoScroll.mode != .anchored, !pendingScrollToBottom else { return }
+        pendingScrollToBottom = true
+
+        // After layout, or the scroll targets the table height from before this message. The
+        // work still runs while not following so a growing reply can reveal the return arrow,
+        // but the mode is checked at landing time so it never moves a reader who scrolled away.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.autoScroll.followsNewContent,
-                  let documentView = self.scrollView.documentView else { return }
+            guard let self else { return }
+            self.pendingScrollToBottom = false
 
-            let overflow = documentView.bounds.height - self.scrollView.contentSize.height
-            documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))
+            if self.autoScroll.followsNewContent,
+               let documentView = self.scrollView.documentView {
+                let overflow = documentView.bounds.height - self.scrollView.contentSize.height
+                documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))
+            }
+            self.updateScrollToEndControl()
         }
     }
 }
@@ -496,6 +520,7 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
             owner: self
         ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
         host.identifier = identifier
+        host.setColumnWidth(conversationColumnWidth)
 
         let content = makePresentationView(for: item)
         let topInset: CGFloat
@@ -535,10 +560,16 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
         return presentationItems.firstIndex { $0.id == .timeline(index) }
     }
 
+    var conversationColumnWidth: CGFloat {
+        ConversationVirtualRowHost.columnWidth(of: tableView)
+    }
+
     func invalidateConversationHeightCacheIfNeeded() {
+        let column = ConversationVirtualRowHost.stateColumnWidth(in: tableView)
+
         let width = min(
             Design.Size.readableWidth,
-            max(0, tableView.bounds.width - Design.Spacing.inset * 2)
+            max(0, column - Design.Spacing.inset * 2)
         )
         guard width > 0 else { return }
         if rowHeightCacheWidth == 0 {
@@ -630,10 +661,10 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
         case .divider:
             return ConversationRowView.turnDivider()
 
-        case .fold(let turnStart, let hiddenIndices, let duration, let stopped):
+        case .fold(let turnStart, let hiddenIndices, let duration, let outcome):
             return TurnFoldView(
                 duration: duration,
-                stopped: stopped,
+                outcome: outcome,
                 folding: [],
                 expanded: expandedTurnStarts.contains(turnStart)
             ) { [weak self] _, expanded in
@@ -714,6 +745,67 @@ final class ConversationVirtualRowHost: NSTableCellView {
     private var releaseContent: (() -> Void)?
     private var onMeasuredHeight: ((CGFloat) -> Void)?
 
+    /// The width of the column this cell sits in, which has to be *stated* — see
+    /// `setColumnWidth`. Held on the cell rather than the content so it survives recycling.
+    private lazy var columnWidth: NSLayoutConstraint = {
+        // Above the content's own compression resistance and below required: a row too narrow
+        // for what is in it gives way in the words, never by growing past the pane. Required
+        // would make the same choice by breaking someone else's required constraint and
+        // logging it as a failure.
+        let constraint = widthAnchor.constraint(equalToConstant: 0)
+        constraint.priority = ConversationDefaults.columnWidthPriority
+        return constraint
+    }()
+
+    /// States how wide the cell's column is, because AppKit does not.
+    ///
+    /// **A cell is not given its column's width.** Under `usesAutomaticRowHeights` the table
+    /// solves the cell from the constraints inside it, and a width nothing determines settles on
+    /// the smallest that satisfies them. So a row capped at the readable measure came out
+    /// `readableWidth` plus its insets — 644pt — sitting at the column's leading edge, and the
+    /// `centerXAnchor` below centred the content inside *that* rather than in the pane. The
+    /// column the whole pane is designed around was therefore flush left in every window wider
+    /// than 644, which is most of them: prose and bubbles hugged the sidebar with several
+    /// hundred points of empty pane beside them, and the turn rail — placed for a column that
+    /// is *centred* — landed on the first character of every paragraph.
+    ///
+    /// Stating the width is what makes `centerXAnchor` mean the pane's centre. It also closes
+    /// the older fault the other way round: with the cell pinned to its column it can no longer
+    /// grow past the clip in a pane narrower than the column.
+    func setColumnWidth(_ width: CGFloat) {
+        guard width > 0 else {
+            columnWidth.isActive = false
+            return
+        }
+        guard !columnWidth.isActive || abs(columnWidth.constant - width) > 0.5 else { return }
+        columnWidth.constant = width
+        columnWidth.isActive = true
+    }
+
+    /// The column a table's cells stand in — the table's own, not its pane's, because the table
+    /// insets the column and a cell centred on the pane's width would sit off that centre by
+    /// half the inset.
+    static func columnWidth(of tableView: NSTableView) -> CGFloat {
+        tableView.tableColumns.first?.width ?? tableView.bounds.width
+    }
+
+    /// Tells every cell currently on screen how wide its column is, and answers with it.
+    ///
+    /// Called from the host's `viewDidLayout`, because a cell AppKit does not rebuild would
+    /// otherwise go on centring itself in a column that no longer exists — the pane can be
+    /// dragged wider without a single row being recycled.
+    @discardableResult
+    static func stateColumnWidth(in tableView: NSTableView) -> CGFloat {
+        let width = columnWidth(of: tableView)
+        guard width > 0 else { return width }
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ConversationVirtualRowHost)?.setColumnWidth(width)
+            }
+        }
+        return width
+    }
+
     func install(
         _ content: NSView,
         topInset: CGFloat,
@@ -729,15 +821,25 @@ final class ConversationVirtualRowHost: NSTableCellView {
         addSubview(content)
 
         let sideInset = Design.Spacing.inset
-        let readableWidth = content.widthAnchor.constraint(
-            equalToConstant: Design.Size.readableWidth
-        )
-        readableWidth.priority = .defaultHigh
+
+        // The pane's width leads and the readable column is a cap, never the other way round.
+        //
+        // A cell is not pinned to its column: under automatic row heights the table solves the
+        // cell's own width from the constraints inside it, so a row that *asks* for the readable
+        // measure gets it even where there is no room — the cell grows past the clip, taking the
+        // words with it. Nothing announces that; the pane has no horizontal scroller, so the
+        // sentences are simply cut mid-word at its edge. This shipped as a child transcript in
+        // the display pane, which is routinely narrower than the column, rendering as clipped
+        // paragraphs with an untouched gutter of pane behind them. Ordering the two the other
+        // way had the same intent and only worked while the pane was wide enough to hide it.
+        //
+        // The cell's own width is stated by `setColumnWidth`; without it neither this nor the
+        // centring below has a column to be a fraction of.
         let paneWidth = content.widthAnchor.constraint(
             equalTo: widthAnchor,
             constant: -sideInset * 2
         )
-        paneWidth.priority = NSLayoutConstraint.Priority(rawValue: 749)
+        paneWidth.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
@@ -746,7 +848,6 @@ final class ConversationVirtualRowHost: NSTableCellView {
             content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset),
             content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sideInset),
             content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
-            readableWidth,
             paneWidth
         ])
     }

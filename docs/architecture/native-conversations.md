@@ -87,7 +87,13 @@ surface. `CodexStreamSession` launches one `codex app-server --listen stdio://` 
 performs the `initialize` / `initialized` handshake, then calls `thread/start` or
 `thread/resume`. User messages become `turn/start`; model, effort and service tier are read
 from the latest `ProjectStore` record into that request, so an idle conversation can change
-configuration without restarting the server or changing thread id.
+configuration without restarting the server or changing thread id. Before a conversation has
+its own Standard/Fast override, its **Follow General Setting** choice resolves the app-wide Codex
+startup-speed policy onto the app-server launch; each later `turn/start` resolves the same chain,
+so a conversation still following an explicit General Standard/Fast choice does not drift from
+the process. Claude's Native transport receives the same startup policy in its per-session
+`--settings` file and restates it over `apply_flag_settings` when the stream is ready.
+The full precedence and Terminal parity live in [`sessions.md`](sessions.md#startup-speed-per-runtime-and-per-conversation).
 
 `CodexAppServerEvent` maps provider-specific JSON-RPC notifications onto `[StreamEvent]`.
 Agent-message deltas use the same streaming placeholder as Claude, completed messages become
@@ -508,17 +514,76 @@ different prompt.
 The entry points use the same staged receipt rail:
 
 - each user or assistant message offers **Add … to chat** and **Comment…**;
-- a Git Review or edit-tool diff line offers **Add line to chat** and **Comment on line…**;
+- a Git Review or edit-tool diff line offers **Add line to chat** and **Comment on line…**; in
+  Git Review's TextKit renderer a text selection is how *several* lines are chosen — a
+  right-click inside the selection retitles the pair **Add lines to chat** / **Comment on
+  lines…** and speaks about every selected line, while a right-click outside it stays about the
+  line under the pointer, macOS's own contextual-click convention. Either way the click selects
+  the target lines whole, so the wash under them is the receipt's exact quote — the lines lit
+  are the lines the sheet and the excerpt will carry;
 - a Git Review file, including an image comparison, can be referenced or commented on as a file;
 - the Attachments pane can stage or comment on its selected item, and a composer image thumbnail
   offers the comment action directly.
 
-Code anchors use the rendered line's new number, falling back to its old number for deletions.
+Code anchors use the rendered line's new number, falling back to its old number for deletions;
+a multi-line span anchors on its first and last displayed lines by the same rule, and its title
+folds the range on as `path:12-15`.
+Opening a comment from either diff carries a separate, presentation-only `CodeContextPreview` into
+the sheet: normally two neighbouring rendered rows on each side, with additions/removals and line
+numbers intact, and every selected row stated with the selection surface plus a leading `›`.
+The preview asks its source for at most ten code rows. If the target itself is larger, it keeps the
+first and last five candidate rows around one counted omission instead of building a view per
+selected line. That bound belongs only to the sheet — `ConversationContextAttachment.excerpt`
+continues to quote the complete selected span, so adding or sending the comment loses nothing.
 Paths are project-relative when they belong to the checkout; attachment-store paths never expose a
 machine-private absolute path. `ConversationContextRailView` groups a review batch into reference
 and comment count chips, with details and removal behind its themed menus. The same counts are
-included in iOS and browser conversation snapshots. OpenCode remains outside this path because it
-currently has only the terminal surface, not Threading's native composer.
+included in iOS and browser conversation snapshots.
+
+#### Hold it, or send it
+
+The comment sheet is one type, `ContextCommentAlert`, for every site above, and it offers two
+affirmatives rather than one: **Add to Chat** on Return parks the comment beside the prompt so
+more can be staged onto the same turn, and **Send** on ⌘Return hands it over immediately.
+`sendContextAttachment` sends it *with* whatever prose is already in the box rather than instead
+of it — someone who typed half a sentence and then commented on the file it was about meant one
+turn.
+
+`TextPromptRequest.immediateTitle` is the seam. Two affirmatives that both answer with the field
+needed a second one, distinct from `clearTitle`, which answers with nothing. The trap underneath
+is that `ThemedButton.keyEquivalent` matches its character *whatever is held with it*, so the
+default's Return would have swallowed ⌘Return and left Send reachable only by mouse.
+`ThemedAlert.resolvedChords` restates a plain Return as an exact-match `KeyboardShortcut` for the
+whole sheet whenever a sibling carries a modifier-bearing chord on the same key — which also
+draws `↩` and `⌘↩` on the two faces, since a pair nobody can see is a pair nobody finds.
+
+#### The terminal half
+
+None of the above requires a native conversation. `SessionContextHandoff` resolves a session to
+whichever surface holds its input and answers for both, so the Attachments pane and Git Review
+offer the same actions to a terminal session — which is every OpenCode session, and any Claude,
+Codex, or Grok session with native Chat turned off. Before this, those panes drew a **Chat…**
+button that silently did nothing, and the one workflow the feature exists to remove — copy the
+path, switch panes, paste it, type the sentence — survived exactly where it cost the most.
+
+A terminal is *pasted into*, because a terminal carries text and that is the whole of its input
+surface. It is handed `ConversationContextAttachment.plainText(omittingAnchor:)` — the sentence a
+person would have typed — rather than the JSON envelope, which exists so a native transport can
+hand the typed value back and has nothing to be handed back to here. A message's locator is
+`conversation-row:3`, a private timeline id, so prose falls back to the title for `.message` and
+uses the path with its line range folded on for `.code` and `.attachment`.
+
+Two details are load-bearing. An attachment's real path goes over **first and alone**, in its own
+bracketed paste, because both CLIs read one arriving paste as a unit and attach it as an image
+only when the whole of it is a path — a path with a sentence after it is a sentence (see
+`TerminalDrop`). And the Return that submits is deliberately late by
+`TerminalDefaults.pastedTurnSubmitDelay`: both CLIs resolve a pasted image path asynchronously,
+and a Return in the same runloop turn risks submitting before the picture arrives.
+
+Whether a pane draws the affordance is `SessionContextHandoff.canReceiveContext`, which is a fact
+about the agent rather than about the pane's list — a dormant session has no door until it
+launches and loses it when it exits, so the Attachments pane watches `SessionActivityDidChange`
+and updates that one control rather than rebuilding itself several times a turn.
 
 ## Conversation Rendering
 
@@ -621,6 +686,29 @@ card the moment a newer turn is accepted, before its new baseline replaces the o
 Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
 against it would attribute later work to an old exchange. An empty diff leaves no card.
 
+**A file row previews its own diff under the pointer** (`ChangedFileDiffViewController`,
+`HostPopoverID.conversationChangedFileDiff`). The reader already parsed the hunks to produce
+the counts, so the preview costs no second git read — but the card is retained for as long as
+the conversation, so what it keeps is bounded *at capture*: `ChangedFileDiffPreview.previews`
+spends `ChangedFilesDefaults.previewLineCap` per file in hunk order and counts what it could
+not cover, rather than pinning every line of every file a session ever touched. The body is
+`GitReviewDiffTextView` — one TextKit document per hunk, not a view per line — because the file
+under the pointer is as likely to be a four-hundred-line rewrite as a two-line fix. The policy
+is the disclosure's rather than the sidebar's: the surface scrolls, so it takes a grace to cross
+the gap and holds itself open while the pointer rests on it (`HoverTrackingView` reports that
+back). A directory, a binary file, and a card built without previews raise nothing, and the row
+takes no tracking area in those cases — a hover wash on a row that answers nothing is the row
+lying about itself.
+
+**The tree's lead-in is one glyph column, not two.** Every row pays for the disclosure column
+whether or not it draws a chevron, which is what puts a directory's files exactly one indent
+step right of its own name. That rule was previously paid *twice* — a folder mark sat beside
+every chevron — so each file row began 40 points inside the card before its name, plus a base
+inset, and a two-level tree spent a fifth of a narrow pane on indentation alone. The folder
+mark said what the chevron already said; it is gone, the base inset with it, and the step is
+`Spacing.medium`. `ChangedFilesCardTests` asserts the parent/child relationship rather than the
+absolute numbers, since the rule is what matters and the tokens may move.
+
 **A long user message collapses behind a fade** (`UserMessageBubbleView`,
 `ConversationDefaults.collapsesUserMessage`) — past 600 characters or eight hard lines, the
 bubble caps at eight rendered lines with an alpha-mask fade over the tail (a mask on the
@@ -678,6 +766,10 @@ our own `setBoundsOrigin` can never release the pin. A bounds change within
 `gestureAttribution` of the last gesture event re-derives the mode — near the bottom re-pins,
 anywhere else frees — and momentum events keep refreshing the window, so a flick stays
 attributed to its end. A minimap jump frees; a finished replay lands at the bottom and follows.
+Whenever the viewport is away from the live end, the shared floating down-arrow is the explicit
+way back: it lands on AppKit's constrained terminal offset and enters *following* again. Streaming
+coalesces that control's visibility refresh with the existing follow pass, so a token does not
+add another main-queue job or a walk over the transcript.
 
 ### iOS conversation boundary
 
@@ -702,6 +794,114 @@ adding about 108 ms before paint. Keyboard frame notifications update the safe-a
 constraint instead; the keyboard demo verifies the same layout behavior when input is actually
 requested.
 
+## Queue, Steer, Stop
+
+Three separate dispositions for a message typed while the agent is busy, and conflating any two
+of them is the mistake every client makes first:
+
+| | The running turn | The message |
+|---|---|---|
+| **Queue** | untouched | held here, sent as its own turn when the turn settles |
+| **Steer** | continues, with the message appended at its next model boundary | joins the *running* turn — no new turn, no second terminal event |
+| **Stop** | aborted at the next safe point | nothing |
+
+Reordering and removal are operations on the **queue** only. A steered message is gone the moment
+it is handed over, and there is nothing left to reorder.
+
+The measurements behind all of it — Claude 2.1.223 and Codex 0.145.0, probed rather than read —
+are in [`COMPOSER_QUEUE_FINDINGS.md`](../COMPOSER_QUEUE_FINDINGS.md).
+
+### The transport boundary
+
+Three optional protocols beside `ConversationStreamSession`
+(`ConversationTurnControl.swift`), in the same style as `ModelSwitchableConversation`, because the
+providers support different subsets and the difference is not a hierarchy:
+
+| | Stop | Steer | Lifecycle |
+|---|---|---|---|
+| Claude `stream-json` | `control_request` `interrupt` | at the next model boundary | `command_lifecycle` keyed by our `uuid` |
+| Codex app-server | `turn/interrupt` | `turn/steer` + `expectedTurnId` | `clientUserMessageId` |
+| Grok / ACP | `session/cancel` | **none** | none |
+
+`ConversationStreamSession` gains `canInterrupt`, `steerAvailability`, `interrupt`, `steer` and
+`send(_:identifiedBy:)`, each of which casts once and answers honestly for a transport that
+conforms to nothing. A fourth runtime therefore changes that one file and nothing in the view,
+and a transport conforming to none still gets a working composer that queues locally.
+
+**Steering is refused out loud rather than degraded.** `SteerAvailability` is `.available` or
+`.unavailable(reason:)` — `.unsupported`, `.noActiveTurn`, `.turnKindRefusesSteering` — so ⌘Return
+draws no promise Grok cannot keep. This is the "Chat… button that silently did nothing" failure,
+already fixed once for terminal sessions.
+
+### Threading owns the queue
+
+`ConversationOutbox` is a pure value type on the view controller, even though Claude's CLI keeps a
+command queue of its own and will drop an entry by uuid. Three reasons: reorder and edit need it
+here (no provider queue can be reordered, and implementing a drag as cancel-and-resend races with
+delivery on every gesture); Codex and ACP hold nothing between turns; and it has to cross
+RemoteKit, which a queue living inside `ClaudeStreamSession` cannot. The provider's queue is the
+*delivery* mechanism at flush time, and `MessageLifecycleReportingConversation` is the receipt.
+
+Flushing takes **one item at a time, never concatenated** — two messages somebody wrote separately
+are two turns — and goes through the same `GitTurnBaselineStore.prepareTurn` as a directly typed
+message, or a queued turn shows the previous turn's diff as its own. The drain hangs off
+`onSendAvailabilityChange` rather than a terminal event, because that is the one signal every
+transport has for "the turn ended", however it ended.
+
+### Stop stops the fleet
+
+`interrupt()` on the parent alone leaves background subagents and shells running, and burning
+tokens — which is exactly the situation Stop is reached for, so the parent-only version does least
+where it matters most. Both implementations stop children first (Claude's `stop_task` per live
+task id, Codex's `turn/interrupt` per child thread), best-effort and individually bounded, then
+interrupt the parent unconditionally. Codex tracks child turns for *any* foreign conversation
+rather than only registered ones: a child's `turn/started` can arrive before the activity
+notification that registers it, and a Stop that depends on registration timing leaves it running.
+
+**A stopped turn is not a failed turn**, and telling them apart needed a type. `StreamEvent`
+carries `TurnOutcome` — `.completed`, `.failed`, `.stopped` — where it carried `isError: Bool`.
+Every provider reports a user stop through its *error* channel (Claude `error_during_execution`,
+Codex `TurnStatus.interrupted`, ACP `stopReason: "cancelled"`), so one flag made "you pressed
+Stop" indistinguishable from "the model call failed": the fold read **You stopped after 42s** for
+a network error, and the execution ledger's `interrupted` phase was unreachable. Each adapter
+owns its own spelling-to-outcome mapping in its own file; the neutral type never learns a
+provider's vocabulary.
+
+Claude is the one case the wire cannot settle — `error_during_execution` covers genuine faults
+too — so `ClaudeStreamSession.outcome(for:)` restates the parser's honest `.failed` as `.stopped`
+only when it has an interrupt outstanding. The flag clears on the terminal event rather than on
+the control response, which arrives ~10 ms earlier.
+
+### What the composer promises
+
+`PromptComposerMode` is `.ready` or `.working(canStop:canSteer:)` — one value the owner resolves
+from the transport, so `PromptView` never asks who the provider is. Return queues, ⌘Return steers
+where it can (the chord already means "the more committed of two affirmatives" here, from
+`ContextCommentAlert`), and the send glyph becomes a Stop rather than a second button, because the
+two are never both meaningful. Esc stops too, but only once the completion list has nothing nearer
+to dismiss.
+
+The queue rows sit **directly above the box, below the status line**. Both halves were arrived at
+from a rendered fixture:
+
+- The status line is the *turn* talking — orb, working word, what the last one cost — and reads
+  with the transcript. The queue is what happens next and belongs to the composer. Put above the
+  status line, the queue sat across a sentence about the past.
+- They are drawn as a **tray**: a quiet `Surface.panel` behind the rows. Without one the rows
+  floated between two other things, and the space each stretched across to put its remove at the
+  trailing edge belonged to nothing — a sentence left, a glyph right, a gap between them that
+  read as a mistake. `panel` and not `field`, because the composer below is a field and two wells
+  stacked read as two places to type.
+- No position numbers: a queue's order is which row is above which, and a column of numbers
+  beside sentences that already stack in order says one thing twice.
+- The grip and the remove are **alpha, never `isHidden`**, and only inked on hover. A stack
+  detaches a hidden arranged view, so geometry moved every time one appeared — the row without a
+  grip started a glyph's width left of the others, and a remove materialising on hover shortened
+  the sentence beside it as the pointer arrived.
+
+Steered messages never appear there — they go straight into the transcript as a user bubble inside
+the running turn, which is where they went.
+
 ## The Turn Rail
 
 `ConversationMinimapView` is a contents page for the conversation: one mark per exchange down
@@ -716,6 +916,49 @@ the full pane — 900pt of unbroken measure in a wide window, which `Design.Size
 already exists to prevent and which the composer already respects. Capping it at 620 and
 centring it fixes the measure *and* leaves the gutter the rail lives in. Two problems, one
 change; the rail was blocked by a layout that was independently wrong.
+
+**The cap is a ceiling, not a request.** `ConversationVirtualRowHost` lets the pane's own width
+drive the row and states the column as the `lessThanOrEqualTo` it is; asking for 620 at a higher
+priority than the pane looks equivalent and is not. A table cell is not pinned to its column —
+under `usesAutomaticRowHeights` the table solves the cell's width from the constraints inside
+it — so where the pane is narrower than the column the cell grows past the clip instead of
+losing the argument. There is no horizontal scroller, so the words are just cut off mid-sentence
+at the pane's edge. It showed first in the child transcript, which lives in the display pane and
+is routinely half the column's width, and the same rows are correct in the conversation pane
+only because it is usually wider than 644. Both widths are asserted in `ConversationRenderTests`:
+nothing leaves a `DisplayPaneDefaults.defaultWidth` pane, and prose still reaches the full column
+when the pane can hold it.
+
+**"Centred" was a claim about a constraint, not about the app, for as long as that cell was free
+to choose its own width.** The same sentence above — a cell is not pinned to its column — has a
+second consequence that went unnoticed: a width nothing *determines* settles on the smallest that
+satisfies the constraints, so the cell came out exactly 644pt wide and sat at the column's
+leading edge. `centerXAnchor` then centred the content inside the cell rather than in the pane,
+and the column the whole layout is designed around was flush against the sidebar in every window
+wider than 644 — several hundred points of empty pane beside it, and the turn rail, which is
+placed for a *centred* column, resting on the first character of every paragraph. The two faults
+looked like one rail bug and were one layout bug.
+
+`ConversationVirtualRowHost.setColumnWidth` states the width AppKit does not, pushed from
+`viewDidLayout` for the cells already on screen and at `viewFor:row:` for the rest. It is what
+makes `centerXAnchor` mean the pane's centre, and it closes the clipping fault above from the
+other side as well: a cell pinned to its column can no longer grow past it. The priority is one
+below required, so a row that genuinely cannot fit gives way in its own words rather than in an
+unsatisfiable required set.
+
+Because it was asserted on a fixture that centres a stack in a host by hand, the harness agreed
+with itself throughout — the same "a component tested outside the container it ships in can pass
+while being unusable" rule CLAUDE.md states, and here the container is the table.
+`testTranscriptComposerAndRailStandOnOneCentredColumn` measures the live pane instead, held at a
+stated width the way a split item holds it.
+
+**The reply box stands on the column too** (`ConversationDefaults.composerWidth`). It used to
+span the pane, which is how a single line of placeholder text came to be 1,400pt wide under a
+620pt conversation. It is the readable measure plus the box's own padding, so the line being
+typed lands on exactly the column the transcript is read on, and the status line above it is
+inset from the *box* rather than from the pane for the same reason. Below that width the box
+keeps the pane's inset and the row keeps the table's, which differ by a few points — a pane
+narrower than the reading measure has no column for the two to share.
 
 `ConversationMinimap` holds the arithmetic, separately from the view, because the two rules
 worth protecting are invisible in a screenshot of a wide window:
@@ -741,6 +984,68 @@ leaves the pane nor comes within `gutterInset` of the column.
 Marker spacing is 20, not t3code's 8: at three turns theirs is a 16pt smudge that reads as a
 rendering artefact. Measured off Codex's own rail — about twenty-five marks over five hundred
 points — and checked by rendering it.
+
+**Spacing has a floor, and past it the rail buckets** (`minimumMarkerSpacing`, `markCount`).
+`railHeight` caps at `maximumHeightFraction` of the pane while spacing was that height divided by
+the turns, so every exchange past about twenty-eight in a 900pt pane packed the marks tighter with
+nothing to stop it: at two hundred turns they were under three points apart and `mark(atY:)` was
+choosing between marks no pointer could separate. Past the floor the rail draws as many marks as it
+can hold and each stands for the turn it is nearest — fewer marks than turns, which is a real loss
+and the honest one, because the alternative is marks that cannot be hit. Everything the pointer
+touches is in **mark** space; everything the preview and `onSelect` speak is in **turn** space;
+`turnIndex(forMark:)` and `markIndex(forTurn:)` are the border, and below the threshold they are
+the identity. A bucketed mark must still reach the conversation's first and last exchange and must
+resolve in order, or a click lands somewhere the eye did not point.
+
+**The taper follows the pointer, not the mark it is nearest.** The three width constants are one
+profile (`markerWidthProfile`, `[24, 16, 10, 8]`) sampled at whole marks, and reading it by
+*integer* distance is what made the rail step: the pointer crossed most of the gap between two
+marks with the picture unchanged, then every mark in the taper took a new width in one frame. The
+stops are the design and were never wrong; only the sampling was. `markerWidth(distance:)`
+smoothsteps between them, `markerDistance` measures in **marks rather than points** so the taper
+keeps its shape once the marks bunch, and `markerEmphasis` puts colour on the same curve — three
+hard tone buckets under a smooth taper read as a rendering fault, widths flowing while tones
+snapped on the same marks in the same frame. The taper itself ramps open and shut
+(`advanceFisheye`, the `ThemedToggle` display-link pattern), and its centre outlives the pointer so
+it settles back towards where the pointer left rather than collapsing flat.
+
+**The rail indexes the conversation; the sticky header indexes the turn.** A turn that ran forty
+tool calls is one mark by design, so inside it the rail has nothing to say and the reader scrolling
+through it loses what every other line is about. `ConversationStickyStepView` pins the current
+call's glyph, tool and `ToolCall.summary` to the top of the pane, and
+`ConversationViewController.updateStickyStep` resolves it from the viewport's topmost row.
+
+Two rules make it behave. **Chrome at the top means hide**: a divider, a fold, a card or the
+streaming placeholder is a boundary that has already said where the reader is, and naming a step
+over it would be a second, quieter answer to a question answered louder. And it **overlays rather
+than insets** the scroll view, because insetting would move content under an anchored auto-scroll
+and make arriving output jump by the header's height — the cost is that free scrolling can tuck a
+line under it, which `landingClearance(for:)` pays back on the one path where it would actually
+hurt, a deliberate jump landing its target underneath the strip that names it.
+
+The model half is `ConversationTimeline.steps(inTurnStartingAt:)` and `currentStep(atOrBefore:)`.
+Steps are recorded as calls append (`toolCallRowsByTurnStart`), keyed off `turnStartIndices.last`
+rather than `currentTurnStartIndex` — a terminal event clears the latter, so a provider emitting one
+more call after reporting the turn finished would contribute a step belonging to no turn. The
+backward walk stops at the enclosing user message, so the top of a turn names *nothing* rather than
+borrowing the previous exchange's last call.
+
+Keyboard navigation is not optional here, because the rail is absent in a narrow pane and the
+header only tells you where you are. ⌃⌘↑/↓ walk exchanges, the vertical siblings of Go Back and Go
+Forward on the same ⌃⌘ window-structure layer; ⌥⌘↑/↓ walk steps, the way `⌃⌘B` refines to `⌥⌘B`.
+Step navigation walks the **presentation** rather than the timeline, which is what makes a folded
+turn's calls skip: they are not presented, so they are not places a reader can be sent. Turn
+navigation walks `timeline.turns` regardless, which is also the escape hatch for a bucketed rail
+whose marks no longer stand for every exchange.
+
+That last one is why `ConversationMinimapMotionTests` exists and why it films rather than
+photographs. **Every still of the stepped rail was correct**; only the sequence was wrong, so no
+screenshot anyone would have taken could have caught it. The tests capture a pointer sweep frame by
+frame and assert that consecutive frames differ, and they reproduce the old behaviour through the
+real drawing code — a pointer that only ever reports the centre of the mark it is nearest *is*
+sampling by nearest mark, with nothing stubbed to arrange it. Measured across 80pt of travel: the
+old sampling produced four distinct frames, the new one produces one per position the pointer was
+actually at.
 
 **The model is separate from the drawing.** `ConversationTimeline` folds `[StreamEvent]` into
 `[Row]` and reports what changed; `ConversationRowView` turns one row into one view;
@@ -819,11 +1124,19 @@ change is in the box, everything the session is telling them is above it. Before
 lived on one strip between the conversation and the input, which sized itself to its content and
 so left the controls clustered at the leading edge of an otherwise empty row.
 
-**Model then mode then effort leads the row**, matching the opening composer wherever the
-selected model publishes effort levels. Speed is reply-only, so it follows. The mode chip
+**Model then mode then effort then speed leads the row**, matching the opening composer wherever
+the selected model publishes those controls. The mode chip
 is also configured *before* the model-catalog guard: a runtime that publishes no catalog — Grok
 today — still has a permission posture, and the early return that hides the model, effort and
 speed chips used to take this one with it.
+
+**Speed has one presentation on both composers.** `ConversationSpeedPresentation` owns the
+**Follow General Setting**, **Standard**, and **Fast** rows, including their selected state and the
+chip's resolved title. Native stores the same optional `AgentSession.fastMode` the opening draft
+hands to session creation. Claude applies a resolved Standard/Fast choice over its live control
+channel; Codex reads it into the next `turn/start`. Following a General setting of Agent's Setting
+cannot reconstruct the provider's original value in a running process, so that case records the
+inheritance for restart and prints a muted notice instead of claiming a live change.
 
 **What choosing a mode does differs by provider, and the menu says which.**
 `PermissionModePresentation` is the one place the rows, the inherit wording and the `hand.raised`

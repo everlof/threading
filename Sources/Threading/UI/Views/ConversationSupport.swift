@@ -61,6 +61,7 @@ final class FlippedClipView: ThemedClipView {
 ///   reserved below short content — the bubble rises as far as the content allows and holds
 ///   once it reaches the top, which is the same reading position without the layout cost.
 /// - **A minimap jump** releases the pin: the user deliberately went somewhere.
+/// - **The floating down-arrow** returns to the live end and resumes following.
 ///
 /// Pure, so the transitions are testable without a scroll view.
 struct ConversationAutoScroll: Equatable {
@@ -93,6 +94,10 @@ struct ConversationAutoScroll: Equatable {
         mode = .free
     }
 
+    mutating func noteJumpedToBottom() {
+        mode = .following
+    }
+
     /// A finished replay lands at the bottom — how a resumed conversation ended is what
     /// matters about it — and following resumes from there.
     mutating func noteReplayFinished() {
@@ -107,6 +112,40 @@ enum ConversationDefaults {
     /// land near this value; prose replaces it with a cached identity-specific height as soon as
     /// it enters the viewport.
     static let estimatedRowHeight: CGFloat = 48
+
+    /// How hard a transcript row insists on being exactly as wide as its column — see
+    /// `ConversationVirtualRowHost.setColumnWidth`. One below required so that a row which
+    /// cannot fit loses the argument in its own content rather than in an unsatisfiable
+    /// required set, and well above the 750 a label defends its text at.
+    static let columnWidthPriority = NSLayoutConstraint.Priority(999)
+
+    /// How hard a pane-level column — the reply box's, the sticky step's — holds the width the
+    /// layout pass states for it: above the hugging its content answers with, below everything
+    /// the split view says about the pane.
+    ///
+    /// A column that sits in the pane itself must be a *stated constant*, the way the transcript
+    /// rows state theirs, and never an equality to the pane's width. An equality-to-pane under a
+    /// required cap cannot be satisfied in a pane wider than the cap, and the solver reduces the
+    /// error with whatever is cheapest — which, at any priority above the 250 an
+    /// `NSSplitViewItem` positions its pane with, is *the pane*: at `.defaultHigh` each such
+    /// column clamped the whole conversation pane down to its own cap and the divider would not
+    /// move, reported as "the chat can't be made wider than the textarea". Nor can the equality
+    /// simply drop below 250 — the composer's footer hugs at exactly that default, so a weaker
+    /// pull loses to the chips and the box collapses to their width instead of filling the pane.
+    /// A constant the layout pass has already made satisfiable pulls on nothing; the priority
+    /// only has to beat the hug (250) and stay under the divider's own drag (490) — and under
+    /// the 500 at which a content-derived constant starts sizing the window (see
+    /// `window-chrome.md`). The transcript rows may keep their 999 because they live in the
+    /// scroll view's document, where no constraint can reach the pane.
+    static let statedColumnPriority = NSLayoutConstraint.Priority(400)
+
+    /// The reply box's column: the transcript's readable measure plus the box's own padding.
+    ///
+    /// The box is padded by `Design.Spacing.inset` before its text starts, so a box this wide
+    /// puts the line being typed on exactly the column the conversation above it is read on —
+    /// one edge down the whole pane rather than a box that spans the window under a centred
+    /// column. It is a cap: a pane narrower than this keeps the box inset from its edges.
+    static var composerWidth: CGFloat { Design.Size.readableWidth + Design.Spacing.inset * 2 }
 
     /// Tool output beyond this is truncated. Generous, because output is collapsed by
     /// default — the cost of keeping it is layout, not attention.

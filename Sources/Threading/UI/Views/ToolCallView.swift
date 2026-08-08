@@ -52,7 +52,7 @@ final class ToolCallView: NSView {
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
         didSet { contextDiff?.onAddContextAttachment = onAddContextAttachment }
     }
-    var onRequestContextComment: ((ConversationContextAttachment) -> Void)? {
+    var onRequestContextComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)? {
         didSet { contextDiff?.onRequestComment = onRequestContextComment }
     }
 
@@ -112,7 +112,9 @@ final class ToolCallView: NSView {
             enableExpansion()
         }
 
-        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(toggle)))
+        let click = NSClickGestureRecognizer(target: self, action: #selector(toggle))
+        click.delegate = self
+        addGestureRecognizer(click)
     }
 
     /// The body is decided by the tool: a diff for an edit, a scrollable text field otherwise.
@@ -336,6 +338,22 @@ final class ToolCallView: NSView {
         // whether or not the pointer is still over it.
         let isActive = isHovered || isExpanded
         applyLayerBackground(isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting)
+    }
+}
+
+// MARK: - Gesture Delegate
+
+extension ToolCallView: NSGestureRecognizerDelegate {
+
+    /// A click inside the opened body belongs to the body — it is selectable output or a diff
+    /// with its own line actions, and a click that placed a caret also folded the row shut.
+    /// Only the header line is the toggle; `GitReviewFileRow` holds the same rule.
+    func gestureRecognizer(
+        _ recognizer: NSGestureRecognizer,
+        shouldAttemptToRecognizeWith event: NSEvent
+    ) -> Bool {
+        guard let bodyView, !bodyView.isHidden else { return true }
+        return !bodyView.frame.contains(convert(event.locationInWindow, from: nil))
     }
 }
 

@@ -54,8 +54,33 @@ enum ConversationMinimap {
         static let neighbourMarkerWidths: [CGFloat] = [16, 10]
         static let restingMarkerWidth: CGFloat = 8
 
+        /// The same three constants read as one curve, sampled at whole marks out from the
+        /// pointer: `[24, 16, 10, 8]`.
+        ///
+        /// **The stops are the design; the interpolation between them is only smoothness.**
+        /// Sampling them by whole-number distance is what made the rail step. The pointer
+        /// crossed the midpoint between two marks and every mark in the taper took a new width
+        /// in one frame, so a control whose entire job is to say "you are here" moved in jumps
+        /// while the pointer moved continuously. The values were never wrong, only the sampling.
+        static var markerWidthProfile: [CGFloat] {
+            [activeMarkerWidth] + neighbourMarkerWidths + [restingMarkerWidth]
+        }
+
         /// Tallest the rail grows before its marks bunch closer than `markerSpacing`.
         static let maximumHeightFraction: CGFloat = 0.6
+
+        /// The closest two marks may sit before the rail stops being pointable.
+        ///
+        /// `railHeight` caps at `maximumHeightFraction` of the pane while spacing was simply that
+        /// height divided by the turns, so past about twenty-eight turns in a 900pt pane every
+        /// further exchange packed the marks tighter, with no floor. At two hundred turns they
+        /// were under three points apart and `mark(atY:)` was choosing between marks no pointer
+        /// could separate — a control that answers a question the hand cannot ask.
+        ///
+        /// Past this floor the rail stops marking every turn and becomes a **bucketed index**:
+        /// fewer marks than turns, each resolving to the turn it is nearest. That is a real loss,
+        /// and the honest one — the alternative is marks that cannot be hit.
+        static let minimumMarkerSpacing: CGFloat = Design.Spacing.medium
     }
 
     // MARK: - Availability
@@ -116,25 +141,54 @@ enum ConversationMinimap {
         return min(max(natural, Metrics.markerHeight), paneHeight * Metrics.maximumHeightFraction)
     }
 
+    /// How many marks the rail draws.
+    ///
+    /// Every turn gets one until they would sit closer than `minimumMarkerSpacing`, after which
+    /// the rail draws as many as it can hold and each stands for the turn it is nearest. Below
+    /// that threshold — every conversation the rail serves up to its height cap — this is simply
+    /// the turn count, and `turnIndex(forMark:)` / `markIndex(forTurn:)` are the identity.
+    static func markCount(turnCount: Int, railHeight: CGFloat) -> Int {
+        guard turnCount > 1 else { return max(0, turnCount) }
+        guard railHeight > 0 else { return turnCount }
+
+        let affordable = Int(railHeight / Metrics.minimumMarkerSpacing) + 1
+        return max(2, min(turnCount, affordable))
+    }
+
+    /// Which turn a mark stands for. The rail's answer to a click, and to a hover.
+    static func turnIndex(forMark mark: Int, markCount: Int, turnCount: Int) -> Int {
+        guard markCount > 1, turnCount > 1 else { return 0 }
+        let clamped = min(max(mark, 0), markCount - 1)
+        return Int((CGFloat(clamped) / CGFloat(markCount - 1) * CGFloat(turnCount - 1)).rounded())
+    }
+
+    /// Which mark stands for a turn. The inverse, for placing the preview and for saying which
+    /// marks are on screen.
+    static func markIndex(forTurn turn: Int, markCount: Int, turnCount: Int) -> Int {
+        guard markCount > 1, turnCount > 1 else { return 0 }
+        let clamped = min(max(turn, 0), turnCount - 1)
+        return Int((CGFloat(clamped) / CGFloat(turnCount - 1) * CGFloat(markCount - 1)).rounded())
+    }
+
     /// The centre of a mark, measured down from the rail's top.
     ///
     /// Evenly spaced **on purpose**: this indexes the conversation, it does not scale it. A
     /// turn that ran forty tool calls and one that ran none are one exchange each, and spacing
     /// them by length would give a long turn a long stretch of rail that says nothing about
     /// how much was *said*.
-    static func markerCenterY(index: Int, turnCount: Int, railHeight: CGFloat) -> CGFloat {
-        guard turnCount > 1 else { return railHeight / 2 }
-        let clamped = min(max(index, 0), turnCount - 1)
-        return railHeight * CGFloat(clamped) / CGFloat(turnCount - 1)
+    static func markerCenterY(mark: Int, markCount: Int, railHeight: CGFloat) -> CGFloat {
+        guard markCount > 1 else { return railHeight / 2 }
+        let clamped = min(max(mark, 0), markCount - 1)
+        return railHeight * CGFloat(clamped) / CGFloat(markCount - 1)
     }
 
     /// Which mark a pointer at this height is nearest, or nil when there is nothing to point at.
-    static func index(atY y: CGFloat, turnCount: Int, railHeight: CGFloat) -> Int? {
-        guard turnCount > 0 else { return nil }
-        guard turnCount > 1, railHeight > 0 else { return 0 }
+    static func mark(atY y: CGFloat, markCount: Int, railHeight: CGFloat) -> Int? {
+        guard markCount > 0 else { return nil }
+        guard markCount > 1, railHeight > 0 else { return 0 }
 
         let progress = min(max(y / railHeight, 0), 1)
-        return Int((progress * CGFloat(turnCount - 1)).rounded())
+        return Int((progress * CGFloat(markCount - 1)).rounded())
     }
 
     /// A mark's width, given how far it sits from the one under the pointer.
@@ -142,12 +196,81 @@ enum ConversationMinimap {
     /// Nil `activeIndex` means the pointer is elsewhere and every mark rests at its shortest.
     static func markerWidth(index: Int, activeIndex: Int?) -> CGFloat {
         guard let activeIndex else { return Metrics.restingMarkerWidth }
+        return markerWidth(distance: CGFloat(abs(index - activeIndex)))
+    }
 
-        let distance = abs(index - activeIndex)
-        if distance == 0 { return Metrics.activeMarkerWidth }
-        if distance <= Metrics.neighbourMarkerWidths.count {
-            return Metrics.neighbourMarkerWidths[distance - 1]
-        }
-        return Metrics.restingMarkerWidth
+    // MARK: - Fisheye
+
+    /// How far a mark sits from the pointer, counted in **marks rather than in points**.
+    ///
+    /// The unit matters once the rail is compressed. Past about twenty-eight turns `railHeight`
+    /// hits its cap and the marks bunch closer than `markerSpacing`; a taper measured in points
+    /// would then reach across a third of the rail and stop picking anything out. Measured in
+    /// marks it keeps its shape at every density, which is what makes it read as "you are here"
+    /// rather than as a glow.
+    static func markerDistance(
+        mark: Int,
+        pointerY: CGFloat,
+        markCount: Int,
+        railHeight: CGFloat
+    ) -> CGFloat {
+        guard markCount > 1, railHeight > 0 else { return 0 }
+        let spacing = railHeight / CGFloat(markCount - 1)
+        guard spacing > 0 else { return 0 }
+
+        let centre = markerCenterY(mark: mark, markCount: markCount, railHeight: railHeight)
+        return abs(pointerY - centre) / spacing
+    }
+
+    /// The width profile read at a fractional distance.
+    ///
+    /// Smoothstep between the stops rather than a straight line, so the taper has no corner at
+    /// a whole mark — a corner is visible here precisely because the eye is following the one
+    /// thing that is moving.
+    static func markerWidth(distance: CGFloat) -> CGFloat {
+        let profile = Metrics.markerWidthProfile
+        let outermost = profile.count - 1
+
+        guard distance > 0 else { return profile[0] }
+        guard distance < CGFloat(outermost) else { return profile[outermost] }
+
+        let nearer = Int(distance)
+        let phase = distance - CGFloat(nearer)
+        return profile[nearer] + (profile[nearer + 1] - profile[nearer]) * smoothstep(phase)
+    }
+
+    /// A mark's width from where the pointer actually is, rather than from the mark it is
+    /// nearest. Nil `pointerY` rests every mark.
+    static func markerWidth(
+        mark: Int,
+        pointerY: CGFloat?,
+        markCount: Int,
+        railHeight: CGFloat
+    ) -> CGFloat {
+        guard let pointerY else { return Metrics.restingMarkerWidth }
+        return markerWidth(distance: markerDistance(
+            mark: mark,
+            pointerY: pointerY,
+            markCount: markCount,
+            railHeight: railHeight
+        ))
+    }
+
+    /// How strongly a mark is picked out: 1 under the pointer, falling to 0 at the edge of the
+    /// taper.
+    ///
+    /// Colour rides the same falloff as width so the two cannot disagree about where the
+    /// pointer is. Three hard colour buckets under a smooth taper looked like a rendering
+    /// fault: the widths flowed and the tones snapped, on the same marks, in the same frame.
+    static func markerEmphasis(distance: CGFloat) -> CGFloat {
+        let span = CGFloat(Metrics.markerWidthProfile.count - 1)
+        guard span > 0 else { return 0 }
+        return 1 - smoothstep(min(max(distance / span, 0), 1))
+    }
+
+    /// The one easing curve the rail uses, so width and colour share a shape.
+    private static func smoothstep(_ phase: CGFloat) -> CGFloat {
+        let clamped = min(max(phase, 0), 1)
+        return clamped * clamped * (3 - 2 * clamped)
     }
 }

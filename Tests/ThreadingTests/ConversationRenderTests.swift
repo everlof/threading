@@ -324,6 +324,308 @@ final class ConversationRenderTests: XCTestCase {
         print("Rendered pane widths to \(directory.path)")
     }
 
+    /// The sticky step header, over a live pane scrolled into the middle of a turn.
+    ///
+    /// Two claims here are only checkable by looking. It must read as **opaque** over the text it
+    /// covers, because a translucent strip over a moving transcript reads as a rendering fault
+    /// rather than as chrome; and it must stand on the **column**, since a name that starts
+    /// somewhere other than where the row starts is a name for something else. 720 is rendered
+    /// as well as 1000 because 720 has no gutter and therefore no rail — the case the header
+    /// exists for, and the ordinary one in a three-pane window.
+    func testRendersTheStickyStepHeaderInsideALongTurn() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            for width in [720, 1000] as [CGFloat] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var landed = false
+                var data: Data?
+
+                // Everything inside one drawing appearance: the table materializes cells lazily,
+                // so construction, layout and the scroll below all have to happen while it is
+                // current or the render comes out in two palettes at once.
+                appearance.performAsCurrentDrawingAppearance {
+                    let (controller, host) = livePane(
+                        turns: 6, width: width, appearance: appearance
+                    )
+                    host.appearance = appearance
+
+                    // Scrolled the way a reader gets there rather than positioned: walk down the
+                    // document until the header resolves a step, which is the state being drawn.
+                    let clip = controller.scrollView.contentView
+                    let overflow = max(
+                        0,
+                        (clip.documentView?.bounds.height ?? 0)
+                            - controller.scrollView.contentSize.height
+                    )
+                    for step in stride(from: 0.05, through: 0.95, by: 0.05) {
+                        clip.setBoundsOrigin(NSPoint(x: 0, y: overflow * CGFloat(step)))
+                        controller.scrollView.reflectScrolledClipView(clip)
+                        host.layoutSubtreeIfNeeded()
+                        controller.updateStickyStep()
+                        if controller.stickyStepRowIndex != nil { landed = true; break }
+                    }
+
+                    host.layoutSubtreeIfNeeded()
+                    data = png(
+                        of: host,
+                        ground: appearanceName == .darkAqua
+                            ? NSColor(white: 0.11, alpha: 1)
+                            : NSColor(white: 1, alpha: 1)
+                    )
+                }
+
+                XCTAssertTrue(
+                    landed,
+                    "No scroll position inside six stress turns put the reader under a tool call"
+                )
+                try XCTUnwrap(data, "the pane drew nothing at \(Int(width))pt").write(
+                    to: directory.appendingPathComponent("sticky-step-\(Int(width))-\(name).png")
+                )
+            }
+        }
+
+        print("Rendered sticky step header to \(directory.path)")
+    }
+
+    /// The live pane, held at a stated width the way a split item holds it.
+    ///
+    /// A frame alone constrains nothing: laid out detached, the pane settles at the width it
+    /// would *prefer*, which for this subtree is its own content's — and every measurement taken
+    /// off it is then a measurement of the fixture rather than of the app. See CLAUDE.md.
+    private func livePane(
+        turns: Int,
+        width: CGFloat,
+        height: CGFloat = Render.viewportHeight,
+        appearance: NSAppearance? = nil
+    ) -> (controller: ConversationViewController, host: NSView) {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(kind: .codex, title: "Column", usesNativeUI: true),
+            project: Project(
+                name: "Column",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        // The appearance has to be current **while** the subtree is built, not assigned after.
+        // `applySurface` bakes resolved colours into layers as each view is constructed, so an
+        // appearance handed to the host afterwards repaints nothing: the first pass of the
+        // sticky-header render came out entirely in the dark palette, and the second converted
+        // the header alone, because the table builds its cells lazily and did so once the
+        // drawing appearance had already been put back. Callers that want a stated appearance
+        // therefore run *everything* — construction, event application, layout, and any scrolling
+        // that materializes further cells — inside one `performAsCurrentDrawingAppearance` block.
+        if let appearance { controller.view.appearance = appearance }
+        _ = controller.view
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        host.addSubview(controller.view)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: height),
+            controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+
+        Self.apply(Self.stressEvents(shape: .mixed, turns: turns), to: controller)
+        host.layoutSubtreeIfNeeded()
+        return (controller, host)
+    }
+
+    /// Everything in the pane stands on one column, and the column is in the middle of the pane.
+    ///
+    /// Asserted against the **table**, because that is where it was wrong: the row fixture above
+    /// centres a stack in a host by hand and so agrees with itself whatever the cell does. In the
+    /// app a cell is not given its column's width, and the transcript was flush against the
+    /// sidebar in every window wider than the column — with the turn rail, placed for a centred
+    /// column, sitting on the first character of every paragraph.
+    func testTranscriptComposerAndRailStandOnOneCentredColumn() throws {
+        for width in [Design.Size.readableWidth, 720, 1000, 1418, 1800] as [CGFloat] {
+            let (controller, _) = livePane(turns: 4, width: width)
+            let pane = controller.view
+            let expectedColumn = min(
+                Design.Size.readableWidth,
+                width - Design.Spacing.inset * 2
+            )
+
+            var contentFrames: [NSRect] = []
+            for row in 0..<controller.tableView.numberOfRows {
+                guard let cell = controller.tableView.view(
+                    atColumn: 0,
+                    row: row,
+                    makeIfNecessary: true
+                ), let content = cell.subviews.first else { continue }
+                contentFrames.append(content.convert(content.bounds, to: pane))
+            }
+            XCTAssertFalse(contentFrames.isEmpty, "no rows materialized at \(Int(width))pt")
+
+            for frame in contentFrames {
+                XCTAssertEqual(
+                    frame.midX,
+                    pane.bounds.midX,
+                    accuracy: 1,
+                    "a transcript row is off the pane's centre at \(Int(width))pt"
+                )
+                XCTAssertLessThanOrEqual(
+                    frame.width,
+                    expectedColumn + 1,
+                    "a transcript row is wider than its column at \(Int(width))pt"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    frame.minX,
+                    Design.Spacing.inset - 1,
+                    "a transcript row reaches the pane's edge at \(Int(width))pt"
+                )
+            }
+
+            // The box's own padding is the difference, so the line being typed lands on exactly
+            // the column the conversation above it is read on.
+            let composer = try XCTUnwrap(Self.firstDescendant(PromptView.self, in: pane))
+            let box = composer.convert(composer.bounds, to: pane)
+            XCTAssertEqual(
+                box.midX,
+                pane.bounds.midX,
+                accuracy: 1,
+                "the reply box is off the pane's centre at \(Int(width))pt"
+            )
+            XCTAssertEqual(
+                box.width,
+                min(ConversationDefaults.composerWidth, width - Design.Spacing.inset * 2),
+                accuracy: 1,
+                "the reply box does not hold its column at \(Int(width))pt"
+            )
+            // Only where both hold their columns. Under that the box keeps the *pane's* inset
+            // and the row keeps the table's, which differ by the few points the table insets
+            // its own column by — a pane narrower than the reading measure has no column for
+            // them to share in the first place.
+            if let column = contentFrames.first,
+               box.width >= ConversationDefaults.composerWidth - 1 {
+                XCTAssertEqual(
+                    box.minX + Design.Spacing.inset,
+                    column.minX,
+                    accuracy: 1,
+                    "the reply text is off the transcript's column at \(Int(width))pt"
+                )
+            }
+
+            // Whatever else moves, the rail keeps its clearance from the words.
+            let railTrailing = ConversationMinimap.railLeading(
+                paneWidth: width,
+                columnWidth: Design.Size.readableWidth
+            ) + ConversationMinimap.railWidth(
+                paneWidth: width,
+                columnWidth: Design.Size.readableWidth
+            )
+            if let column = contentFrames.first {
+                XCTAssertLessThanOrEqual(
+                    railTrailing,
+                    column.minX,
+                    "the turn rail overlaps the column at \(Int(width))pt"
+                )
+            }
+        }
+    }
+
+    /// The pane's width belongs to the split view, and the divider must outrank anything the
+    /// composer says about it. Every fixture above states its width as `required`, which is
+    /// right for measuring the box and blind to the one failure that shipped: the reply box
+    /// reached for the pane's width at `.defaultHigh` under its required column cap, and in any
+    /// pane wider than the cap the solver satisfied that pull the cheap way — by shrinking the
+    /// *pane* through the split view's weaker holding constraints. The conversation clamped
+    /// itself to the box's width and the divider would not drag it wider. A detached view held
+    /// at holding priority cannot stand in for that machinery (summed content hugging outweighs
+    /// a lone optional width and shrinks it for a different reason entirely — measured), so the
+    /// fixture is the machinery: a real `NSSplitViewController` in an unshown window, holding
+    /// its panes the way the main window holds them, with the divider driven through the same
+    /// Auto Layout path a drag resolves into.
+    func testTheSplitViewDividerOutranksTheComposer() throws {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(kind: .codex, title: "Column", usesNativeUI: true),
+            project: Project(
+                name: "Column",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        Self.apply(Self.stressEvents(shape: .mixed, turns: 2), to: controller)
+
+        let sidebar = NSViewController()
+        sidebar.view = NSView()
+        let split = NSSplitViewController()
+        let sidebarItem = NSSplitViewItem(viewController: sidebar)
+        sidebarItem.holdingPriority = SidebarDefaults.holdingPriority
+        let contentItem = NSSplitViewItem(viewController: controller)
+        split.addSplitViewItem(sidebarItem)
+        split.addSplitViewItem(contentItem)
+
+        // Built, never shown — see the testing notes in CLAUDE.md.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1900, height: 800),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: true
+        )
+        window.contentViewController = split
+        window.setContentSize(NSSize(width: 1900, height: 800))
+        window.layoutIfNeeded()
+
+        let composer = try XCTUnwrap(Self.firstDescendant(PromptView.self, in: split.view))
+
+        // The divider placed where the conversation is far wider than the box's cap — where
+        // the shipped bug snapped the pane back to the cap and held it there.
+        split.splitView.setPosition(700, ofDividerAt: 0)
+        window.layoutIfNeeded()
+        XCTAssertGreaterThanOrEqual(
+            controller.view.frame.width,
+            1100,
+            "the composer holds the conversation pane against the divider"
+        )
+        XCTAssertEqual(
+            composer.frame.width,
+            ConversationDefaults.composerWidth,
+            accuracy: 1,
+            "the reply box left its column in a wide pane"
+        )
+
+        // And back the other way, narrower than the cap: the box yields to the pane rather
+        // than pushing the divider out.
+        split.splitView.setPosition(1400, ofDividerAt: 0)
+        window.layoutIfNeeded()
+        let narrow = controller.view.frame.width
+        XCTAssertLessThanOrEqual(
+            narrow,
+            560,
+            "the composer pushed the divider back out of a narrow pane"
+        )
+        XCTAssertEqual(
+            composer.frame.width,
+            min(ConversationDefaults.composerWidth, narrow - Design.Spacing.inset * 2),
+            accuracy: 1,
+            "the reply box does not hold its column in a narrow pane"
+        )
+    }
+
+    /// The images of the real pane, which is the only place the column and the rail can be seen
+    /// standing beside each other — `pane(rows:turns:width:)` above draws a fixture that centres
+    /// itself by construction and therefore cannot show this going wrong.
+    func testRendersTheLivePaneAtSeveralWidths() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for width in [720, 1000, 1418] as [CGFloat] {
+            let (_, host) = livePane(turns: 5, width: width)
+            let data = try XCTUnwrap(png(of: host), "the live pane drew nothing at \(Int(width))pt")
+            try data.write(to: directory.appendingPathComponent("live-pane-\(Int(width)).png"))
+        }
+
+        print("Rendered live pane widths to \(directory.path)")
+    }
+
     // MARK: - Stress Profiling
 
     /// Opt-in because this deliberately reduces several hundred production transcript rows and
@@ -752,7 +1054,7 @@ final class ConversationRenderTests: XCTestCase {
             .assistantMessage(blocks: [.text("First answer")]),
             .turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(duration: 1)
             )
         ], to: controller)
@@ -772,7 +1074,7 @@ final class ConversationRenderTests: XCTestCase {
             .assistantMessage(blocks: [.text("Second answer")]),
             .turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(duration: 2)
             )
         ], to: controller)
@@ -1121,7 +1423,7 @@ final class ConversationRenderTests: XCTestCase {
             }),
             .turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(
                     duration: 1.25,
                     outputTokens: 128,
@@ -1300,7 +1602,7 @@ final class ConversationRenderTests: XCTestCase {
             .assistantMessage(blocks: [.text(finalAnswer)]),
             .turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(
                     duration: 12.5,
                     outputTokens: 512,
@@ -1499,7 +1801,7 @@ final class ConversationRenderTests: XCTestCase {
             }
             events.append(.turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(
                     duration: Double(turn + 1) / 10,
                     outputTokens: 96 + turn,
@@ -1537,7 +1839,7 @@ final class ConversationRenderTests: XCTestCase {
             }),
             .turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(
                     duration: 0.75,
                     outputTokens: 96,
@@ -1785,6 +2087,81 @@ final class ConversationRenderTests: XCTestCase {
 
             let payload = try XCTUnwrap(data, "Failed to render the changed-files card in \(name)")
             try payload.write(to: directory.appendingPathComponent("changed-files-card-\(name).png"))
+        }
+    }
+
+    /// The preview a file row raises under the pointer: the path, its ±counts, and the change
+    /// itself. Washes, gutters and the code face against the popover's own surface are all
+    /// appearance work, and this is the only place they are reviewed.
+    func testRendersTheChangedFileDiffPreview() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let file = GitFileDiff(
+            path: "Sources/Threading/Core/Remote/RemoteAccessTypes.swift",
+            change: .modified,
+            hunks: [GitHunk(
+                header: "@@ -210,6 +210,11 @@",
+                lines: [
+                    .init(kind: .context, text: "    func authorization(forToken token: String) -> RemoteAuthorization?", oldNumber: 210, newNumber: 210),
+                    .init(kind: .context, text: "", oldNumber: 211, newNumber: 211),
+                    .init(kind: .added, text: "    /// Revalidates an authorization captured by an already-authenticated connection.", newNumber: 212),
+                    .init(kind: .added, text: "    /// Socket closure is asynchronous, so every operation that crosses to another", newNumber: 213),
+                    .init(kind: .added, text: "    /// session checks this immediately before reading or mutating session state.", newNumber: 214),
+                    .init(kind: .added, text: "    func isCurrent(_ authorization: RemoteAuthorization) -> Bool", newNumber: 215),
+                    .init(kind: .removed, text: "    func stale(_ authorization: RemoteAuthorization) -> Bool", oldNumber: 212),
+                    .init(kind: .context, text: "}", oldNumber: 213, newNumber: 216)
+                ]
+            )],
+            added: 4,
+            removed: 1
+        )
+        let card = ChangedFilesCardView(
+            tree: ChangedFilesTree.build(from: [
+                ChangedFilesTree.File(path: file.path, added: file.added, removed: file.removed)
+            ]),
+            previews: ChangedFileDiffPreview.previews(from: [file]),
+            onViewDiff: {}
+        )
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let surface = card.makePreviewSurface(
+                    for: ChangedFileDiffPreview.preview(of: file)
+                )
+                let host = NSView()
+                host.addSubview(surface.view)
+                NSLayoutConstraint.activate([
+                    surface.view.topAnchor.constraint(equalTo: host.topAnchor),
+                    surface.view.leadingAnchor.constraint(equalTo: host.leadingAnchor)
+                ])
+                // The popover paints a surface behind this content; the fixture stands in for
+                // it, or the diff draws onto transparency. It has to be a colour that follows
+                // the *drawing* appearance — a palette role resolves against the running app's
+                // instead, which painted a light ground under dark-resolved text and rendered
+                // every unwashed line invisible.
+                host.appearance = appearance
+                surface.view.appearance = appearance
+                host.frame = NSRect(origin: .zero, size: surface.view.fittingSize)
+                host.layoutSubtreeIfNeeded()
+
+                XCTAssertGreaterThan(host.frame.height, 60, "The preview rendered empty")
+                data = self.png(of: host)
+            }
+
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            let payload = try XCTUnwrap(data, "Failed to render the diff preview in \(name)")
+            try payload.write(
+                to: directory.appendingPathComponent("changed-file-diff-preview-\(name).png")
+            )
         }
     }
 
@@ -2596,6 +2973,115 @@ final class SubagentSummaryViewTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-subagent-transcript.png")
         try data.write(to: url)
+    }
+
+    /// A pane narrower than the readable column still has to wrap to *itself*.
+    ///
+    /// The row host is the only place that decides a row's measure, and a table cell is free to
+    /// be wider than its column: nothing pins it. Asking for the readable column at a higher
+    /// priority than the pane's own width therefore does not lose gracefully in a narrow pane —
+    /// the cell grows past the clip and the sentences are cut mid-word at its edge, with no
+    /// wrap and no horizontal scroller to reach them.
+    func testChildTranscriptWrapsToANarrowPaneRatherThanLeavingIt() throws {
+        let agent = makeAgent(
+            threadID: "narrow-pane",
+            status: .completed,
+            events: [
+                .userMessage("Review the browser credential plan."),
+                .assistantMessage(blocks: [
+                    .text("""
+                    Invariant 1 says the origin key is compared again immediately before the \
+                    fill, but "immediately before" in Swift is not immediately before. The \
+                    bridge executes against whatever main-frame document exists when WebKit \
+                    delivers the script, so a click landing on a fresh document crosses the \
+                    secret into the wrong origin.
+                    """)
+                ])
+            ]
+        )
+
+        // The width a panel opens itself to — narrower than `Design.Size.readableWidth`, which
+        // is the case the row host has to survive.
+        let paneWidth = DisplayPaneDefaults.defaultWidth
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: 720))
+        host.appearance = NSAppearance(named: .darkAqua)
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = host.bounds
+        controller.view.autoresizingMask = [.width, .height]
+        host.addSubview(controller.view)
+        controller.update(agent)
+        host.layoutSubtreeIfNeeded()
+
+        // Drawing is what makes an unshown table ask for its cells.
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        host.layoutSubtreeIfNeeded()
+
+        let rows = descendants(of: controller.view).compactMap { $0 as? ConversationVirtualRowHost }
+        XCTAssertFalse(rows.isEmpty, "The transcript materialized no rows to measure")
+
+        for row in rows {
+            XCTAssertLessThanOrEqual(
+                row.convert(row.bounds, to: host).maxX, paneWidth + 1,
+                "A row measured \(row.bounds.width)pt in a \(paneWidth)pt pane"
+            )
+            for content in row.subviews {
+                XCTAssertLessThanOrEqual(
+                    content.convert(content.bounds, to: host).maxX, paneWidth + 1,
+                    "\(type(of: content)) measured \(content.bounds.width)pt "
+                        + "in a \(paneWidth)pt pane"
+                )
+            }
+        }
+    }
+
+    /// The other half of the same rule: given the room, prose still stops at the readable
+    /// column rather than running the full width of a wide pane.
+    func testChildTranscriptStopsAtTheReadableColumnInAWidePane() throws {
+        let agent = makeAgent(
+            threadID: "wide-pane",
+            status: .completed,
+            events: [
+                .assistantMessage(blocks: [
+                    .text(String(repeating: "The measure of a line of prose. ", count: 12))
+                ])
+            ]
+        )
+
+        let paneWidth = Design.Size.readableWidth * 2
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: 720))
+        host.appearance = NSAppearance(named: .darkAqua)
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = host.bounds
+        controller.view.autoresizingMask = [.width, .height]
+        host.addSubview(controller.view)
+        controller.update(agent)
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        host.layoutSubtreeIfNeeded()
+
+        let contents = descendants(of: controller.view)
+            .compactMap { $0 as? ConversationVirtualRowHost }
+            .flatMap(\.subviews)
+        XCTAssertFalse(contents.isEmpty, "The transcript materialized no rows to measure")
+
+        let measures = contents.map { $0.alignmentRect(forFrame: $0.frame).width }
+        for (content, measure) in zip(contents, measures) {
+            XCTAssertLessThanOrEqual(
+                measure, Design.Size.readableWidth + 1,
+                "\(type(of: content)) ran to \(measure)pt of a \(paneWidth)pt pane"
+            )
+        }
+        // The cap has to be reached, not merely respected: a row that stops short of it in a
+        // wide pane is the same fault read from the other side.
+        XCTAssertEqual(
+            measures.max() ?? 0, Design.Size.readableWidth, accuracy: 1,
+            "Prose no longer fills the readable column when the pane can hold it"
+        )
     }
 
     func testDisplayPaneKeepsOneEphemeralSubagentTabAndDoesNotReopenIt() throws {

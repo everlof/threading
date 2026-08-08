@@ -1,6 +1,17 @@
 import AppKit
 import SwiftTerm
 
+/// Resolves the process behind a terminal session.
+///
+/// Production leaves this at `AgentLauncher`; the runtime can supply a per-session provider in
+/// DEBUG builds so a deterministic fixture crosses the real PTY and app bridge without becoming
+/// a shipping `AgentKind` or appearing in the composer.
+typealias AgentLaunchPlanProvider = @MainActor (
+    _ session: AgentSession,
+    _ project: Project,
+    _ initialPrompt: String?
+) -> AgentLaunchPlan
+
 /// Hosts the terminal for a single agent session.
 ///
 /// The controller outlives any individual run of the agent: when the agent exits the
@@ -14,6 +25,7 @@ final class AgentSessionViewController: NSViewController {
     let session: TerminalSession
     private let agentKind: AgentKind
     private let subagentState: SubagentSessionState
+    private let launchPlanProvider: AgentLaunchPlanProvider
     private let appEvents = AppEventObservations()
 
     private(set) var isRunning = false
@@ -54,12 +66,16 @@ final class AgentSessionViewController: NSViewController {
 
     init(
         agentSession: AgentSession,
-        subagentState: SubagentSessionState? = nil
+        subagentState: SubagentSessionState? = nil,
+        launchPlanProvider: AgentLaunchPlanProvider? = nil
     ) {
         self.sessionID = agentSession.id
         self.agentKind = agentSession.kind
         self.subagentState = subagentState
             ?? SubagentSessionState(sessionID: agentSession.id)
+        self.launchPlanProvider = launchPlanProvider ?? { session, project, prompt in
+            AgentLauncher.plan(for: session, in: project, initialPrompt: prompt)
+        }
         self.session = TerminalSession(
             profile: ThemeAssignments.profile(for: agentSession.id),
             identity: .agentSession(agentSession.id)
@@ -75,7 +91,7 @@ final class AgentSessionViewController: NSViewController {
         attachmentObserver = TerminalAttachmentObserver(
             sessionID: agentSession.id,
             projectRoot: {
-                ProjectStore.shared.project(forSessionID: agentSession.id).map {
+                ProjectStore.shared.executionProject(forSessionID: agentSession.id).map {
                     URL(fileURLWithPath: $0.folderPath, isDirectory: true)
                 }
             },
@@ -199,13 +215,22 @@ final class AgentSessionViewController: NSViewController {
     func launch(initialPrompt: String? = nil) {
         guard !isRunning else { return }
 
+        // The last line before a PTY exists, which is where recovery's refusal has to be. The
+        // pane refuses earlier and more visibly, but this is the one every path crosses — a
+        // remote resume, a scheduled send, a relaunch, an MCP tool — so a route that recovery
+        // did not anticipate stops here rather than starting an agent.
+        guard !RecoveryMode.isActive else {
+            RecoveryMode.refuse("an agent launch")
+            return
+        }
+
         guard let agentSession = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.project(forSessionID: sessionID) else {
             ThreadingLogger.agent.error("Cannot launch session \(self.sessionID, privacy: .public): not found in store")
             return
         }
 
-        let plan = AgentLauncher.plan(for: agentSession, in: project, initialPrompt: initialPrompt)
+        let plan = launchPlanProvider(agentSession, project, initialPrompt)
         pendingLaunchPlan = plan
 
         DispatchQueue.main.async { [weak self] in
@@ -482,7 +507,7 @@ final class AgentSessionViewController: NSViewController {
     /// Codex rollouts live under the launching account's own home, so discovery is scoped to
     /// that account rather than the default one.
     private func discoverCodexSessionID(for agentSession: AgentSession, launchedAt: Date) {
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID),
+        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
               let account = AgentAccountDiscovery.account(
                   for: agentSession.kind,
                   handle: agentSession.accountHandle
@@ -515,7 +540,7 @@ final class AgentSessionViewController: NSViewController {
     /// Querying that public surface avoids coupling Threading to OpenCode's private SQLite
     /// schema, which has already changed between releases.
     private func discoverOpenCodeSessionID(launchedAt: Date) {
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
             isDiscoveringIdentifier = false
             return
         }
@@ -546,7 +571,7 @@ final class AgentSessionViewController: NSViewController {
     /// create that conversation. Confirm it through the supported session list before storing a
     /// resume state, so quitting login cannot strand the sidebar row on a nonexistent UUID.
     private func discoverGrokSessionID(for agentSession: AgentSession) {
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
             isDiscoveringIdentifier = false
             return
         }
@@ -625,9 +650,10 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         activityTracker.recordBell()
     }
 
-    func terminalSessionDidForwardScroll(_ session: TerminalSession) {
-        // The agent repaints its content in response; that is not it working.
-        activityTracker.noteScrollForwarded()
+    func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {
+        // The agent repaints its content in response — its transcript under a wheel tick, the
+        // row under the pointer as it moves. That is not it working.
+        activityTracker.noteMouseReportForwarded()
     }
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {

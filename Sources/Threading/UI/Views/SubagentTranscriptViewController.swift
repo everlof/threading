@@ -118,6 +118,13 @@ final class SubagentTranscriptViewController: NSViewController {
         }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // Rows here are the conversation's own, and are centred on a column they have to be
+        // told the width of — see `ConversationVirtualRowHost.setColumnWidth`.
+        ConversationVirtualRowHost.stateColumnWidth(in: tableView)
+    }
+
     // MARK: - Content
 
     func update(_ agent: SubagentTimeline.Agent) {
@@ -472,6 +479,7 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
             owner: self
         ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
         host.identifier = identifier
+        host.setColumnWidth(ConversationVirtualRowHost.columnWidth(of: tableView))
 
         let content: NSView
         switch item.content {

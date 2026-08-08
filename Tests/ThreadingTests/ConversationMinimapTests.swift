@@ -116,18 +116,18 @@ final class ConversationMinimapTests: XCTestCase {
         // of rail that says nothing about how much was *said*.
         let height: CGFloat = 100
 
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: 0, turnCount: 5, railHeight: height), 0)
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: 2, turnCount: 5, railHeight: height), 50)
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: 4, turnCount: 5, railHeight: height), 100)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: 0, markCount: 5, railHeight: height), 0)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: 2, markCount: 5, railHeight: height), 50)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: 4, markCount: 5, railHeight: height), 100)
     }
 
     func testASingleMarkSitsInTheMiddleRatherThanAtTheTop() {
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: 0, turnCount: 1, railHeight: 100), 50)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: 0, markCount: 1, railHeight: 100), 50)
     }
 
     func testAnOutOfRangeIndexIsClampedRatherThanRunningOffTheRail() {
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: 99, turnCount: 5, railHeight: 100), 100)
-        XCTAssertEqual(ConversationMinimap.markerCenterY(index: -3, turnCount: 5, railHeight: 100), 0)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: 99, markCount: 5, railHeight: 100), 100)
+        XCTAssertEqual(ConversationMinimap.markerCenterY(mark: -3, markCount: 5, railHeight: 100), 0)
     }
 
     func testRailHeightGrowsWithTheTurnCountButIsBoundedByThePane() {
@@ -140,26 +140,114 @@ final class ConversationMinimapTests: XCTestCase {
         XCTAssertEqual(tall, 900 * ConversationMinimap.Metrics.maximumHeightFraction)
     }
 
+    // MARK: - The Spacing Floor
+
+    func testMarksNeverCrowdCloserThanAPointerCanSeparate() {
+        // The defect this fixes. `railHeight` caps at a fraction of the pane while spacing was
+        // that height divided by the turns, so every exchange past the cap packed the marks
+        // tighter with no floor — at two hundred turns they were under three points apart and
+        // the rail was answering a question no hand could ask. Swept rather than sampled,
+        // because the previous version was correct at every count anyone had thought to try.
+        let floor = ConversationMinimap.Metrics.minimumMarkerSpacing
+
+        for paneHeight in stride(from: 400.0, through: 1400.0, by: 100.0) {
+            for turnCount in [2, 5, 27, 28, 29, 60, 200, 1000, 2000] {
+                let height = ConversationMinimap.railHeight(
+                    turnCount: turnCount, paneHeight: paneHeight
+                )
+                let marks = ConversationMinimap.markCount(turnCount: turnCount, railHeight: height)
+                guard marks > 1 else { continue }
+
+                let first = ConversationMinimap.markerCenterY(
+                    mark: 0, markCount: marks, railHeight: height
+                )
+                let second = ConversationMinimap.markerCenterY(
+                    mark: 1, markCount: marks, railHeight: height
+                )
+                XCTAssertGreaterThanOrEqual(
+                    second - first, floor,
+                    "\(turnCount) turns in a \(Int(paneHeight))pt pane put marks \(second - first)pt apart"
+                )
+            }
+        }
+    }
+
+    func testEveryTurnKeepsItsOwnMarkUntilTheFloorForbidsIt() {
+        // Bucketing is a real loss, so it must not start early. Below the threshold the two
+        // spaces are the same space and the maps are the identity.
+        let height = ConversationMinimap.railHeight(turnCount: 20, paneHeight: 900)
+        let marks = ConversationMinimap.markCount(turnCount: 20, railHeight: height)
+
+        XCTAssertEqual(marks, 20)
+        for turn in 0..<20 {
+            XCTAssertEqual(
+                ConversationMinimap.markIndex(forTurn: turn, markCount: marks, turnCount: 20), turn
+            )
+            XCTAssertEqual(
+                ConversationMinimap.turnIndex(forMark: turn, markCount: marks, turnCount: 20), turn
+            )
+        }
+    }
+
+    func testABucketedRailStillReachesBothEndsAndNeverGoesBackwards() {
+        // What a bucketed mark may not do: skip the conversation's first or last exchange, or
+        // resolve out of order — either would make a click land somewhere the eye did not point.
+        let turnCount = 500
+        let height = ConversationMinimap.railHeight(turnCount: turnCount, paneHeight: 900)
+        let marks = ConversationMinimap.markCount(turnCount: turnCount, railHeight: height)
+
+        XCTAssertLessThan(marks, turnCount, "A 500-turn rail was not bucketed at all")
+
+        let resolved = (0..<marks).map {
+            ConversationMinimap.turnIndex(forMark: $0, markCount: marks, turnCount: turnCount)
+        }
+        XCTAssertEqual(resolved.first, 0, "The first mark did not stand for the first turn")
+        XCTAssertEqual(resolved.last, turnCount - 1, "The last mark did not stand for the last turn")
+        XCTAssertEqual(resolved, resolved.sorted(), "Marks resolved to turns out of order")
+        XCTAssertTrue(
+            resolved.allSatisfy { (0..<turnCount).contains($0) },
+            "A mark resolved to a turn that does not exist"
+        )
+    }
+
+    func testAPointerLandsOnTheMarkItWasDrawnAt() {
+        // The round trip the preview card depends on: hovering a mark's own centre must resolve
+        // to that mark, or the card describes one turn while a click lands on another.
+        let turnCount = 500
+        let height = ConversationMinimap.railHeight(turnCount: turnCount, paneHeight: 900)
+        let marks = ConversationMinimap.markCount(turnCount: turnCount, railHeight: height)
+
+        for mark in 0..<marks {
+            let centre = ConversationMinimap.markerCenterY(
+                mark: mark, markCount: marks, railHeight: height
+            )
+            XCTAssertEqual(
+                ConversationMinimap.mark(atY: centre, markCount: marks, railHeight: height), mark,
+                "Pointing at mark \(mark)'s own centre resolved elsewhere"
+            )
+        }
+    }
+
     // MARK: - Pointer
 
     func testThePointerPicksTheNearestMark() {
         let height: CGFloat = 100
 
-        XCTAssertEqual(ConversationMinimap.index(atY: 0, turnCount: 5, railHeight: height), 0)
-        XCTAssertEqual(ConversationMinimap.index(atY: 26, turnCount: 5, railHeight: height), 1)
-        XCTAssertEqual(ConversationMinimap.index(atY: 51, turnCount: 5, railHeight: height), 2)
-        XCTAssertEqual(ConversationMinimap.index(atY: 100, turnCount: 5, railHeight: height), 4)
+        XCTAssertEqual(ConversationMinimap.mark(atY: 0, markCount: 5, railHeight: height), 0)
+        XCTAssertEqual(ConversationMinimap.mark(atY: 26, markCount: 5, railHeight: height), 1)
+        XCTAssertEqual(ConversationMinimap.mark(atY: 51, markCount: 5, railHeight: height), 2)
+        XCTAssertEqual(ConversationMinimap.mark(atY: 100, markCount: 5, railHeight: height), 4)
     }
 
     func testPointingPastTheRailClampsRatherThanReturningNothing() {
         // The hit area is taller than the rail — it spans the pane — so a pointer above the
         // first mark or below the last should still resolve, to the end it is nearest.
-        XCTAssertEqual(ConversationMinimap.index(atY: -500, turnCount: 5, railHeight: 100), 0)
-        XCTAssertEqual(ConversationMinimap.index(atY: 900, turnCount: 5, railHeight: 100), 4)
+        XCTAssertEqual(ConversationMinimap.mark(atY: -500, markCount: 5, railHeight: 100), 0)
+        XCTAssertEqual(ConversationMinimap.mark(atY: 900, markCount: 5, railHeight: 100), 4)
     }
 
     func testPointingAtAnEmptyRailResolvesToNothing() {
-        XCTAssertNil(ConversationMinimap.index(atY: 10, turnCount: 0, railHeight: 100))
+        XCTAssertNil(ConversationMinimap.mark(atY: 10, markCount: 0, railHeight: 100))
     }
 
     // MARK: - Fisheye
@@ -181,6 +269,96 @@ final class ConversationMinimapTests: XCTestCase {
                 ConversationMinimap.markerWidth(index: index, activeIndex: nil),
                 ConversationMinimap.Metrics.restingMarkerWidth
             )
+        }
+    }
+
+    func testTheTunedWidthsSurviveAtWholeMarks() {
+        // The stops are the design and the interpolation is only smoothness, so the smooth form
+        // must agree with the sampled one everywhere the sampled one had an opinion. If this
+        // fails the rail has been retuned by accident rather than on purpose.
+        typealias Metrics = ConversationMinimap.Metrics
+
+        XCTAssertEqual(ConversationMinimap.markerWidth(distance: 0), Metrics.activeMarkerWidth)
+        XCTAssertEqual(ConversationMinimap.markerWidth(distance: 1), Metrics.neighbourMarkerWidths[0])
+        XCTAssertEqual(ConversationMinimap.markerWidth(distance: 2), Metrics.neighbourMarkerWidths[1])
+        XCTAssertEqual(ConversationMinimap.markerWidth(distance: 3), Metrics.restingMarkerWidth)
+        XCTAssertEqual(ConversationMinimap.markerWidth(distance: 40), Metrics.restingMarkerWidth)
+    }
+
+    func testTheTaperFollowsThePointerRatherThanTheMarkItIsNearest() {
+        // The bug this fixes, and the reason the rail felt stepped: widths were sampled at the
+        // *nearest* mark, so the pointer could travel most of the way between two marks with
+        // nothing moving, and then every mark in the taper changed width in a single frame as
+        // it crossed the midpoint. Swept across the whole rail, no step may exceed a point.
+        let turnCount = 12
+        let height = ConversationMinimap.railHeight(turnCount: turnCount, paneHeight: 900)
+        let marks = ConversationMinimap.markCount(turnCount: turnCount, railHeight: height)
+        var previous = (0..<marks).map {
+            ConversationMinimap.markerWidth(mark: $0, pointerY: 0, markCount: marks, railHeight: height)
+        }
+
+        for step in stride(from: 0.5, through: height, by: 0.5) {
+            let widths = (0..<marks).map {
+                ConversationMinimap.markerWidth(
+                    mark: $0, pointerY: step, markCount: marks, railHeight: height
+                )
+            }
+            for index in widths.indices {
+                XCTAssertLessThan(
+                    abs(widths[index] - previous[index]), 1,
+                    "Mark \(index) jumped as the pointer passed \(step)pt"
+                )
+            }
+            previous = widths
+        }
+    }
+
+    func testTheTaperIsMeasuredInMarksSoItKeepsItsShapeWhenTheyBunch() {
+        // Past its cap the rail packs its marks closer than `markerSpacing`. A taper measured in
+        // *points* would then reach across a third of the rail and stop picking anything out;
+        // measured in marks it covers the same three either side at every density.
+        let sparse = ConversationMinimap.railHeight(turnCount: 5, paneHeight: 900)
+        let packed = ConversationMinimap.railHeight(turnCount: 200, paneHeight: 900)
+
+        let sparseMarks = ConversationMinimap.markCount(turnCount: 5, railHeight: sparse)
+        let packedMarks = ConversationMinimap.markCount(turnCount: 200, railHeight: packed)
+
+        let sparseNeighbour = ConversationMinimap.markerDistance(
+            mark: 1,
+            pointerY: ConversationMinimap.markerCenterY(
+                mark: 0, markCount: sparseMarks, railHeight: sparse
+            ),
+            markCount: sparseMarks,
+            railHeight: sparse
+        )
+        let packedNeighbour = ConversationMinimap.markerDistance(
+            mark: 1,
+            pointerY: ConversationMinimap.markerCenterY(
+                mark: 0, markCount: packedMarks, railHeight: packed
+            ),
+            markCount: packedMarks,
+            railHeight: packed
+        )
+
+        XCTAssertEqual(sparseNeighbour, 1, accuracy: 0.0001)
+        XCTAssertEqual(packedNeighbour, 1, accuracy: 0.0001, "The taper widened when the marks bunched")
+    }
+
+    func testColourAndWidthAgreeAboutWhereThePointerIs() {
+        // Three hard colour buckets under a smooth taper read as a rendering fault: the widths
+        // flowed and the tones snapped, on the same marks in the same frame. Emphasis rides the
+        // same curve, so it peaks under the pointer and is spent at the edge of the taper.
+        let outermost = CGFloat(ConversationMinimap.Metrics.markerWidthProfile.count - 1)
+
+        XCTAssertEqual(ConversationMinimap.markerEmphasis(distance: 0), 1)
+        XCTAssertEqual(ConversationMinimap.markerEmphasis(distance: outermost), 0)
+        XCTAssertEqual(ConversationMinimap.markerEmphasis(distance: outermost + 5), 0)
+
+        var previous = ConversationMinimap.markerEmphasis(distance: 0)
+        for step in stride(from: 0.1, through: outermost, by: 0.1) {
+            let emphasis = ConversationMinimap.markerEmphasis(distance: step)
+            XCTAssertLessThanOrEqual(emphasis, previous + 0.0001, "Emphasis rose as the pointer moved away")
+            previous = emphasis
         }
     }
 

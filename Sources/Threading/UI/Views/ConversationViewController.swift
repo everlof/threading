@@ -135,6 +135,16 @@ final class ConversationViewController: NSViewController {
         return scroll
     }()
 
+    lazy var jumpToEndButton: ThemedButton = {
+        let button = ThemedButton.floatingScrollToEnd(
+            accessibility: L10n.string("Scroll to end"),
+            target: self,
+            action: #selector(scrollToConversationEnd)
+        )
+        button.isHidden = true
+        return button
+    }()
+
     /// The turn rail in the gutter beside the column.
     private lazy var minimap: ConversationMinimapView = {
         let minimap = ConversationMinimapView()
@@ -144,8 +154,30 @@ final class ConversationViewController: NSViewController {
     }()
     private var minimapTurns: [ConversationTimeline.Turn] = []
     private lazy var minimapWidth = minimap.widthAnchor.constraint(equalToConstant: 0)
+    /// The reply box's stated column — `updateComposerColumnWidth` keeps the constant at what
+    /// the pane can actually give, so the constraint never pulls on the pane itself.
+    private lazy var composerColumnWidth: NSLayoutConstraint = {
+        let constraint = promptContentContainer.widthAnchor.constraint(
+            equalToConstant: ConversationDefaults.composerWidth
+        )
+        constraint.priority = ConversationDefaults.statedColumnPriority
+        return constraint
+    }()
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-    private lazy var promptView: PromptView = {
+
+    /// Which tool call the reader is currently inside, pinned to the top of the pane.
+    private lazy var stickyStep: ConversationStickyStepView = {
+        let header = ConversationStickyStepView()
+        header.alphaValue = 0
+        header.onSelect = { [weak self] rowIndex in self?.scrollToRow(rowIndex) }
+        return header
+    }()
+
+    /// The row the header last resolved from, so the walk back through the turn runs on a change
+    /// of viewport rather than on every scroll event.
+    private var stickyStepTopRow: Int?
+    private var stickyStepRow: Int?
+    lazy var promptView: PromptView = {
         let prompt = PromptView()
         prompt.translatesAutoresizingMaskIntoConstraints = false
         prompt.fontSurface = .conversation
@@ -162,9 +194,33 @@ final class ConversationViewController: NSViewController {
             PromptAttachment.record(
                 paths: self.promptView.attachmentPaths,
                 sessionID: self.sessionID,
-                projectRoot: URL(fileURLWithPath: self.project.folderPath, isDirectory: true)
+                projectRoot: URL(
+                    fileURLWithPath: self.agentSession.workingDirectory(in: self.project),
+                    isDirectory: true
+                )
             )
             _ = self.submit(text, context: self.promptView.contextAttachments)
+        }
+        prompt.onSteer = { [weak self] text in
+            guard let self else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let context = self.promptView.contextAttachments
+            guard !trimmed.isEmpty || !context.isEmpty else { return }
+            PromptAttachment.record(
+                paths: self.promptView.attachmentPaths,
+                sessionID: self.sessionID,
+                projectRoot: URL(
+                    fileURLWithPath: self.agentSession.workingDirectory(in: self.project),
+                    isDirectory: true
+                )
+            )
+            self.steer(ConversationPrompt(text: trimmed, context: context))
+        }
+        prompt.onStop = { [weak self] in
+            self?.stopCurrentTurn()
+        }
+        prompt.onRecallPrevious = { [weak self] in
+            self?.editLastQueuedMessage() ?? false
         }
         prompt.onRequestContextComment = { [weak self] attachment in
             self?.requestComment(on: attachment)
@@ -184,6 +240,7 @@ final class ConversationViewController: NSViewController {
         container.setAccessibilityIdentifier("composer.conversation-reply.content")
         return container
     }()
+    private lazy var activityBeamView = AgentActivityBeamView()
     /// The box the composer-to-conversation handoff animates into.
     ///
     /// The container rather than the `PromptView` inside it, mirroring the composer's own
@@ -247,7 +304,7 @@ final class ConversationViewController: NSViewController {
     /// How much this conversation may do before it has to ask. Second on the row because that
     /// is where the opening composer puts it: model then mode is the pair both composers lead
     /// with, and two surfaces answering the same questions in a different order is the thing
-    /// worth spending the slot on. Catalog-backed effort follows on both; speed is reply-only.
+    /// worth spending the slot on. Catalog-backed effort and speed follow on both.
     private let modeChip = ChipView()
 
     /// Reasoning levels belong to model metadata. Whether they can be changed after launch is
@@ -291,14 +348,14 @@ final class ConversationViewController: NSViewController {
 
     /// The prompt has been accepted locally but is held behind the git-baseline barrier. During
     /// this short window neither the local composer nor a remote mirror may start another turn.
-    private var isPreparingTurn = false
+    var isPreparingTurn = false
 
     /// The backgrounded shells, children and monitors the agent currently has running.
     ///
     /// Claude restates the whole list whenever it changes; Codex has no equivalent, so its
     /// sessions leave this empty. Read at the turn boundary, never as it arrives — see
     /// `handle(_:)`.
-    var backgroundWorkInFlight: [String] = []
+    var backgroundWorkInFlight: [BackgroundTask] = []
 
     /// Whether the turn that just ended was waiting on work it had started itself.
     ///
@@ -311,6 +368,14 @@ final class ConversationViewController: NSViewController {
     /// `BackgroundWorkLedger`, which the terminal surface judges by too.
     private var backgroundWork = BackgroundWorkLedger()
 
+    /// The refusal the last turn failed on, when it failed for a spent usage limit.
+    ///
+    /// The native half of `limit-recovery.md`. A terminal session's refusal has to be read out
+    /// of its transcript because the CLI only prints it; here the same refusal arrives on the
+    /// stream as the turn's own failure text, so there is nothing to poll and nothing to infer —
+    /// which is why `ObservedUsageLimit` names no source for a rendered conversation.
+    private(set) var usageLimit: UsageLimitStop?
+
     /// A turn opened or closed, which is the only moment the in-flight list is read.
     ///
     /// Called from the status edge in `ConversationRendering` rather than as the list arrives,
@@ -319,6 +384,10 @@ final class ConversationViewController: NSViewController {
         pausedOnOwnWork = isTurnInFlight
             ? false
             : backgroundWork.turnEnded(leaving: backgroundWorkInFlight)
+        // A turn beginning is the limit lifting, whoever asked for it. Cleared on the opening
+        // edge only: the closing edge is where a refusal is *recorded*, and clearing there
+        // would wipe the state one event after setting it.
+        if isTurnInFlight { usageLimit = nil }
     }
 
     /// Batches replay-only UI work. Four hundred items must not each scroll, rebuild controls,
@@ -327,6 +396,10 @@ final class ConversationViewController: NSViewController {
 
     /// Whether new content may move the view — see `ConversationAutoScroll`.
     var autoScroll = ConversationAutoScroll()
+
+    /// Streaming can ask to follow once per token. One main-queue pass both lands a following
+    /// transcript and refreshes the floating return control for a reader who stayed elsewhere.
+    var pendingScrollToBottom = false
 
     /// When the user's hand last touched the scroll view, so a bounds change can be read as
     /// theirs rather than as one of our own scrolls landing.
@@ -359,7 +432,7 @@ final class ConversationViewController: NSViewController {
                 turnStart: Int,
                 hiddenIndices: [Int],
                 duration: TimeInterval?,
-                stopped: Bool
+                outcome: TurnOutcome
             )
             case retained(NSView)
             case streaming(NSTextField)
@@ -400,13 +473,42 @@ final class ConversationViewController: NSViewController {
     /// never inserted twice.
     var foldedTurnStarts: Set<Int> = []
 
-    /// An interrupted turn waiting to fold. It stays expanded so the user keeps their place;
-    /// the next turn folds it.
-    var pendingFold: (startIndex: Int, interrupted: Bool)?
+    /// A turn that ended early, waiting to fold. It stays expanded so the user keeps their
+    /// place; the next turn folds it, with the outcome it actually had.
+    var pendingFold: (startIndex: Int, outcome: TurnOutcome)?
 
     /// Turns whose changed-files card was already requested, so a repeated settle event
     /// cannot append twins.
     var changedFilesCardTurns: Set<Int> = []
+
+    /// Messages written while the agent was busy, in the order they will be sent.
+    ///
+    /// Threading's own, even where the provider keeps one — see `ConversationOutbox`. It lives on
+    /// the controller rather than in the transport because the controller outlives a turn and is
+    /// what `AgentRuntime` caches, so a queue survives switching panes.
+    var outbox = ConversationOutbox()
+
+    /// Between asking the transport to stop and its receipt arriving. Keeps the Stop from being
+    /// pressed twice into a transport that is already stopping.
+    var isStoppingTurn = false
+
+    /// The waiting messages, between the transcript and the composer.
+    lazy var outboxRail: ConversationOutboxRailView = {
+        let rail = ConversationOutboxRailView()
+        rail.setAccessibilityIdentifier("composer.conversation-reply.queue")
+        return rail
+    }()
+
+    /// What is waiting for a later moment, above the queue that is waiting only for this turn.
+    ///
+    /// Two strips rather than one list, and the order is the argument: the queue goes next, the
+    /// schedule goes eventually, so the further-off thing sits further from the box. See
+    /// `ScheduledMessageStripView` for why they are not one view.
+    lazy var scheduledStrip: ScheduledMessageStripView = {
+        let strip = ScheduledMessageStripView()
+        strip.setAccessibilityIdentifier("composer.conversation-reply.scheduled")
+        return strip
+    }()
 
     /// The newest turn's card — the only one whose View diff still describes what Git
     /// Review's Last Turn scope shows. Superseded cards lose the button.
@@ -452,12 +554,19 @@ final class ConversationViewController: NSViewController {
     /// Work left running outranks `idle` for the same reason it does in `SessionActivityTracker`:
     /// a turn that ends on top of a backgrounded shell is not the session finishing, and saying
     /// it is posts "finished its turn" for an answer the agent is still about to give.
+    ///
+    /// A usage-limit refusal outranks that same work, and for the tracker's reason: a task the
+    /// refused turn left running cannot wake an agent whose account has nothing left to spend.
+    /// It sits under `dormant` because a dead process is the more useful thing to say — the row
+    /// is dimmed, resuming is the offer, and the refusal is still the newest thing in the
+    /// transcript when it comes back.
     var activity: SessionActivity {
         if hasPendingPermission, !isVisible {
             return isTurnInFlight ? .awaitingUser : .needsAttention
         }
         if isTurnInFlight { return .working }
         guard stream.isRunning else { return .dormant }
+        if usageLimit != nil { return .limitReached }
         return pausedOnOwnWork ? .working : .idle
     }
 
@@ -525,7 +634,7 @@ final class ConversationViewController: NSViewController {
         case .codex:
             self.stream = CodexStreamSession(
                 sessionID: agentSession.id,
-                workingDirectory: project.folderPath,
+                workingDirectory: agentSession.workingDirectory(in: project),
                 configurationProvider: {
                     let current = ProjectStore.shared.session(withID: agentSession.id)
                         ?? agentSession
@@ -537,7 +646,7 @@ final class ConversationViewController: NSViewController {
                         account: account
                     )
                     let serviceTier: String?
-                    if let fastMode = current.fastMode {
+                    if let fastMode = AgentLauncher.fastModeAtStartup(for: current) {
                         if fastMode {
                             serviceTier = AgentModels.option(
                                 identifier: model,
@@ -561,7 +670,7 @@ final class ConversationViewController: NSViewController {
         case .grok:
             self.stream = GrokACPStreamSession(
                 sessionID: agentSession.id,
-                workingDirectory: project.folderPath,
+                workingDirectory: agentSession.workingDirectory(in: project),
                 plan: plan
             )
         case .openCode:
@@ -645,8 +754,30 @@ final class ConversationViewController: NSViewController {
 
         view.addSubview(scrollView)
         view.addSubview(minimap)
+        view.addSubview(jumpToEndButton, positioned: .above, relativeTo: scrollView)
+        // Above the scroll view in z, and pinned to its top edge: it overlays the transcript
+        // rather than insetting it, because insetting would move the content under an anchored
+        // auto-scroll and make arriving output jump by the header's height.
+        view.addSubview(stickyStep, positioned: .above, relativeTo: scrollView)
         view.addSubview(promptContentContainer)
+        installActivityBeam()
         view.addSubview(statusRow)
+        view.addSubview(outboxRail)
+        view.addSubview(scheduledStrip)
+
+        wireOutboxRail()
+        wireScheduledStrip()
+        promptView.scheduleMenuProvider = { [weak self] in
+            self?.scheduleMenuEntries() ?? []
+        }
+        // The strip is drawn from a store nothing else here writes to — a send delivered by the
+        // scheduler, or unscheduled from another window, has to reach this view somehow, and
+        // `refreshOutboxRail`'s callers know nothing about it.
+        appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
+            self?.refreshScheduledStrip()
+        }
+        refreshScheduledStrip()
+        refreshComposerMode()
 
         // The preview hangs off the pane, not off the rail: it is wider than the rail and
         // would be clipped inside it, and it has to float over the conversation.
@@ -658,6 +789,23 @@ final class ConversationViewController: NSViewController {
     /// Wraps only the prompt's visual body. Stream state, permission cards, keyboard routing and
     /// submission stay on this controller and `PromptView`; hooks can add compact controls beside
     /// `.proceed` but cannot replace or overlay it.
+    /// Rings the reply box with the ambient agent-activity beam — the same overlay the opening
+    /// composer carries, pinned over the container as a sibling so an extension swapping the
+    /// composed content cannot take the ring with it. Decorative; swallows no events.
+    private func installActivityBeam() {
+        view.addSubview(activityBeamView)
+        NSLayoutConstraint.activate([
+            activityBeamView.leadingAnchor.constraint(equalTo: promptContentContainer.leadingAnchor),
+            activityBeamView.trailingAnchor.constraint(equalTo: promptContentContainer.trailingAnchor),
+            activityBeamView.topAnchor.constraint(equalTo: promptContentContainer.topAnchor),
+            activityBeamView.bottomAnchor.constraint(equalTo: promptContentContainer.bottomAnchor)
+        ])
+        activityBeamView.update(workload: AgentWorkloadMonitor.shared.workload)
+        appEvents.observe(AgentWorkloadDidChange.self) { [weak self] event in
+            self?.activityBeamView.update(workload: event.workload)
+        }
+    }
+
     private func setupPromptCustomization() {
         promptCustomizationHost.refresh()
     }
@@ -732,8 +880,9 @@ final class ConversationViewController: NSViewController {
         }
         modeChip.itemsProvider = { [weak self] in self?.permissionModeItems() ?? [] }
         modeChip.onSelect = { [weak self] item in
-            // Nil is a real answer here — the inherit row — so this reads "not a mode" as
-            // inherit rather than falling back to one.
+            // Nil is a real answer here — the row marked as the default, or Use Agent's
+            // Setting where there is none — so this reads "not a mode" as inherit rather than
+            // falling back to one.
             self?.selectPermissionMode(item.representedValue as? AgentPermissionMode)
         }
         effortChip.itemsProvider = { [weak self] in self?.effortItems() ?? [] }
@@ -742,14 +891,18 @@ final class ConversationViewController: NSViewController {
         }
         speedChip.itemsProvider = { [weak self] in self?.speedItems() ?? [] }
         speedChip.onSelect = { [weak self] item in
-            guard let fast = item.representedValue as? Bool else { return }
-            self?.selectFastMode(fast)
+            guard let choice = item.representedValue as? ConversationSpeedChoice else { return }
+            self?.selectFastMode(choice.fastMode)
         }
 
-        modelChip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        modeChip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        effortChip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        speedChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // The split divider owns the pane's width. These labels therefore truncate when all
+        // four choices no longer fit, using `ChipView`'s tooltip and hover expansion to reveal
+        // the full value. Marking every chip required made their combined fitting width a
+        // 590-point minimum on the conversation pane, so a divider dragged past that point
+        // sprang back even though the prompt box itself had already yielded.
+        for chip in [modelChip, modeChip, effortChip, speedChip] {
+            chip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
 
         // What the reply will be sent with, on the leading side; what it has cost so far, on
         // the trailing side beside the send. The composer places them — see
@@ -757,7 +910,7 @@ final class ConversationViewController: NSViewController {
         //
         // Model then mode first, because that is the pair the opening composer leads with and
         // keeping those two slots identical across the two composers is the point. Effort and
-        // speed have no opening-composer counterpart, so they follow.
+        // speed follow in the same order on both.
         promptView.setFooterControls(
             leading: [modelChip, modeChip, effortChip, speedChip],
             trailing: [contextLabel]
@@ -777,19 +930,44 @@ final class ConversationViewController: NSViewController {
                 constant: -Design.Spacing.small
             ),
 
+            // Directly above the box, below the status line. The two lines answer different
+            // questions and belong on different sides of that boundary: the status line is the
+            // *turn* talking — the orb, the word, what the last one cost — and reads with the
+            // transcript, while the queue is what happens next and belongs to the composer.
+            // Put above the status line, the queue sat across a sentence about the past.
+            //
+            // On the box's column rather than the pane's, so the tray and the box share one edge.
+            outboxRail.leadingAnchor.constraint(equalTo: promptContentContainer.leadingAnchor),
+            outboxRail.trailingAnchor.constraint(equalTo: promptContentContainer.trailingAnchor),
+            outboxRail.bottomAnchor.constraint(
+                equalTo: promptContentContainer.topAnchor,
+                constant: -Design.Spacing.tight
+            ),
+
+            // Above the queue, on the same column: what goes next sits nearest the box, and what
+            // goes later sits behind it.
+            scheduledStrip.leadingAnchor.constraint(equalTo: promptContentContainer.leadingAnchor),
+            scheduledStrip.trailingAnchor.constraint(
+                equalTo: promptContentContainer.trailingAnchor
+            ),
+            scheduledStrip.bottomAnchor.constraint(
+                equalTo: outboxRail.topAnchor,
+                constant: -Design.Spacing.tight
+            ),
+
             // Both edges pinned, not one: the line is a single truncating label now, and a row
             // free to size itself to its content is what let the controls it used to carry
             // cluster against the leading edge instead of reaching the pane's trailing one.
             //
-            // Twice the inset, so the narration starts on the same vertical as the text in the
-            // box below it — the box is inset from the pane, and its text inset again from the
-            // box. Aligned by ink rather than by frame.
+            // Inset from the *box* rather than from the pane, because the box is no longer the
+            // pane's width: the narration starts on the same vertical as the text under it, and
+            // both sit on the transcript's column. Aligned by ink rather than by frame.
             statusRow.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: Design.Spacing.inset * 2
+                equalTo: promptContentContainer.leadingAnchor,
+                constant: Design.Spacing.inset
             ),
             statusRow.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
+                equalTo: promptContentContainer.trailingAnchor,
                 constant: -Design.Spacing.inset
             ),
             statusRow.bottomAnchor.constraint(
@@ -797,12 +975,22 @@ final class ConversationViewController: NSViewController {
                 constant: -Design.Spacing.small
             ),
 
+            // The reply box stands on a *stated* column, the way the transcript's rows do: the
+            // cap and the insets are required, and `updateComposerColumnWidth` states the width
+            // the pane's current size leaves for it. Deliberately not an equality to the pane's
+            // own width — see `ConversationDefaults.statedColumnPriority` for the two ways
+            // that constraint fails, one of them by resizing the pane.
+            promptContentContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            promptContentContainer.widthAnchor.constraint(
+                lessThanOrEqualToConstant: ConversationDefaults.composerWidth
+            ),
+            composerColumnWidth,
             promptContentContainer.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
+                greaterThanOrEqualTo: view.leadingAnchor,
                 constant: Design.Spacing.inset
             ),
             promptContentContainer.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
+                lessThanOrEqualTo: view.trailingAnchor,
                 constant: -Design.Spacing.inset
             ),
             promptContentContainer.bottomAnchor.constraint(
@@ -815,7 +1003,21 @@ final class ConversationViewController: NSViewController {
             // itself in the middle of an empty margin. `railLeading` keeps it by the pane's
             // edge and only pulls it back when the gutter is too tight for both.
             minimap.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            minimap.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor)
+            minimap.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+
+            // Pane-wide. The band spans the pane and puts its *content* on the column itself
+            // (see `ConversationStickyStepView`), which is the difference between aligning the
+            // box and aligning the ink — held to the column, the strip read as a transcript row
+            // that had drifted to the top, and its first glyph sat 15pt inside every other line.
+            stickyStep.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            stickyStep.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stickyStep.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            jumpToEndButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            jumpToEndButton.bottomAnchor.constraint(
+                equalTo: scrollView.bottomAnchor,
+                constant: -Design.Spacing.inset
+            )
         ])
 
         minimapLeading.isActive = true
@@ -869,7 +1071,20 @@ final class ConversationViewController: NSViewController {
         stream.onSendAvailabilityChange = { [weak self] in
             self?.refreshConversationControls()
             guard let self else { return }
+            // Availability is the one signal every transport has for "the turn ended", however
+            // it ended, so it is where the queue drains rather than off a terminal event some
+            // provider might not send. Mode first: `flushOutboxIfReady` no-ops unless the
+            // transport is genuinely ready, and the composer must not sit showing a Stop for a
+            // turn that is already over.
+            self.refreshComposerMode()
+            self.flushOutboxIfReady()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
+        }
+
+        if let reporting = stream as? MessageLifecycleReportingConversation {
+            reporting.onMessageLifecycle = { [weak self] id, state in
+                self?.applyMessageLifecycle(id, state)
+            }
         }
         if let capabilities = stream as? ComposerCapabilityProviding {
             capabilities.onComposerCapabilitiesChange = { [weak self] in
@@ -938,6 +1153,8 @@ final class ConversationViewController: NSViewController {
             scheduleConversationViewportSave()
         }
         updateVisibleTurns()
+        updateStickyStep()
+        updateScrollToEndControl()
     }
 
     private func scheduleConversationViewportSave() {
@@ -985,6 +1202,7 @@ final class ConversationViewController: NSViewController {
         ))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         autoScroll.noteUserScrolled(nearBottom: false)
+        updateScrollToEndControl()
         return true
     }
 
@@ -993,8 +1211,26 @@ final class ConversationViewController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         invalidateConversationHeightCacheIfNeeded()
+        updateComposerColumnWidth()
         updateMinimapWidth()
         updateVisibleTurns()
+        // A layout pass can move rows under a stationary viewport, so the header is re-resolved
+        // here as well as on scroll; the cached top row makes the common case a comparison.
+        updateStickyStep()
+        updateScrollToEndControl()
+    }
+
+    /// States the reply box's column for the pane's current width: the readable measure where
+    /// the pane affords it, whatever remains inside the insets where it does not. A constant the
+    /// layout has already made satisfiable, so the box follows the pane and can never resize
+    /// it — see `ConversationDefaults.statedColumnPriority`.
+    private func updateComposerColumnWidth() {
+        let width = min(
+            ConversationDefaults.composerWidth,
+            view.bounds.width - Design.Spacing.inset * 2
+        )
+        guard width > 0, abs(composerColumnWidth.constant - width) > 0.5 else { return }
+        composerColumnWidth.constant = width
     }
 
     /// The rail gets whatever gutter the capped column leaves, and nothing when there is none.
@@ -1080,6 +1316,132 @@ final class ConversationViewController: NSViewController {
         minimap.setVisibleTurnIndices(indices)
     }
 
+    // MARK: - Sticky Step
+
+    /// Names the tool call the top of the viewport currently sits inside, or hides.
+    ///
+    /// **Chrome at the top means hide.** A divider, a fold, a permission card or the streaming
+    /// placeholder at the top of the pane is a *boundary*, and a boundary is already telling the
+    /// reader where they are — naming a step over it would be a second, quieter answer to a
+    /// question that had already been answered louder.
+    func updateStickyStep() {
+        guard isViewLoaded else { return }
+
+        let visibleRows = tableView.rows(in: scrollView.contentView.documentVisibleRect)
+        guard visibleRows.location != NSNotFound,
+              presentationItems.indices.contains(visibleRows.location) else {
+            setStickyStep(nil)
+            return
+        }
+
+        // Resolved only when the top row changes. Scrolling inside one tall row fires this
+        // continuously, and the walk back through the turn is the one part worth not repeating.
+        let topRow = visibleRows.location
+        guard topRow != stickyStepTopRow else { return }
+        stickyStepTopRow = topRow
+
+        guard case .timeline(let timelineIndex) = presentationItems[topRow].content else {
+            setStickyStep(nil)
+            return
+        }
+        setStickyStep(timeline.currentStep(atOrBefore: timelineIndex))
+    }
+
+    private func setStickyStep(_ rowIndex: Int?) {
+        guard rowIndex != stickyStepRow else { return }
+        stickyStepRow = rowIndex
+
+        if let rowIndex,
+           timeline.rows.indices.contains(rowIndex),
+           case .toolCall(let call) = timeline.rows[rowIndex] {
+            stickyStep.show(tool: call.tool, subject: call.summary, atRow: rowIndex)
+        } else {
+            stickyStepRow = nil
+        }
+
+        let wanted: CGFloat = stickyStepRow == nil ? 0 : 1
+        guard stickyStep.alphaValue != wanted else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.quick
+            stickyStep.animator().alphaValue = wanted
+        }
+    }
+
+    /// Whether the header is currently naming a step, and which. Read by tests, which cannot ask
+    /// an alpha-faded view what it means.
+    var stickyStepRowIndex: Int? { stickyStepRow }
+
+    /// How far above a jump target to stop.
+    ///
+    /// The usual gap, plus the header's own height when landing there will pin one — otherwise
+    /// the row a reader deliberately navigated to is delivered underneath the strip that names
+    /// it, which is the one place the overlay would actively cost them something.
+    private func landingClearance(for index: Int) -> CGFloat {
+        guard timeline.currentStep(atOrBefore: index) != nil else { return Design.Spacing.large }
+        return Design.Spacing.large + stickyStep.fittingSize.height
+    }
+
+    // MARK: - Turn and Step Navigation
+
+    /// The timeline row at the top of the viewport, which every jump is measured from.
+    private var topVisibleTimelineIndex: Int? {
+        let visibleRows = tableView.rows(in: scrollView.contentView.documentVisibleRect)
+        guard visibleRows.location != NSNotFound else { return nil }
+
+        for row in visibleRows.location..<(visibleRows.location + max(visibleRows.length, 1)) {
+            guard presentationItems.indices.contains(row) else { break }
+            if case .timeline(let index) = presentationItems[row].content { return index }
+        }
+        return nil
+    }
+
+    /// Moves to the exchange before or after the one at the top of the pane.
+    ///
+    /// Relative to the viewport rather than to a selection, because the conversation has no
+    /// selection: what the reader is looking at is the only thing "current" can mean here.
+    @discardableResult
+    func goToAdjacentTurn(forward: Bool) -> Bool {
+        let starts = timeline.turns.map(\.rowIndex)
+        guard !starts.isEmpty else { return false }
+        let top = topVisibleTimelineIndex ?? 0
+
+        let target: Int?
+        if forward {
+            target = starts.first { $0 > top }
+        } else {
+            // Strictly before the *turn's own opening row*, so a reader partway down a turn goes
+            // to that turn's top first rather than skipping over it to the previous one.
+            let enclosing = starts.last { $0 <= top }
+            target = enclosing == top ? starts.last { $0 < top } : enclosing
+        }
+
+        guard let target else { return false }
+        scrollToTimelineRow(target, animated: true)
+        return true
+    }
+
+    /// Moves to the tool call before or after the top of the pane.
+    ///
+    /// Walked over the **presentation** rather than the timeline, which is what makes a folded
+    /// turn's steps skip: they are not presented, so they are not places a reader can be sent.
+    @discardableResult
+    func goToAdjacentStep(forward: Bool) -> Bool {
+        let top = topVisibleTimelineIndex
+        var target: Int?
+
+        for item in forward ? presentationItems : presentationItems.reversed() {
+            guard case .timeline(let index) = item.content,
+                  timeline.rows.indices.contains(index),
+                  case .toolCall = timeline.rows[index] else { continue }
+            guard let top else { target = index; break }
+            if forward ? index > top : index < top { target = index; break }
+        }
+
+        guard let target else { return false }
+        scrollToTimelineRow(target, animated: true)
+        return true
+    }
+
     /// Brings a row to the top of the pane, a little below it so it does not sit against the
     /// toolbar's edge.
     private func scrollToRow(_ index: Int) {
@@ -1101,7 +1463,7 @@ final class ConversationViewController: NSViewController {
 
         let started = DispatchTime.now().uptimeNanoseconds
         let geometryStarted = DispatchTime.now().uptimeNanoseconds
-        let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
+        let target = max(0, tableView.rect(ofRow: tableRow).minY - landingClearance(for: index))
         let geometryEnded = DispatchTime.now().uptimeNanoseconds
 
         guard animated else {
@@ -1140,12 +1502,13 @@ final class ConversationViewController: NSViewController {
         guard let correctedRow = presentationRow(forTimelineIndex: index) else { return (0, 0) }
         let correctedTarget = max(
             0,
-            tableView.rect(ofRow: correctedRow).minY - Design.Spacing.large
+            tableView.rect(ofRow: correctedRow).minY - landingClearance(for: index)
         )
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: correctedTarget))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         let correctionEnded = measuring ? DispatchTime.now().uptimeNanoseconds : 0
         updateVisibleTurns()
+        updateStickyStep()
         let visibleTurnsEnded = measuring ? DispatchTime.now().uptimeNanoseconds : 0
         return (
             correctionNanoseconds: measuring ? correctionEnded - correctionStarted : 0,
@@ -1157,6 +1520,14 @@ final class ConversationViewController: NSViewController {
 
     func launch() {
         guard !stream.isRunning else { return }
+
+        // The native surface's half of the same line `AgentSessionViewController.launch` holds:
+        // recovery starts no agent by any route, and this one would also write `hasLaunched`
+        // into a store a recovery launch is only reading.
+        guard !RecoveryMode.isActive else {
+            RecoveryMode.refuse("a native conversation launch")
+            return
+        }
 
         ProjectStore.shared.update(sessionID: agentSession.id) {
             $0.hasLaunched = true
@@ -1279,8 +1650,8 @@ final class ConversationViewController: NSViewController {
     /// cannot see, correct, or account for when the reply arrives, and this one costs them a
     /// turn of their own usage.
     @discardableResult
-    func sendAppPrompt(_ text: String) -> Bool {
-        submit(text)
+    func sendAppPrompt(_ text: String, context: [ConversationContextAttachment] = []) -> Bool {
+        submit(text, context: context)
     }
 
     /// Provider-neutral rows for mobile/web conversation clients. Tool inputs have already
@@ -1371,15 +1742,26 @@ final class ConversationViewController: NSViewController {
         SessionContinuityStore.shared.setConversationDraft(promptView.stringValue, for: sessionID)
     }
 
-    func requestComment(on attachment: ConversationContextAttachment) {
-        let request = TextPromptRequest(
-            title: L10n.format("Comment on %@", attachment.title),
-            message: attachment.excerpt,
-            confirmTitle: L10n.string("Add to Chat"),
-            placeholder: L10n.string("What should change?")
-        )
-        guard case .text(let body)? = TextPromptAlert.ask(request) else { return }
-        stageContextAttachment(attachment.commenting(body))
+    /// Stages the context and hands the turn over immediately — the ⌘Return half of the comment
+    /// sheet, and the pane menus' **Send** entry.
+    ///
+    /// Sent *with* whatever is already in the box rather than instead of it: a person who typed
+    /// half a sentence and then commented on the file it is about meant one turn, and dropping
+    /// their prose to send only the comment would be the composer discarding work.
+    func sendContextAttachment(_ attachment: ConversationContextAttachment) {
+        guard RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) else {
+            refreshInputControl()
+            return
+        }
+        promptView.addContextAttachment(attachment)
+        _ = submit(promptView.stringValue, context: promptView.contextAttachments)
+    }
+
+    func requestComment(
+        on attachment: ConversationContextAttachment,
+        preview: CodeContextPreview? = nil
+    ) {
+        ContextCommentAlert.request(on: attachment, preview: preview, for: sessionID)
     }
 
     func attachmentContext(path: String, displayPath: String? = nil) -> ConversationContextAttachment {
@@ -1404,8 +1786,8 @@ final class ConversationViewController: NSViewController {
             toolView.onAddContextAttachment = { [weak self] attachment in
                 self?.stageContextAttachment(attachment)
             }
-            toolView.onRequestContextComment = { [weak self] attachment in
-                self?.requestComment(on: attachment)
+            toolView.onRequestContextComment = { [weak self] attachment, preview in
+                self?.requestComment(on: attachment, preview: preview)
             }
             return
         }
@@ -1446,7 +1828,10 @@ final class ConversationViewController: NSViewController {
     }
 
     private func projectRelativePath(for path: String) -> String {
-        let root = URL(fileURLWithPath: project.folderPath, isDirectory: true)
+        let root = URL(
+            fileURLWithPath: agentSession.workingDirectory(in: project),
+            isDirectory: true
+        )
             .standardizedFileURL.path
         let candidate = URL(fileURLWithPath: path).standardizedFileURL.path
         let prefix = root.hasSuffix("/") ? root : root + "/"
@@ -1512,7 +1897,13 @@ final class ConversationViewController: NSViewController {
             return false
         }
 
-        guard stream.canSend else { return false }
+        // The agent is busy. This used to `return false` and the Return did nothing visible —
+        // the text stayed in the box and nothing said whether it had been taken. It queues now,
+        // which is the whole point of the outbox.
+        guard stream.canSend else {
+            guard authorization == nil else { return false }
+            return enqueue(ConversationPrompt(text: trimmed, context: context))
+        }
 
         let localPrompt = ConversationPrompt(text: trimmed, context: context)
         let transportedText: String
@@ -1581,23 +1972,38 @@ final class ConversationViewController: NSViewController {
 
         if invocation?.capability.presentation == .command {
             apply(timeline.appendNotice(sourceText, kind: .muted))
+            apply(.status(.working(word: workingWords.next())))
         } else {
-            // Echoed locally as it is sent. The stream never reports a live user turn back —
-            // `.userMessage` exists only for replay — so producing it here is what draws it
-            // once. Anchoring is decided before the echo lands so its `addRow` cannot yank the
-            // view to the bottom first.
-            autoScroll.noteMessageSent()
-            apply(timeline.appendUserMessage(localPrompt.userMessage))
-            anchorSentMessage(at: timeline.rows.count - 1)
+            recordSentTurn(localPrompt)
         }
+
+        promptView.clear()
+        SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+    }
+
+    /// Draws a user turn that has just gone over the wire.
+    ///
+    /// Shared by the three ways a message reaches a provider — typed and sent, drained from the
+    /// queue, or steered into a running turn — because all three owe the transcript the same
+    /// thing. Before this was one place, a queued message reached the agent without ever being
+    /// echoed, and the conversation showed an answer to a question nobody could see.
+    func recordSentTurn(_ prompt: ConversationPrompt) {
+        refreshConversationControls()
+        runProgress = nil
+
+        // Echoed locally as it is sent. The stream never reports a live user turn back —
+        // `.userMessage` exists only for replay — so producing it here is what draws it
+        // once. Anchoring is decided before the echo lands so its `addRow` cannot yank the
+        // view to the bottom first.
+        autoScroll.noteMessageSent()
+        apply(timeline.appendUserMessage(prompt.userMessage))
+        anchorSentMessage(at: timeline.rows.count - 1)
 
         // Drawn here, which is the moment the turn starts and the only place the status enters
         // `working` — so the word is fixed for the whole wait and a new one arrives with the
         // next turn.
         apply(.status(.working(word: workingWords.next())))
-        promptView.clear()
-        SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
-        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 
     private var nativeStatusText: String {
@@ -1632,19 +2038,37 @@ final class ConversationViewController: NSViewController {
     /// "Toward": no blank space is reserved below short content, so the bubble rises as far
     /// as the content allows — the clip view clamps the rest — and holds the top once enough
     /// reply has arrived to put it there.
-    private func anchorSentMessage(at index: Int) {
-        // After layout, or the target is the frame the row had before it existed.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.autoScroll.mode == .anchored,
-                  let tableRow = self.presentationRow(forTimelineIndex: index) else { return }
+    func anchorSentMessage(at index: Int) {
+        guard autoScroll.mode == .anchored else { return }
 
-            let target = max(
-                0,
-                self.tableView.rect(ofRow: tableRow).minY - Design.Spacing.large
-            )
-            self.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
-            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+        // Land once immediately. Deferring the first pass leaves a newly inserted bubble below
+        // the viewport until the main queue gets back to us, even though the state machine has
+        // already entered anchored mode.
+        landSentMessageAnchor(at: index)
+
+        // Scrolling materializes and measures the rows around the destination. Correct once on
+        // the next turn, against that updated document height, rather than looping on AppKit's
+        // layout as an end condition.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.autoScroll.mode == .anchored else { return }
+            self.landSentMessageAnchor(at: index)
+            self.updateScrollToEndControl()
         }
+    }
+
+    private func landSentMessageAnchor(at index: Int) {
+        view.layoutSubtreeIfNeeded()
+        tableView.layoutSubtreeIfNeeded()
+        guard let tableRow = presentationRow(forTimelineIndex: index) else { return }
+
+        // A raw clip-view offset is clamped to the table's current estimated document height.
+        // Reveal through NSTableView first so it materializes the destination and guarantees the
+        // bubble is visible; the measured pass below can then place it toward the top.
+        tableView.scrollRowToVisible(tableRow)
+        tableView.layoutSubtreeIfNeeded()
+        let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     // MARK: - Events
@@ -1675,6 +2099,19 @@ final class ConversationViewController: NSViewController {
         // read where it matters, at the turn boundary in `ConversationRendering`.
         if case .backgroundWork(let inFlight) = event {
             backgroundWorkInFlight = inFlight
+        }
+        // Only a *failed* turn is asked. A provider's refusal arrives through the same channel
+        // as a network fault and as the user's own Stop, and only the outcome tells them apart
+        // — matching the words alone would stop a session for having written about limits.
+        if case .turnFinished(let text, let outcome, _) = event, outcome == .failed {
+            usageLimit = UsageLimitStop.recognised(in: text)
+            if let usageLimit {
+                EventLog.shared.record(.limitRecovery, "Native turn refused for a usage limit", [
+                    "session": sessionID.uuidString,
+                    "message": usageLimit.message,
+                    "resetHint": usageLimit.resetHint ?? ""
+                ])
+            }
         }
         recordAttachments(in: event)
         for change in timeline.apply(event) { apply(change) }
@@ -1731,6 +2168,33 @@ final class ConversationViewController: NSViewController {
         return overflow <= 0
             || scrollView.contentView.bounds.origin.y
                 >= overflow - ConversationDefaults.bottomTolerance
+    }
+
+    @objc func scrollToConversationEnd() {
+        autoScroll.noteJumpedToBottom()
+        view.layoutSubtreeIfNeeded()
+        tableView.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: maximumConversationScrollOffsetY()))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateScrollToEndControl()
+        scheduleConversationViewportSave()
+    }
+
+    func updateScrollToEndControl() {
+        guard isViewLoaded else { return }
+        jumpToEndButton.isHidden = isNearConversationBottom
+    }
+
+    func maximumConversationScrollOffsetY() -> CGFloat {
+        guard scrollView.documentView != nil else { return 0 }
+        let bounds = scrollView.contentView.bounds
+        let proposed = NSRect(
+            x: bounds.minX,
+            y: (scrollView.documentView?.frame.maxY ?? 0) + bounds.height,
+            width: bounds.width,
+            height: bounds.height
+        )
+        return max(scrollView.contentView.constrainBoundsRect(proposed).origin.y, 0)
     }
 
     private func loadSubagentTranscriptIfNeeded(_ agent: SubagentTimeline.Agent) {
@@ -1839,7 +2303,10 @@ final class ConversationViewController: NSViewController {
             return
         }
 
-        let root = URL(fileURLWithPath: project.folderPath, isDirectory: true)
+        let root = URL(
+            fileURLWithPath: agentSession.workingDirectory(in: project),
+            isDirectory: true
+        )
         for text in texts {
             SessionAttachmentStore.shared.recordReferences(
                 in: text,
@@ -1978,24 +2445,19 @@ final class ConversationViewController: NSViewController {
         )
         speedChip.isEnabled = canConfigure && !isChangingConversationConfiguration
 
-        let effective = AgentModels.effectiveFastMode(
-            for: session,
+        let speedTitle = ConversationSpeedPresentation.chipTitle(
+            selected: session.fastMode,
+            kind: session.kind,
             model: model,
             account: account
         )
-        let speedTitle: String
-        switch effective {
-        case true: speedTitle = ConversationControlDefaults.fast
-        case false: speedTitle = ConversationControlDefaults.standard
-        case nil: speedTitle = ConversationControlDefaults.accountDefault
-        }
         speedChip.configure(
-            symbolName: ConversationControlDefaults.speedSymbol,
+            symbolName: ConversationSpeedPresentation.symbol,
             title: speedTitle
         )
     }
 
-    private func refreshInputControl() {
+    func refreshInputControl() {
         guard isViewLoaded else { return }
         let state = RemoteSessionMirrorRegistry.shared.ownerInputControlState(for: sessionID)
         promptView.isSubmissionEnabled = state.canWrite && !isPreparingTurn
@@ -2014,9 +2476,6 @@ final class ConversationViewController: NSViewController {
     private func modelItems() -> [ThemedMenuEntry] {
         let session = storedSession
         let resolved = resolvedDefaultModel
-        let defaultTitle = resolved.identifier.map {
-            "\(ModelName.display(for: $0))\(ConversationControlDefaults.suffix(for: resolved.source))"
-        } ?? ConversationControlDefaults.defaultModel
 
         // The same readings the composer's model menu carries. Switching model mid-conversation
         // is exactly the move a spent window calls for, and this menu used to be the one place
@@ -2027,36 +2486,51 @@ final class ConversationViewController: NSViewController {
         // a list is not a reason to ask the network once per item.
         if let account { AccountUsageService.shared.refresh(account) }
 
-        var defaultItem = ThemedMenuItem(
-            title: defaultTitle,
-            representedValue: nil,
-            isSelected: session.model == nil
+        // `including:` rather than inserting the pinned model here: a conversation running a
+        // model this login's catalog no longer lists still needs a row of its own, but it belongs
+        // in the same order as the rest. Put at the front it would sit above the most capable
+        // model on offer and read as the recommendation rather than as what happens to be running.
+        let options = AgentModels.options(
+            for: session.kind,
+            account: account,
+            including: session.model
         )
-        if let account {
-            AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
+
+        // "Leave it to the CLI" is marked on the model it resolves to rather than named again
+        // above the list — the composer's model menu and the permission menu mark their default
+        // the same way, because a row that repeats one the list already carries reads as a
+        // seventh model rather than as the same one twice.
+        let markedInList = options.contains { $0.identifier == resolved.identifier }
+        func markedTitle(_ model: String) -> String {
+            "\(ModelName.display(for: model))\(ConversationControlDefaults.suffix(for: resolved.source))"
         }
 
-        var items: [ThemedMenuEntry] = [.item(defaultItem)]
+        var items: [ThemedMenuEntry] = []
 
-        var options = AgentModels.options(for: session.kind, account: account)
-        if let selected = session.model,
-           !options.contains(where: { $0.identifier == selected }) {
-            options.insert(
-                AgentModelOption(
-                    identifier: selected,
-                    displayName: ModelName.display(for: selected),
-                    fastServiceTier: nil,
-                    defaultServiceTier: nil
-                ),
-                at: 0
+        // Kept for the two cases the list cannot mark: nothing has named a model at all, and a
+        // model this catalog does not carry.
+        if !markedInList {
+            var defaultItem = ThemedMenuItem(
+                title: resolved.identifier.map(markedTitle) ?? ConversationControlDefaults.defaultModel,
+                representedValue: nil,
+                isSelected: session.model == nil
             )
+            if let account {
+                AccountUsageMenu.decorate(&defaultItem, forModel: resolved.meteredIdentifier, on: account)
+            }
+            items.append(.item(defaultItem))
         }
 
         items += options.map { option in
+            // The marked row *is* the default row, so it answers nil: the conversation goes on
+            // following what the account resolves to rather than pinning today's answer to it.
+            let isDefault = markedInList && option.identifier == resolved.identifier
             var item = ThemedMenuItem(
-                title: option.displayName,
-                representedValue: option.identifier,
-                isSelected: option.identifier == session.model
+                title: isDefault ? markedTitle(option.identifier) : option.displayName,
+                representedValue: isDefault ? nil : option.identifier,
+                isSelected: isDefault
+                    ? (session.model == nil || session.model == option.identifier)
+                    : option.identifier == session.model
             )
             if let account {
                 AccountUsageMenu.decorate(&item, forModel: option.identifier, on: account)
@@ -2101,26 +2575,11 @@ final class ConversationViewController: NSViewController {
     }
 
     private func speedItems() -> [ThemedMenuEntry] {
-        let effective = AgentModels.effectiveFastMode(
-            for: storedSession,
-            model: activeModel,
-            account: account
+        ConversationSpeedPresentation.rows(
+            selected: storedSession.fastMode,
+            kind: storedSession.kind,
+            timing: .whileRunning
         )
-
-        return [
-            .item(ThemedMenuItem(
-                title: ConversationControlDefaults.standard,
-                subtitle: ConversationControlDefaults.standardDetail,
-                representedValue: false,
-                isSelected: effective == false
-            )),
-            .item(ThemedMenuItem(
-                title: ConversationControlDefaults.fast,
-                subtitle: ConversationControlDefaults.fastDetail,
-                representedValue: true,
-                isSelected: effective == true
-            ))
-        ]
     }
 
     private func selectEffort(_ effort: String?) {
@@ -2205,10 +2664,11 @@ final class ConversationViewController: NSViewController {
             for: session.kind,
             account: account
         )
-        let wasFast = storedSession.fastMode ?? AgentModels.defaultFastMode(
-            for: session.kind,
+        let wasFast = AgentModels.effectiveFastMode(
+            for: storedSession,
             model: activeModel,
-            account: account
+            account: account,
+            startupSpeed: AppSettings.shared.startupSpeed(for: session.kind)
         ) ?? false
 
         let persist = { [weak self] in
@@ -2284,7 +2744,7 @@ final class ConversationViewController: NSViewController {
         }
     }
 
-    private func selectFastMode(_ fast: Bool) {
+    private func selectFastMode(_ fast: Bool?) {
         guard !isChangingConversationConfiguration else { return }
 
         let persist = { [weak self] in
@@ -2296,12 +2756,23 @@ final class ConversationViewController: NSViewController {
             self.refreshConversationControls()
         }
 
+        // Standard and Fast have live representations. Following an explicit General default
+        // resolves to one of those too. Agent's Setting has no generic "restore provider
+        // config" control request, so only the record changes until the next launch.
+        guard let resolved = fast
+            ?? AppSettings.shared.startupSpeed(for: storedSession.kind).fastModeOverride
+        else {
+            persist()
+            appendNotice(ConversationSpeedPresentation.inheritRecordedOnly, kind: .muted)
+            return
+        }
+
         switch storedSession.kind {
         case .claude:
             guard let switcher = stream as? FastModeConversation else { return }
             isChangingConversationConfiguration = true
             refreshConversationControls()
-            switcher.setFastMode(fast) { [weak self] result in
+            switcher.setFastMode(resolved) { [weak self] result in
                 switch result {
                 case .success:
                     persist()
@@ -2325,14 +2796,15 @@ final class ConversationViewController: NSViewController {
         }
     }
 
-    /// Model and permission mode are already present on the launch line. Fast mode has no launch
-    /// flag in a persistent print transport, so an explicit saved choice is restored over its
-    /// control channel once that process is ready.
+    /// Model and permission mode are already present on the launch line. Fast mode also rides
+    /// Claude's per-session settings layer, then is restated over the live control channel once
+    /// the persistent print transport is ready so the running process and the saved startup
+    /// choice cannot drift.
     ///
     /// The transport's own conformance is the test, not the runtime's name: a transport that
     /// cannot be asked mid-conversation does not conform, and one that can needs no entry here.
     private func restoreConversationConfiguration() {
-        guard let fast = storedSession.fastMode,
+        guard let fast = AgentLauncher.fastModeAtStartup(for: storedSession),
               let switcher = stream as? FastModeConversation
         else { return }
 
@@ -2355,7 +2827,6 @@ final class ConversationViewController: NSViewController {
 
 private enum ConversationControlDefaults {
     static let modelSymbol = "cpu"
-    static let speedSymbol = "bolt.fill"
     /// The last resort, reached only by a login that has never run this agent anywhere — no
     /// configuration, no organisation default, no transcript to read. "Default model" was the
     /// wrong words for it: it reads as a setting whose value is being withheld, when the truth
@@ -2363,7 +2834,6 @@ private enum ConversationControlDefaults {
     /// the most this can honestly say; the CLI's own fallback is negotiated per subscription and
     /// is not written down on this machine.
     static var defaultModel: String { L10n.string("Agent's choice") }
-    static var accountDefault: String { L10n.string("Account default") }
     static var accountDefaultSuffix: String { L10n.string("  (account default)") }
     static var runningModelSuffix: String { L10n.string("  (in use)") }
     static var lastUsedSuffix: String { L10n.string("  (last used)") }
@@ -2377,8 +2847,4 @@ private enum ConversationControlDefaults {
         case .rememberedFromEarlierRun: return lastUsedSuffix
         }
     }
-    static var standard: String { L10n.string("Standard") }
-    static var fast: String { L10n.string("Fast") }
-    static var standardDetail: String { L10n.string("Normal speed and usage") }
-    static var fastDetail: String { L10n.string("1.5× speed, increased usage") }
 }
