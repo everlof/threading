@@ -121,6 +121,22 @@ public enum RemoteDiagnosticExtraField: String, Sendable {
     case agentAccountSummary
     case previousLaunchClean
     case automaticUpdateChecks
+
+    // What the app's own launch history says, beside `previousLaunchClean`, which only ever
+    // describes the one launch before this one. These describe the run of them: the verdict, the
+    // state of the ledger it was read from, and how far the last launch that died actually got.
+    // Counts and enum tokens as everywhere else here — a checkpoint is a case name, and the
+    // ledger's field says whether damage was moved aside rather than where it went.
+    case crashLoopDecision
+    case launchLedger
+    case lastStartupCheckpoint
+
+    // What Apple's own delayed diagnostics saw, as counts and a covered window rather than the
+    // payloads. `metricKitLastCrash` is the exception type, signal, termination reason and app
+    // version of the newest crash MetricKit reported — never a call tree, frame, or address.
+    case metricKitDiagnostics
+    case metricKitWindow
+    case metricKitLastCrash
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {

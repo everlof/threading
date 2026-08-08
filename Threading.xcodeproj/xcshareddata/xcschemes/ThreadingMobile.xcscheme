@@ -21,6 +21,20 @@
                ReferencedContainer = "container:Threading.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B2000001000000000000000B"
+               BuildableName = "ThreadingMobileTests.xctest"
+               BlueprintName = "ThreadingMobileTests"
+               ReferencedContainer = "container:Threading.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -28,6 +42,27 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "A20000010000000000000001"
+            BuildableName = "ThreadingMobile.app"
+            BlueprintName = "ThreadingMobile"
+            ReferencedContainer = "container:Threading.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+      <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B2000001000000000000000B"
+               BuildableName = "ThreadingMobileTests.xctest"
+               BlueprintName = "ThreadingMobileTests"
+               ReferencedContainer = "container:Threading.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

@@ -963,6 +963,11 @@ private struct SessionRow: View {
         switch session.state {
         case "working": return MobileL10n.string("Working")
         case "needsAttention": return MobileL10n.string("Needs attention")
+        // The host spells its activity over the wire with `String(describing:)`, so this is
+        // `SessionActivity.limitReached` by its own name. Worth its own word here rather than
+        // falling to "Connected": away from the Mac is exactly where a session that stopped
+        // hours ago is discovered, and "Connected" is the reading that started this.
+        case "limitReached": return MobileL10n.string("Usage limit reached")
         default: return MobileL10n.string("Connected")
         }
     }

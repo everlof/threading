@@ -180,12 +180,12 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         sessionActionURL(sessionID: sessionID, action: "attachments")
     }
 
-    public func attachmentURL(sessionID: String, path: String) -> URL? {
+    public func attachmentURL(sessionID: String, id: String) -> URL? {
         var components = URLComponents(
             url: sessionActionURL(sessionID: sessionID, action: "attachment"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [URLQueryItem(name: "path", value: path)]
+        components?.queryItems = [URLQueryItem(name: "id", value: id)]
         return components?.url
     }
 
@@ -199,6 +199,40 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "tab", value: tabID)]
+        return components?.url
+    }
+
+    public func extensionPanelURL(
+        sessionID: String,
+        extensionIdentifier: String,
+        panelID: String
+    ) -> URL? {
+        var components = URLComponents(
+            url: sessionActionURL(sessionID: sessionID, action: "extension-panel"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "extension", value: extensionIdentifier),
+            URLQueryItem(name: "panel", value: panelID),
+        ]
+        return components?.url
+    }
+
+    public func extensionPanelResourceURL(
+        sessionID: String,
+        extensionIdentifier: String,
+        panelID: String,
+        path: String
+    ) -> URL? {
+        var components = URLComponents(
+            url: sessionActionURL(sessionID: sessionID, action: "extension-panel-resource"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "extension", value: extensionIdentifier),
+            URLQueryItem(name: "panel", value: panelID),
+            URLQueryItem(name: "path", value: path),
+        ]
         return components?.url
     }
 

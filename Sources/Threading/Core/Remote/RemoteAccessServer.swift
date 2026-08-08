@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import Network
 import os
+import ThreadingExtensionKit
 import ThreadingRemoteKit
 
 typealias RemoteClientDiagnosticsReceiver = @Sendable (
@@ -397,6 +398,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST",
+           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path) {
+            handleExtensionPanelAction(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
         if request.method == "GET",
            let route = RemoteRouter.gitReviewRoute(forPath: path) {
             handleGitReview(
@@ -435,6 +442,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         if request.method == "GET",
            let sessionID = RemoteRouter.browserPreviewSessionID(forPath: path) {
             handleBrowserPreview(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "GET",
+           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path) {
+            handleExtensionPanel(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "GET",
+           let sessionID = RemoteRouter.extensionPanelResourceSessionID(forPath: path) {
+            handleExtensionPanelResource(request, sessionID: sessionID, respond: respond)
             return
         }
 
@@ -1273,7 +1292,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     kind: attachment.kind.rawValue,
                     byteCount: Int64(size),
                     modifiedAt: values.contentModificationDate,
-                    origin: attachment.origin.rawValue
+                    origin: attachment.origin.rawValue,
+                    id: attachment.id
                 )
             }
             respond(.respond(RemoteRouter.json(RemoteAttachmentsDTO(
@@ -1344,8 +1364,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             rawSessionID: rawSessionID,
             respond: respond
         ) else { return }
-        guard let path = RemoteRouter.queryValue(named: "path", in: request.path),
-              RemoteInboundPolicy.acceptsRepositoryPath(path) else {
+        guard let attachmentID = RemoteRouter.queryValue(named: "id", in: request.path),
+              RemoteInboundPolicy.acceptsAttachmentID(attachmentID) else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -1355,7 +1375,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 ProjectStore.shared.session(withID: sessionID)
             ), let attachment = SessionAttachmentStore.shared.attachment(
                 for: sessionID,
-                relativePath: path
+                id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
                let size = values.fileSize,
                size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
@@ -1376,9 +1396,178 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// Serves the extension SDK's semantic panel value to the paired owner. The phone receives
+    /// neither an AppKit archive nor a presentation-only projection: it hosts this same tree with
+    /// native SwiftUI controls.
+    private func handleExtensionPanel(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let sessionID = authorizeOwnerSessionRead(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let reference = extensionPanelReference(in: request) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard RemoteSessionAccess.isVisible(
+                ProjectStore.shared.session(withID: sessionID)
+            ), let item = ExtensionManager.shared.registeredPanel(
+                extensionIdentifier: reference.extensionIdentifier,
+                panelID: reference.panelID
+            ) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            respond(.respond(RemoteRouter.json(RemoteExtensionPanelDTO(
+                extensionIdentifier: item.extensionIdentifier,
+                extensionName: item.extensionName,
+                processGeneration: item.processGeneration,
+                panel: item.panel
+            ))))
+        }
+    }
+
+    /// Relays one native control event to the same running extension generation that owns the
+    /// Mac panel. Mutation replay above this handler makes a lost HTTP response safe to retry.
+    private func handleExtensionPanelAction(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) != nil else { return }
+        guard let sessionID = SessionID(uuidString: rawSessionID),
+              let reference = extensionPanelReference(in: request),
+              let action = try? JSONDecoder().decode(
+            RemoteExtensionPanelActionRequestDTO.self,
+            from: request.body
+              ), RemoteInboundPolicy.acceptsExtensionIdentifier(action.actionID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard RemoteSessionAccess.isVisible(
+                ProjectStore.shared.session(withID: sessionID)
+            ), let item = ExtensionManager.shared.registeredPanel(
+                extensionIdentifier: reference.extensionIdentifier,
+                panelID: reference.panelID
+            ) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard action.processGeneration == item.processGeneration else {
+                respond(.respond(RemoteRouter.json(RemoteExtensionPanelActionResponseDTO(
+                    processGeneration: item.processGeneration,
+                    panel: item.panel
+                ))))
+                return
+            }
+
+            let projectID = ProjectStore.shared.project(forSessionID: sessionID)?
+                .id.uuidString.lowercased()
+            _ = ExtensionManager.shared.invokePanelAction(
+                extensionIdentifier: reference.extensionIdentifier,
+                panelID: reference.panelID,
+                actionID: action.actionID,
+                value: action.value,
+                context: ExtensionCommandContext(
+                    projectID: projectID,
+                    sessionID: sessionID.uuidString.lowercased()
+                )
+            ) { result in
+                let payload: RemoteExtensionPanelActionResponseDTO
+                switch result {
+                case .success(let response):
+                    payload = RemoteExtensionPanelActionResponseDTO(
+                        processGeneration: item.processGeneration,
+                        panel: response.panel,
+                        message: response.message,
+                        error: response.error
+                    )
+                case .failure(let error):
+                    payload = RemoteExtensionPanelActionResponseDTO(
+                        processGeneration: item.processGeneration,
+                        error: error.localizedDescription
+                    )
+                }
+                respond(.respond(RemoteRouter.json(payload)))
+            }
+        }
+    }
+
+    /// Package images referenced by the semantic tree stay behind the same owner-only boundary.
+    /// `ExtensionManager` resolves and bounds the package-relative path before any bytes are read.
+    private func handleExtensionPanelResource(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let sessionID = authorizeOwnerSessionRead(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let reference = extensionPanelReference(in: request),
+              let path = RemoteRouter.queryValue(named: "path", in: request.path),
+              RemoteInboundPolicy.acceptsExtensionResourcePath(path) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard RemoteSessionAccess.isVisible(
+                ProjectStore.shared.session(withID: sessionID)
+            ), ExtensionManager.shared.registeredPanel(
+                extensionIdentifier: reference.extensionIdentifier,
+                panelID: reference.panelID
+            ) != nil,
+            let url = ExtensionManager.shared.extensionImageResourceURL(
+                extensionIdentifier: reference.extensionIdentifier,
+                relativePath: path
+            ) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            let contentType = Self.attachmentContentType(for: url)
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+                      data.count <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                    return
+                }
+                respond(.respond(RemoteRouter.data(data, contentType: contentType)))
+            }
+        }
+    }
+
+    private func extensionPanelReference(
+        in request: HTTPRequest
+    ) -> (extensionIdentifier: String, panelID: String)? {
+        guard let extensionIdentifier = RemoteRouter.queryValue(
+            named: "extension",
+            in: request.path
+        ), let panelID = RemoteRouter.queryValue(named: "panel", in: request.path),
+        RemoteInboundPolicy.acceptsExtensionIdentifier(extensionIdentifier),
+        RemoteInboundPolicy.acceptsExtensionIdentifier(panelID) else {
+            return nil
+        }
+        return (extensionIdentifier, panelID)
+    }
+
     private static func attachmentContentType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "pdf": return "application/pdf"
+        case "html", "htm": return "text/html; charset=utf-8"
         case "png": return "image/png"
         case "jpg", "jpeg": return "image/jpeg"
         case "gif": return "image/gif"

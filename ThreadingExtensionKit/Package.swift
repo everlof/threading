@@ -4,7 +4,10 @@ import PackageDescription
 
 let package = Package(
     name: "ThreadingExtensionKit",
-    platforms: [.macOS(.v13)],
+    // The extension process and authoring tools remain Mac-hosted. The semantic contract is also
+    // consumed by the iOS remote client, which renders the same validated `ExtensionNode` tree
+    // natively instead of receiving pixels or an HTML projection.
+    platforms: [.macOS(.v13), .iOS(.v15)],
     products: [
         .library(
             name: "ThreadingExtensionKit",

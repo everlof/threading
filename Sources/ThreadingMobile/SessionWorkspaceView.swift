@@ -23,6 +23,45 @@ private enum SessionWorkspaceItem: String, CaseIterable, Hashable, Identifiable 
         case .attachments: return "paperclip"
         }
     }
+
+    var route: SessionWorkspaceRoute {
+        switch self {
+        case .browser: return .browser(tabID: nil)
+        case .review: return .review
+        case .files: return .files
+        case .attachments: return .attachments
+        }
+    }
+}
+
+enum SessionWorkspaceRoute: Hashable {
+    case browser(tabID: String?)
+    case review
+    case files
+    case attachments
+    case attachment(id: String)
+    case extensionPanel(extensionIdentifier: String, panelID: String)
+
+    static func notificationDestination(
+        _ destination: RemoteNotificationDestinationDTO?
+    ) -> Self? {
+        guard let destination, destination.isValid else { return nil }
+        switch destination.kind {
+        case .session:
+            return nil
+        case .attachment:
+            return destination.attachmentID.map { .attachment(id: $0) }
+        case .browserTab:
+            return destination.browserTabID.map { .browser(tabID: $0) }
+        case .extensionPanel:
+            guard let extensionIdentifier = destination.extensionIdentifier,
+                  let panelID = destination.extensionPanelID else { return nil }
+            return .extensionPanel(
+                extensionIdentifier: extensionIdentifier,
+                panelID: panelID
+            )
+        }
+    }
 }
 
 struct SessionWorkspaceView: View {
@@ -33,23 +72,28 @@ struct SessionWorkspaceView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteTheme) private var theme
     @State private var workspace: RemoteWorkspaceDTO?
+    @State private var path: [SessionWorkspaceRoute]
 
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         activity: MobileWorkspaceActivity,
-        initialWorkspace: RemoteWorkspaceDTO? = nil
+        initialWorkspace: RemoteWorkspaceDTO? = nil,
+        initialDestination: RemoteNotificationDestinationDTO? = nil
     ) {
         self.session = session
         self.client = client
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
+        _path = State(initialValue: SessionWorkspaceRoute.notificationDestination(
+            initialDestination
+        ).map { [$0] } ?? [])
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List(SessionWorkspaceItem.allCases) { item in
-                NavigationLink(value: item) {
+                NavigationLink(value: item.route) {
                     SessionWorkspaceItemRow(
                         item: item,
                         workspace: workspace,
@@ -63,8 +107,8 @@ struct SessionWorkspaceView: View {
             .background(theme.ground)
             .navigationTitle("Workspace")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: SessionWorkspaceItem.self) { item in
-                destination(for: item)
+            .navigationDestination(for: SessionWorkspaceRoute.self) { route in
+                destination(for: route)
             }
             .toolbarBackground(theme.surface, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -86,13 +130,14 @@ struct SessionWorkspaceView: View {
     }
 
     @ViewBuilder
-    private func destination(for item: SessionWorkspaceItem) -> some View {
-        switch item {
-        case .browser:
+    private func destination(for route: SessionWorkspaceRoute) -> some View {
+        switch route {
+        case .browser(let tabID):
             RemoteBrowserFollowView(
                 session: session,
                 client: client,
-                activity: activity
+                activity: activity,
+                initialTabID: tabID
             )
         case .review:
             RemoteGitReviewView(
@@ -113,6 +158,19 @@ struct SessionWorkspaceView: View {
                 session: session,
                 client: client,
                 showsCloseButton: false
+            )
+        case .attachment(let id):
+            RemoteAttachmentTargetView(
+                session: session,
+                attachmentID: id,
+                client: client
+            )
+        case .extensionPanel(let extensionIdentifier, let panelID):
+            RemoteExtensionPanelView(
+                session: session,
+                extensionIdentifier: extensionIdentifier,
+                panelID: panelID,
+                client: client
             )
         }
     }

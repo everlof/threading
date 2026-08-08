@@ -207,6 +207,32 @@ final class RemoteInboundPolicyTests: XCTestCase {
         XCTAssertFalse(RemoteInboundPolicy.acceptsRepositoryPath("\u{00}"))
     }
 
+    func testExtensionPanelIdentifiersUseTheSDKAlphabetAndRemoteByteLimit() {
+        XCTAssertTrue(RemoteInboundPolicy.acceptsExtensionIdentifier("codes.threading.progress"))
+        XCTAssertTrue(RemoteInboundPolicy.acceptsExtensionIdentifier("build-status"))
+        for rejected in ["", "Uppercase", "has space", "path/name", "emoji-😀"] {
+            XCTAssertFalse(RemoteInboundPolicy.acceptsExtensionIdentifier(rejected))
+        }
+
+        let limit = RemoteAccessDefaults.maximumPermissionIDBytes
+        XCTAssertTrue(RemoteInboundPolicy.acceptsExtensionIdentifier(
+            String(repeating: "a", count: limit)
+        ))
+        XCTAssertFalse(RemoteInboundPolicy.acceptsExtensionIdentifier(
+            String(repeating: "a", count: limit + 1)
+        ))
+    }
+
+    func testExtensionResourcesAcceptOnlyBoundedSafeRelativePaths() {
+        XCTAssertTrue(RemoteInboundPolicy.acceptsExtensionResourcePath("Images/status.png"))
+        for rejected in ["", "/tmp/status.png", "../status.png", "Images/../status.png", "a\u{00}b"] {
+            XCTAssertFalse(
+                RemoteInboundPolicy.acceptsExtensionResourcePath(rejected),
+                "should have been refused: \(rejected.debugDescription)"
+            )
+        }
+    }
+
     // MARK: - Attention requests
 
     func testAttentionRecipientRefusesControlAndWhitespace() {

@@ -13,6 +13,12 @@ import AppKit
 /// of read-only markdown in a box one line tall, which is the layout of a form whose last field
 /// is an afterthought — and it read as one. What the user has to write is the largest thing
 /// here; what the app measured sits below it, quotable but quiet.
+///
+/// **The environment is held apart from the report rather than baked into it**, because it is
+/// said in three places and must not be said twice in any of them: the details box shows it under
+/// the capture, Copy Report carries it into the chat, and the ticket closes with it under the
+/// rule `GitHubIssueComposer` draws. A report string that already contained it would have
+/// arrived on GitHub with the environment printed once in the evidence and again under the rule.
 final class InspectorReportViewController: NSViewController {
 
     // MARK: - Properties
@@ -20,6 +26,11 @@ final class InspectorReportViewController: NSViewController {
     private let heading: String
     private let subheading: String
     private let markdown: String
+
+    /// What the app was wearing when the capture was made — `InspectorEnvironment.markdown`, or
+    /// empty when there was no window to read it from.
+    private let environment: String
+
     private let screenshot: NSImage?
 
     private let noteField = PromptView()
@@ -49,10 +60,17 @@ final class InspectorReportViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(heading: String, subheading: String, markdown: String, screenshot: NSImage?) {
+    init(
+        heading: String,
+        subheading: String,
+        markdown: String,
+        environment: String,
+        screenshot: NSImage?
+    ) {
         self.heading = heading
         self.subheading = subheading
         self.markdown = markdown
+        self.environment = environment
         self.screenshot = screenshot
         super.init(nibName: nil, bundle: nil)
     }
@@ -183,7 +201,7 @@ final class InspectorReportViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         if let textView = scrollView.documentView as? ThemedTextView {
-            textView.string = markdown
+            textView.string = details
             textView.isEditable = false
             textView.isSelectable = true
             textView.applyFont(.code())
@@ -320,7 +338,7 @@ final class InspectorReportViewController: NSViewController {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(
-            InspectorReportComposer.compose(note: noteField.stringValue, markdown: markdown),
+            InspectorReportComposer.compose(note: noteField.stringValue, markdown: details),
             forType: .string
         )
 
@@ -347,6 +365,10 @@ final class InspectorReportViewController: NSViewController {
     }
 
     /// What gets filed: the description leads, the capture follows, the environment closes.
+    ///
+    /// The captured environment is the one the sheet was given, which already opens with the
+    /// three facts `GitHubIssueEnvironment` states and adds what the capture itself needed. A
+    /// sheet built without one still files the plain line rather than an empty rule.
     func issueDraft() -> GitHubIssueDraft {
         GitHubIssueDraft(
             title: GitHubIssueComposer.title(
@@ -356,10 +378,20 @@ final class InspectorReportViewController: NSViewController {
             body: GitHubIssueComposer.body(
                 note: noteField.stringValue,
                 report: markdown,
-                environment: GitHubIssueEnvironment.markdown()
+                environment: environment.isEmpty
+                    ? GitHubIssueEnvironment.markdown()
+                    : environment
             ),
             labels: [GitHubIssueKind.problem.label]
         )
+    }
+
+    /// The capture and what it was captured under, in the order they are read. One blank line
+    /// between them: the environment is a different kind of fact from the geometry above it, and
+    /// a flat list of eighteen bullets is one nobody finishes.
+    var details: String {
+        guard !environment.isEmpty else { return markdown }
+        return markdown + "\n\n" + environment
     }
 
     @objc private func close() {

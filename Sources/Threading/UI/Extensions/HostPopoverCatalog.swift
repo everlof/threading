@@ -13,6 +13,7 @@ enum HostPopoverID: String, CaseIterable {
     case toolbarAccountUsage = "toolbar.account-usage-popover"
     case settingsAccountIconPicker = "settings.account-icon-picker"
     case extensionNodeDetail = "extension.node-detail"
+    case conversationChangedFileDiff = "conversation.changed-file-diff"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -34,6 +35,14 @@ enum HostPopoverID: String, CaseIterable {
             return .hostOnly(
                 reason: "Edits an explicit user-owned identity choice; extensions contribute "
                     + "icon resolvers but cannot replace the native picker."
+            )
+        case .conversationChangedFileDiff:
+            return .hostOnly(
+                reason: "One file's diff under the pointer, drawn by the same renderer as Git "
+                    + "Review from what git reported for that turn. There is nothing here for "
+                    + "an extension to compose into — the body *is* the change — and the "
+                    + "surface exists only while a reader is holding a row open, so its "
+                    + "timing, placement, chrome and dismissal stay host-owned."
             )
         }
     }

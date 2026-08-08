@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Attachment unavailable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilagan är inte tillgänglig" } } }
+    },
+    "Choose…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj…" } } }
+    },
+    "Custom extension surface": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anpassad tilläggsyta" } } }
+    },
+    "Extension": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillägg" } } }
+    },
+    "Extension panel": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tilläggspanel" } } }
+    },
+    "Extension panel unavailable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tilläggspanelen är inte tillgänglig" } } }
+    },
+    "Images, documents, and HTML from this session will appear here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilder, dokument och HTML från den här sessionen visas här." } } }
+    },
+    "Opening attachment…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar bilaga…" } } }
+    },
+    "Opening extension panel…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar tilläggspanel…" } } }
+    },
+    "Refresh extension panel": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdatera tilläggspanel" } } }
+    },
+    "Running “%@”…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kör ”%@”…" } } }
+    },
+    "Loading…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in…" } } }
+    },
+    "The extension panel is not ready yet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tilläggspanelen är inte klar än." } } }
+    },
+    "The extension restarted. Its current panel has been restored.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillägget startades om. Dess aktuella panel har återställts." } } }
+    },
+    "This captured attachment is no longer available on the Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här sparade bilagan är inte längre tillgänglig på Mac-datorn." } } }
+    },
+    "This custom extension surface is available on your Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här anpassade tilläggsytan är tillgänglig på din Mac." } } }
+    },
+    "This live panel is available on your Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här aktiva panelen är tillgänglig på din Mac." } } }
+    },
+    "End Demo": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avsluta demo" } } }
+    },
+    "No Mac nearby? Try the demo.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen Mac i närheten? Prova demon." } } }
+    },
+    "This is the demo. Nothing here is connected.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det här är demon. Inget här är anslutet." } } }
+    },
+    "Try the demo": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prova demon" } } }
+    },
+    "Demo Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Demo-Mac" } } }
+    },
     "A shared link opens one chat and can never manage your Mac.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En delad länk öppnar en chatt och kan aldrig hantera din Mac." } } }
     },
@@ -3614,12 +3680,812 @@
         }
       }
     },
+    "Your description is sent exactly as written.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Din beskrivning skickas precis som du har skrivit den."
+          }
+        }
+      }
+    },
+    "May contain code or chat content; Send uses a small preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan innehålla kod eller chattinnehåll; Skicka använder en liten förhandsvisning"
+          }
+        }
+      }
+    },
+    "Send report": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka rapport"
+          }
+        }
+      }
+    },
+    "Send to Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka till Mac"
+          }
+        }
+      }
+    },
+    "Share files…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela filer…"
+          }
+        }
+      }
+    },
+    "Report update": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportuppdatering"
+          }
+        }
+      }
+    },
+    "Report received": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapport mottagen"
+          }
+        }
+      }
+    },
+    "Thank you. Keep reference %@ if you contact us about this report.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tack. Spara referensen %@ om du kontaktar oss om rapporten."
+          }
+        }
+      }
+    },
+    "Report saved": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapport sparad"
+          }
+        }
+      }
+    },
+    "Threading couldn’t reach the report service. The report is saved securely on this device and will be retried when the app is active.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte nå rapporttjänsten. Rapporten är säkert sparad på enheten och skickas igen när appen är aktiv."
+          }
+        }
+      }
+    },
+    "Couldn’t send report": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att skicka rapporten"
+          }
+        }
+      }
+    },
+    "Sent to your Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skickad till din Mac"
+          }
+        }
+      }
+    },
+    "A new %@ task is investigating this report in %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En ny uppgift i %@ undersöker rapporten i %@."
+          }
+        }
+      }
+    },
+    "Couldn’t create task": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att skapa uppgiften"
+          }
+        }
+      }
+    },
+    "The report exceeded its safe size limit.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapporten överskred den säkra storleksgränsen."
+          }
+        }
+      }
+    },
+    "The screenshot preview could not be prepared. Remove it and try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisningen av skärmbilden kunde inte förberedas. Ta bort den och försök igen."
+          }
+        }
+      }
+    },
+    "The report outbox is full. Connect to the internet and try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportutkorgen är full. Anslut till internet och försök igen."
+          }
+        }
+      }
+    },
+    "The report service returned an unreadable response.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapporttjänsten returnerade ett oläsligt svar."
+          }
+        }
+      }
+    },
+    "The report service returned HTTP %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapporttjänsten returnerade HTTP %lld."
+          }
+        }
+      }
+    },
+    "Send report uploads the selected items to Threading’s private support inbox. Diagnostics never include messages, prompts, paths, notification text, device names or credentials. Optional details contain no stable device identifier.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka rapport överför de valda delarna till Threadings privata supportinkorg. Diagnostik innehåller aldrig meddelanden, prompter, sökvägar, notifikationstext, enhetsnamn eller inloggningsuppgifter. Valfria detaljer innehåller ingen stabil enhetsidentifierare."
+          }
+        }
+      }
+    },
     "Until %@": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Till %@"
+          }
+        }
+      }
+    },
+    "Customize keys": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anpassa tangenter"
+          }
+        }
+      }
+    },
+    "Insert without submitting": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Infoga utan att skicka"
+          }
+        }
+      }
+    },
+    "Control": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontroll"
+          }
+        }
+      }
+    },
+    "Option": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alternativ"
+          }
+        }
+      }
+    },
+    "Shift": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skift"
+          }
+        }
+      }
+    },
+    "off": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "av"
+          }
+        }
+      }
+    },
+    "armed for the next key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "aktiv för nästa tangent"
+          }
+        }
+      }
+    },
+    "locked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "låst"
+          }
+        }
+      }
+    },
+    "Terminal Keys": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminaltangenter"
+          }
+        }
+      }
+    },
+    "Keys": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangenter"
+          }
+        }
+      }
+    },
+    "Drag to reorder with Edit. These keys apply to %@ sessions on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dra för att ändra ordning via Redigera. Tangenterna gäller %@-sessioner på den här enheten."
+          }
+        }
+      }
+    },
+    "Add key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till tangent"
+          }
+        }
+      }
+    },
+    "Add snippet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till textsnutt"
+          }
+        }
+      }
+    },
+    "Reset to standard keys": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ till standardtangenter"
+          }
+        }
+      }
+    },
+    "Reset to standard keys?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ till standardtangenter?"
+          }
+        }
+      }
+    },
+    "Your customized %@ keys on this device will be removed.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dina anpassade %@-tangenter på den här enheten tas bort."
+          }
+        }
+      }
+    },
+    "Reset": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ"
+          }
+        }
+      }
+    },
+    "Customized": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anpassad"
+          }
+        }
+      }
+    },
+    "The key bar under a remote terminal. Keyboards are stored on this device only.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangentraden under en fjärrterminal. Tangentbord sparas bara på den här enheten."
+          }
+        }
+      }
+    },
+    "Escape sequence": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escapesekvens"
+          }
+        }
+      }
+    },
+    "Types “%@” and Return": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriver ”%@” och retur"
+          }
+        }
+      }
+    },
+    "Types “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriver ”%@”"
+          }
+        }
+      }
+    },
+    "Holds Control for the next key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håller kontroll för nästa tangent"
+          }
+        }
+      }
+    },
+    "Holds Option for the next key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håller alternativ för nästa tangent"
+          }
+        }
+      }
+    },
+    "Escape": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escape"
+          }
+        }
+      }
+    },
+    "Tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tabb"
+          }
+        }
+      }
+    },
+    "Return": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retur"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Radera"
+          }
+        }
+      }
+    },
+    "Forward Delete": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Radera framåt"
+          }
+        }
+      }
+    },
+    "Up Arrow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppåtpil"
+          }
+        }
+      }
+    },
+    "Down Arrow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedåtpil"
+          }
+        }
+      }
+    },
+    "Left Arrow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vänsterpil"
+          }
+        }
+      }
+    },
+    "Right Arrow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Högerpil"
+          }
+        }
+      }
+    },
+    "Home": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home"
+          }
+        }
+      }
+    },
+    "End": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End"
+          }
+        }
+      }
+    },
+    "Page Up": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Page Up"
+          }
+        }
+      }
+    },
+    "Page Down": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Page Down"
+          }
+        }
+      }
+    },
+    "Combine with": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kombinera med"
+          }
+        }
+      }
+    },
+    "The key is added as one chord — ⇧ Tab becomes a single ⇧tab key.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangenten läggs till som ett ackord — ⇧ tabb blir en enda ⇧tab-tangent."
+          }
+        }
+      }
+    },
+    "Latching modifiers": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låsbara modifierare"
+          }
+        }
+      }
+    },
+    "Tap once to apply to the next key, twice to lock, again to release.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tryck en gång för nästa tangent, två gånger för att låsa, igen för att släppa."
+          }
+        }
+      }
+    },
+    "Add Key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till tangent"
+          }
+        }
+      }
+    },
+    "Label": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etikett"
+          }
+        }
+      }
+    },
+    "Optional — the text leads otherwise": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valfritt — annars visas texten"
+          }
+        }
+      }
+    },
+    "Text to type": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text att skriva"
+          }
+        }
+      }
+    },
+    "Submit with Return": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka med retur"
+          }
+        }
+      }
+    },
+    "Snippet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Textsnutt"
+          }
+        }
+      }
+    },
+    "A long-press on a submitting snippet key inserts its text without running it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ett långtryck på en skickande textsnutt-tangent infogar texten utan att köra den."
+          }
+        }
+      }
+    },
+    "Add Snippet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till textsnutt"
+          }
+        }
+      }
+    },
+    "Add": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till"
+          }
+        }
+      }
+    },
+    "Edit Key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigera tangent"
+          }
+        }
+      }
+    },
+    "Optional — the key names itself otherwise": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valfritt — annars namnger tangenten sig själv"
+          }
+        }
+      }
+    },
+    "Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisning"
+          }
+        }
+      }
+    },
+    "Terminal keys": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminaltangenter"
+          }
+        }
+      }
+    },
+    "The key bar under a remote terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangentraden under en fjärrterminal"
+          }
+        }
+      }
+    },
+    "home": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "home"
+          }
+        }
+      }
+    },
+    "end": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "end"
+          }
+        }
+      }
+    },
+    "pgup": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pgup"
+          }
+        }
+      }
+    },
+    "pgdn": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pgdn"
+          }
+        }
+      }
+    },
+    "Usage limit reached": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anv\u00e4ndningsgr\u00e4nsen n\u00e5dd"
           }
         }
       }

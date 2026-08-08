@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingExtensionKit
 import ThreadingRemoteKit
 
 // `RemoteCapability` and the wire DTOs live in `ThreadingRemoteKit` (shared with future clients).
@@ -331,6 +332,25 @@ enum RemoteInboundPolicy {
 
     static func acceptsPermissionID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= RemoteAccessDefaults.maximumPermissionIDBytes
+    }
+
+    static func acceptsAttachmentID(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= RemoteAccessDefaults.maximumPermissionIDBytes
+            && value.unicodeScalars.allSatisfy { scalar in
+                CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_"
+            }
+    }
+
+    static func acceptsExtensionIdentifier(_ value: String) -> Bool {
+        value.utf8.count <= RemoteAccessDefaults.maximumPermissionIDBytes
+            && ExtensionIdentifierRules.isContributionIdentifier(value)
+    }
+
+    static func acceptsExtensionResourcePath(_ value: String) -> Bool {
+        value.utf8.count <= RemoteAccessDefaults.maximumRepositoryPathBytes
+            && !value.utf8.contains(0)
+            && ExtensionIdentifierRules.isSafeRelativePath(value)
     }
 
     static func acceptsConversationRowID(_ value: String) -> Bool {

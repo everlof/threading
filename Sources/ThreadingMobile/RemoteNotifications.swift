@@ -5,7 +5,6 @@ import UserNotifications
 
 enum RemoteNotificationBridge {
     static let eventNotification = Notification.Name("ThreadingRemoteNotificationEvent")
-    static let openedNotification = Notification.Name("ThreadingRemoteNotificationOpened")
     static let deviceTokenNotification = Notification.Name("ThreadingRemotePushToken")
 
     static func received(_ event: RemoteNotificationEventDTO, connectionID: String) {
@@ -16,8 +15,26 @@ enum RemoteNotificationBridge {
         )
     }
 
-    static func opened(_ event: RemoteNotificationEventDTO) {
-        NotificationCenter.default.post(name: openedNotification, object: event)
+}
+
+/// Decodes both forms the iPhone can receive: the APNs payload nests the authenticated event
+/// under `event`, while the live Remote Access socket delivers the event object itself.
+///
+/// Keeping this UIKit-free seam internal lets the iOS test bundle exercise the exact production
+/// decoder without constructing private `UNNotification` implementation objects.
+enum RemoteNotificationPayloadDecoder {
+    static func event(from userInfo: [AnyHashable: Any]) -> RemoteNotificationEventDTO? {
+        let source: Any
+        if let nested = userInfo["event"] {
+            source = nested
+        } else {
+            source = userInfo
+        }
+        guard JSONSerialization.isValidJSONObject(source),
+              let data = try? JSONSerialization.data(withJSONObject: source) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(RemoteNotificationEventDTO.self, from: data)
     }
 }
 
@@ -27,12 +44,14 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     UNUserNotificationCenterDelegate {
 
     private let continuity: MobileSessionContinuityStore
+    private let keyboards: MobileTerminalKeyboardStore
     private let model: RemoteAppModel
     private let notifications: RemoteNotificationManager
 
     override init() {
         let continuity = MobileSessionContinuityStore()
         self.continuity = continuity
+        keyboards = MobileTerminalKeyboardStore()
         model = RemoteAppModel(continuity: continuity)
         notifications = RemoteNotificationManager()
         super.init()
@@ -102,6 +121,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         let root = ThreadingMobileHostedRoot(
             model: model,
             continuity: continuity,
+            keyboards: keyboards,
             notifications: notifications
         )
         return UIHostingController(rootView: root)
@@ -162,7 +182,9 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        if let event = Self.event(from: notification.request.content.userInfo) {
+        if let event = RemoteNotificationPayloadDecoder.event(
+            from: notification.request.content.userInfo
+        ) {
             MobileDiagnostics.record(.notificationReceived, fields: [
                 .trace: event.id,
                 .kind: event.kind.rawValue,
@@ -176,7 +198,9 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let event = Self.event(from: response.notification.request.content.userInfo) else {
+        guard let event = RemoteNotificationPayloadDecoder.event(
+            from: response.notification.request.content.userInfo
+        ) else {
             return
         }
         MobileDiagnostics.record(.notificationOpened, fields: [
@@ -184,22 +208,18 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
             .kind: event.kind.rawValue,
             .transport: "apns",
         ])
-        RemoteNotificationBridge.opened(event)
+        model.openSessionFromNotification(event)
     }
 
-    private static func event(from userInfo: [AnyHashable: Any]) -> RemoteNotificationEventDTO? {
-        let source: Any
-        if let nested = userInfo["event"] {
-            source = nested
-        } else {
-            source = userInfo
+    func openNotification(from response: UNNotificationResponse) {
+        guard let event = RemoteNotificationPayloadDecoder.event(
+            from: response.notification.request.content.userInfo
+        ) else {
+            return
         }
-        guard JSONSerialization.isValidJSONObject(source),
-              let data = try? JSONSerialization.data(withJSONObject: source) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(RemoteNotificationEventDTO.self, from: data)
+        model.openSessionFromNotification(event)
     }
+
 }
 
 @MainActor
@@ -218,6 +238,9 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
         window.makeKeyAndVisible()
+        if let response = connectionOptions.notificationResponse {
+            appDelegate.openNotification(from: response)
+        }
     }
 }
 
@@ -609,8 +632,9 @@ final class RemoteNotificationManager: ObservableObject {
             ])
             return
         }
-        // While the app is visible, the session's own card/dot is the better cue.
-        guard scenePhase != .active else {
+        // Ordinary state changes have an in-app card/dot. An agent update is an explicit
+        // milestone the user asked to receive, including while looking at another chat.
+        guard scenePhase != .active || event.kind == .agentMessage else {
             MobileDiagnostics.record(.notificationSuppressed, fields: [
                 .trace: event.id,
                 .reason: "foreground",

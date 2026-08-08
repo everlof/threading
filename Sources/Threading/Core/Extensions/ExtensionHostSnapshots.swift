@@ -154,8 +154,10 @@ final class LiveExtensionHostSnapshotProvider:
         case .working: return .working
         // One state to extensions, deliberately. `ExtensionSessionActivity` is a published
         // vocabulary an installed extension already switches on, and splitting it would hand
-        // every one of them a value it has no branch for. Both mean "this session wants you".
-        case .awaitingUser, .needsAttention: return .needsAttention
+        // every one of them a value it has no branch for. All three mean "this session is not
+        // going to move on its own" — a limited session included, since an extension cannot
+        // lift a rate limit any more than it can answer a question.
+        case .awaitingUser, .needsAttention, .limitReached: return .needsAttention
         }
     }
 

@@ -12,11 +12,17 @@ let package = Package(
     products: [
         .library(name: "ThreadingRemoteKit", targets: ["ThreadingRemoteKit"])
     ],
+    dependencies: [
+        .package(path: "../ThreadingExtensionKit")
+    ],
     targets: [
-        .target(name: "ThreadingRemoteKit"),
+        .target(
+            name: "ThreadingRemoteKit",
+            dependencies: ["ThreadingExtensionKit"]
+        ),
         .testTarget(
             name: "ThreadingRemoteKitTests",
-            dependencies: ["ThreadingRemoteKit"]
+            dependencies: ["ThreadingRemoteKit", "ThreadingExtensionKit"]
         )
     ]
 )

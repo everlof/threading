@@ -18,6 +18,18 @@ struct RemoteBrowserFollowView: View {
     @State private var loadError: String?
     @State private var isLoading = false
 
+    init(
+        session: RemoteSessionSummaryDTO,
+        client: RemoteClient,
+        activity: MobileWorkspaceActivity,
+        initialTabID: String? = nil
+    ) {
+        self.session = session
+        self.client = client
+        _activity = ObservedObject(wrappedValue: activity)
+        _selectedTabID = State(initialValue: initialTabID)
+    }
+
     private var selectedTab: RemoteBrowserTabDTO? {
         if let selectedTabID,
            let selected = workspace.browserTabs.first(where: { $0.id == selectedTabID }) {

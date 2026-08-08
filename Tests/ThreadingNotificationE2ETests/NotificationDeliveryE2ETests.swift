@@ -93,7 +93,7 @@ final class NotificationDeliveryE2ETests: XCTestCase {
             AgentLauncher.streamPlan(for: session, in: project)
         }
         stream.onEvent = { event in
-            guard case .turnFinished(_, let isError, _) = event, !didFinishTurn else { return }
+            guard case .turnFinished(_, let outcome, _) = event, !didFinishTurn else { return }
             didFinishTurn = true
             turnWasError = isError
             turn.fulfill()

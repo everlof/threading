@@ -166,6 +166,14 @@ struct RemoteRouter {
         sessionID(forPath: path, action: "browser-preview")
     }
 
+    static func extensionPanelSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "extension-panel")
+    }
+
+    static func extensionPanelResourceSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "extension-panel-resource")
+    }
+
     static func queryValue(named name: String, in rawPath: String) -> String? {
         guard var components = URLComponents(string: rawPath) else { return nil }
         // A request target is commonly relative, while URLComponents is most predictable

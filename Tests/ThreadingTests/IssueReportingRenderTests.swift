@@ -107,7 +107,33 @@ final class IssueReportingRenderTests: XCTestCase {
         XCTAssertTrue(draft.body.hasPrefix("Archive button is unclickable"))
         XCTAssertTrue(draft.body.contains("- Element: SidebarRowView"))
         XCTAssertTrue(draft.body.contains("Threading"))
+        XCTAssertTrue(draft.body.contains("- App theme: System, adaptive, drawing dark"))
         XCTAssertEqual(draft.labels, ["bug"])
+    }
+
+    /// The environment is one block in three places, and the ticket is the one that could hold
+    /// two: the composer closes every body with an environment under a rule, so a report string
+    /// that already carried its own would print the build line twice.
+    @MainActor
+    func testTheEnvironmentIsStatedOnceInTheTicketAndOnceInTheDetails() {
+        let sheet = makeInspectorSheet()
+        _ = laidOut(sheet)
+
+        let body = sheet.issueDraft().body
+        XCTAssertEqual(
+            body.components(separatedBy: "Threading 1.0 (1)").count - 1,
+            1,
+            "the environment landed in the ticket twice"
+        )
+
+        XCTAssertTrue(
+            sheet.details.contains("- Window: 1440×900 at 2×"),
+            "the box says what was captured, not what it was captured under"
+        )
+        XCTAssertTrue(
+            sheet.details.hasPrefix("- Element: SidebarRowView"),
+            "the capture still leads the details"
+        )
     }
 
     // MARK: - Help ▸ Report a Problem
@@ -227,6 +253,9 @@ final class IssueReportingRenderTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Fixed text rather than a live `InspectorEnvironment.capture`: the renders are compared
+    /// between runs, and a block carrying this machine's window size and theme would differ in
+    /// every one of them.
     @MainActor
     private func makeInspectorSheet() -> InspectorReportViewController {
         InspectorReportViewController(
@@ -236,6 +265,13 @@ final class IssueReportingRenderTests: XCTestCase {
             - Element: SidebarRowView
             - Frame: {{12, 40}, {248, 28}}
             - Window screenshot, target outlined: /tmp/threading-inspect-20260731-160412.png
+            """,
+            environment: """
+            - Threading 1.0 (1) · Version 15.5 (Build 24F74)
+            - App theme: System, adaptive, drawing dark
+            - Window chrome: the native frame
+            - Window: 1440×900 at 2×
+            - Text size: standard
             """,
             screenshot: swatch()
         )

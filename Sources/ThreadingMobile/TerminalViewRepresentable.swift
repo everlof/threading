@@ -9,6 +9,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     @ObservedObject var connection: RemoteSessionConnection
     let theme: RemoteTerminalThemeDTO?
     let allowsDirectInput: Bool
+    let keyBridge: TerminalKeyBridge
     let initialScrollProgress: Double?
     let onScrollProgress: (Double) -> Void
 
@@ -16,6 +17,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         Coordinator(
             connection: connection,
             allowsInput: allowsDirectInput,
+            keyBridge: keyBridge,
             initialScrollProgress: initialScrollProgress,
             onScrollProgress: onScrollProgress
         )
@@ -126,6 +128,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, TerminalViewDelegate {
         var connection: RemoteSessionConnection
         var allowsInput: Bool
+        let keyBridge: TerminalKeyBridge
         var initialScrollProgress: Double?
         var onScrollProgress: (Double) -> Void
         private weak var terminalView: RemoteTerminalView?
@@ -135,17 +138,21 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         init(
             connection: RemoteSessionConnection,
             allowsInput: Bool,
+            keyBridge: TerminalKeyBridge,
             initialScrollProgress: Double?,
             onScrollProgress: @escaping (Double) -> Void
         ) {
             self.connection = connection
             self.allowsInput = allowsInput
+            self.keyBridge = keyBridge
             self.initialScrollProgress = initialScrollProgress
             self.onScrollProgress = onScrollProgress
         }
 
+        @MainActor
         func attach(to view: RemoteTerminalView) {
             terminalView = view
+            keyBridge.terminalView = view
             contentOffsetObservation = view.observe(\.contentOffset, options: [.new]) {
                 [weak self, weak view] _, _ in
                 guard let self, let view,
@@ -154,9 +161,13 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             }
         }
 
+        @MainActor
         func detach() {
             contentOffsetObservation?.invalidate()
             contentOffsetObservation = nil
+            if keyBridge.terminalView === terminalView {
+                keyBridge.terminalView = nil
+            }
             terminalView = nil
         }
 
@@ -188,7 +199,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             guard allowsInput else { return }
             let bytes = Array(data)
             Task { @MainActor [weak self] in
-                self?.connection.sendTerminalInput(bytes[...])
+                guard let self else { return }
+                let typed = self.keyBridge.applyLatchesToTyped(bytes)
+                self.connection.sendTerminalInput(typed[...])
             }
         }
 

@@ -969,7 +969,7 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(
             try XCTUnwrap(get(
-                "/api/session/\(sessionID.uuidString)/attachment?path=preview.png",
+                "/api/session/\(sessionID.uuidString)/attachment?id=attachment-1",
                 bearer: "guesttoken"
             )).status,
             403
@@ -989,6 +989,29 @@ final class RemoteServerIntegrationTests: XCTestCase {
             )).status,
             403,
             "sharing one conversation must not expose browser pixels"
+        )
+        let panelPath = "/api/session/\(sessionID.uuidString)/extension-panel?extension=codes.threading.progress&panel=build-status"
+        XCTAssertEqual(
+            try XCTUnwrap(get(panelPath, bearer: "guesttoken")).status,
+            403,
+            "sharing one conversation must not expose extension panel state"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(get(
+                "/api/session/\(sessionID.uuidString)/extension-panel-resource?extension=codes.threading.progress&panel=build-status&path=Images%2Fstatus.png",
+                bearer: "guesttoken"
+            )).status,
+            403,
+            "sharing one conversation must not expose extension package resources"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                panelPath,
+                bearer: "guesttoken",
+                body: Data(#"{"processGeneration":"generation-1","actionID":"refresh"}"#.utf8)
+            )).status,
+            403,
+            "sharing one conversation must not invoke extension actions"
         )
     }
 
@@ -1595,6 +1618,21 @@ final class RemoteServerIntegrationTests: XCTestCase {
             ),
             "abc"
         )
+        XCTAssertEqual(
+            RemoteRouter.extensionPanelSessionID(
+                forPath: "/api/session/abc/extension-panel"
+            ),
+            "abc"
+        )
+        XCTAssertEqual(
+            RemoteRouter.extensionPanelResourceSessionID(
+                forPath: "/api/session/abc/extension-panel-resource"
+            ),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.extensionPanelSessionID(
+            forPath: "/api/session/a/b/extension-panel"
+        ))
         XCTAssertEqual(
             RemoteRouter.queryValue(
                 named: "path",

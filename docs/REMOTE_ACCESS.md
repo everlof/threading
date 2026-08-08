@@ -284,19 +284,44 @@ permission request uses its more specific permission notification instead of als
 generic response-needed event. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
 
-Opening a notification deep-links to the relevant chat. Permission notifications intentionally
+Opening a notification deep-links to the relevant chat. A requested agent update may additionally
+carry one closed, authenticated destination: an attachment id, a browser-tab id, or an extension
+and panel id. These are Threading-owned identities, not an agent-authored path, URL, or application
+deep link. Each client resolves the destination again inside the named session and presents it in
+its own navigation: the Mac reveals the current panel/drawer/window host, while iPhone pushes an
+attachment preview, Browser Follow, or a native rendering of the extension SDK's semantic panel
+tree. The extension process stays on the Mac and iPhone relays native control events back to that
+exact process generation. A restart restores the newly registered panel before another action can
+run. Companion pixel surfaces are not streamed to the phone: their required semantic root remains
+the mobile fallback, and an isolated `customSurface` truthfully stays Mac-only.
+
+Permission notifications intentionally
 contain no command, path, tool arguments or diff on the lock screen, and do not offer lock-screen
 Allow/Deny actions; the authenticated chat remains the place to review the evidence. Claude/Codex
 permission prompts drawn inside their terminal UI are not parsed, so only Threading's structured
 Native permission cards currently produce this notification.
 
-When remote access is enabled, sessions also receive the `notify_user` MCP tool. It is for an
+Sessions receive the `notify_user` MCP tool. It can post to this Mac without Remote Access; iOS
+delivery additionally requires Remote Access and an eligible paired phone. The tool is for an
 explicit request such as “notify me with a summary when you are finished”: the agent calls it
 once the requested milestone has actually been reached, and still writes its normal answer in
 the chat. “Me” defaults to the participant who wrote the current turn. A request may explicitly
 target the owner, everyone in this chat, or another member by exact display name — useful when
 the agent needs that person's input. Targeting never crosses the current chat, and delivery
 requires that recipient to have enabled **Requested agent updates**.
+
+Display and navigation tools return an opaque, session-scoped `target_ref` after they have
+successfully produced something addressable. `display_image` and `display_html` capture immutable
+Attachments; `browser_navigate` names the live browser tab; activating a Browser or extension tab
+does the same for that live surface. Passing that reference to `notify_user` binds the notification
+to the already-resolved object. The reference cannot be manufactured from a filesystem path or
+URL, expires from a bounded in-memory registry, and cannot be consumed by another session.
+`delivery` is `mac`, `ios`, `both`, or `auto`; `auto` currently means both, and each delivery is
+reported independently so a disabled phone path does not suppress an allowed Mac notification.
+For an extension target, tapping on iPhone fetches the registered `ExtensionPanel` over the
+owner-authenticated session route, validates the SDK node budget again, and renders native SwiftUI
+text, controls, disclosures, images, and scenes. Package images use a separate bounded resource
+route; neither package paths nor arbitrary URLs are accepted as notification destinations.
 
 The explicit `@` control beside the iPhone or browser composer is a different path. It opens an
 **Ask for input** sheet over both Native and agent-UI terminal sessions, lists interactive chat
@@ -340,9 +365,22 @@ iPhone lets people-presence and typing indicators be hidden separately.
 Each remote Native composer owns its draft. The iPhone's terminal also uses an independent local
 composer by default and sends the completed text plus Return as one PTY write. This does not make
 the terminal multi-user: it creates a safe atomic boundary at submission so concurrent devices
-cannot interleave individual characters. Escape, Ctrl-C, Tab and arrows remain immediate terminal
+cannot interleave individual characters. The key bar's controls remain immediate terminal
 controls. **Independent terminal drafts** can be disabled in the iPhone's collaboration settings
 when raw direct terminal typing is required.
+
+The key bar itself is a customizable, Termius-style keyboard, and deliberately exceeds Termius's
+model where agent TUIs need it: a key can be a *chord* (⇧⇥ — Claude Code's permission-mode
+cycle, which Termius cannot put on its bar at all), a snippet that types saved text and
+optionally submits it, a raw escape sequence, or a latching ⌃/⌥ that arms for the next key —
+including the next keystroke typed on the system keyboard — locks on a second tap, and releases
+on a third. `RemoteTerminalKeyboard` in `ThreadingRemoteKit` owns the model and the sequence
+encoder (xterm `;N` modifier parameters, DECCKM-aware arrows/Home/End — the fixed bar this
+replaced always sent normal-mode arrows); `MobileTerminalKeyboardStore` persists custom layouts
+per agent kind with the continuity store's versioned/quarantined archive pattern. Layouts are
+device-local on purpose — a phone and an iPad earn different bars — and the stock layout per
+agent kind returns on reset. Keys ride the existing `input` frame, so the server's
+capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and
@@ -432,7 +470,7 @@ feature lock.
   interactive all-sessions owner may
   create, rename, pin, archive or restore sessions, or select the shared app appearance and a
   session's visual terminal theme. Workspace browser metadata and bounded visible-tab snapshots,
-  plus checkout reads including Git Review, repository files, and detected image/PDF attachments,
+  plus checkout reads including Git Review, repository files, and detected image/PDF/HTML attachments,
   also require that owner scope. View-only and guest links cannot change host state, read checkout
   files, or receive browser pixels. Permanent deletion remains a Mac-only action.
   Archiving a live session immediately disconnects any remote viewer already attached to it.

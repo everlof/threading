@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingExtensionKit
 import ThreadingRemoteKit
 import UIKit
 
@@ -253,8 +254,8 @@ struct RemoteClient {
         )
     }
 
-    func attachmentData(sessionID: String, path: String) async throws -> Data {
-        guard let url = link.attachmentURL(sessionID: sessionID, path: path) else {
+    func attachmentData(sessionID: String, id: String) async throws -> Data {
+        guard let url = link.attachmentURL(sessionID: sessionID, id: id) else {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))
@@ -271,6 +272,67 @@ struct RemoteClient {
 
     func browserPreviewData(sessionID: String, tabID: String) async throws -> Data {
         guard let url = link.browserPreviewURL(sessionID: sessionID, tabID: tabID) else {
+            throw RemoteClientError.invalidResponse
+        }
+        let (data, response) = try await Self.session.data(for: request(url: url))
+        _ = try validate(data: data, response: response, accepted: 200...299)
+        return data
+    }
+
+    func extensionPanel(
+        sessionID: String,
+        extensionIdentifier: String,
+        panelID: String
+    ) async throws -> RemoteExtensionPanelDTO {
+        guard let url = link.extensionPanelURL(
+            sessionID: sessionID,
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID
+        ) else {
+            throw RemoteClientError.invalidResponse
+        }
+        return try await get(RemoteExtensionPanelDTO.self, from: url)
+    }
+
+    func invokeExtensionPanelAction(
+        sessionID: String,
+        extensionIdentifier: String,
+        panelID: String,
+        processGeneration: String,
+        actionID: String,
+        value: ExtensionJSONValue? = nil,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteExtensionPanelActionResponseDTO {
+        guard let url = link.extensionPanelURL(
+            sessionID: sessionID,
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID
+        ) else {
+            throw RemoteClientError.invalidResponse
+        }
+        return try await postResponse(
+            RemoteExtensionPanelActionRequestDTO(
+                processGeneration: processGeneration,
+                actionID: actionID,
+                value: value
+            ),
+            to: url,
+            requestID: requestID
+        )
+    }
+
+    func extensionPanelResourceData(
+        sessionID: String,
+        extensionIdentifier: String,
+        panelID: String,
+        path: String
+    ) async throws -> Data {
+        guard let url = link.extensionPanelResourceURL(
+            sessionID: sessionID,
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID,
+            path: path
+        ) else {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))

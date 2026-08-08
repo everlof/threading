@@ -7,6 +7,7 @@ import SwiftUI
 struct ThreadingMobileHostedRoot: View {
     @ObservedObject var model: RemoteAppModel
     let continuity: MobileSessionContinuityStore
+    let keyboards: MobileTerminalKeyboardStore
     @ObservedObject var notifications: RemoteNotificationManager
     @Environment(\.scenePhase) private var scenePhase
 
@@ -14,10 +15,12 @@ struct ThreadingMobileHostedRoot: View {
         RootView()
             .environmentObject(model)
             .environmentObject(continuity)
+            .environmentObject(keyboards)
             .environmentObject(notifications)
             .task {
                 await notifications.prepare()
                 await notifications.sync(hosts: model.hosts)
+                await MobileIssueReportOutbox.shared.flush()
             }
             .onChange(of: scenePhase) { _, phase in
                 notifications.scenePhase = phase
@@ -26,6 +29,7 @@ struct ThreadingMobileHostedRoot: View {
                     Task {
                         await notifications.refreshAuthorization()
                         await notifications.sync(hosts: model.hosts)
+                        await MobileIssueReportOutbox.shared.flush()
                     }
                 }
             }
@@ -34,15 +38,6 @@ struct ThreadingMobileHostedRoot: View {
             }
             .onChange(of: model.hosts) { _, hosts in
                 Task { await notifications.sync(hosts: hosts) }
-            }
-            .onReceive(NotificationCenter.default.publisher(
-                for: RemoteNotificationBridge.openedNotification
-            )) { note in
-                guard let event = note.object as? RemoteNotificationEventDTO else { return }
-                model.openSessionFromNotification(
-                    hostID: event.hostID,
-                    sessionID: event.sessionID
-                )
             }
     }
 }

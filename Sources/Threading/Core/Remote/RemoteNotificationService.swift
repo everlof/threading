@@ -74,6 +74,26 @@ final class RemoteNotificationService {
         }
     }
 
+    /// Whether the requested recipient set includes the Mac owner, independently of whether any
+    /// phone is registered. Local delivery uses this before posting on the owner's Mac so a guest
+    /// saying “notify me” cannot accidentally alert somebody else.
+    func requestedRecipientIncludesOwner(
+        sessionID: SessionID,
+        recipient rawRecipient: String?
+    ) -> Bool {
+        let normalized = rawRecipient?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch normalized {
+        case "owner", "everyone", "all":
+            return true
+        case nil, "", "requester", "me":
+            return (currentActorBySession[sessionID] ?? .owner) == .owner
+        default:
+            return false
+        }
+    }
+
     func register(
         _ registration: RemoteNotificationRegistrationDTO,
         deviceID: String,
@@ -212,13 +232,19 @@ final class RemoteNotificationService {
         sessionID: SessionID,
         title: String?,
         body: String,
-        recipient rawRecipient: String?
+        recipient rawRecipient: String?,
+        destination: RemoteNotificationDestinationDTO = .session
     ) -> RequestedDeliveryResult {
+        guard destination.isValid else {
+            return .unavailable(reason: "The notification target is invalid.")
+        }
         guard let session = ProjectStore.shared.session(withID: sessionID) else {
             return .unavailable(reason: "This chat no longer exists.")
         }
         let available = matchingSubscriptions(kind: .agentMessage) {
             $0.authorization.scope.covers(sessionID)
+                && (destination.kind == .session
+                    || $0.authorization.principal == .ownerDevice)
         }
         let requested = rawRecipient?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -287,7 +313,8 @@ final class RemoteNotificationService {
             body: Self.safeText(
                 body,
                 bytes: RemoteAccessDefaults.maximumNotificationBodyBytes
-            )
+            ),
+            destination: destination
         )
         let delivery = deliver(event) {
             $0.authorization.scope.covers(sessionID)
@@ -659,6 +686,7 @@ actor RemoteAPNSPushSender {
                 body: String(event.body.prefix(400)),
                 titleLocalization: event.titleLocalization,
                 bodyLocalization: event.bodyLocalization,
+                destination: event.destination,
                 createdAt: event.createdAt
             )
             body = try? JSONEncoder().encode(envelope(
@@ -695,10 +723,10 @@ actor RemoteAPNSPushSender {
             String(Int(event.createdAt + retention)),
             forHTTPHeaderField: "apns-expiration"
         )
-        request.setValue(
-            "\(deliveredEvent.kind.rawValue)-\(deliveredEvent.sessionID)",
-            forHTTPHeaderField: "apns-collapse-id"
-        )
+        let collapseID = deliveredEvent.kind == .agentMessage
+            ? deliveredEvent.id
+            : "\(deliveredEvent.kind.rawValue)-\(deliveredEvent.sessionID)"
+        request.setValue(collapseID, forHTTPHeaderField: "apns-collapse-id")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

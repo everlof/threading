@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingExtensionKit
 @testable import ThreadingRemoteKit
 
 final class RemoteProtocolTests: XCTestCase {
@@ -11,6 +12,7 @@ final class RemoteProtocolTests: XCTestCase {
             sessionID: "session-1",
             title: "Needs permission",
             body: "Review the edit",
+            destination: .attachment(id: "attachment-1"),
             createdAt: 123
         )
         XCTAssertEqual(
@@ -836,9 +838,9 @@ final class RemoteProtocolTests: XCTestCase {
             "https://quiet-river.trycloudflare.com/api/session/abc/attachments"
         )
         XCTAssertEqual(
-            link.attachmentURL(sessionID: "abc", path: "art/final report.pdf")?
+            link.attachmentURL(sessionID: "abc", id: "attachment-1")?
                 .absoluteString,
-            "https://quiet-river.trycloudflare.com/api/session/abc/attachment?path=art/final%20report.pdf"
+            "https://quiet-river.trycloudflare.com/api/session/abc/attachment?id=attachment-1"
         )
         XCTAssertEqual(
             link.workspaceURL(sessionID: "abc").absoluteString,
@@ -847,6 +849,74 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(
             link.browserPreviewURL(sessionID: "abc", tabID: "tab-1")?.absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/browser-preview?tab=tab-1"
+        )
+        XCTAssertEqual(
+            link.extensionPanelURL(
+                sessionID: "abc",
+                extensionIdentifier: "codes.threading.progress",
+                panelID: "build-status"
+            )?.absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/extension-panel?extension=codes.threading.progress&panel=build-status"
+        )
+        XCTAssertEqual(
+            link.extensionPanelResourceURL(
+                sessionID: "abc",
+                extensionIdentifier: "codes.threading.progress",
+                panelID: "build-status",
+                path: "Images/status.png"
+            )?.absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/extension-panel-resource?extension=codes.threading.progress&panel=build-status&path=Images/status.png"
+        )
+    }
+
+    func testExtensionPanelPayloadsPreserveSemanticUIAndProcessGeneration() throws {
+        let panel = ExtensionPanel(
+            id: "build-status",
+            title: "Build status",
+            root: .stack(axis: .vertical, spacing: .small, children: [
+                .text("Two of three steps complete", role: .heading),
+                .button(id: "refresh", title: "Refresh", role: .primary, isEnabled: true),
+            ]),
+            loadActionID: "load"
+        )
+        let payload = RemoteExtensionPanelDTO(
+            extensionIdentifier: "codes.threading.progress",
+            extensionName: "Progress",
+            processGeneration: "generation-1",
+            panel: panel
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteExtensionPanelDTO.self,
+                from: JSONEncoder().encode(payload)
+            ),
+            payload
+        )
+
+        let request = RemoteExtensionPanelActionRequestDTO(
+            processGeneration: "generation-1",
+            actionID: "refresh",
+            value: .string("step-2")
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteExtensionPanelActionRequestDTO.self,
+                from: JSONEncoder().encode(request)
+            ),
+            request
+        )
+
+        let response = RemoteExtensionPanelActionResponseDTO(
+            processGeneration: "generation-2",
+            panel: panel,
+            error: "Refresh failed"
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteExtensionPanelActionResponseDTO.self,
+                from: JSONEncoder().encode(response)
+            ),
+            response
         )
     }
 
@@ -857,7 +927,8 @@ final class RemoteProtocolTests: XCTestCase {
                 name: "final report.pdf",
                 kind: "pdf",
                 byteCount: 4_096,
-                modifiedAt: Date(timeIntervalSince1970: 123)
+                modifiedAt: Date(timeIntervalSince1970: 123),
+                id: "attachment-1"
             ),
             RemoteAttachmentDTO(
                 path: "images/result.png",

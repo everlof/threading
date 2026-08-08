@@ -861,16 +861,19 @@ public struct RemoteRepositoryFileDTO: Codable, Equatable, Identifiable, Sendabl
     }
 }
 
-/// One image or PDF that passed between the two parties during a session.
+/// One durable attachment that passed between the two parties during a session.
 ///
 /// The path is relative to whatever the host resolved it against — the checkout for a file that
 /// lives there, the host's own attachment store for one it took custody of — and is opaque to the
 /// phone, which only ever hands it back. File bytes are fetched separately so the list remains
 /// cheap and the phone never receives visual files it has not chosen to preview.
 public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
+    /// Opaque host-minted identity. It is safe to return to attachment endpoints and notification
+    /// routes; `path` is presentation metadata only.
+    public let id: String
     public let path: String
     public let name: String
-    /// `image` or `pdf`.
+    /// `image`, `pdf`, or `html`.
     public let kind: String
     public let byteCount: Int64
     public let modifiedAt: Date?
@@ -879,22 +882,38 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     /// such field, and a phone that guessed would be labelling rows with an answer nobody gave.
     public let origin: String?
 
-    public var id: String { path }
-
     public init(
         path: String,
         name: String,
         kind: String,
         byteCount: Int64,
         modifiedAt: Date? = nil,
-        origin: String? = nil
+        origin: String? = nil,
+        id: String? = nil
     ) {
+        self.id = id ?? path
         self.path = path
         self.name = name
         self.kind = kind
         self.byteCount = byteCount
         self.modifiedAt = modifiedAt
         self.origin = origin
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, path, name, kind, byteCount, modifiedAt, origin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let path = try container.decode(String.self, forKey: .path)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? path
+        self.path = path
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(String.self, forKey: .kind)
+        byteCount = try container.decode(Int64.self, forKey: .byteCount)
+        modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
+        origin = try container.decodeIfPresent(String.self, forKey: .origin)
     }
 }
 
@@ -1376,6 +1395,79 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     case attentionRequest
 }
 
+/// The authenticated in-app destination a notification opens.
+///
+/// This is deliberately a closed host vocabulary rather than a URL supplied by an agent or an
+/// extension. The notification only names an object Threading already owns; each client maps the
+/// same destination to its own navigation idiom (a display-pane tab on Mac, a pushed detail on
+/// iPhone). Associated identifiers are opaque and are validated again inside the named session
+/// before anything is shown.
+public struct RemoteNotificationDestinationDTO: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Equatable, Sendable {
+        case session
+        case attachment
+        case browserTab
+        case extensionPanel
+    }
+
+    public let kind: Kind
+    public let attachmentID: String?
+    public let browserTabID: String?
+    public let extensionIdentifier: String?
+    public let extensionPanelID: String?
+
+    public init(
+        kind: Kind,
+        attachmentID: String? = nil,
+        browserTabID: String? = nil,
+        extensionIdentifier: String? = nil,
+        extensionPanelID: String? = nil
+    ) {
+        self.kind = kind
+        self.attachmentID = attachmentID
+        self.browserTabID = browserTabID
+        self.extensionIdentifier = extensionIdentifier
+        self.extensionPanelID = extensionPanelID
+    }
+
+    public static let session = Self(kind: .session)
+
+    public static func attachment(id: String) -> Self {
+        Self(kind: .attachment, attachmentID: id)
+    }
+
+    public static func browserTab(id: String) -> Self {
+        Self(kind: .browserTab, browserTabID: id)
+    }
+
+    public static func extensionPanel(extensionIdentifier: String, panelID: String) -> Self {
+        Self(
+            kind: .extensionPanel,
+            extensionIdentifier: extensionIdentifier,
+            extensionPanelID: panelID
+        )
+    }
+
+    /// A malformed route is never partially interpreted as a broader one. Callers either use
+    /// this exact destination or fall back to the session explicitly.
+    public var isValid: Bool {
+        switch kind {
+        case .session:
+            return attachmentID == nil && browserTabID == nil
+                && extensionIdentifier == nil && extensionPanelID == nil
+        case .attachment:
+            return attachmentID?.isEmpty == false && browserTabID == nil
+                && extensionIdentifier == nil && extensionPanelID == nil
+        case .browserTab:
+            return attachmentID == nil && browserTabID?.isEmpty == false
+                && extensionIdentifier == nil && extensionPanelID == nil
+        case .extensionPanel:
+            return attachmentID == nil && browserTabID == nil
+                && extensionIdentifier?.isEmpty == false && extensionPanelID?.isEmpty == false
+        }
+    }
+}
+
 /// A bundle-localized alternative to notification fallback text.
 ///
 /// The fallback remains in the event for older clients and for notification kinds whose text is
@@ -1404,6 +1496,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
     public let body: String
     public let titleLocalization: RemoteLocalizedTextDTO?
     public let bodyLocalization: RemoteLocalizedTextDTO?
+    public let destination: RemoteNotificationDestinationDTO
     public let createdAt: Double
 
     public init(
@@ -1415,6 +1508,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         body: String,
         titleLocalization: RemoteLocalizedTextDTO? = nil,
         bodyLocalization: RemoteLocalizedTextDTO? = nil,
+        destination: RemoteNotificationDestinationDTO = .session,
         createdAt: Double = Date().timeIntervalSince1970
     ) {
         self.type = "notification"
@@ -1426,7 +1520,37 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         self.body = body
         self.titleLocalization = titleLocalization
         self.bodyLocalization = bodyLocalization
+        self.destination = destination
         self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, id, kind, hostID, sessionID, title, body
+        case titleLocalization, bodyLocalization, destination, createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decode(RemoteNotificationKind.self, forKey: .kind)
+        hostID = try container.decode(String.self, forKey: .hostID)
+        sessionID = try container.decode(String.self, forKey: .sessionID)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        titleLocalization = try container.decodeIfPresent(
+            RemoteLocalizedTextDTO.self,
+            forKey: .titleLocalization
+        )
+        bodyLocalization = try container.decodeIfPresent(
+            RemoteLocalizedTextDTO.self,
+            forKey: .bodyLocalization
+        )
+        destination = try container.decodeIfPresent(
+            RemoteNotificationDestinationDTO.self,
+            forKey: .destination
+        ) ?? .session
+        createdAt = try container.decode(Double.self, forKey: .createdAt)
     }
 }
 

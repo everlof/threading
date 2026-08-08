@@ -1,6 +1,14 @@
 import Foundation
 import ThreadingRemoteKit
 
+struct RemoteNotificationOpenRequest: Equatable, Identifiable {
+    let eventID: String
+    let sessionID: String
+    let destination: RemoteNotificationDestinationDTO
+
+    var id: String { eventID }
+}
+
 @MainActor
 final class RemoteAppModel: ObservableObject {
     enum Phase: Equatable {
@@ -15,6 +23,7 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
+    @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
     @Published var isPairing = false
     @Published var navigationPath: [String] = [] {
         didSet {
@@ -593,21 +602,33 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
-    func openSessionFromNotification(hostID: String, sessionID: String) {
+    func openSessionFromNotification(_ event: RemoteNotificationEventDTO) {
         let candidate = hosts.first {
-            ($0.hostID ?? $0.id) == hostID && $0.isOwnerDevice
-        } ?? hosts.first { ($0.hostID ?? $0.id) == hostID }
+            ($0.hostID ?? $0.id) == event.hostID && $0.isOwnerDevice
+        } ?? hosts.first { ($0.hostID ?? $0.id) == event.hostID }
         guard let candidate else { return }
 
         selectHost(candidate.id)
         Task {
             await refresh()
             guard activeHostID == candidate.id,
-                  me?.sessions.contains(where: { $0.id == sessionID }) == true else { return }
-            if navigationPath.last != sessionID {
-                navigationPath.append(sessionID)
+                  me?.sessions.contains(where: { $0.id == event.sessionID }) == true else {
+                return
             }
+            if navigationPath.last != event.sessionID {
+                navigationPath.append(event.sessionID)
+            }
+            notificationOpenRequest = RemoteNotificationOpenRequest(
+                eventID: event.id,
+                sessionID: event.sessionID,
+                destination: event.destination
+            )
         }
+    }
+
+    func consumeNotificationOpenRequest(eventID: String) {
+        guard notificationOpenRequest?.eventID == eventID else { return }
+        notificationOpenRequest = nil
     }
 
     private func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {

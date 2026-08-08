@@ -49,6 +49,16 @@ struct MobileSettingsView: View {
                         )
                     }
 
+                    NavigationLink {
+                        TerminalKeyboardAgentList()
+                    } label: {
+                        SettingsRow(
+                            symbol: "keyboard",
+                            title: "Terminal keys",
+                            detail: "The key bar under a remote terminal"
+                        )
+                    }
+
                     Button {
                         showsNotifications = true
                     } label: {
@@ -410,6 +420,7 @@ struct MobileAppIconChoice: Identifiable, Equatable {
         themed("amiga-workbench-31", "Amiga Workbench 3.1", "Amiga"),
         themed("retro-98", "Windows 98", "Windows98"),
         themed("tui", "TUI", "TUI"),
+        themed("classic-player", "Classic Player", "ClassicPlayer"),
         themed("christmas", "Christmas", "Christmas"),
     ]
 

@@ -18,6 +18,8 @@ struct SessionDetailView: View {
     @State private var isConfirmingSurfaceSwitch = false
     @State private var pendingSurface = "terminal"
     @State private var isShowingWorkspace = false
+    @State private var initialWorkspaceDestination: RemoteNotificationDestinationDTO?
+    @State private var initialWorkspaceEventID: String?
     @Environment(\.dismiss) private var dismiss
 
     private var currentSession: RemoteSessionSummaryDTO {
@@ -66,6 +68,8 @@ struct SessionDetailView: View {
             if model.canManageSessions, model.client != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        initialWorkspaceDestination = nil
+                        initialWorkspaceEventID = nil
                         isShowingWorkspace = true
                     } label: {
                         WorkspaceToolbarIcon(activity: workspaceActivity)
@@ -180,20 +184,34 @@ struct SessionDetailView: View {
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .background(theme.ground)
-        .sheet(isPresented: $isShowingWorkspace) {
+        .sheet(isPresented: $isShowingWorkspace, onDismiss: {
+            initialWorkspaceDestination = nil
+            initialWorkspaceEventID = nil
+        }) {
             if let client = model.client {
                 SessionWorkspaceView(
                     session: currentSession,
                     client: client,
-                    activity: workspaceActivity
+                    activity: workspaceActivity,
+                    initialDestination: initialWorkspaceDestination
                 )
+                // A second milestone may be opened while Workspace is already presented. Give
+                // each notification its own navigation identity so that tap replaces the old
+                // stack with the newly requested attachment or live surface.
+                .id(initialWorkspaceEventID ?? "manual-workspace")
                 .environment(\.remoteTheme, theme)
                 .preferredColorScheme(theme.colorScheme)
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
             }
         }
-        .task { await open() }
+        .task {
+            await open()
+            openPendingNotificationDestination()
+        }
+        .onChange(of: model.notificationOpenRequest?.eventID) { _, _ in
+            openPendingNotificationDestination()
+        }
         .onDisappear {
             connection?.disconnect(markEnded: false)
         }
@@ -253,6 +271,21 @@ struct SessionDetailView: View {
             ),
             actions: [ThemedDialogAction("OK")]
         )
+    }
+
+    private func openPendingNotificationDestination() {
+        guard let request = model.notificationOpenRequest,
+              request.sessionID == session.id else { return }
+        if request.destination.kind != .session {
+            // Keep the request pending until the authenticated client exists. Consuming it while
+            // the sheet's `if let client` branch is empty would turn a cold-launch notification
+            // into a blank sheet and lose the destination before refresh can finish.
+            guard model.client != nil else { return }
+            initialWorkspaceDestination = request.destination
+            initialWorkspaceEventID = request.eventID
+            isShowingWorkspace = true
+        }
+        model.consumeNotificationOpenRequest(eventID: request.eventID)
     }
 
     private func open() async {
@@ -486,9 +519,12 @@ struct TerminalRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
+    @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var inheritedTheme
     @State private var showsAttentionRequest = false
+    @State private var showsKeyboardEditor = false
+    @StateObject private var keyBridge = TerminalKeyBridge()
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -514,6 +550,7 @@ struct TerminalRemoteView: View {
                 theme: connection.terminalTheme,
                 allowsDirectInput: !usesIndependentComposer
                     && connection.inputControl?.canWrite != false,
+                keyBridge: keyBridge,
                 initialScrollProgress: terminalContinuity?.terminalViewportProgress,
                 onScrollProgress: saveTerminalViewport
             )
@@ -527,7 +564,12 @@ struct TerminalRemoteView: View {
             if usesIndependentComposer {
                 TerminalLineComposer(connection: connection)
             }
-            TerminalKeyBar(connection: connection)
+            TerminalKeyBar(
+                connection: connection,
+                bridge: keyBridge,
+                agentKind: connection.session.agentKind,
+                customize: { showsKeyboardEditor = true }
+            )
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -538,6 +580,11 @@ struct TerminalRemoteView: View {
         .preferredColorScheme(theme.colorScheme)
         .sheet(isPresented: $showsAttentionRequest) {
             AttentionRequestSheet(connection: connection)
+        }
+        .sheet(isPresented: $showsKeyboardEditor) {
+            TerminalKeyboardEditorView(agentKind: connection.session.agentKind)
+                .environmentObject(keyboards)
+                .environment(\.remoteTheme, theme)
         }
     }
 
@@ -762,51 +809,6 @@ private struct TerminalLineComposer: View {
         case .accepted:
             break
         }
-    }
-}
-
-private struct TerminalKeyBar: View {
-    @ObservedObject var connection: RemoteSessionConnection
-    @Environment(\.remoteTheme) private var theme
-
-    private let keys: [(String, String)] = [
-        (MobileL10n.string("esc"), "\u{1b}"),
-        ("⌃C", "\u{3}"),
-        (MobileL10n.string("tab"), "\t"),
-        ("↑", "\u{1b}[A"),
-        ("↓", "\u{1b}[B"),
-        ("←", "\u{1b}[D"),
-        ("→", "\u{1b}[C"),
-    ]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(keys, id: \.0) { label, value in
-                    Button(label) {
-                        connection.sendTerminalKey(value)
-                    }
-                    .font(.system(.subheadline, design: .monospaced).weight(.medium))
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(
-                        theme.controlResting,
-                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                    )
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .background(theme.surface)
-        .overlay(alignment: .top) {
-            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
-        }
-        .disabled(
-            connection.capability != .interact
-                || connection.phase != .connected
-                || connection.inputControl?.canWrite == false
-        )
     }
 }
 
