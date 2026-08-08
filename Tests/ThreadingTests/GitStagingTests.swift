@@ -303,6 +303,48 @@ final class GitStagingTests: XCTestCase {
 
     // MARK: - Managed Workspaces
 
+    func testGitChildrenUseTheLoginShellPathForHooksFiltersAndLFS() {
+        let environment = GitChildEnvironment.make(
+            inherited: [
+                EnvironmentKeys.path: "/usr/bin:/bin",
+                EnvironmentKeys.home: "/Users/fixture"
+            ],
+            loginPath: "/opt/homebrew/bin:/Users/fixture/.local/bin:/usr/bin:/bin"
+        )
+
+        XCTAssertEqual(
+            environment[EnvironmentKeys.path],
+            "/opt/homebrew/bin:/Users/fixture/.local/bin:/usr/bin:/bin"
+        )
+        XCTAssertEqual(environment[EnvironmentKeys.home], "/Users/fixture")
+        XCTAssertEqual(environment["LC_ALL"], "C")
+        XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+    }
+
+    func testGitChildExplicitEnvironmentOverridesRemainFinal() {
+        let environment = GitChildEnvironment.make(
+            inherited: [EnvironmentKeys.path: "/usr/bin:/bin"],
+            loginPath: "/opt/homebrew/bin:/usr/bin:/bin",
+            overrides: [
+                EnvironmentKeys.path: "/fixture/bin",
+                "GIT_INDEX_FILE": "/fixture/index"
+            ]
+        )
+
+        XCTAssertEqual(environment[EnvironmentKeys.path], "/fixture/bin")
+        XCTAssertEqual(environment["GIT_INDEX_FILE"], "/fixture/index")
+    }
+
+    func testLoginShellPathIgnoresStartupGreeting() {
+        XCTAssertEqual(
+            GitChildEnvironment.path(
+                fromShellOutput: "Welcome to the fixture shell\n\n/opt/homebrew/bin:/usr/bin:/bin\n"
+            ),
+            "/opt/homebrew/bin:/usr/bin:/bin"
+        )
+        XCTAssertNil(GitChildEnvironment.path(fromShellOutput: "\n \n"))
+    }
+
     func testManagedWorkspacePlanWrittenBeforePublicationKeepsLocalDefaults() throws {
         let data = try XCTUnwrap(#"{"delivery":"mergeAndCleanUp"}"#.data(using: .utf8))
         let plan = try JSONDecoder().decode(ManagedWorkspacePlan.self, from: data)
@@ -317,15 +359,38 @@ final class GitStagingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: workspaceParent) }
 
         let project = Project(name: "Fixture", folderURL: root)
-        let emptyHooks = root.appendingPathComponent(".test-hooks", isDirectory: true)
-        try FileManager.default.createDirectory(at: emptyHooks, withIntermediateDirectories: true)
-        try git("config", "core.hooksPath", emptyHooks.path)
+        try FileManager.default.createDirectory(
+            at: workspaceParent,
+            withIntermediateDirectories: true
+        )
+        let hooks = workspaceParent.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooks, withIntermediateDirectories: true)
+        let observedPath = workspaceParent.appendingPathComponent("post-checkout-path.txt")
+        let postCheckout = hooks.appendingPathComponent("post-checkout")
+        try """
+        #!/bin/sh
+        /usr/bin/printenv PATH > '\(observedPath.path)'
+
+        """.write(to: postCheckout, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: postCheckout.path
+        )
+        try git("config", "core.hooksPath", hooks.path)
         let branchesBefore = try output("branch", "--format=%(refname:short)")
         let workspace = try ManagedGitWorkspace.provision(
             sessionID: SessionID(),
             from: project,
             plan: ManagedWorkspacePlan(),
             rootDirectory: workspaceParent
+        )
+
+        let hookPath = try String(contentsOf: observedPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let loginPath = try XCTUnwrap(GitChildEnvironment.make()[EnvironmentKeys.path])
+        XCTAssertTrue(
+            hookPath == loginPath || hookPath.hasSuffix(":" + loginPath),
+            "Git may prepend git-core, but the hook must retain the complete login-shell PATH"
         )
 
         XCTAssertEqual(

@@ -154,6 +154,12 @@ add `--no-color --no-ext-diff --no-textconv`; parsing git's porcelain and unifie
 is `GitDiffParser`, pure functions with the fixture traps (C-quoted paths, the trailing tab
 after a path with spaces, `\ No newline` markers, `-z` rename records) pinned by unit tests.
 
+The executable remains the absolute system Git, while its child environment uses the PATH from
+the user's login shell. Git itself does not need PATH discovery, but hooks, credential helpers,
+filters and Git LFS do; inheriting launchd's GUI PATH made those programs disappear only inside
+app-owned worktree and push operations. The resolved PATH is cached once per shell and explicit
+per-operation overrides (such as the alternate index used below) are applied afterwards.
+
 **`git diff` never mentions untracked files**, so the ordinary working-tree modes synthesize them:
 `status --porcelain=v2 -z -uall` lists them individually and each becomes an all-added file
 diff read in-process — not `diff --no-index` per file, which would spawn a process per file

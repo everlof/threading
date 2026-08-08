@@ -87,6 +87,7 @@ enum GitWorktree {
         process.executableURL = URL(fileURLWithPath: GitDefaults.executablePath)
         process.arguments = arguments
         process.currentDirectoryURL = directory
+        process.environment = GitChildEnvironment.make()
 
         let output = Pipe()
         let errors = Pipe()

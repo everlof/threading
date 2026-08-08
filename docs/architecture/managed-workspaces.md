@@ -156,6 +156,13 @@ files needed by a new checkout, such as a development environment file. Only ign
 files are copied. Symlinks, paths escaping either root, and existing destinations are refused.
 The copy happens before the worktree is locked and before any session record is persisted.
 
+Worktree creation invokes `/usr/bin/git` directly, but Git can launch repository-owned programs
+by name: clean/smudge filters, hooks, credential helpers and Git LFS's `post-checkout` executable.
+A Finder-launched app does not inherit Homebrew or the user's other shell paths. All app-owned
+Git children therefore receive the PATH reported by the user's login shell, cached once per shell;
+operation-specific environment overrides remain final. Without that split, a repository whose
+ordinary checkout works with Git LFS fails only when Threading creates its isolated checkout.
+
 ## Deterministic lifecycle proof
 
 `ManagedWorkspaceLifecycleE2ETests` exercises the ordinary, non-network test path with a real

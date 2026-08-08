@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Failure
 
@@ -83,13 +84,7 @@ enum GitProcess {
         process.arguments = arguments
         process.currentDirectoryURL = root
 
-        var environment = ProcessInfo.processInfo.environment
-        environment["LC_ALL"] = "C"
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        for (name, value) in environmentOverrides {
-            environment[name] = value
-        }
-        process.environment = environment
+        process.environment = GitChildEnvironment.make(overrides: environmentOverrides)
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -196,6 +191,113 @@ enum GitProcess {
         func markOversized() { lock.lock(); oversizedValue = true; lock.unlock() }
         var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOutValue }
         var oversized: Bool { lock.lock(); defer { lock.unlock() }; return oversizedValue }
+    }
+}
+
+// MARK: - Environment
+
+/// The environment inherited by app-owned Git processes.
+///
+/// `/usr/bin/git` itself is absolute, but programs Git launches are not: hooks, credential
+/// helpers, clean/smudge filters and Git LFS all resolve on `PATH`. A Finder-launched app gets
+/// launchd's small environment rather than the PATH the user's login shell gives an agent.
+/// Resolve that PATH once per shell and pass it to Git without running Git itself through shell
+/// source text.
+enum GitChildEnvironment {
+    private enum CachedLoginPath: Sendable {
+        case found(String)
+        case unavailable
+
+        var value: String? {
+            switch self {
+            case .found(let path): path
+            case .unavailable: nil
+            }
+        }
+    }
+
+    private static let loginPaths = OSAllocatedUnfairLock(
+        initialState: [String: CachedLoginPath]()
+    )
+
+    static func make(overrides: [String: String] = [:]) -> [String: String] {
+        make(
+            inherited: ProcessInfo.processInfo.environment,
+            loginPath: loginPath(for: loginShell),
+            overrides: overrides
+        )
+    }
+
+    /// Background Git work cannot read the main-actor terminal profile. The account's SHELL is
+    /// the login shell whose startup files define PATH; the terminal profile is a separate UI
+    /// choice that normally agrees but must not pull Git back onto the main actor.
+    private static var loginShell: String {
+        ProcessInfo.processInfo.environment[EnvironmentKeys.shell] ?? "/bin/zsh"
+    }
+
+    /// Pure merge policy kept visible to tests: the login shell replaces only PATH, while an
+    /// operation's explicit environment remains the final authority (alternate indexes rely on
+    /// this same ordering).
+    static func make(
+        inherited: [String: String],
+        loginPath: String?,
+        overrides: [String: String] = [:]
+    ) -> [String: String] {
+        var environment = inherited
+        if let loginPath {
+            environment[EnvironmentKeys.path] = loginPath
+        }
+        environment["LC_ALL"] = "C"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        for (name, value) in overrides {
+            environment[name] = value
+        }
+        return environment
+    }
+
+    /// Login files sometimes print a greeting. `exec` prevents logout output after `printenv`,
+    /// so the final non-empty line is the one answer rather than shell decoration before it.
+    static func path(fromShellOutput output: String) -> String? {
+        output
+            .split(whereSeparator: \Character.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last(where: { !$0.isEmpty })
+    }
+
+    private static func loginPath(for shell: String) -> String? {
+        if let cached = loginPaths.withLock({ $0[shell] }) {
+            return cached.value
+        }
+
+        let resolved = resolveLoginPath(shell: shell)
+        loginPaths.withLock {
+            $0[shell] = resolved.map(CachedLoginPath.found) ?? .unavailable
+        }
+        return resolved
+    }
+
+    private static func resolveLoginPath(shell: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-l", "-c", "exec /usr/bin/printenv PATH"]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            ThreadingLogger.git.error(
+                "Could not resolve login-shell PATH: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return path(fromShellOutput: String(decoding: data, as: UTF8.self))
     }
 }
 
