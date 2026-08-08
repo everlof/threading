@@ -4,3 +4,6 @@
 [submodule "LabelMorph"]
 	path = LabelMorph
 	url = https://github.com/everlof/LabelMorph.git
+[submodule "BorderBeamKit"]
+	path = BorderBeamKit
+	url = ./BorderBeamKit
