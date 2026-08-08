@@ -106,9 +106,9 @@ final class TerminalSession: NSObject {
             self.delegate?.terminalSessionDidRingBell(self)
         }
 
-        terminalView.onWheelForwarded = { [weak self] in
+        terminalView.onMouseReportForwarded = { [weak self] in
             guard let self else { return }
-            self.delegate?.terminalSessionDidForwardScroll(self)
+            self.delegate?.terminalSessionDidForwardMouseReport(self)
         }
 
         terminalView.onUserInput = { [weak self] in
@@ -407,6 +407,21 @@ final class TerminalSession: NSObject {
         terminalView.send(txt: text)
     }
 
+    /// Inserts text the way a paste arrives, rather than the way typing does.
+    ///
+    /// The difference is load-bearing and is not about speed: both agent CLIs treat one arriving
+    /// bracketed paste as a unit and read it as an image when the whole of it is a path with an
+    /// image extension, while the same bytes typed stay text. It is how a dropped screenshot
+    /// becomes an attachment, and how `SessionContextHandoff` hands a commented-on attachment to
+    /// a terminal session. See `TerminalDrop` for the escaping that survives the trip.
+    func pasteText(_ text: String) {
+        if let sessionID = identity.ownerSessionID,
+           !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
+            return
+        }
+        terminalView.pasteText(text)
+    }
+
     /// Sends raw bytes to the PTY as if typed — the entry point for remote keyboard input.
     func sendRemoteInput(_ bytes: [UInt8]) {
         terminalView.sendRemote(bytes[...])
@@ -436,6 +451,21 @@ final class TerminalSession: NSObject {
     var characterGrid: (cols: Int, rows: Int) {
         let terminal = terminalView.getTerminal()
         return (terminal.cols, terminal.rows)
+    }
+
+    /// The visible screen as plain text rows, for a reader matching words on it.
+    ///
+    /// `translateToString` hands a blank cell back as U+0000, not a space — the same trap
+    /// `RemoteScreenSeed` documents — so the gaps a TUI leaves between words are mapped before
+    /// any caller compares text. Rows follow what is *displayed* (`getLine` is scroll-relative),
+    /// which is the right frame for reading a prompt the user could answer.
+    func visibleScreenLines() -> [String] {
+        let terminal = terminalView.getTerminal()
+        return (0..<terminal.rows).map { row in
+            guard let line = terminal.getLine(row: row) else { return "" }
+            return line.translateToString(trimRight: true)
+                .replacingOccurrences(of: "\u{0}", with: " ")
+        }
     }
 
     /// Re-reads which command owns the terminal, and retires a title whose owner has gone.
@@ -551,7 +581,7 @@ protocol TerminalSessionDelegate: AnyObject {
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?)
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int)
     func terminalSessionDidRingBell(_ session: TerminalSession)
-    func terminalSessionDidForwardScroll(_ session: TerminalSession)
+    func terminalSessionDidForwardMouseReport(_ session: TerminalSession)
 }
 
 // MARK: - Default Delegate Implementation
@@ -568,5 +598,5 @@ extension TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {}
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {}
     func terminalSessionDidRingBell(_ session: TerminalSession) {}
-    func terminalSessionDidForwardScroll(_ session: TerminalSession) {}
+    func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {}
 }

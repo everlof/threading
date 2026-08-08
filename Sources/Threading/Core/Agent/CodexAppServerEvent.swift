@@ -89,6 +89,24 @@ enum JSONRPCRequestID: Hashable {
 typealias CodexAppServerEnvelope = JSONRPCLineEnvelope
 typealias CodexAppServerRequestID = JSONRPCRequestID
 
+// MARK: - Turn Outcome
+
+extension TurnOutcome {
+    /// Reads the app-server's own `TurnStatus`.
+    ///
+    /// The mapping lives here rather than on `TurnOutcome` so the neutral type never learns a
+    /// provider's spelling — the same boundary `ToolIdentity` keeps. `inProgress` cannot reach
+    /// a terminal event and an unknown status is treated as a completion rather than invented
+    /// into a failure the user would have to explain.
+    init(codexTurnStatus status: String?) {
+        switch status {
+        case "failed": self = .failed
+        case "interrupted": self = .stopped
+        default: self = .completed
+        }
+    }
+}
+
 // MARK: - Parent Conversation Adapter
 
 /// Maps app-server notifications onto the same provider-neutral events as Claude's stream.
@@ -153,9 +171,12 @@ enum CodexAppServerEvent {
             let message = error?["message"] as? String
                 ?? error?["additionalDetails"] as? String
 
+            // Codex is the one provider that names the three outcomes itself: `TurnStatus` is
+            // `completed | interrupted | failed | inProgress`, so nothing has to be inferred
+            // from an error channel here.
             return [.turnFinished(
                 text: message,
-                isError: status == "failed",
+                outcome: TurnOutcome(codexTurnStatus: status),
                 metrics: TurnMetrics(
                     duration: duration,
                     outputTokens: outputTokens,

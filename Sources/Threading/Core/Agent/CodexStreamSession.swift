@@ -31,6 +31,9 @@ final class CodexStreamSession:
     ProviderExecutionReportingConversation,
     ComposerCapabilityProviding,
     ReasoningEffortConfigurableConversation,
+    InterruptibleConversation,
+    SteerableConversation,
+    MessageLifecycleReportingConversation,
     SubagentReportingConversation,
     SessionTitleReportingConversation {
 
@@ -50,7 +53,7 @@ final class CodexStreamSession:
 
     private(set) var isRunning = false
     var canSend: Bool {
-        isRunning && inputPipe != nil && !isTurnInFlight && pendingTurn == nil
+        isRunning && input != nil && !isTurnInFlight && pendingTurn == nil
             && !isCompactionInFlight
     }
 
@@ -67,8 +70,8 @@ final class CodexStreamSession:
     private let configurationProvider: () -> CodexTurnConfiguration
     private let workingDirectory: String
 
-    private var process: Process?
-    private var inputPipe: Pipe?
+    private var process: AgentChildProcess?
+    private var input: FileHandle?
     private var launchResumeState: ResumeState = .unavailable
 
     private var buffer = Data()
@@ -93,6 +96,35 @@ final class CodexStreamSession:
     private var turnStartedAt: TimeInterval?
     private var turnEffort: String?
     private var outputTokensByTurn: [String: Int] = [:]
+
+    var onMessageLifecycle: ((ConversationMessageID, MessageLifecycleState) -> Void)?
+
+    /// The turn `turn/steer` and `turn/interrupt` name.
+    ///
+    /// Read from `turn/started`, which the server sends for every turn including ones it opened
+    /// itself (a review, a compaction). Cleared when the turn settles, so `steerAvailability`
+    /// cannot offer to add to a turn that has ended.
+    private var activeTurnID: String?
+
+    /// The kind of the turn in flight, where it is not an ordinary one.
+    ///
+    /// App-server refuses a steer on `review` and `compact` turns by name
+    /// (`NonSteerableTurnKind`), so the composer is told before the user types rather than after
+    /// the RPC comes back.
+    private var activeTurnKind: CodexTurnKind = .ordinary
+
+    /// Identifiers we handed the server, by the `clientUserMessageId` it echoes on the user
+    /// message item. What lets a queued row state the provider's answer rather than an
+    /// assumption.
+    private var messageIDsInFlight: Set<ConversationMessageID> = []
+
+    /// Live turns on child threads, so Stop can end the fleet. Keyed by thread id because that
+    /// is what `turn/interrupt` takes alongside the turn.
+    ///
+    /// Tracked for *any* foreign conversation rather than only registered children: a child's
+    /// `turn/started` can arrive before the activity notification that registers it, and a Stop
+    /// that depends on registration timing leaves children running.
+    private var childTurnsByThread: [String: String] = [:]
 
     /// The most recent request's size and the model's window, from `thread/tokenUsage/updated`
     /// — what the context meter reads at each turn boundary. Session-scoped rather than
@@ -136,21 +168,32 @@ final class CodexStreamSession:
         guard !isRunning else { return }
 
         let launchPlan = plan()
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let errorPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: launchPlan.executable)
-        process.arguments = launchPlan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errorPipe
 
         resetForLaunch(resumeState: launchPlan.resumeState)
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let process: AgentChildProcess
+        do {
+            process = try AgentChildProcess.launch(
+                executable: launchPlan.executable,
+                arguments: launchPlan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                sessionID: sessionID
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.handleTermination(status: status)
+                }
+            }
+        } catch {
+            ThreadingLogger.agent.error(
+                "Codex app-server failed to start: \(error.localizedDescription)"
+            )
+            Task { @MainActor [weak self] in
+                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+            }
+            return
+        }
+
+        process.standardOutput.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
@@ -158,7 +201,9 @@ final class CodexStreamSession:
             }
         }
 
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // A separate pipe rather than merged into stdout: diagnostics interleaved with the
+        // JSON-RPC stream would corrupt every line they landed inside.
+        process.standardError.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
@@ -166,29 +211,8 @@ final class CodexStreamSession:
             }
         }
 
-        process.terminationHandler = { [weak self] child in
-            let status = child.terminationStatus
-            Task { @MainActor [weak self] in
-                self?.handleTermination(status: status)
-            }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            ThreadingLogger.agent.error(
-                "Codex app-server failed to start: \(error.localizedDescription)"
-            )
-            output.fileHandleForReading.readabilityHandler = nil
-            errorPipe.fileHandleForReading.readabilityHandler = nil
-            Task { @MainActor [weak self] in
-                self?.onExit?(-1)
-            }
-            return
-        }
-
         self.process = process
-        self.inputPipe = input
+        self.input = process.standardInput
         isRunning = true
         onSendAvailabilityChange?()
         sendInitialize()
@@ -201,6 +225,14 @@ final class CodexStreamSession:
     func send(_ text: String) -> Bool {
         beginTurn(CodexPendingTurn(
             input: [["type": "text", "text": text]]
+        ))
+    }
+
+    @discardableResult
+    func send(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        beginTurn(CodexPendingTurn(
+            input: [["type": "text", "text": prompt.transportText]],
+            messageID: id
         ))
     }
 
@@ -300,9 +332,9 @@ final class CodexStreamSession:
 
     /// Closing stdin asks the persistent server to shut down after its current work.
     func finish() {
-        guard inputPipe != nil else { return }
-        try? inputPipe?.fileHandleForWriting.close()
-        inputPipe = nil
+        guard input != nil else { return }
+        try? input?.close()
+        input = nil
         onSendAvailabilityChange?()
     }
 
@@ -398,16 +430,158 @@ final class CodexStreamSession:
         if let serviceTier = configuration.serviceTier {
             parameters["serviceTier"] = serviceTier
         }
+        if let messageID = pendingTurn.messageID {
+            parameters["clientUserMessageId"] = messageID.wireValue
+            messageIDsInFlight.insert(messageID)
+            onMessageLifecycle?(messageID, .started)
+        }
 
         guard sendRequest(
             method: "turn/start",
             parameters: parameters,
             purpose: .startTurn
         ) != nil else {
+            if let messageID = pendingTurn.messageID {
+                messageIDsInFlight.remove(messageID)
+                onMessageLifecycle?(messageID, .cancelled)
+            }
             finishTurnWithTransportError("Threading could not send the Codex turn.")
             return
         }
         self.pendingTurn = nil
+    }
+
+    // MARK: - Turn Control
+
+    var canInterrupt: Bool {
+        isRunning && input != nil && isTurnInFlight && activeTurnID != nil
+    }
+
+    /// Whether app-server will accept an addition to the turn in flight.
+    ///
+    /// Three separate refusals rather than one boolean, because they mean different things to the
+    /// person holding a message: nothing running (wait), or a review/compaction running (this
+    /// particular work cannot be steered, but the next turn can).
+    var steerAvailability: SteerAvailability {
+        guard isRunning, input != nil, isTurnInFlight, activeTurnID != nil else {
+            return .unavailable(.noActiveTurn)
+        }
+        return activeTurnKind.acceptsSteering
+            ? .available
+            : .unavailable(.turnKindRefusesSteering)
+    }
+
+    /// Appends user input to the turn already running.
+    ///
+    /// `expectedTurnId` is the protocol's own optimistic-concurrency precondition, and it is the
+    /// good kind of API: the race Threading would otherwise lose — the turn ending between the
+    /// user pressing send and the request landing — becomes an explicit, catchable failure rather
+    /// than a message quietly delivered to the wrong turn. The handler for that failure is not to
+    /// retry; it is to let the caller queue the message as an ordinary next turn.
+    @discardableResult
+    func steer(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        guard steerAvailability.isAvailable,
+              let threadID = rootThreadID,
+              let turnID = activeTurnID else { return false }
+
+        let parameters: [String: Any] = [
+            "threadId": threadID,
+            "expectedTurnId": turnID,
+            "clientUserMessageId": id.wireValue,
+            "input": [["type": "text", "text": prompt.transportText]]
+        ]
+
+        guard sendRequest(
+            method: "turn/steer",
+            parameters: parameters,
+            purpose: .steerTurn(id)
+        ) != nil else { return false }
+
+        messageIDsInFlight.insert(id)
+        onMessageLifecycle?(id, .handedOver)
+        return true
+    }
+
+    /// Stops the running turn and every child turn it started.
+    ///
+    /// Children first and best-effort, then the parent unconditionally: interrupting only the
+    /// root leaves a fleet running, and a child that never answers must not hold up the thing the
+    /// user pressed. Each child request is fire-and-forget for exactly that reason — the parent
+    /// interrupt below is what the receipt reports on.
+    func interrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        guard canInterrupt, let threadID = rootThreadID, let turnID = activeTurnID else {
+            completion(.failed(reason: L10n.string("There is nothing running to stop.")))
+            return
+        }
+
+        for (childThread, childTurn) in childTurnsByThread {
+            sendRequest(
+                method: "turn/interrupt",
+                parameters: ["threadId": childThread, "turnId": childTurn],
+                purpose: .interruptTurn
+            )
+        }
+        childTurnsByThread.removeAll()
+
+        guard sendRequest(
+            method: "turn/interrupt",
+            parameters: ["threadId": threadID, "turnId": turnID],
+            purpose: .interruptTurn
+        ) != nil else {
+            completion(.failed(reason: L10n.string("Threading could not reach Codex to stop it.")))
+            return
+        }
+
+        // App-server has no `still_queued`: it holds nothing between turns, so there is nothing
+        // for it to report on. The outbox keeps everything it is holding, which is the truth.
+        completion(.acknowledged)
+    }
+
+    /// Keeps the turn identity that `turn/steer` and `turn/interrupt` require.
+    ///
+    /// A turn belonging to another thread is a child's: recorded so Stop can end it, and
+    /// deliberately never allowed to become `activeTurnID`, which names the turn the composer is
+    /// adding to. Both facts come off the same notification, so they are read in one place.
+    private func noteTurnLifecycle(method: String, parameters: [String: Any]) {
+        guard method == "turn/started" || method == "turn/completed" else { return }
+
+        let notificationThreadID = parameters["threadId"] as? String
+        let turn = parameters["turn"] as? [String: Any]
+        guard let turnID = turn?["id"] as? String else { return }
+
+        let isRoot = notificationThreadID == nil || notificationThreadID == rootThreadID
+
+        if method == "turn/started" {
+            if isRoot {
+                activeTurnID = turnID
+                // `isCompactionInFlight` is set by the request that asked for it; a review turn
+                // is the one we started through `review/start`. Nothing on the wire names the
+                // kind, so it is remembered from what we asked for.
+                activeTurnKind = isCompactionInFlight ? .compact : activeTurnKind
+            } else if let threadID = notificationThreadID {
+                childTurnsByThread[threadID] = turnID
+            }
+            return
+        }
+
+        if isRoot {
+            activeTurnID = nil
+            activeTurnKind = .ordinary
+            settleMessagesInFlight()
+        } else if let threadID = notificationThreadID {
+            childTurnsByThread[threadID] = nil
+        }
+    }
+
+    /// Marks every message this turn carried as done.
+    ///
+    /// App-server reports no per-message completion of its own — `clientUserMessageId` comes back
+    /// on the user item, which says the message was accepted rather than finished — so the turn's
+    /// own completion is the honest end for everything that rode it, including a steer.
+    private func settleMessagesInFlight() {
+        let settled = messageIDsInFlight
+        messageIDsInFlight.removeAll()
+        for id in settled { onMessageLifecycle?(id, .completed) }
     }
 
     private func reportRootThread(_ thread: [String: Any]) {
@@ -589,14 +763,14 @@ final class CodexStreamSession:
     }
 
     private func writeLine(_ object: [String: Any]) -> Bool {
-        guard let inputPipe,
+        guard let input,
               JSONSerialization.isValidJSONObject(object),
               var data = try? JSONSerialization.data(withJSONObject: object)
         else { return false }
         data.append(0x0A)
 
         do {
-            try inputPipe.fileHandleForWriting.write(contentsOf: data)
+            try input.write(contentsOf: data)
             return true
         } catch {
             ThreadingLogger.agent.error(
@@ -655,6 +829,22 @@ final class CodexStreamSession:
             case .compact:
                 isCompactionInFlight = false
                 finishTurnWithTransportError(L10n.format("Compact failed: %@", error))
+            case .steerTurn(let messageID):
+                // The turn ended, or turned out not to be steerable, between the press and the
+                // request landing — which is exactly what `expectedTurnId` exists to catch. The
+                // message goes back to the outbox as an ordinary next turn rather than being
+                // retried against a turn that is already gone.
+                messageIDsInFlight.remove(messageID)
+                onMessageLifecycle?(messageID, .cancelled)
+                ThreadingLogger.agent.info(
+                    "Codex refused a steer; the message returns to the queue: \(error, privacy: .public)"
+                )
+            case .interruptTurn:
+                // Nothing to settle: the turn's own terminal event still decides how it ended,
+                // and a refused interrupt most often means it had already finished.
+                ThreadingLogger.agent.info(
+                    "Codex refused an interrupt: \(error, privacy: .public)"
+                )
             }
             return
         }
@@ -676,6 +866,10 @@ final class CodexStreamSession:
             break
 
         case .startReview:
+            activeTurnKind = .review
+
+        case .steerTurn, .interruptTurn:
+            // Acceptance, not completion. The turn's own notifications settle both.
             break
 
         case .listSkills:
@@ -693,6 +887,8 @@ final class CodexStreamSession:
         if method == "skills/changed" {
             requestSkillsIfNeeded(forceReload: true)
         }
+
+        noteTurnLifecycle(method: method, parameters: parameters)
 
         if method == "thread/started",
            let thread = parameters["thread"] as? [String: Any],
@@ -771,14 +967,15 @@ final class CodexStreamSession:
 
         for event in events {
             let completed = completingTurnMetrics(in: event)
-            if case .turnFinished(_, let isError, _) = completed {
+            if case .turnFinished(_, let outcome, _) = completed {
                 let completedCompaction = isCompactionInFlight
                 receivedTurnFinished = true
                 isTurnInFlight = false
                 isCompactionInFlight = false
                 pendingTurn = nil
                 if let turnID { outputTokensByTurn[turnID] = nil }
-                if completedCompaction, !isError {
+                // A compaction the user stopped compacted nothing, so it says nothing.
+                if completedCompaction, outcome == .completed {
                     onEvent?(.transcriptNotice(L10n.string("Context compacted.")))
                 }
                 onSendAvailabilityChange?()
@@ -906,10 +1103,10 @@ final class CodexStreamSession:
     private func handleTermination(status: Int32) {
         guard process != nil else { return }
 
-        (process?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
-        (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        process?.standardOutput.readabilityHandler = nil
+        process?.standardError.readabilityHandler = nil
         process = nil
-        inputPipe = nil
+        input = nil
 
         let wasTerminating = isTerminating
         isTerminating = false
@@ -938,14 +1135,14 @@ final class CodexStreamSession:
         receivedTurnFinished = true
         onEvent?(completingTurnMetrics(in: .turnFinished(
             text: message,
-            isError: true,
+            outcome: .failed,
             metrics: .empty
         )))
         onSendAvailabilityChange?()
     }
 
     private func completingTurnMetrics(in event: StreamEvent) -> StreamEvent {
-        guard case .turnFinished(let text, let isError, let metrics) = event else {
+        guard case .turnFinished(let text, let outcome, let metrics) = event else {
             return event
         }
 
@@ -958,7 +1155,7 @@ final class CodexStreamSession:
 
         return .turnFinished(
             text: text,
-            isError: isError,
+            outcome: outcome,
             metrics: metrics.filling(
                 duration: duration,
                 effort: effort,
@@ -976,10 +1173,34 @@ private enum RequestPurpose {
     case startReview
     case listSkills
     case compact
+
+    /// Carries the message identity so a refused steer can hand that exact message back to the
+    /// outbox rather than losing what somebody typed.
+    case steerTurn(ConversationMessageID)
+
+    case interruptTurn
 }
 
 private struct CodexPendingTurn {
     let input: [[String: Any]]
+
+    /// The identifier the outbox knows this message by, travelling as `clientUserMessageId` so
+    /// the server can name it back. Absent for turns the composer did not originate — a review
+    /// or a compaction is work, not a message somebody queued.
+    var messageID: ConversationMessageID?
+}
+
+/// Whether the turn in flight is one app-server will let us add to.
+///
+/// `NonSteerableTurnKind` in the protocol schema is `review | compact`, and the server answers a
+/// steer on either with "cannot steer a review turn" / "cannot steer a compact turn". Knowing it
+/// locally means the composer can decline before the round trip rather than after.
+private enum CodexTurnKind {
+    case ordinary
+    case review
+    case compact
+
+    var acceptsSteering: Bool { self == .ordinary }
 }
 
 private struct CodexSkillMetadata {

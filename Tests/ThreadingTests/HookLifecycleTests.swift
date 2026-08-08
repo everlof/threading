@@ -9,28 +9,98 @@ final class HookLifecycleTests: XCTestCase {
 
     func testEveryEventNamesAClaudeHook() {
         for event in HookLifecycleEvent.allCases {
+            XCTAssertTrue(
+                event.claudeRegistration.isSupported,
+                "\(event) must name a Claude hook, or nothing installs it"
+            )
             XCTAssertFalse(
-                event.claudeEventName.isEmpty,
-                "\(event) must name a Claude hook, or its settings entry writes an empty key"
+                event.claudeRegistration.eventNames.contains(where: \.isEmpty),
+                "\(event) must not write an empty key into the settings file"
             )
         }
     }
 
-    /// Codex 0.144.6 carries Claude's event vocabulary apart from `Notification`. Pinning it
-    /// means a release that adds the event fails here rather than silently staying unwired.
-    func testCodexHasNoAwaitingUserEvent() {
-        XCTAssertNil(HookLifecycleEvent.awaitingUser.codexEventName)
+    /// Codex 0.144.6 carries Claude's turn vocabulary apart from `Notification`, and exposes no
+    /// tool whose result is the user's answer. Pinning it means a release that adds either fails
+    /// here rather than silently staying unwired.
+    func testCodexReportsTurnsButNeverThatItIsWaiting() {
+        let unsupported: Set<HookLifecycleEvent> = [
+            .awaitingUser, .blockingAskOpened, .blockingAskClosed
+        ]
 
-        for event in HookLifecycleEvent.allCases where event != .awaitingUser {
-            XCTAssertNotNil(event.codexEventName, "\(event) should map onto a Codex hook")
+        for event in HookLifecycleEvent.allCases {
+            XCTAssertEqual(
+                event.codexRegistration.isSupported,
+                !unsupported.contains(event),
+                "\(event) is registered with Codex against expectation"
+            )
         }
     }
 
     func testClaudeAndCodexAgreeOnSharedEventNames() {
         for event in HookLifecycleEvent.allCases {
-            guard let codexName = event.codexEventName else { continue }
-            XCTAssertEqual(codexName, event.claudeEventName)
+            let codex = event.codexRegistration
+            guard codex.isSupported else { continue }
+            XCTAssertEqual(codex.eventNames, event.claudeRegistration.eventNames)
         }
+    }
+
+    // MARK: - Blocking Asks
+
+    /// The two halves of an ask are registered on the tool hooks, scoped to the tools that ask.
+    /// Unscoped, the opening hook would report every `Read` as a question.
+    func testAnAskIsRegisteredOnTheToolHooksAndScopedToTheAskingTools() {
+        let opened = HookLifecycleEvent.blockingAskOpened.claudeRegistration
+        let closed = HookLifecycleEvent.blockingAskClosed.claudeRegistration
+
+        XCTAssertEqual(opened.eventNames, ["PreToolUse"])
+        XCTAssertEqual(closed.eventNames, ["PostToolUse", "PostToolUseFailure"])
+
+        let matcher = TurnBlockingTools.names(for: .claude).joined(separator: "|")
+        XCTAssertEqual(opened.toolMatcher, matcher)
+        XCTAssertEqual(closed.toolMatcher, matcher)
+    }
+
+    /// Everything else fires on its own boundary and must stay unscoped, or a matcher meant for
+    /// one event would quietly stop another from ever arriving.
+    func testOnlyTheAskEventsAreScopedToTools() {
+        for event in HookLifecycleEvent.allCases
+        where event != .blockingAskOpened && event != .blockingAskClosed {
+            XCTAssertNil(event.claudeRegistration.toolMatcher, "\(event) must not be scoped")
+            XCTAssertNil(event.codexRegistration.toolMatcher, "\(event) must not be scoped")
+        }
+    }
+
+    /// A runtime that names no asking tool registers nothing at all. The alternative — an
+    /// unmatched hook — would report every tool call as a turn stopped on the user.
+    func testARuntimeWithNoAskingToolRegistersNoHookRatherThanAnUnmatchedOne() {
+        XCTAssertEqual(
+            HookRegistration.matched(eventNames: ["PreToolUse"], tools: []),
+            .unsupported
+        )
+
+        for kind in AgentKind.allCases {
+            let tools = TurnBlockingTools.names(for: kind)
+            let registration = HookRegistration.matched(eventNames: ["PreToolUse"], tools: tools)
+
+            XCTAssertEqual(
+                registration.isSupported,
+                !tools.isEmpty,
+                "\(kind) may register a hook only when it names a tool to scope it to"
+            )
+            XCTAssertEqual(
+                registration.toolMatcher == nil,
+                tools.isEmpty,
+                "\(kind) must never register a tool-scoped hook without its matcher"
+            )
+        }
+    }
+
+    func testClaudeStopsOnTheQuestionAndThePlanApproval() {
+        XCTAssertEqual(
+            TurnBlockingTools.names(for: .claude),
+            ["AskUserQuestion", "ExitPlanMode"]
+        )
     }
 
     // MARK: - Report Parsing
@@ -47,6 +117,39 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(report.event, .turnStarted)
         XCTAssertEqual(report.agentSessionID, TranscriptID("abc-123"))
         XCTAssertEqual(report.prompt, "do the thing")
+    }
+
+    /// The call's own id, so an ask is closed by the tool that opened it rather than by the next
+    /// tool of the same name.
+    func testAnAskNamesTheToolCallItDescribes() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .blockingAskOpened,
+            payload: ["tool_name": "AskUserQuestion", "tool_use_id": "toolu_01"]
+        ))
+
+        XCTAssertEqual(report.toolCallID, "toolu_01")
+    }
+
+    /// A runtime that identifies no call still pairs, on the tool's name.
+    func testAnAskWithoutACallIDFallsBackToTheToolName() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .blockingAskOpened,
+            payload: ["tool_name": "AskUserQuestion", "tool_use_id": ""]
+        ))
+
+        XCTAssertEqual(report.toolCallID, "AskUserQuestion")
+    }
+
+    func testAnEventAboutNoToolNamesNoCall() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .turnStarted,
+            payload: ["prompt": "do the thing"]
+        ))
+
+        XCTAssertNil(report.toolCallID)
     }
 
     func testSubagentStopCarriesChildTranscriptMetadata() throws {
@@ -200,11 +303,14 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertNil(report.prompt)
         XCTAssertNil(report.subagentID)
         XCTAssertNil(report.subagentTranscriptPath)
-        XCTAssertTrue(report.backgroundTaskIDs.isEmpty)
+        XCTAssertTrue(report.backgroundWork.isEmpty)
     }
 
     /// The shape Claude 2.1.220 sends on `Stop` beside a backgrounded shell. Only each entry's
-    /// identity is taken, so the rest carries the provider's own vocabulary untouched.
+    /// identity and kind are taken, so the rest carries the provider's own vocabulary untouched.
+    ///
+    /// The hook spells the kind as the friendly label from its own schema — `shell`, `subagent`
+    /// — where the stream sends the raw discriminant. `BackgroundWorkKind` reads both.
     func testStopNamesTheWorkTheAgentLeftRunning() throws {
         let report = try XCTUnwrap(HookLifecycleReport(
             sessionID: SessionID(),
@@ -225,19 +331,25 @@ final class HookLifecycleTests: XCTestCase {
             ]
         ))
 
-        XCTAssertEqual(report.backgroundTaskIDs, ["bwf9miuvg", "b8x1tqpxz"])
+        XCTAssertEqual(report.backgroundWork, [
+            BackgroundTask(id: "bwf9miuvg", kind: .standing),
+            BackgroundTask(id: "b8x1tqpxz", kind: .delegated)
+        ])
     }
 
     /// An entry the schema should carry an id for but does not falls back to its position, so
     /// it still looks like the same task at the next boundary rather than a brand new one.
+    ///
+    /// A missing *type* falls back to `.standing`, which is the reading that changes nothing:
+    /// the entry is judged by age, exactly as every entry was before kinds were read at all.
     func testAnUnidentifiedTaskFallsBackToAStablePosition() throws {
         let report = try XCTUnwrap(HookLifecycleReport(
             sessionID: SessionID(),
             event: .turnFinished,
-            payload: ["background_tasks": [["type": "shell", "status": "running"]]]
+            payload: ["background_tasks": [["status": "running"]]]
         ))
 
-        XCTAssertEqual(report.backgroundTaskIDs, ["#0"])
+        XCTAssertEqual(report.backgroundWork, [BackgroundTask(id: "#0", kind: .standing)])
     }
 
     /// "Empty array when nothing is in flight" is the CLI's own contract, and it must read the
@@ -254,8 +366,43 @@ final class HookLifecycleTests: XCTestCase {
             payload: ["session_id": "codex-1"]
         ))
 
-        XCTAssertTrue(empty.backgroundTaskIDs.isEmpty)
-        XCTAssertTrue(absent.backgroundTaskIDs.isEmpty)
+        XCTAssertTrue(empty.backgroundWork.isEmpty)
+        XCTAssertTrue(absent.backgroundWork.isEmpty)
+    }
+
+    /// Every task type the CLI can name, read off the two spellings it uses to name them.
+    ///
+    /// Taken from 2.1.224's own label table rather than from a list: the hook maps each raw
+    /// discriminant through it, and the stream sends the discriminant untouched. Only the two
+    /// delegated kinds pause a session regardless of age, and anything unrecognised — including
+    /// a type added by a later CLI — must read as standing, which is the direction that leaves
+    /// today's behaviour alone.
+    func testBothSpellingsOfEveryTaskTypeAreRead() {
+        for delegated in ["subagent", "local_agent", "workflow", "local_workflow"] {
+            XCTAssertEqual(
+                BackgroundWorkKind(reportedType: delegated),
+                .delegated,
+                "\(delegated) reports back into the conversation on its own"
+            )
+        }
+
+        for standing in [
+            "shell", "local_bash",
+            "monitor", "monitor_mcp", "monitor_ws",
+            "MCP task", "mcp_task",
+            "teammate", "in_process_teammate",
+            "cloud session", "remote_agent",
+            "dream", "auto-mode scan", "auto_mode_scan",
+            "something_a_later_cli_invents"
+        ] {
+            XCTAssertEqual(
+                BackgroundWorkKind(reportedType: standing),
+                .standing,
+                "\(standing) may stand indefinitely, so it is judged by age"
+            )
+        }
+
+        XCTAssertEqual(BackgroundWorkKind(reportedType: nil), .standing)
     }
 
     // MARK: - Query Parsing
@@ -356,6 +503,57 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(failure.stderr.count, HookOutcomeDefaults.maximumStderrCharacters)
     }
 
+    // MARK: - Provoked Output
+
+    /// Moving the pointer over a CLI that tracks the mouse repaints the row under it, which is
+    /// far over the byte threshold for a sweep of a few cells. The session was reading that as
+    /// a turn: a spinner started by nothing but the mouse, on a session sitting at its prompt.
+    @MainActor
+    func testPointerMotionRepaintDoesNotStartATurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteMouseReportForwarded()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
+    /// The same repaint on a session that reports its own turns took the other route: a burst
+    /// inside a flagged turn means the user answered where they stood, which a hover highlight
+    /// is not. The question is still open, so the mark stays up.
+    @MainActor
+    func testPointerMotionRepaintDoesNotAnswerAQuestion() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteAwaitingUser()
+        tracker.noteMouseReportForwarded()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+    }
+
+    /// Suppression blocks a session *entering* `working` and must not end one that already is —
+    /// otherwise moving the mouse mid-task would report the agent as finished.
+    @MainActor
+    func testPointerMotionDoesNotEndAnInflightTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        XCTAssertEqual(tracker.activity, .working)
+
+        tracker.noteMouseReportForwarded()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
     // MARK: - Activity Reporting
 
     @MainActor
@@ -436,6 +634,198 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
+    // MARK: - Blocking Asks
+
+    /// The bug this exists for. A question tool is called *inside* a turn, so `Stop` never fires
+    /// and the session is genuinely still mid-turn — the sidebar spun a loader at a session that
+    /// had stopped dead on a question, for as long as the user was looking at it.
+    @MainActor
+    func testAnOpenAskShowsAsBlockedRatherThanWorking() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        XCTAssertEqual(tracker.activity, .working)
+
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+    }
+
+    /// Being looked at answers the runtime's own vague notice, because answering happens in the
+    /// terminal and raises no hook. It answers nothing here: the tool call is still open, and
+    /// the hook that closes it is registered.
+    @MainActor
+    func testLookingAtASessionDoesNotAnswerAnOpenAsk() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.isVisible = true
+
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+    }
+
+    /// Reading the question repaints the box it is drawn in, and arrowing through its options
+    /// repaints it again — far over the byte threshold. That output is the question being asked,
+    /// not the question being answered.
+    @MainActor
+    func testRepaintingTheQuestionIsNotAnAnswer() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+    }
+
+    /// Answering returns the session to the turn it was always in — the agent goes on working
+    /// with nobody having typed a prompt.
+    @MainActor
+    func testAnsweringTheAskReturnsToTheTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteBlockingAskClosed(id: "toolu_01")
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// Claude notifies about the question six seconds after the keyboard goes quiet in front of
+    /// it, so the ask and the notice describe the same wait. Answering has to clear both, or the
+    /// session goes from blocked straight to blocked with nothing blocking it.
+    @MainActor
+    func testAnsweringAlsoClearsTheNoticeRaisedAboutTheSameQuestion() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteAwaitingUser()
+        tracker.noteBlockingAskClosed(id: "toolu_01")
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// A close belongs to its own open. Two asks in one turn — a question, then a plan to
+    /// approve — must not have the first's answer clear the second.
+    @MainActor
+    func testAnAskIsClosedOnlyByTheCallThatOpenedIt() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteBlockingAskOpened(id: "toolu_02")
+        tracker.noteBlockingAskClosed(id: "toolu_01")
+
+        XCTAssertEqual(tracker.activity, .awaitingUser, "the second ask is still open")
+
+        tracker.noteBlockingAskClosed(id: "toolu_02")
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// An unidentified ask still has to pair with its close, or the mark would never come down.
+    @MainActor
+    func testAnUnidentifiedAskStillPairsWithItsClose() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: nil)
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+
+        tracker.noteBlockingAskClosed(id: nil)
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// A close whose open was never seen, or seen twice, must converge rather than drift — the
+    /// hooks are a network of curl calls and neither delivery nor ordering is promised.
+    @MainActor
+    func testDuplicateAndOrphanedReportsConverge() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+        tracker.noteTurnStarted()
+
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteBlockingAskClosed(id: "toolu_01")
+        XCTAssertEqual(tracker.activity, .working, "one call is one ask, however often reported")
+
+        tracker.noteBlockingAskClosed(id: "toolu_09")
+        XCTAssertEqual(tracker.activity, .working, "a close nobody opened changes nothing")
+    }
+
+    /// `Stop` is the stronger statement: the agent is back at its prompt, so an ask whose close
+    /// was lost ends with the turn rather than outliving it.
+    @MainActor
+    func testATurnEndingClearsAnAskWhoseCloseWasLost() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteTurnFinished()
+
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
+    /// The next prompt is proof the user is past whatever the last turn asked.
+    @MainActor
+    func testANewTurnClearsAnAskWhoseCloseWasLost() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteTurnStarted()
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// A session with no process is holding nothing, and the next process starts from nothing.
+    @MainActor
+    func testDormancyAndRelaunchForgetAnOpenAsk() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+
+        tracker.markDormant()
+        XCTAssertEqual(tracker.activity, .dormant)
+
+        tracker.markRunning()
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
+    /// An ask is a report like any other, so a session that only ever reports one still stops
+    /// counting bytes — the two signals disagree by design.
+    @MainActor
+    func testAnAskSwitchesTheSessionOffTheOutputHeuristic() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        XCTAssertFalse(tracker.reportsOwnActivity)
+
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+
+        XCTAssertTrue(tracker.reportsOwnActivity)
+    }
+
     // MARK: - Unattended Launch
 
     /// A startup relaunch boots with nobody looking, and a resume's TUI repaint is a burst
@@ -511,15 +901,59 @@ final class HookLifecycleTests: XCTestCase {
 
     /// The rule in isolation, without a tracker around it. Both CLIs wake a session when a
     /// background task ends, so "will this speak again" is true of everything in the list and
-    /// separates nothing. When the work *appeared* is what separates them.
-    func testOnlyWorkTheTurnItselfStartedPausesIt() {
+    /// separates nothing. For work that may stand indefinitely, when it *appeared* separates it.
+    func testOnlyStandingWorkTheTurnItselfStartedPausesIt() {
         var ledger = BackgroundWorkLedger()
 
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a"]), "started in this turn")
-        XCTAssertFalse(ledger.turnEnded(leaving: ["a"]), "carried over, so parked")
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a", "b"]), "b is new beside the parked a")
-        XCTAssertFalse(ledger.turnEnded(leaving: ["a", "b"]))
+        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("a")]), "started in this turn")
+        XCTAssertFalse(ledger.turnEnded(leaving: [standingWork("a")]), "carried over, so parked")
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [standingWork("a"), standingWork("b")]),
+            "b is new beside the parked a"
+        )
+        XCTAssertFalse(ledger.turnEnded(leaving: [standingWork("a"), standingWork("b")]))
         XCTAssertFalse(ledger.turnEnded(leaving: []), "nothing left to wait for")
+    }
+
+    /// The bug age alone could not see. A background subagent is in flight at every boundary
+    /// until it finishes, so by age it is new exactly once and carried over forever after — the
+    /// session showed `working` for one turn and `idle` for the rest while its child worked on.
+    /// Measured on 2.1.224 across four consecutive turns that each ended with the same one
+    /// pending agent.
+    func testDelegatedWorkPausesTheTurnHoweverOldItIs() {
+        var ledger = BackgroundWorkLedger()
+
+        XCTAssertTrue(ledger.turnEnded(leaving: [delegatedWork("child")]), "spawned this turn")
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [delegatedWork("child")]),
+            "still delegated, still unanswered, however many turns have passed"
+        )
+        XCTAssertTrue(ledger.turnEnded(leaving: [delegatedWork("child")]))
+        XCTAssertFalse(ledger.turnEnded(leaving: []), "and it ends when the child reports back")
+    }
+
+    /// The two rules coexisting, which is the whole point of asking the kind first: a parked dev
+    /// server must not hold the session open, and a subagent running beside it must.
+    func testADelegatedChildPausesEvenBesideAParkedServer() {
+        var ledger = BackgroundWorkLedger()
+
+        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("dev-server")]))
+        XCTAssertFalse(
+            ledger.turnEnded(leaving: [standingWork("dev-server")]),
+            "the server alone is parked"
+        )
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [standingWork("dev-server"), delegatedWork("child")]),
+            "the child is what this turn handed off"
+        )
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [standingWork("dev-server"), delegatedWork("child")]),
+            "and it keeps pausing while the server beside it stays parked"
+        )
+        XCTAssertFalse(
+            ledger.turnEnded(leaving: [standingWork("dev-server")]),
+            "the child reported back; the server is parked as it always was"
+        )
     }
 
     /// Ids are replaced at each boundary rather than accumulated: a task that finished and one
@@ -528,17 +962,23 @@ final class HookLifecycleTests: XCTestCase {
     func testWorkThatFinishedIsNotRememberedAsCarriedOver() {
         var ledger = BackgroundWorkLedger()
 
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a"]))
+        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("a")]))
         XCTAssertFalse(ledger.turnEnded(leaving: []))
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a"]), "a second run of the same work is new")
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [standingWork("a")]),
+            "a second run of the same work is new"
+        )
     }
 
     func testForgettingMakesTheNextTaskNewAgain() {
         var ledger = BackgroundWorkLedger()
 
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a"]))
+        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("a")]))
         ledger.forget()
-        XCTAssertTrue(ledger.turnEnded(leaving: ["a"]), "a relaunched process inherits nothing")
+        XCTAssertTrue(
+            ledger.turnEnded(leaving: [standingWork("a")]),
+            "a relaunched process inherits nothing"
+        )
     }
 
     // MARK: - Work Left Running
@@ -553,13 +993,13 @@ final class HookLifecycleTests: XCTestCase {
         onScreen.markRunning()
         onScreen.isVisible = true
         onScreen.noteTurnStarted()
-        onScreen.noteTurnFinished(backgroundWork: ["bwf9miuvg"])
+        onScreen.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
 
         let offScreen = SessionActivityTracker()
         offScreen.markRunning()
         offScreen.isVisible = false
         offScreen.noteTurnStarted()
-        offScreen.noteTurnFinished(backgroundWork: ["bwf9miuvg"])
+        offScreen.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
 
         XCTAssertEqual(onScreen.activity, .working, "nothing has finished yet")
         XCTAssertEqual(
@@ -578,7 +1018,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["bwf9miuvg"])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
         XCTAssertEqual(tracker.activity, .working)
 
         // The background task completed and Claude submitted its result as a new prompt.
@@ -599,11 +1039,11 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["dev-server"])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
         XCTAssertEqual(tracker.activity, .working, "the turn that started it is waiting on it")
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["dev-server"])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
         XCTAssertEqual(
             tracker.activity,
             .needsAttention,
@@ -612,8 +1052,52 @@ final class HookLifecycleTests: XCTestCase {
 
         // And a genuinely new task still pauses, beside the one that was already there.
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["dev-server", "test-run"])
+        tracker.noteTurnFinished(
+            backgroundWork: [standingWork("dev-server"), standingWork("test-run")]
+        )
         XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// The reported symptom, end to end: "no progress circle, but a subagent is working".
+    ///
+    /// A background subagent stays in flight across every turn the user spends asking after it,
+    /// and each of those turns used to settle the session to `idle` — a blank row beside a child
+    /// that was still writing. Off screen it was louder: the same boundary handed the session an
+    /// unread mark and, through `AttentionAlertPolicy`, a "finished its turn" notification for a
+    /// turn whose child had not reported.
+    @MainActor
+    func testAskingAfterABackgroundChildDoesNotBlankTheSession() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        // The turn that spawned it.
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
+        XCTAssertEqual(tracker.activity, .working)
+
+        // Three turns of "is it still going?", each ending with the same child in flight.
+        for turn in 1...3 {
+            tracker.noteTurnStarted()
+            tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
+            XCTAssertEqual(
+                tracker.activity,
+                .working,
+                "the child was still working after turn \(turn)"
+            )
+        }
+
+        // Off screen the same boundary must not post an unread mark either: nothing has been
+        // handed back to read.
+        tracker.isVisible = false
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
+        XCTAssertEqual(tracker.activity, .working)
+
+        // The child reported back, and the turn that outlives it is the one that finishes.
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
     /// Work left running is held apart from the turn on purpose. Claude raises `Notification`
@@ -627,7 +1111,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["bwf9miuvg"])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
         tracker.noteAwaitingUser()
 
         XCTAssertEqual(tracker.activity, .needsAttention)
@@ -641,7 +1125,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.markRunning()
         tracker.isVisible = false
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: ["bwf9miuvg"])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
         XCTAssertEqual(tracker.activity, .working)
 
         tracker.markDormant()
@@ -842,4 +1326,17 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = true
         XCTAssertEqual(tracker.activity, .dormant, "being looked at does not give it a process")
     }
+}
+
+// MARK: - Background Work Fixtures
+
+/// A shell, a monitor, or anything else whose lifetime the payload does not state — the work
+/// `BackgroundWorkLedger` has to judge by when it appeared.
+private func standingWork(_ id: String) -> BackgroundTask {
+    BackgroundTask(id: id, kind: .standing)
+}
+
+/// A subagent or a workflow: bounded, and it re-enters the conversation on its own.
+private func delegatedWork(_ id: String) -> BackgroundTask {
+    BackgroundTask(id: id, kind: .delegated)
 }

@@ -2,8 +2,9 @@ import Foundation
 import XCTest
 @testable import Threading
 
-/// The batch adoption behind onboarding's import: one save for many conversations, duplicates
-/// skipped exactly as the single `importSession` skips them.
+/// The batch adoption behind both imports — onboarding's page and the sheet: one save for many
+/// conversations, and duplicates skipped whether they repeat something the project already
+/// tracks or each other.
 @MainActor
 final class ProjectStoreImportBatchTests: XCTestCase {
 
@@ -25,9 +26,9 @@ final class ProjectStoreImportBatchTests: XCTestCase {
             )
         }
 
-        // One already tracked the single way, then a batch that repeats it.
+        // One already tracked, then a batch that repeats it.
         let existing = try XCTUnwrap(
-            store.importSession(conversation("already", daysAgo: 3), into: project.id)
+            store.importSessions([conversation("already", daysAgo: 3)], into: project.id).first
         )
 
         let adopted = store.importSessions(

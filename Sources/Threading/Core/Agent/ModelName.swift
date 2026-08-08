@@ -29,6 +29,50 @@ enum ModelName {
         ("haiku", "Haiku")
     ]
 
+    /// The published tiers, most capable first.
+    ///
+    /// Declaration order *is* the order: `rawValue` is what sorts a model list, so a new tier is
+    /// added in its place rather than given a number to remember. Anthropic's own tiering is what
+    /// this follows — Fable above Opus above Sonnet above Haiku — which is also the order of the
+    /// list prices, so the ranking is checkable against something outside this file.
+    ///
+    /// Deliberately families rather than versions: a menu ordered by dated version would put
+    /// last year's Opus above this year's Sonnet, and would need editing on every release. The
+    /// alias inside a family already tracks its latest.
+    enum Tier: Int, CaseIterable {
+        case fable
+        case opus
+        case sonnet
+        case haiku
+
+        /// Every spelling that names this tier. Mythos is Fable's tier — the same capabilities at
+        /// the same price through a different distribution — so it sorts as one.
+        var tokens: [String] {
+            switch self {
+            case .fable: return ["fable", "mythos"]
+            case .opus: return ["opus"]
+            case .sonnet: return ["sonnet"]
+            case .haiku: return ["haiku"]
+            }
+        }
+    }
+
+    /// Which tier `identifier` belongs to, or nil for one no tier names.
+    ///
+    /// Containment, like `scope(_:meters:)` and for the same reason: the id a CLI hands us is
+    /// `fable`, `claude-fable-5`, or `claude-fable-5[1m]` depending on where it was read, and a
+    /// tier that only matched one spelling would sort the other two as unknown.
+    ///
+    /// Nil is a real answer and the one an organisation's own grant gets. It sorts *after* every
+    /// named tier rather than being guessed into one: putting an unrecognised model above Opus
+    /// on a hunch is worse than leaving it where the source listed it.
+    static func tier(of identifier: String) -> Tier? {
+        let id = identifier.lowercased()
+        return Tier.allCases.first { tier in
+            tier.tokens.contains { id.contains($0) }
+        }
+    }
+
     /// `claude-fable-5[1m]` → `Fable 5 · 1M`, `opus[1m]` → `Opus · 1M`, `gpt-5-codex` →
     /// `gpt-5-codex`.
     static func display(for identifier: String) -> String {

@@ -59,6 +59,60 @@ final class CodexHookInstallerTests: XCTestCase {
         ]
     }
 
+    /// The exact text written by the last pre-rename installer. Keeping the fixture here makes
+    /// the compatibility claim independent of the current generator it is testing.
+    private func legacyCommand(for event: HookLifecycleEvent) -> String {
+        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
+            + "\(MCPDefaults.lifecyclePathPrefix)"
+            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
+            + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
+
+        return "skalman_payload=$(cat);"
+            + " [ -n \"$\(MCPDefaults.legacySessionTokenEnvironmentKey)\" ] &&"
+            + " printf '%s' \"$skalman_payload\" |"
+            + " curl -s --max-time \(Int(MCPDefaults.lifecycleTimeout))"
+            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
+            + " >/dev/null 2>&1; true # skalman-lifecycle"
+    }
+
+    private func legacyPermissionCommand() -> String {
+        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
+            + "\(MCPDefaults.permissionPathPrefix)"
+            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
+
+        return "skalman_payload=$(cat);"
+            + " [ -n \"$\(MCPDefaults.legacyBrokerEnvironmentKey)\" ] &&"
+            + " printf '%s' \"$skalman_payload\" |"
+            + " curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
+            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\";"
+            + " true # skalman-lifecycle"
+    }
+
+    private func legacyDocument() -> [String: Any] {
+        var hooks: [String: [[String: Any]]] = [:]
+        for event in HookLifecycleEvent.allCases {
+            let registration = event.codexRegistration
+            guard registration.isSupported else { continue }
+            for name in registration.eventNames {
+                hooks[name, default: []].append([
+                    "hooks": [[
+                        "type": "command",
+                        "command": legacyCommand(for: event),
+                        "timeout": Int(MCPDefaults.lifecycleTimeout)
+                    ]]
+                ])
+            }
+        }
+        hooks["PreToolUse", default: []].append([
+            "hooks": [[
+                "type": "command",
+                "command": legacyPermissionCommand(),
+                "timeout": Int(MCPDefaults.permissionTimeout)
+            ]]
+        ])
+        return ["hooks": hooks]
+    }
+
     // MARK: - Installing
 
     func testInstallCreatesEntriesForEveryMappedEvent() throws {
@@ -67,9 +121,27 @@ final class CodexHookInstallerTests: XCTestCase {
         let hooks = try XCTUnwrap(read()["hooks"] as? [String: Any])
 
         for event in HookLifecycleEvent.allCases {
-            guard let name = event.codexEventName else { continue }
-            XCTAssertNotNil(hooks[name], "\(name) should have been installed")
+            for name in event.codexRegistration.eventNames {
+                XCTAssertNotNil(hooks[name], "\(name) should have been installed")
+            }
         }
+    }
+
+    /// A hook Codex cannot scope to particular tools must not be installed unscoped. An
+    /// unmatched `PreToolUse` reporting a *question* would say that every command Codex runs is
+    /// one the user is blocked on, which is worse than reporting nothing.
+    func testInstallWritesNoToolScopedEntryWithoutItsMatcher() throws {
+        CodexHookInstaller.install(inCodexHome: codexHome.path)
+
+        let hooks = try XCTUnwrap(read()["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+
+        XCTAssertEqual(
+            preToolUse.count,
+            1,
+            "only the permission broker registers on PreToolUse for Codex today"
+        )
+        XCTAssertNil(preToolUse[0][HookRegistrationDefaults.matcherKey])
     }
 
     /// Codex has no `Notification`, so writing one would put an event into the file that the
@@ -102,6 +174,62 @@ final class CodexHookInstallerTests: XCTestCase {
         let second = try commands(forEvent: "SessionStart")
 
         XCTAssertEqual(first, second)
+    }
+
+    /// An arbitrary command with our old marker is still ours, but it is not one of the exact
+    /// commands made compatible by the launch aliases. Replace it rather than trusting a stale
+    /// shape forever; foreign entries remain untouched.
+    func testInstallReplacesUnknownPreRenameEntriesAndKeepsForeignHooks() throws {
+        let legacyCommand = "skalman_payload=$(cat); true # skalman-lifecycle"
+        try write([
+            "hooks": [
+                "SessionStart": [
+                    ["hooks": [[
+                        "type": "command",
+                        "command": "/other/tool report",
+                        "timeout": 5
+                    ]]],
+                    ["hooks": [[
+                        "type": "command",
+                        "command": legacyCommand,
+                        "timeout": 2
+                    ]]]
+                ]
+            ]
+        ])
+
+        XCTAssertTrue(CodexHookInstaller.install(inCodexHome: codexHome.path))
+
+        let commands = try commands(forEvent: "SessionStart")
+        XCTAssertTrue(commands.contains("/other/tool report"), "the foreign hook was lost")
+        XCTAssertFalse(commands.contains(legacyCommand), "the inert pre-rename hook survived")
+        XCTAssertEqual(
+            commands.filter { $0.contains(MCPDefaults.hookMarker) }.count,
+            1,
+            "the migrated lifecycle hook must be installed exactly once"
+        )
+    }
+
+    /// Codex trusts a hook by its exact command text. A complete installation from before the
+    /// product rename remains runnable through launch aliases, so installing must leave the
+    /// entire document byte-for-byte alone rather than revoking that existing trust decision.
+    func testInstallPreservesKnownPreRenameHooksWithoutRewriting() throws {
+        try write(legacyDocument())
+        let before = try Data(contentsOf: hooksFile)
+
+        XCTAssertFalse(CodexHookInstaller.install(inCodexHome: codexHome.path))
+        XCTAssertEqual(try Data(contentsOf: hooksFile), before)
+
+        for event in HookLifecycleEvent.allCases {
+            let registration = event.codexRegistration
+            guard registration.isSupported else { continue }
+            for name in registration.eventNames {
+                let commands = try commands(forEvent: name)
+                XCTAssertTrue(commands.contains(legacyCommand(for: event)))
+                XCTAssertFalse(commands.contains { $0.contains(MCPDefaults.hookMarker) })
+            }
+        }
+        XCTAssertTrue(try commands(forEvent: "PreToolUse").contains(legacyPermissionCommand()))
     }
 
     /// Codex trusts a hook by hashing its text, so an unnecessary rewrite would revoke the
@@ -243,6 +371,111 @@ final class CodexHookInstallerTests: XCTestCase {
 
     func testUninstallWithNoFileIsHarmless() {
         XCTAssertFalse(CodexHookInstaller.uninstall(fromCodexHome: codexHome.path))
+    }
+
+    /// Turning the integration off after the rename removes the entry the same product wrote
+    /// before the rename too; otherwise the off switch leaves a dead hook in a user-owned file.
+    func testUninstallRemovesPreRenameEntries() throws {
+        try write([
+            "hooks": [
+                "Stop": [
+                    ["hooks": [[
+                        "type": "command",
+                        "command": "skalman_payload=$(cat); true # skalman-lifecycle",
+                        "timeout": 2
+                    ]]]
+                ]
+            ]
+        ])
+
+        XCTAssertTrue(CodexHookInstaller.uninstall(fromCodexHome: codexHome.path))
+        XCTAssertTrue(try entries(forEvent: "Stop").isEmpty)
+    }
+
+    // MARK: - Pre-Rename Preference
+
+    @MainActor
+    func testHostedTestsDoNotImportTheDevelopersLegacyPreferences() {
+        XCTAssertFalse(AppSettings.importsLegacyPreferencesForSharedProcess)
+    }
+
+    /// The integration was already an explicit opt-in before the bundle-id rename. Carrying
+    /// that one choice is what makes the installer above run on the next Codex launch.
+    @MainActor
+    func testPreRenameHookOptInIsCarriedWhenTheCurrentDomainHasNoChoice() throws {
+        let suite = "CodexHookPreferenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(
+            defaults: defaults,
+            legacyPreferences: ["installsCodexHooks": true]
+        )
+
+        XCTAssertTrue(settings.installsCodexHooks)
+        XCTAssertEqual(
+            defaults.persistentDomain(forName: suite)?["installsCodexHooks"] as? Bool,
+            true
+        )
+    }
+
+    /// A choice made under the current name is newer and authoritative, including switching
+    /// the integration off after having used it before the rename.
+    @MainActor
+    func testCurrentHookChoiceWinsOverThePreRenameOptIn() throws {
+        let suite = "CodexHookPreferenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "installsCodexHooks")
+
+        let settings = AppSettings(
+            defaults: defaults,
+            legacyPreferences: ["installsCodexHooks": true]
+        )
+
+        XCTAssertFalse(settings.installsCodexHooks)
+    }
+
+    /// The bypass was a separate, explicit choice before the rename too. If the integration is
+    /// still enabled, carrying that `true` restores the same launch posture rather than leaving
+    /// hooks inert on machines that deliberately relied on the bypass.
+    @MainActor
+    func testPreRenameHookTrustBypassIsCarriedWithTheEnabledIntegration() throws {
+        let suite = "CodexHookPreferenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(
+            defaults: defaults,
+            legacyPreferences: [
+                "installsCodexHooks": true,
+                "bypassesCodexHookTrust": true
+            ]
+        )
+
+        XCTAssertTrue(settings.installsCodexHooks)
+        XCTAssertTrue(settings.bypassesCodexHookTrust)
+    }
+
+    /// A current off choice for the integration is authoritative and must not revive its
+    /// security-sensitive bypass from the old domain.
+    @MainActor
+    func testCurrentHookOptOutDoesNotCarryThePreRenameTrustBypass() throws {
+        let suite = "CodexHookPreferenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "installsCodexHooks")
+
+        let settings = AppSettings(
+            defaults: defaults,
+            legacyPreferences: [
+                "installsCodexHooks": true,
+                "bypassesCodexHookTrust": true
+            ]
+        )
+
+        XCTAssertFalse(settings.installsCodexHooks)
+        XCTAssertFalse(settings.bypassesCodexHookTrust)
     }
 
     /// Keys other than `hooks` belong to whoever wrote them.

@@ -49,20 +49,66 @@ enum StreamEvent: Sendable {
     /// conversation on its own: the turn that queued it ends, and the agent then speaks again
     /// with nobody having typed. A session in that state has not finished anything.
     ///
-    /// Carries identities rather than a count so `BackgroundWorkLedger` can tell work a turn
-    /// started from work parked in an earlier one.
-    case backgroundWork(inFlight: [String])
+    /// Carries identities and kinds rather than a count, so `BackgroundWorkLedger` can tell
+    /// delegated work from standing work, and standing work a turn started from standing work
+    /// parked in an earlier one.
+    case backgroundWork(inFlight: [BackgroundTask])
 
-    /// The turn finished. `isError` marks a turn that failed rather than completed.
+    /// The turn finished, and `outcome` says how.
     ///
     /// Metrics are exact values from the provider where the stream supplies them, completed
     /// with the local round-trip clock by the session wrapper where it does not. Keeping them
     /// on the terminal event makes a finished turn one fact: content, outcome and receipt
     /// cannot arrive out of step in the view.
-    case turnFinished(text: String?, isError: Bool, metrics: TurnMetrics)
+    case turnFinished(text: String?, outcome: TurnOutcome, metrics: TurnMetrics)
 
     /// Anything not modelled, kept so callers can log without the parser throwing.
     case unknown(type: String)
+}
+
+// MARK: - Turn Outcome
+
+/// How a turn ended.
+///
+/// This was a `Bool` named `isError`, and the two facts it conflated are not the same fact:
+/// every provider reports a user-stopped turn through its *error* channel — Claude answers
+/// `result` with `subtype: "error_during_execution"`, Codex settles the turn as
+/// `TurnStatus.interrupted`, ACP answers the pending prompt with `stopReason: "cancelled"` —
+/// so a single flag made "you pressed Stop" indistinguishable from "the model call failed".
+/// The fold under a settled turn read **You stopped after 42s** for a network error, and an
+/// interrupted turn and a broken one were drawn identically.
+///
+/// Three values rather than two because the third is what the composer's Stop button produces,
+/// and a turn the user ended deliberately is not a failure to report.
+enum TurnOutcome: Equatable, Sendable {
+    /// Ran to the end on its own.
+    case completed
+
+    /// The provider reported a failure: a refusal, a transport fault, a model error.
+    case failed
+
+    /// The user stopped it. Nothing went wrong.
+    case stopped
+
+    /// Whether accompanying text is a fault to show rather than an answer to render.
+    ///
+    /// A stopped turn is deliberately *not* an error here: whatever prose arrived before the
+    /// interrupt is the agent's partial answer, not a diagnostic.
+    var isError: Bool { self == .failed }
+
+    /// Whether the turn ended before it was done, either way. This is the question the timeline
+    /// asks when deciding whether to keep a turn expanded so the user keeps their place.
+    var isIncomplete: Bool { self != .completed }
+
+    /// The stable wire spelling for the execution ledger. Deliberately not `String(describing:)`,
+    /// which would let a rename of a case silently rewrite the meaning of stored records.
+    var auditName: String {
+        switch self {
+        case .completed: "completed"
+        case .failed: "failed"
+        case .stopped: "stopped"
+        }
+    }
 }
 
 // MARK: - Turn Metrics
@@ -441,9 +487,19 @@ extension StreamEvent {
                 // empty, as the last one ends. The stream spells the identity `task_id` where
                 // the hook payload spells it `id`; a missing one falls back to its position,
                 // which is stable for as long as the entry is.
+                //
+                // It spells the *kind* differently too — `task_type` here, carrying the raw
+                // discriminant (`local_agent`), against the hook's `type` carrying the friendly
+                // label (`subagent`). `BackgroundWorkKind` reads both, which is why neither
+                // surface needs to translate for the other.
                 event = .backgroundWork(
                     inFlight: (wire.backgroundTasks ?? []).enumerated().map { index, task in
-                        task.objectValue?["task_id"]?.stringValue ?? "#\(index)"
+                        BackgroundTask(
+                            id: task.objectValue?["task_id"]?.stringValue ?? "#\(index)",
+                            kind: BackgroundWorkKind(
+                                reportedType: task.objectValue?["task_type"]?.stringValue
+                            )
+                        )
                     }
                 )
             default:
@@ -463,9 +519,14 @@ extension StreamEvent {
             event = results.isEmpty ? .unknown(type: "user") : .toolResults(results)
 
         case "result":
+            // `.failed` rather than `.stopped`, even though Claude reports a user interrupt
+            // through this same error channel (`subtype: "error_during_execution"`). That
+            // subtype covers genuine execution faults too, so the wire cannot tell the two
+            // apart. Only the session knows whether it asked for the interrupt, and it
+            // restates the outcome on the way out — see `ClaudeStreamSession.outcome(for:)`.
             event = .turnFinished(
                 text: wire.result,
-                isError: wire.isError,
+                outcome: wire.isError ? .failed : .completed,
                 metrics: TurnMetrics(
                     duration: wire.durationMS.map { $0 / 1_000 },
                     outputTokens: wire.usage?.outputTokens,
@@ -599,8 +660,8 @@ private struct ClaudeWireEvent: Decodable {
     let usage: ClaudeWireUsage?
 
     /// The in-flight background work carried by `background_tasks_changed`. Kept opaque: each
-    /// entry describes a shell, child or monitor this side never renders, and only the count
-    /// is read.
+    /// entry describes a shell, child or monitor this side never renders, and only its identity
+    /// and kind are read back out.
     let backgroundTasks: [JSONValue]?
 
     private enum CodingKeys: String, CodingKey {

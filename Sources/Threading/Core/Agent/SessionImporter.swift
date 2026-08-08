@@ -58,12 +58,30 @@ enum SessionImporter {
                 accounts: codexAccounts
             ))
 
-            let result = found
-                .filter { !known.contains($0.agentSessionID) }
-                .sorted { $0.lastActiveAt > $1.lastActiveAt }
+            let result = deduplicated(
+                found
+                    .filter { !known.contains($0.agentSessionID) }
+                    .sorted { $0.lastActiveAt > $1.lastActiveAt }
+            )
 
             DispatchQueue.main.async { completion(result) }
         }
+    }
+
+    /// One row per conversation, from a list already ordered newest first.
+    ///
+    /// The same conversation is on disk under more than one account whenever it has been moved
+    /// between logins, and each account's copy is found separately: 13 of this project's own
+    /// conversations were offered twice, identical but for which copy the accounts had written
+    /// to last. Both rows resume the same transcript, so the second is a row the reader has to
+    /// tell apart from the first and then discard.
+    ///
+    /// Identity is `kind` and transcript id — `ImportableSession.id`, the same rule the
+    /// whole-disk scan dedupes on. The surviving row is the newest, which is the account whose
+    /// copy of the conversation has the most in it.
+    static func deduplicated(_ sessions: [ImportableSession]) -> [ImportableSession] {
+        var seen = Set<String>()
+        return sessions.filter { seen.insert($0.id).inserted }
     }
 
     /// Whether a chat launched in `cwd` belongs to a project's checkout.
@@ -127,7 +145,7 @@ enum SessionImporter {
                     kind: .claude,
                     accountHandle: account.handle,
                     title: title,
-                    lastActiveAt: modificationDate(of: url)
+                    lastActiveAt: lastActivity(at: url)
                 )
             }
         }
@@ -227,7 +245,7 @@ enum SessionImporter {
                     kind: .codex,
                     accountHandle: account.handle,
                     title: providerTitles[header.id] ?? promptTitle,
-                    lastActiveAt: modificationDate(of: url)
+                    lastActiveAt: lastActivity(at: url)
                 )
             }
         }
@@ -314,6 +332,37 @@ enum SessionImporter {
         return SessionNaming.promptTitle(from: raw)
     }
 
+    /// When the conversation itself last moved.
+    ///
+    /// The file's modification date is the obvious answer and is wrong in the ordinary case.
+    /// Both CLIs write bookkeeping into a transcript long after its conversation ended — Claude
+    /// re-appends `last-prompt` and `bridge-session` records, and a launch rewrites them across
+    /// a whole directory at once — so the mtimes of a project's transcripts collapse onto
+    /// whenever an agent was last started. This project had seven conversations all reading
+    /// "4 min ago" in the import sheet, sorted above each other by nothing: their last real
+    /// turns were eight to nine hours apart, and exactly one of them was live.
+    ///
+    /// The tail carries the answer, because those bookkeeping records are the ones that carry
+    /// no timestamp: the newest record that *has* one is the last thing that actually happened.
+    /// Reading backwards is what makes this cheap — 273 of this project's 276 transcripts
+    /// answer within 7 KB of the end, so the usual file costs one chunk however large it is.
+    ///
+    /// The scan is bounded and falls back to the modification date, so a transcript whose tail
+    /// is nothing but bookkeeping answers the old way rather than being read to the top.
+    static func lastActivity(at url: URL) -> Date {
+        var found: Date?
+
+        JSONLReader.forEachRecordFromEnd(at: url, limit: ImportDefaults.activityTailLimit) {
+            record in
+            guard let date = TranscriptTimestamp.of(record) else { return true }
+
+            found = date
+            return false
+        }
+
+        return found ?? modificationDate(of: url)
+    }
+
     static func modificationDate(of url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             ?? .distantPast
@@ -336,6 +385,12 @@ enum ImportDefaults {
 
     /// Enough to reach the title without reading a long conversation entire.
     static let claudeScanLimit = 512 * 1024
+
+    /// How far back from the end `lastActivity` looks for a timestamped record. Generous
+    /// against what the corpus needs — the deepest Codex rollout here answers within 220 KB and
+    /// almost every Claude transcript within 7 KB — because the cost is only paid by a file
+    /// that has no answer, and reading stops at the first record that does.
+    static let activityTailLimit = 512 * 1024
 
     /// Codex buries the opening turn behind its telemetry, and compaction pushes it further
     /// still, so the search has to reach well past where the record usually sits. Reading

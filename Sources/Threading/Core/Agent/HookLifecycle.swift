@@ -31,33 +31,138 @@ enum HookLifecycleEvent: String, CaseIterable {
     /// A delegated child stopped and may now name its durable transcript.
     case subagentStopped
 
-    /// The name Claude's settings file knows this event by.
-    var claudeEventName: String {
+    /// A tool whose whole result is the user's answer was called, so the turn is parked on them.
+    ///
+    /// Separate from `awaitingUser`, which is the runtime's own notion of waiting and is both
+    /// late and ambiguous: Claude raises one `Notification` for a permission prompt and for an
+    /// idle prompt alike, and only six seconds after the *keyboard* goes quiet — so a user
+    /// reading the question, or arrowing through its options, is never reported at all. This
+    /// event is the tool call itself. It arrives before the question is drawn, it names the call
+    /// that raised it, and only that call ending clears it.
+    ///
+    /// Which tools count is `TurnBlockingTools`, per runtime.
+    case blockingAskOpened
+
+    /// The tool that was asking returned, so the turn is running again.
+    ///
+    /// "Returned" covers answered, dismissed and interrupted alike — all three mean the thing
+    /// the turn was stopped on is over.
+    case blockingAskClosed
+
+    /// How Claude's settings file registers this event.
+    var claudeRegistration: HookRegistration {
         switch self {
-        case .turnStarted: return "UserPromptSubmit"
-        case .turnFinished: return "Stop"
-        case .awaitingUser: return "Notification"
-        case .sessionStarted: return "SessionStart"
-        case .subagentStarted: return "SubagentStart"
-        case .subagentStopped: return "SubagentStop"
+        case .turnStarted: return HookRegistration(eventNames: ["UserPromptSubmit"])
+        case .turnFinished: return HookRegistration(eventNames: ["Stop"])
+        case .awaitingUser: return HookRegistration(eventNames: ["Notification"])
+        case .sessionStarted: return HookRegistration(eventNames: ["SessionStart"])
+        case .subagentStarted: return HookRegistration(eventNames: ["SubagentStart"])
+        case .subagentStopped: return HookRegistration(eventNames: ["SubagentStop"])
+        case .blockingAskOpened:
+            return .matched(
+                eventNames: ["PreToolUse"],
+                tools: TurnBlockingTools.names(for: .claude)
+            )
+        case .blockingAskClosed:
+            // Both names, because the ask ends both ways and only one of them is the happy one:
+            // `PostToolUse` when the user answered, `PostToolUseFailure` when they pressed
+            // Escape — which is reported as an interrupt and fires nothing else. A session
+            // listening only for the first would keep the blocked mark for the rest of the turn
+            // while the agent worked on. Both carry the `tool_use_id` of the call they are
+            // about — measured on CLI 2.1.222, where answering a question produced a
+            // `PostToolUse` bearing the same id as the `PreToolUse` that opened it.
+            return .matched(
+                eventNames: ["PostToolUse", "PostToolUseFailure"],
+                tools: TurnBlockingTools.names(for: .claude)
+            )
         }
     }
 
-    /// The name Codex's `hooks.json` knows this event by, or nil where it has no equivalent.
+    /// How Codex's `hooks.json` registers this event.
     ///
-    /// Codex 0.144.6 carries the same event vocabulary as Claude apart from `Notification`,
-    /// which it does not emit — so a Codex session can report its turn boundaries but never
-    /// that it is waiting on the user.
-    var codexEventName: String? {
+    /// Codex 0.144.6 carries the same turn vocabulary as Claude apart from `Notification`, which
+    /// it does not emit, and it exposes no tool whose result is the user's answer — so a Codex
+    /// session reports its turn boundaries but never that it is waiting on the user.
+    var codexRegistration: HookRegistration {
         switch self {
-        case .turnStarted: return "UserPromptSubmit"
-        case .turnFinished: return "Stop"
-        case .sessionStarted: return "SessionStart"
-        case .awaitingUser: return nil
-        case .subagentStarted: return "SubagentStart"
-        case .subagentStopped: return "SubagentStop"
+        case .turnStarted: return HookRegistration(eventNames: ["UserPromptSubmit"])
+        case .turnFinished: return HookRegistration(eventNames: ["Stop"])
+        case .sessionStarted: return HookRegistration(eventNames: ["SessionStart"])
+        case .awaitingUser: return .unsupported
+        case .subagentStarted: return HookRegistration(eventNames: ["SubagentStart"])
+        case .subagentStopped: return HookRegistration(eventNames: ["SubagentStop"])
+        case .blockingAskOpened, .blockingAskClosed:
+            // Nothing to scope a hook to, so nothing is registered — and no hook name is
+            // guessed here either, since an unverified one would install an entry the CLI
+            // never fires. Wiring a future Codex is two edits: name its asking tool in
+            // `TurnBlockingTools`, and return `.matched` with the hook names it reports the
+            // call's start and end under. Everything downstream already reads both.
+            return .unsupported
         }
     }
+}
+
+// MARK: - Hook Registration
+
+/// How one lifecycle event is registered with one runtime: the hook names that report it, and
+/// the tools those hooks are limited to.
+///
+/// Plural names because a single fact can arrive under more than one hook — an ask ends whether
+/// its tool returned or was interrupted, and the two are different events to the CLI. Kept as a
+/// value rather than a bare string so the matcher travels with the names it belongs to: they are
+/// only correct together, and a hook name that reaches an installer without its matcher is
+/// exactly the registration that must never be written.
+struct HookRegistration: Equatable {
+
+    // MARK: - Properties
+
+    /// The runtime's own names for the hooks that report this event. Empty means the runtime
+    /// cannot report it, and nothing is installed.
+    let eventNames: [String]
+
+    /// The tool-name pattern the hooks are limited to, or nil when the event fires on its own
+    /// boundary rather than on a tool.
+    let toolMatcher: String?
+
+    /// Whether there is anything to install.
+    var isSupported: Bool { !eventNames.isEmpty }
+
+    // MARK: - Initialization
+
+    init(eventNames: [String], toolMatcher: String? = nil) {
+        self.eventNames = eventNames
+        self.toolMatcher = toolMatcher
+    }
+
+    // MARK: - Public Methods
+
+    /// A registration scoped to particular tools, or nothing at all when the runtime names none.
+    ///
+    /// The refusal is the point. A tool-scoped event says something about the tools it names —
+    /// "the turn is parked on the user" — and registering it unmatched would say that about
+    /// every `Read` and every `Bash` in the session. An empty list is how a runtime with no such
+    /// tool declines, and this is what keeps that from silently becoming "hook everything".
+    static func matched(eventNames: [String], tools: [String]) -> HookRegistration {
+        guard !tools.isEmpty else { return .unsupported }
+        return HookRegistration(
+            eventNames: eventNames,
+            toolMatcher: tools.joined(separator: HookRegistrationDefaults.matcherSeparator)
+        )
+    }
+
+    /// The runtime has no hook for this event.
+    static let unsupported = HookRegistration(eventNames: [])
+}
+
+// MARK: - Hook Registration Defaults
+
+enum HookRegistrationDefaults {
+    /// Both CLIs match a hook's `matcher` against the tool name as a regular expression, so
+    /// alternation is how a list of tools becomes one entry.
+    static let matcherSeparator = "|"
+
+    /// The key a matcher is written under, which both CLIs spell the same way.
+    static let matcherKey = "matcher"
 }
 
 // MARK: - Hook Lifecycle Report
@@ -82,6 +187,14 @@ struct HookLifecycleReport {
     /// The prompt text, on `turnStarted` only.
     let prompt: String?
 
+    /// The tool call an ask-shaped event describes, by the identity the runtime gave it.
+    ///
+    /// `tool_use_id` where the runtime supplies one — Claude carries the same one on all three
+    /// tool hooks, which is what lets an ask be closed by the call that opened it rather than by
+    /// the next tool of the same name. The tool's own name is the fallback, and pairs correctly
+    /// for a runtime that asks one question at a time.
+    let toolCallID: String?
+
     /// Provider-issued child identity and metadata on subagent events.
     let subagentID: String?
     let subagentType: String?
@@ -97,12 +210,13 @@ struct HookLifecycleReport {
     /// detached subagent or an MCP monitor will re-enter the conversation on its own, without
     /// the user, so the `Stop` that precedes it is not the end of anything.
     ///
-    /// Identities rather than a count, because `BackgroundWorkLedger` has to tell work this
-    /// turn started from work carried over from an earlier one — a count cannot.
+    /// Identity and kind rather than a count: `BackgroundWorkLedger` has to tell delegated work
+    /// from standing work, and standing work this turn started from standing work carried over
+    /// from an earlier one. A count answers neither.
     ///
     /// Empty where the key is absent, which is every event but `Stop`/`SubagentStop`, and every
     /// Codex report — 0.144.6 has no equivalent, so those sessions keep the old behaviour.
-    let backgroundTaskIDs: [String]
+    let backgroundWork: [BackgroundTask]
 
     /// Builds a report from a hook's JSON payload, or nil if it names no event.
     init?(sessionID: SessionID, event: HookLifecycleEvent?, payload: [String: Any]) {
@@ -113,19 +227,33 @@ struct HookLifecycleReport {
         self.agentSessionID = (payload["session_id"] as? String)
             .flatMap { $0.isEmpty ? nil : TranscriptID($0) }
         self.prompt = payload["prompt"] as? String
+        self.toolCallID = Self.text(payload["tool_use_id"]) ?? Self.text(payload["tool_name"])
         self.subagentID = payload["agent_id"] as? String
         self.subagentType = payload["agent_type"] as? String
         self.subagentTranscriptPath = payload["agent_transcript_path"] as? String
         self.lastAssistantMessage = payload["last_assistant_message"] as? String
         self.turnID = payload["turn_id"] as? String
-        // Only the identity is taken: the rest of each entry describes work this side never
-        // renders. An entry whose id is missing falls back to its position, which is stable
-        // across boundaries for as long as the entry is — so unreadable work still reads as
-        // carried over rather than as new on every turn.
+        // Only the identity and the kind are taken: the rest of each entry describes work this
+        // side never renders. An entry whose id is missing falls back to its position, which is
+        // stable across boundaries for as long as the entry is — so unreadable work still reads
+        // as carried over rather than as new on every turn. A missing type reads `.standing`,
+        // which is the direction that changes nothing.
         let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
-        self.backgroundTaskIDs = tasks.enumerated().map { index, task in
-            task["id"] as? String ?? "#\(index)"
+        self.backgroundWork = tasks.enumerated().map { index, task in
+            BackgroundTask(
+                id: task["id"] as? String ?? "#\(index)",
+                kind: BackgroundWorkKind(reportedType: task["type"] as? String)
+            )
         }
+    }
+
+    /// A payload string, or nil when the key is absent *or* present and empty.
+    ///
+    /// The two are the same fact — the hook named nothing — and separating them downstream only
+    /// gives every read site the chance to disagree about which counts.
+    private static func text(_ value: Any?) -> String? {
+        guard let text = value as? String, !text.isEmpty else { return nil }
+        return text
     }
 
     // MARK: - Child Admission

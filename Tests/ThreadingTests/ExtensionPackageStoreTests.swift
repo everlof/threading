@@ -1158,7 +1158,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let controller = ToolsPreferencesViewController(
             groups: [MCPToolCatalog.display, group]
         )
-        _ = controller.view
+        let window = settingsWindow(controller.view, width: 760, height: 2_400)
+        window.contentView?.layoutSubtreeIfNeeded()
 
         for identifier in [
             "settings.tools.group.\(MCPToolCatalog.display.id)",
@@ -1168,6 +1169,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 $0.accessibilityIdentifier() == identifier
             }
             XCTAssertTrue(try XCTUnwrap(disclosure).accessibilityPerformPress())
+            window.contentView?.layoutSubtreeIfNeeded()
         }
         let labels = descendants(in: controller.view)
             .compactMap { ($0 as? NSTextField)?.stringValue }
@@ -1176,6 +1178,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(labels.contains("Lookup"))
         XCTAssertTrue(labels.contains("ext__com__example__cache__lookup"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+        withExtendedLifetime(window) {}
     }
 
     func testExtensionSettingsAddStablePagesAndSectionsAndPersistHostOwnedValues() throws {
@@ -1241,6 +1244,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(SettingsPages.page(id: SettingsPages.generalID)?.title, "General")
 
         let general = SettingsUI.page([], hostPage: .general)
+        let generalWindow = settingsWindow(general)
+        generalWindow.contentView?.layoutSubtreeIfNeeded()
         let generalIDs = Set(descendants(in: general).compactMap {
             $0.accessibilityIdentifier()
         })
@@ -1251,6 +1256,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
         let extensionPage = try XCTUnwrap(SettingsPages.page(id: pageID)).make()
         _ = extensionPage.view
+        let extensionWindow = settingsWindow(extensionPage.view)
+        extensionWindow.contentView?.layoutSubtreeIfNeeded()
         let extensionIDs = Set(descendants(in: extensionPage.view).compactMap {
             $0.accessibilityIdentifier()
         })
@@ -1279,6 +1286,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 rootURL: temporaryDirectory("settings-capability-boundary")
             ).environment(for: manifest)[ExtensionSettingsEnvironment.valuesJSON]
         )
+        withExtendedLifetime((generalWindow, extensionWindow)) {}
     }
 
     func testUnreadableExtensionSettingsAreRecoveredBeforeAnEdit() throws {
@@ -2715,5 +2723,31 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    /// Table-backed settings intentionally materialize nothing for a detached zero-size view.
+    /// Host them at the same useful size as the real window before making visible-row assertions.
+    private func settingsWindow(
+        _ page: NSView,
+        width: CGFloat = 720,
+        height: CGFloat = 700
+    ) -> NSWindow {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        return window
     }
 }

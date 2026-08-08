@@ -969,6 +969,34 @@ final class StateManagerTests: XCTestCase {
         }
     }
 
+    /// The journals belong to the processes that wrote them, and the launch marker among them is
+    /// the sharp end: adopted, `EventLog` reads it seconds later as this launch's own unclean
+    /// exit and attributes it to a pid, a start time and a version from the app under its old
+    /// name — which is exactly what the real adoption did on 30 July 2026. The other half is
+    /// mechanical: this launch's journal is already open for appending by the time the adoption
+    /// runs, so replacing a file in there detaches every record written afterwards.
+    func testThePreRenameJournalsAndItsLaunchMarkerStayBehind() throws {
+        let logs = EventLogDefaults.directoryName
+        _ = try makeLegacyDirectory(projectNamed: "Real work", extraFiles: [
+            "\(logs)/\(EventLogDefaults.markerFileName)": #"{"pid":"1","startedAt":"then"}"#,
+            "\(logs)/skalman-2026-07-29.\(EventLogDefaults.fileExtension)": "{}",
+            "drafts.json": "{}"
+        ])
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+
+        let outcome = LegacyApplicationSupportMigration.runIfNeeded(
+            applicationSupport: testDirectory
+        )
+
+        XCTAssertEqual(outcome.adoptedFileCount, 1)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: current.appendingPathComponent(logs).path
+            ),
+            "a launch marker from another process must never arrive in the new directory"
+        )
+    }
+
     @discardableResult
     private func makeLegacyDirectory(
         projectNamed name: String,

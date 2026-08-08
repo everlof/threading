@@ -119,6 +119,35 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertEqual(settings["remoteControlAtStartup"] as? Bool, true)
     }
 
+    func testSettingsFileCarriesFastAndStandardUsingClaudesOwnKey() throws {
+        for fast in [true, false] {
+            let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+                for: SessionID(),
+                brokersPermissions: false,
+                reportsLifecycle: false,
+                fastMode: fast
+            ))
+            addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+            let settings = try settingsJSON(at: path)
+            XCTAssertEqual(settings["fastMode"] as? Bool, fast)
+            XCTAssertNil(settings["hooks"], "a speed override alone needs no listener hooks")
+        }
+    }
+
+    func testDeferringSpeedWritesNoFastModeKey() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            fastMode: nil,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        XCTAssertNil(try settingsJSON(at: path)["fastMode"])
+    }
+
     /// Deferring writes no key at all. Asserted through whatever the file turns out to be, since
     /// a host with no MCP listener writes nothing for a session with nothing else to say.
     func testDeferringWritesNoKey() throws {
@@ -257,7 +286,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertEqual(Set(hooks.keys), ["PreToolUse"])
     }
 
-    func testLifecycleReportingDoesNotAddTheNativePermissionHook() throws {
+    func testLifecycleReportingWritesEveryEventAndNothingElse() throws {
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: SessionID(),
             brokersPermissions: false,
@@ -271,9 +300,98 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
         XCTAssertEqual(
             Set(hooks.keys),
-            Set(HookLifecycleEvent.allCases.map(\.claudeEventName))
+            Set(HookLifecycleEvent.allCases.flatMap(\.claudeRegistration.eventNames))
         )
-        XCTAssertNil(hooks["PreToolUse"])
+    }
+
+    /// Reporting registers a `PreToolUse` hook of its own — the one that says a question tool
+    /// opened — and it must not be mistaken for the permission broker. The two differ in every
+    /// way that matters: this one names the tools it watches, points at the lifecycle endpoint,
+    /// and throws its own output away, which is what keeps it from answering a permission
+    /// question a terminal session is already asking the user itself.
+    func testLifecycleReportingAddsOnlyAToolScopedObservationalPreToolUseHook() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+
+        XCTAssertEqual(preToolUse.count, 1)
+        XCTAssertEqual(
+            preToolUse[0][HookRegistrationDefaults.matcherKey] as? String,
+            TurnBlockingTools.names(for: .claude).joined(separator: "|")
+        )
+
+        let command = try XCTUnwrap(commands(in: preToolUse[0]).first)
+        XCTAssertTrue(command.contains(MCPDefaults.lifecyclePathPrefix))
+        XCTAssertFalse(command.contains(MCPDefaults.permissionPathPrefix))
+        XCTAssertTrue(command.hasSuffix(">/dev/null 2>&1 || true"))
+    }
+
+    /// A native session brokers permission on `PreToolUse` and reports asks on it too. They are
+    /// separate entries under one key, and an assignment that dropped either would either lose
+    /// the sidebar's blocked mark or — far worse — leave every tool unapproved.
+    func testBrokeringAndAskReportingShareThePreToolUseKeyWithoutDisplacingEachOther() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: true,
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let commands = preToolUse.flatMap(commands(in:))
+
+        XCTAssertEqual(preToolUse.count, 2)
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.permissionPathPrefix) }.count, 1)
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.lifecyclePathPrefix) }.count, 1)
+
+        // The broker offers every tool; only the observational entry is scoped.
+        XCTAssertEqual(
+            preToolUse.filter { $0[HookRegistrationDefaults.matcherKey] == nil }.count,
+            1
+        )
+    }
+
+    /// The ask ends whether its tool returned or was interrupted, so both hooks report it.
+    func testAnAskIsClosedByBothOfClaudesToolCompletionHooks() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+
+        for name in ["PostToolUse", "PostToolUseFailure"] {
+            let entries = try XCTUnwrap(hooks[name] as? [[String: Any]], "\(name) is missing")
+            let command = try XCTUnwrap(commands(in: entries[0]).first)
+            XCTAssertNotNil(entries[0][HookRegistrationDefaults.matcherKey])
+            XCTAssertTrue(
+                command.contains(HookLifecycleEvent.blockingAskClosed.rawValue),
+                "\(name) must report the ask closing"
+            )
+        }
+    }
+
+    /// The commands one `hooks` entry runs.
+    private func commands(in group: [String: Any]) -> [String] {
+        (group["hooks"] as? [[String: Any]])?.compactMap { $0["command"] as? String } ?? []
     }
 
     // MARK: - Persistence

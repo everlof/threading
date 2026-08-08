@@ -231,7 +231,7 @@ enum SessionNaming {
         switch session.kind {
         case .claude:
             guard session.kind.supports(.transcriptTitles),
-                  let project = ProjectStore.shared.project(forSessionID: sessionID),
+                  let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
                   let url = ClaudeTranscript.url(
                       sessionID: transcriptID,
                       for: session,
@@ -490,7 +490,9 @@ enum SessionNamingDefaults {
     /// than any real transcript.
     static let titleScanLimit = 256 * 1024 * 1024
 
+    /// Quiet after provider TUI output before reading metadata it may have just replaced.
+    static let providerTitleRefreshDelay: TimeInterval = 0.25
+
     static let claudeAITitleType = "ai-title"
     static let claudeCustomTitleType = "custom-title"
-    static let providerTitleRefreshDelay: TimeInterval = 0.25
 }

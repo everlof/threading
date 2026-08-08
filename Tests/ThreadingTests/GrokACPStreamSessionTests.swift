@@ -211,9 +211,9 @@ final class GrokACPStreamSessionTests: XCTestCase {
                 XCTAssertEqual(steps.map(\.title), ["Verify"])
                 XCTAssertEqual(steps.map(\.status), [.completed])
                 plan.fulfill()
-            case .turnFinished(let message, let isError, let metrics):
+            case .turnFinished(let message, let outcome, let metrics):
                 XCTAssertNil(message)
-                XCTAssertFalse(isError)
+                XCTAssertEqual(outcome, .completed)
                 XCTAssertEqual(metrics.contextTokens, 25)
                 XCTAssertEqual(metrics.contextWindow, 500_000)
                 finished.fulfill()

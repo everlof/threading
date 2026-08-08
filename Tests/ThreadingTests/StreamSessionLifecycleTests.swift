@@ -40,10 +40,10 @@ final class StreamSessionLifecycleTests: XCTestCase {
             )
         }
         session.onEvent = { event in
-            guard case .turnFinished(let text, let isError, _) = event else { return }
+            guard case .turnFinished(let text, let outcome, _) = event else { return }
             XCTAssertTrue(Thread.isMainThread)
             XCTAssertEqual(text, "claude exploded")
-            XCTAssertTrue(isError)
+            XCTAssertEqual(outcome, .failed)
             receivedDiagnostic = true
             diagnosticReceived.fulfill()
         }
@@ -561,8 +561,8 @@ final class StreamSessionLifecycleTests: XCTestCase {
         }
         session.onComposerCapabilitiesChange = {}
         session.onEvent = { event in
-            guard case .turnFinished(let text, let isError, _) = event else { return }
-            XCTAssertFalse(isError)
+            guard case .turnFinished(let text, let outcome, _) = event else { return }
+            XCTAssertEqual(outcome, .completed)
             XCTAssertEqual(text, "queued prompt arrived")
             finished.fulfill()
         }
@@ -636,8 +636,8 @@ final class StreamSessionLifecycleTests: XCTestCase {
             discovered.fulfill()
         }
         session.onEvent = { event in
-            guard case .turnFinished(_, let isError, _) = event else { return }
-            XCTAssertFalse(isError)
+            guard case .turnFinished(_, let outcome, _) = event else { return }
+            XCTAssertEqual(outcome, .completed)
             finished.fulfill()
         }
 
@@ -861,8 +861,8 @@ final class StreamSessionLifecycleTests: XCTestCase {
             switch event {
             case .initialised:
                 initialized.fulfill()
-            case .turnFinished(_, let isError, _):
-                XCTAssertFalse(isError)
+            case .turnFinished(_, let outcome, _):
+                XCTAssertEqual(outcome, .completed)
                 finishCount += 1
                 if finishCount == 1 { compacted.fulfill() }
                 if finishCount == 2 { reviewed.fulfill() }
@@ -1880,11 +1880,11 @@ final class StreamEventParserTests: XCTestCase {
         let failed = try onlyEvent(CodexStreamEvent.parse("""
             {"type":"turn.failed","error":{"message":"sandbox denied","code":17}}
             """))
-        guard case .turnFinished(let text, let isError, _) = failed else {
+        guard case .turnFinished(let text, let outcome, _) = failed else {
             return XCTFail("Expected failed Codex turn")
         }
         XCTAssertEqual(text, "sandbox denied")
-        XCTAssertTrue(isError)
+        XCTAssertEqual(outcome, .failed)
     }
 
     func testBothProvidersDecodeExactTurnReceipts() throws {
@@ -1892,7 +1892,7 @@ final class StreamEventParserTests: XCTestCase {
             {"type":"result","is_error":false,"duration_ms":89432,
              "usage":{"input_tokens":12000,"output_tokens":3149}}
             """))
-        guard case .turnFinished(_, false, let claudeMetrics) = claude else {
+        guard case .turnFinished(_, .completed, let claudeMetrics) = claude else {
             return XCTFail("Expected Claude result")
         }
         XCTAssertEqual(
@@ -1906,7 +1906,7 @@ final class StreamEventParserTests: XCTestCase {
             {"type":"turn.completed",
              "usage":{"input_tokens":12000,"cached_input_tokens":9000,"output_tokens":3149}}
             """))
-        guard case .turnFinished(_, false, let codexMetrics) = codex else {
+        guard case .turnFinished(_, .completed, let codexMetrics) = codex else {
             return XCTFail("Expected Codex result")
         }
         XCTAssertNil(codexMetrics.duration, "Codex duration comes from the wrapper's local clock")
@@ -1926,9 +1926,14 @@ final class StreamEventParserTests: XCTestCase {
         guard case .backgroundWork(let inFlight) = started else {
             return XCTFail("Expected a background-work level")
         }
-        // Identities, not a count: the ledger has to tell these apart across turns, and the
-        // stream spells the key `task_id` where the hook payload spells it `id`.
-        XCTAssertEqual(inFlight, ["b4vc22id4", "b8x1tqpxz"])
+        // Identities and kinds, not a count: the ledger has to tell these apart across turns
+        // and to tell delegated work from standing work. The stream spells the key `task_id`
+        // where the hook payload spells it `id`, and the kind as the raw `local_agent` where
+        // the hook sends the friendly `subagent`.
+        XCTAssertEqual(inFlight, [
+            BackgroundTask(id: "b4vc22id4", kind: .standing),
+            BackgroundTask(id: "b8x1tqpxz", kind: .delegated)
+        ])
 
         let drained = try onlyEvent(StreamEvent.parse(
             #"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#

@@ -11,6 +11,7 @@ final class GrokACPStreamSession:
     ConversationStreamSession,
     ProviderExecutionReportingConversation,
     ComposerCapabilityProviding,
+    InterruptibleConversation,
     SessionTitleReportingConversation
 {
 
@@ -28,7 +29,7 @@ final class GrokACPStreamSession:
 
     private(set) var isRunning = false
     var canSend: Bool {
-        isRunning && inputPipe != nil && !isTurnInFlight && pendingPrompt == nil
+        isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil
     }
 
     var rootProcessIdentifier: pid_t? {
@@ -39,8 +40,8 @@ final class GrokACPStreamSession:
     private let workingDirectory: String
     private let plan: () -> AgentLaunchPlan
 
-    private var process: Process?
-    private var inputPipe: Pipe?
+    private var process: AgentChildProcess?
+    private var input: FileHandle?
     private var buffer = Data()
     private var errorBuffer = Data()
     private var parseDiagnostics = StreamParseDiagnostics()
@@ -83,49 +84,42 @@ final class GrokACPStreamSession:
         guard !isRunning else { return }
 
         let launchPlan = plan()
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let errorPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: launchPlan.executable)
-        process.arguments = launchPlan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errorPipe
 
         resetForLaunch(resumeState: launchPlan.resumeState)
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.received(chunk) }
-        }
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.receivedError(chunk) }
-        }
-        process.terminationHandler = { [weak self] child in
-            let status = child.terminationStatus
-            Task { @MainActor [weak self] in self?.handleTermination(status: status) }
-        }
-
+        let process: AgentChildProcess
         do {
-            try process.run()
+            process = try AgentChildProcess.launch(
+                executable: launchPlan.executable,
+                arguments: launchPlan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                sessionID: sessionID
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in self?.handleTermination(status: status) }
+            }
         } catch {
             ThreadingLogger.agent.error(
                 "Grok ACP failed to start: \(error.localizedDescription)"
             )
-            output.fileHandleForReading.readabilityHandler = nil
-            errorPipe.fileHandleForReading.readabilityHandler = nil
-            onExit?(-1)
+            onExit?(AgentChildProcessDefaults.spawnFailureStatus)
             return
         }
 
+        process.standardOutput.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            Task { @MainActor [weak self] in self?.received(chunk) }
+        }
+        // Kept apart from stdout: a diagnostic line landing inside the JSON-RPC stream would
+        // corrupt the message it interrupted.
+        process.standardError.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            Task { @MainActor [weak self] in self?.receivedError(chunk) }
+        }
+
         self.process = process
-        inputPipe = input
+        input = process.standardInput
         isRunning = true
         onSendAvailabilityChange?()
         sendInitialize()
@@ -154,10 +148,47 @@ final class GrokACPStreamSession:
         return send(invocation.sourceText)
     }
 
+    // MARK: - Turn Control
+
+    var canInterrupt: Bool {
+        isRunning && input != nil && isTurnInFlight && activeSessionID != nil
+    }
+
+    /// ACP has no steering primitive: the specification allows one prompt turn per session at a
+    /// time, and names nothing for adding to the one in flight. Saying so is the point — the
+    /// composer offers no steer for Grok rather than offering one that quietly queues.
+    var steerAvailability: SteerAvailability { .unavailable(.unsupported) }
+
+    /// Stops the turn in flight, leaving the session open.
+    ///
+    /// `session/cancel` is a **notification**: there is nothing to await, and the protocol is
+    /// explicit that the agent answers the still-pending `session/prompt` with
+    /// `stopReason: "cancelled"` rather than with an error, precisely so a client can tell a
+    /// deliberate stop from a failure. That reply is what settles the turn as `.stopped` — see
+    /// `TurnOutcome(acpStopReason:)`.
+    ///
+    /// The distinction from `terminate()`, which sends the same notification, is that this one
+    /// keeps the process: Stop ends the work, not the conversation.
+    func interrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        guard canInterrupt, let activeSessionID else {
+            completion(.failed(reason: L10n.string("There is nothing running to stop.")))
+            return
+        }
+
+        sendNotification(
+            method: "session/cancel",
+            parameters: ["sessionId": activeSessionID]
+        )
+
+        // A notification is acknowledged by definition, and ACP holds nothing queued behind the
+        // turn for it to report on.
+        completion(.acknowledged)
+    }
+
     func finish() {
-        guard inputPipe != nil else { return }
-        try? inputPipe?.fileHandleForWriting.close()
-        inputPipe = nil
+        guard input != nil else { return }
+        try? input?.close()
+        input = nil
         onSendAvailabilityChange?()
     }
 
@@ -311,14 +342,14 @@ final class GrokACPStreamSession:
     }
 
     private func writeLine(_ object: [String: Any]) -> Bool {
-        guard let inputPipe,
+        guard let input,
               JSONSerialization.isValidJSONObject(object),
               var data = try? JSONSerialization.data(withJSONObject: object)
         else { return false }
         data.append(0x0A)
 
         do {
-            try inputPipe.fileHandleForWriting.write(contentsOf: data)
+            try input.write(contentsOf: data)
             return true
         } catch {
             ThreadingLogger.agent.error(
@@ -402,10 +433,9 @@ final class GrokACPStreamSession:
 
         case .prompt:
             flushPendingMessages()
-            let stopReason = result?["stopReason"] as? String
             finishTurn(
                 text: nil,
-                isError: stopReason == "refusal" || stopReason == "cancelled"
+                outcome: TurnOutcome(acpStopReason: result?["stopReason"] as? String)
             )
         }
     }
@@ -676,10 +706,10 @@ final class GrokACPStreamSession:
 
     private func finishTurnWithTransportError(_ message: String) {
         flushPendingMessages()
-        finishTurn(text: message, isError: true)
+        finishTurn(text: message, outcome: .failed)
     }
 
-    private func finishTurn(text: String?, isError: Bool) {
+    private func finishTurn(text: String?, outcome: TurnOutcome) {
         guard isTurnInFlight || text != nil else { return }
         pendingPrompt = nil
         isTurnInFlight = false
@@ -691,7 +721,7 @@ final class GrokACPStreamSession:
         turnStartedAt = nil
         onEvent?(.turnFinished(
             text: text,
-            isError: isError,
+            outcome: outcome,
             metrics: TurnMetrics(
                 duration: duration,
                 outputTokens: nil,
@@ -711,10 +741,10 @@ final class GrokACPStreamSession:
 
     private func handleTermination(status: Int32) {
         guard process != nil else { return }
-        (process?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
-        (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        process?.standardOutput.readabilityHandler = nil
+        process?.standardError.readabilityHandler = nil
         process = nil
-        inputPipe = nil
+        input = nil
 
         let wasTerminating = isTerminating
         isTerminating = false
@@ -742,6 +772,24 @@ final class GrokACPStreamSession:
         guard composerCapabilities != normalization.capabilities else { return }
         composerCapabilities = normalization.capabilities
         onComposerCapabilitiesChange?()
+    }
+}
+
+// MARK: - Turn Outcome
+
+extension TurnOutcome {
+    /// Reads the stop reason ACP answers a `session/prompt` with.
+    ///
+    /// `cancelled` is the protocol's own word for a turn the client ended through
+    /// `session/cancel`, and the spec is explicit that an agent must answer with it rather than
+    /// with an error precisely so the two can be told apart. A refusal is a real failure; an
+    /// unrecognised reason completes rather than inventing one.
+    init(acpStopReason reason: String?) {
+        switch reason {
+        case "cancelled": self = .stopped
+        case "refusal": self = .failed
+        default: self = .completed
+        }
     }
 }
 

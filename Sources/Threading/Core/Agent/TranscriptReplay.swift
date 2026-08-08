@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
@@ -91,7 +90,7 @@ enum TranscriptReplay {
             metrics.contextTokens = lastContextTokens
             metrics.contextWindow = lastContextWindow
             metrics.effort = lastEffort
-            events.append(.turnFinished(text: nil, isError: false, metrics: metrics))
+            events.append(.turnFinished(text: nil, outcome: .completed, metrics: metrics))
         }
 
         JSONLReader.forEachRecord(at: url, limit: ReplayDefaults.scanLimit) { record in
@@ -205,35 +204,11 @@ enum TranscriptReplay {
         }
     }
 
-    /// When a record was written. Claude stamps records at the top level and Codex stamps its
-    /// rollout envelope the same way; both write ISO 8601, with and without fractional seconds
-    /// depending on version.
+    /// When a record was written. Shared with import, which asks the same question of the same
+    /// two formats from the other end of the file.
     private static func timestamp(of record: [String: Any]) -> Date? {
-        guard let raw = record["timestamp"] as? String else { return nil }
-        return timestampParsers.withLock { parsers in
-            parsers.fractional.date(from: raw) ?? parsers.plain.date(from: raw)
-        }
+        TranscriptTimestamp.of(record)
     }
-
-    /// Foundation formatters are reference types with mutable configuration and lack an
-    /// available Sendable conformance on the app's deployment target. The wrapper's only escape
-    /// is as the state of `timestampParsers`; every read is therefore protected by that lock.
-    private final class TimestampParsers: @unchecked Sendable {
-        let fractional: ISO8601DateFormatter = {
-            let parser = ISO8601DateFormatter()
-            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return parser
-        }()
-        let plain: ISO8601DateFormatter = {
-            let parser = ISO8601DateFormatter()
-            parser.formatOptions = [.withInternetDateTime]
-            return parser
-        }()
-    }
-
-    private static let timestampParsers = OSAllocatedUnfairLock(
-        initialState: TimestampParsers()
-    )
 
     /// Maps one transcript record to something worth drawing, or nil to skip it.
     private static func event(from record: [String: Any], kind: AgentKind) -> StreamEvent? {

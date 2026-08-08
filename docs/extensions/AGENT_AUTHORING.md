@@ -442,6 +442,14 @@ panel with the same panel ID. Keep `loadActionID` on replacement values for clar
 tracks the generation and will not recursively invoke it. Make the load action idempotent
 because reload and crash recovery intentionally run it again.
 
+The semantic `root` is also the portable panel contract for a paired iPhone. A notification can
+deep-link to the panel; the extension keeps running on the Mac, iPhone renders the same validated
+tree with native controls, and input, picker, button, and scene actions return to the owning Mac
+process generation. Use package `extensionResource` images when the semantic panel needs imagery;
+the host serves only validated package-relative resources. A companion `remoteSurface` is not
+pixel-streamed to iPhone, so make `root` useful rather than a placeholder. An isolated
+`customSurface` remains Mac-only and gets an explicit unavailable state on iPhone.
+
 A context-dependent workspace navigator uses the same pattern: set its `loadActionID`, handle
 `ExtensionWorkspaceNavigatorActionRequest`, and return an
 `ExtensionWorkspaceNavigatorActionResponse` naming the same `navigatorID`. Navigator refreshes

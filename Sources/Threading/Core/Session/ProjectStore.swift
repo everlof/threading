@@ -22,7 +22,14 @@ final class ProjectStore {
 
     /// A failed load is never followed by writes in the same launch. Even when quarantine
     /// succeeded, the empty in-memory graph is not authoritative replacement state.
-    private var stateWritesAllowed = true
+    ///
+    /// A recovery launch seeds it false for a different reason with the same shape: the store is
+    /// read so the sidebar can show that the projects survived, and nothing about a launch that
+    /// started no session is worth writing back over them. It is seeded at construction rather
+    /// than set afterwards because `load()` runs inside `init` and takes a write of its own —
+    /// the legacy theme-assignment migration — so a flag set on the finished object would arrive
+    /// one save too late.
+    private var stateWritesAllowed: Bool
 
     private let stateManager: StateManager
     private var isRestoringState = false
@@ -45,16 +52,24 @@ final class ProjectStore {
     var selectedSessionID: SessionID? {
         didSet {
             guard !isRestoringState, selectedSessionID != oldValue else { return }
-            // Selection is navigation state, not a structural edit. Rewriting every project
-            // and session here made sidebar clicks progressively slower as the store grew.
+            // Its own gate, because this write does not go through `save()`: selection is
+            // navigation state, not a structural edit, and rewriting every project and session
+            // here made sidebar clicks progressively slower as the store grew. A recovery launch
+            // still lists and selects — the sidebar is the evidence somebody came for — and must
+            // not record where they browsed as the selection the next normal launch restores.
+            guard stateWritesAllowed else { return }
             stateManager.saveSelectedSessionID(selectedSessionID)
         }
     }
 
     // MARK: - Initialization
 
-    init(stateManager: StateManager = .shared) {
+    init(
+        stateManager: StateManager = .shared,
+        refusesWrites: Bool = RecoveryMode.isActive
+    ) {
         self.stateManager = stateManager
+        self.stateWritesAllowed = !refusesWrites
         load()
         rebuildLookupIndexes()
     }
@@ -94,9 +109,13 @@ final class ProjectStore {
         for session in removedProject?.sessions ?? [] {
             ConversationHandoffStore.remove(for: session.id)
             ExecutionAuditStore.shared.remove(sessionID: session.id)
+            ScheduledMessageStore.shared.forget(sessionID: session.id)
         }
 
         DraftStore.shared.clear(for: id)
+        // Session starts waiting on this project would otherwise fire into a folder the app no
+        // longer knows, or be re-armed forever against a project id nothing can resolve.
+        ScheduledMessageStore.shared.forget(projectID: id)
 
         projects.removeAll { $0.id == id }
         rebuildLookupIndexes()
@@ -151,10 +170,12 @@ final class ProjectStore {
         accountHandle: AccountHandle = .standard,
         model: String? = nil,
         reasoningEffort: String? = nil,
+        fastMode: Bool? = nil,
         usesNativeUI: Bool = false,
         permissionMode: AgentPermissionMode? = nil,
         title: String? = nil,
         handoff: ConversationHandoff? = nil,
+        managedWorkspace: ManagedWorkspace? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
         let account = kind.supportsAccounts
@@ -191,7 +212,10 @@ final class ProjectStore {
             handoff: handoff,
             id: id
         )
-        session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
+        session.managedWorkspace = managedWorkspace
+        session.fastMode = fastMode
+        session.branch = managedWorkspace?.targetBranch
+            ?? GitInfo.currentBranch(for: projects[index].folderPath)
         session.permissionMode = permissionMode
 
         projects[index].sessions.append(session)
@@ -241,44 +265,18 @@ final class ProjectStore {
         return session
     }
 
-    /// Adopts a conversation found on disk, so it can be resumed like any other session.
+    /// Adopts conversations found on disk, so they can be resumed like any other session.
     ///
-    /// The session is created already launched and carrying its identifier: it exists because
+    /// Each session is created already launched and carrying its identifier: it exists because
     /// a conversation exists, so selecting it must resume that conversation rather than start
     /// a new one. Adopting the same conversation twice is refused, since both entries would
-    /// resume the same transcript.
-    @discardableResult
-    func importSession(_ found: ImportableSession, into projectID: ProjectID) -> AgentSession? {
-        guard let index = index(ofProject: projectID) else { return nil }
-
-        guard !projects[index].sessions.contains(where: {
-            $0.resumeState.transcriptID == found.agentSessionID
-        })
-        else { return nil }
-
-        var session = AgentSession(
-            kind: found.kind,
-            title: found.title,
-            accountHandle: found.accountHandle
-        )
-        session.resumeState = .resumable(found.agentSessionID)
-        session.hasLaunched = true
-        session.lastActiveAt = found.lastActiveAt
-        session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
-
-        projects[index].sessions.append(session)
-        rebuildLookupIndexes()
-        save()
-        notifyChanged()
-
-        return session
-    }
-
-    /// Adopts many conversations with one save, for onboarding's import — hundreds of
-    /// `importSession` calls would write and notify per conversation, and the sidebar reload
-    /// each notification triggers is what would make a large import stutter.
+    /// resume the same transcript — whether the repeat is of something already tracked or of
+    /// another conversation in the same batch.
     ///
-    /// Duplicates (by transcript id) are skipped, same as the single adoption.
+    /// Plural, and one save for the batch: both callers adopt in bulk — onboarding's import
+    /// page and the import sheet's multiple selection — and a write plus a notification per
+    /// conversation is what made a large import stutter, since each notification reloads the
+    /// sidebar.
     @discardableResult
     func importSessions(
         _ found: [ImportableSession],
@@ -514,6 +512,10 @@ final class ProjectStore {
         )
         ConversationHandoffStore.remove(for: sessionID)
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
+        // Here rather than in the sidebar's delete gesture: this is the one door every deletion
+        // route passes through, and Settings ▸ Archived removes sessions without going near the
+        // sidebar at all. A scheduled send left behind would keep naming a session that is gone.
+        ScheduledMessageStore.shared.forget(sessionID: sessionID)
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
         rebuildLookupIndexes()
 
@@ -753,6 +755,23 @@ final class ProjectStore {
         return projects[location.projectIndex]
     }
 
+    /// The folder a session actually executes in, which differs from its logical Project only
+    /// for the explicitly opted-in managed-workspace path.
+    func workingDirectory(forSessionID sessionID: SessionID) -> String? {
+        guard let location = locate(sessionID: sessionID) else { return nil }
+        let project = projects[location.projectIndex]
+        return project.sessions[location.sessionIndex].workingDirectory(in: project)
+    }
+
+    /// A copy suitable for APIs whose existing contract takes a Project but whose work must be
+    /// scoped to the session's actual checkout. The persisted Project is never rewritten.
+    func executionProject(forSessionID sessionID: SessionID) -> Project? {
+        guard let location = locate(sessionID: sessionID) else { return nil }
+        var project = projects[location.projectIndex]
+        project.folderPath = project.sessions[location.sessionIndex].workingDirectory(in: project)
+        return project
+    }
+
     func terminal(withID terminalID: TerminalID) -> ProjectTerminal? {
         guard let location = locate(terminalID: terminalID) else { return nil }
         return projects[location.projectIndex].terminals[location.terminalIndex]
@@ -863,9 +882,16 @@ final class ProjectStore {
         saveTimer = nil
 
         guard stateWritesAllowed else {
-            ThreadingLogger.agent.error(
-                "Refusing to save projects state because its failed load could not be quarantined"
-            )
+            // Two reasons reach here and only one of them is a fault, so the line says which:
+            // a failed load whose quarantine did not take, and a recovery launch that reads the
+            // store to show it and writes nothing back.
+            if RecoveryMode.isActive {
+                RecoveryMode.refuse("a projects-state save")
+            } else {
+                ThreadingLogger.agent.error(
+                    "Refusing to save projects state because its failed load could not be quarantined"
+                )
+            }
             return
         }
 
@@ -876,11 +902,25 @@ final class ProjectStore {
         stateManager.saveProjectsState(state)
     }
 
+    /// Reads the store, and records that it was read.
+    ///
+    /// **The checkpoint is here rather than in `AppDelegate`.** The launch does not open this
+    /// store at a line anyone chose — it opens when something first asks for it, which today is
+    /// inside the first window's layout — and putting the checkpoint in the launch sequence would
+    /// mean opening the store early so that it could be observed. Moving a real load to observe
+    /// it is not observing it. The consequence to expect when reading a ledger: `persistenceOpened`
+    /// lands *after* `mainWindowConstructed`. Checkpoints are timestamped facts, not an order.
     private func load() {
         switch stateManager.loadProjectsState() {
         case .missing:
+            LaunchLedger.shared.record(.persistenceOpened, detail: [
+                StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeMissing
+            ])
             return
         case .loaded(let state):
+            LaunchLedger.shared.record(.persistenceOpened, detail: [
+                StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeLoaded
+            ])
             isRestoringState = true
             projects = state.projects
             selectedSessionID = state.selectedSessionID
@@ -889,6 +929,9 @@ final class ProjectStore {
                 save()
             }
         case .failed(let quarantinedAt):
+            LaunchLedger.shared.record(.persistenceOpened, detail: [
+                StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeFailed
+            ])
             didLoadStateSuccessfully = false
             stateWritesAllowed = false
             if let quarantinedAt {

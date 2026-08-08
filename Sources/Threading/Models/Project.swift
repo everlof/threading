@@ -68,10 +68,11 @@ struct AgentCapabilities: OptionSet {
   /// terminal surface, where no control channel exists to ask.
   static let serviceTierFastMode = Self(rawValue: 1 << 11)
 
-  /// Fast is a *live control-channel flag* that a running conversation starts with off until
-  /// Threading sends it. Claude only, and deliberately distinct from `serviceTierFastMode`:
-  /// the two differ in where the answer lives, in whether it survives a relaunch, and in
-  /// whether "no explicit choice" means off or means the account's default.
+  /// Fast is a *live control-channel flag* Threading can restate after the process starts.
+  /// Claude only, and deliberately distinct from `serviceTierFastMode`: the two differ in where
+  /// the live answer lives and how a turn changes it. Startup policy also travels through
+  /// Claude's per-session settings layer; with no Threading choice, the native transport's
+  /// fallback is off while a terminal may inherit Claude's own persisted setting.
   ///
   /// Whether a *given* transport can be asked mid-conversation stays with
   /// `FastModeConversation`; this states only what an unset choice means.
@@ -142,10 +143,55 @@ struct AgentCapabilities: OptionSet {
   /// login directly.
   static let headlessResearch = Self(rawValue: 1 << 19)
 
+  /// The runtime's transcript records the permission mode the session is *in*, as opposed to
+  /// the one Threading launched it with, so a terminal's posture can be read back after the
+  /// user changed it inside the CLI.
+  ///
+  /// Claude only, and the record is a first-class one rather than something inferred from a
+  /// TUI frame: `{"type":"permission-mode","permissionMode":"auto",…}` is written to the
+  /// session's own transcript, which is what makes Shift+Tab observable at all. Claude's own
+  /// external vocabulary comes back — its `default` for Manual included — so a reader has to
+  /// go through `AgentPermissionMode(externalValue:for:)` rather than `init(rawValue:)`.
+  ///
+  /// Codex, Grok and OpenCode record nothing equivalent, which is deliberate as a capability
+  /// rather than a Claude branch: the surfaces that show the mode ask this, so a runtime that
+  /// starts writing one becomes readable by claiming the flag and adding its reader.
+  static let transcriptPermissionModeRecord = Self(rawValue: 1 << 20)
+
+  /// The runtime's short usage window is *anchored*: it opens on the account's first message
+  /// and resets a fixed span later, rather than sliding continuously. That single fact is what
+  /// makes the window's phase something a user owns, and it is the whole premise of
+  /// `UsageWindowPoke` — on a sliding window there is no moment to move.
+  ///
+  /// Claude only, and on evidence rather than on documentation: `ClaudeUsageFetcher` reports a
+  /// `resetsAt` that stands still through a session and jumps by exactly five hours when a new
+  /// window opens, which is an anchor. Codex reports a five-hour window too and shares it
+  /// between local messages and cloud chats, but whether its reset is anchored or sliding is
+  /// not published, and the two behave identically until the account goes quiet across a
+  /// boundary. So the flag stays off there until `UsageWindowAnchorEvidence` answers it from
+  /// this account's own history, which is the honest order: the capability is granted by a
+  /// measurement, and Threading is the instrument that takes it.
+  ///
+  /// Grok and OpenCode report no windows to Threading at all, and xAI's acceptable-use policy
+  /// forbids scripted access outright, so neither is a candidate whatever it reports later.
+  static let anchoredUsageWindow = Self(rawValue: 1 << 21)
+
+  /// The runtime writes a refused request into the session's own transcript, so a conversation
+  /// stopped on its account's usage limit can be told apart from one still working.
+  ///
+  /// Claude only, and the record is the only thing that reports it: a refusal raises no
+  /// lifecycle hook — no turn began and none ended — and the CLI answers by printing a sentence
+  /// into its TUI, which the host sees as bytes. Without this a spent session goes on drawing a
+  /// spinner for as long as it is left alone. See `ObservedUsageLimit`.
+  ///
+  /// Separate from `anchoredUsageWindow`, which is about an *account's* window having a phase.
+  /// This is about one conversation having been told no.
+  static let transcriptUsageLimitRecord = Self(rawValue: 1 << 22)
+
   /// The runtime publishes the current conversation name as provider metadata outside its
   /// transcript. Codex only: terminal sessions persist it in `session_index.jsonl`, while the
   /// app-server returns `Thread.name` and emits `thread/name/updated`.
-  static let providerTitleMetadata = Self(rawValue: 1 << 20)
+  static let providerTitleMetadata = Self(rawValue: 1 << 23)
 
   /// The runtime exposes a reversible archive operation for its retained conversations, and
   /// moves their records between active and archived stores in a way Threading can observe.
@@ -153,7 +199,7 @@ struct AgentCapabilities: OptionSet {
   /// but its current public CLI/HTTP contract cannot clear it again. None therefore satisfies
   /// Threading's reversible Archive/Restore contract, so their filing stays local rather than
   /// losing Undo or being misrepresented as the destructive delete they also expose.
-  static let providerArchive = Self(rawValue: 1 << 21)
+  static let providerArchive = Self(rawValue: 1 << 24)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -208,8 +254,9 @@ enum AgentKind: String, Codable, CaseIterable {
       return [
         .resume, .presetSessionID, .accounts, .nativeUI, .permissionModes, .forking,
         .threadingBridge, .remoteControl, .statusLine, .transcriptTitles,
-        .transcriptModelRecord, .transcriptUsageIndex, .liveFastModeControl,
-        .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch
+        .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
+        .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
+        .anchoredUsageWindow, .transcriptUsageLimitRecord
       ]
     case .codex:
       return [
@@ -636,6 +683,102 @@ enum AgentTitleSource: String, Codable {
   }
 }
 
+// MARK: - Managed Workspace
+
+/// What Threading should do with an isolated worktree when its agent says the task is done.
+///
+/// A remote review is deliberately not one of these cases. Publishing a branch and opening a
+/// PR/MR is a separate optional decision on `ManagedWorkspacePlan`; keeping it out of the
+/// default is what makes enabling isolation mean only local, reversible repository work.
+enum ManagedWorkspaceDelivery: String, Codable, Sendable, Equatable, CaseIterable {
+  case mergeAndCleanUp
+  case keepForReview
+}
+
+/// The remote review Threading may publish after the agent's completion handshake.
+///
+/// This is intentionally narrower than the repository-wide Git Review policy: a managed
+/// session cannot open an editor after an unattended final turn, and "push only" would leave
+/// remote state without the review object the opt-in promised.
+enum ManagedWorkspacePublication: String, Codable, Sendable, Equatable, CaseIterable {
+  case draft
+  case ready
+}
+
+/// The small, frozen choice made in the composer. Nil on a draft/session means the feature is
+/// off, so records written before managed workspaces decode with precisely their old behaviour.
+struct ManagedWorkspacePlan: Codable, Sendable, Equatable {
+  var delivery: ManagedWorkspaceDelivery
+  var publication: ManagedWorkspacePublication?
+
+  init(
+    delivery: ManagedWorkspaceDelivery = .mergeAndCleanUp,
+    publication: ManagedWorkspacePublication? = nil
+  ) {
+    self.delivery = delivery
+    self.publication = publication
+  }
+}
+
+enum ManagedWorkspaceState: String, Codable, Sendable, Equatable {
+  case active
+  case kept
+  case integrated
+  case published
+  case needsAttention
+}
+
+/// Durable evidence that the generated remote branch has a review object of its own.
+///
+/// The provider stays data rather than a type so another forge can use the same session record.
+/// The branch is app-generated and opaque; it is persisted because a retry must find the same
+/// change request instead of creating another one.
+struct ManagedWorkspaceChangeRequest: Codable, Sendable, Equatable {
+  let provider: String
+  let repository: String
+  let remote: String
+  let branch: String
+  let number: Int
+  let url: URL
+  let isDraft: Bool
+}
+
+/// What happened to the generated remote-only branch after its review finished.
+///
+/// Nil is the migration spelling of `awaitingReviewCompletion`: records published before the
+/// reconciler existed still need cleanup. `ownershipLost` is terminal and deliberately leaves
+/// the ref alone, because somebody moved it away from the exact commit Threading published.
+enum ManagedWorkspaceRemoteBranchState: String, Codable, Sendable, Equatable {
+  case awaitingReviewCompletion
+  case deleted
+  case alreadyAbsent
+  case ownershipLost
+
+  var needsReconciliation: Bool { self == .awaitingReviewCompletion }
+}
+
+/// Threading's durable ownership record for one generated, detached worktree.
+///
+/// The session still belongs to its logical Project; only its execution directory changes.
+/// Keeping both paths is what lets the sidebar remain stable while cleanup can target exactly
+/// the one directory Threading created.
+struct ManagedWorkspace: Codable, Sendable, Equatable {
+  let repositoryRoot: String
+  let sourceCheckoutPath: String
+  let worktreeRoot: String
+  let executionPath: String
+  let targetBranch: String
+  var baseCommit: String
+  let delivery: ManagedWorkspaceDelivery
+  let publication: ManagedWorkspacePublication?
+  let remoteBranch: String?
+  var finalCommit: String?
+  var changeRequest: ManagedWorkspaceChangeRequest?
+  var remoteBranchState: ManagedWorkspaceRemoteBranchState?
+  var state: ManagedWorkspaceState
+  var lastError: String?
+}
+
 // MARK: - Agent Session
 
 /// A single agent conversation belonging to a project.
@@ -722,9 +865,10 @@ struct AgentSession: Codable, Identifiable {
   /// requests Standard. The third state matters: decoding an older session must not silently
   /// turn off an account whose config already selected Fast.
   ///
-  /// Claude applies this through its persistent print transport's control protocol. Codex
-  /// maps it onto the next app-server `turn/start` request's `serviceTier` while preserving
-  /// the same process and conversation id.
+  /// Claude applies this through the per-session settings layer on both surfaces and restates
+  /// it through the persistent print transport's control protocol. Codex maps it onto launch
+  /// configuration on both surfaces and the next app-server `turn/start` request while
+  /// preserving the same process and conversation id.
   var fastMode: Bool?
 
   /// A per-conversation override for Claude's Remote Control bridge — the built-in feature
@@ -864,8 +1008,10 @@ struct AgentSession: Codable, Identifiable {
 
   /// Whether the session has been filed away.
   ///
-  /// Archiving only affects where the session appears: its identifier and conversation are
-  /// untouched, so an archived session resumes exactly as it would have.
+  /// The identifier and conversation are untouched, so an archived session resumes exactly as
+  /// it would have. Where the runtime exposes its own reversible archive, `ProviderArchiveSync`
+  /// keeps this flag and that provider state together; elsewhere it remains a Threading-only
+  /// filing choice.
   var isArchived: Bool
 
   /// The archive value on which Threading and a capable provider last agreed.
@@ -892,6 +1038,10 @@ struct AgentSession: Codable, Identifiable {
   /// optional for the same reason: a session inside a muted project can still say no.
   /// See `AttentionAlertScope`.
   var notificationsMuted: Bool?
+
+  /// An execution directory owned for this session alone. Nil is the ordinary path: launch in
+  /// the Project folder exactly as Threading always has.
+  var managedWorkspace: ManagedWorkspace?
 
   init(
     kind: AgentKind,
@@ -955,6 +1105,7 @@ struct AgentSession: Codable, Identifiable {
     self.usesNativeUI = usesNativeUI && configuration.kind.supportsNativeUI
     self.themeID = nil
     self.notificationsMuted = nil
+    self.managedWorkspace = nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -967,6 +1118,7 @@ struct AgentSession: Codable, Identifiable {
     case continuationSource, continuationSourceKind
     case handoff
     case themeID, themeName, notificationsMuted
+    case managedWorkspace
   }
 
   init(from decoder: Decoder) throws {
@@ -1233,6 +1385,10 @@ struct AgentSession: Codable, Identifiable {
       Bool.self,
       forKey: .notificationsMuted
     )
+    managedWorkspace = try container.decodeIfPresent(
+      ManagedWorkspace.self,
+      forKey: .managedWorkspace
+    )
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1271,6 +1427,28 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(handoff, forKey: .handoff)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
+    try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
+  }
+
+  /// Where this conversation's process and project-relative tools run.
+  ///
+  /// Managed sessions retain their logical Project relationship for navigation, theming and
+  /// persistence; substituting the directory only at execution seams prevents a temporary
+  /// worktree from becoming a second sidebar project.
+  func workingDirectory(in project: Project) -> String {
+    managedWorkspace?.executionPath ?? project.folderPath
+  }
+
+  /// Records one archive state as the value both Threading and the provider now hold.
+  /// Returns whether either persisted field changed, so a batch reconciliation writes once.
+  @discardableResult
+  mutating func synchronizeArchiveState(_ archived: Bool) -> Bool {
+    guard isArchived != archived || lastSynchronizedArchiveState != archived else {
+      return false
+    }
+    isArchived = archived
+    lastSynchronizedArchiveState = archived
+    return true
   }
 
   /// Changes a reasoning option only where the provider configuration can carry one.
@@ -1314,18 +1492,6 @@ struct AgentSession: Codable, Identifiable {
   /// Whether a previous conversation exists that can be resumed.
   var isResumable: Bool {
     resumeState.isResumable
-  }
-
-  /// Records one archive state as the value both Threading and the provider now hold.
-  /// Returns whether either persisted field changed, so a batch reconciliation writes once.
-  @discardableResult
-  mutating func synchronizeArchiveState(_ archived: Bool) -> Bool {
-    guard isArchived != archived || lastSynchronizedArchiveState != archived else {
-      return false
-    }
-    isArchived = archived
-    lastSynchronizedArchiveState = archived
-    return true
   }
 
   /// The name shown in the sidebar.
@@ -1592,16 +1758,29 @@ struct ProjectsState: Codable {
 /// legacy version-zero document, while a value newer than this app is refused. That keeps a
 /// future layout from being partially interpreted and then replaced by today's narrower model.
 struct PersistedPanel: Codable {
-  static let currentFormatVersion = 1
+  /// Raised to 2 when detached windows arrived. The bump is the point: a build that predates
+  /// them cannot show a `window:` tab, and the version is what makes it say so — refusing the
+  /// document with the error this decoder was built to give, rather than reading a layout it
+  /// only partly understands and writing that back.
+  static let currentFormatVersion = 2
 
   var tabs: [PersistedTab]
   var activeTabID: String?
   var observedSignature: String?
   var drawerActiveTabID: String? = nil
   var drawerOpen: Bool? = nil
+  var detachedWindows: [PersistedDetachedWindow] = []
 
   var panelTabs: [PersistedTab] { tabs.filter { $0.host == nil } }
   var drawerTabs: [PersistedTab] { tabs.filter { $0.host == PersistedTab.drawerHost } }
+
+  /// Every tab belonging to a detached window, whichever one — the slice the panel and drawer
+  /// writers must carry through untouched.
+  var detachedWindowTabs: [PersistedTab] { tabs.filter(\.namesADetachedWindow) }
+
+  func tabs(inDetachedWindow windowID: UUID) -> [PersistedTab] {
+    tabs.filter { $0.detachedWindowID == windowID }
+  }
 
   private enum CodingKeys: String, CodingKey {
     case formatVersion
@@ -1610,6 +1789,7 @@ struct PersistedPanel: Codable {
     case observedSignature
     case drawerActiveTabID
     case drawerOpen
+    case detachedWindows
   }
 }
 
@@ -1639,12 +1819,50 @@ extension PersistedPanel {
         debugDescription: "Panel tab identifiers must be non-empty and unique"
       )
     }
-    guard tabs.allSatisfy({ $0.host == nil || $0.host == PersistedTab.drawerHost }) else {
+    detachedWindows =
+      try container.decodeIfPresent([PersistedDetachedWindow].self, forKey: .detachedWindows) ?? []
+
+    guard
+      tabs.allSatisfy({
+        $0.host == nil || $0.host == PersistedTab.drawerHost || $0.detachedWindowID != nil
+      })
+    else {
       throw DecodingError.dataCorruptedError(
         forKey: .tabs,
         in: container,
         debugDescription: "Panel tab has an unknown host"
       )
+    }
+
+    let declaredWindows = Set(detachedWindows.compactMap { UUID(uuidString: $0.id) })
+    guard declaredWindows.count == detachedWindows.count else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .detachedWindows,
+        in: container,
+        debugDescription: "Detached window identifiers must be valid and unique"
+      )
+    }
+    // A tab naming a window the document does not declare would be shown by no pane and
+    // dropped by the next save, which is the silent loss this validation exists to prevent.
+    guard tabs.allSatisfy({ tab in
+      tab.detachedWindowID.map(declaredWindows.contains) ?? true
+    }) else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .tabs,
+        in: container,
+        debugDescription: "Tab names a detached window the document does not declare"
+      )
+    }
+    for window in detachedWindows {
+      guard let windowID = UUID(uuidString: window.id), let activeTabID = window.activeTabID
+      else { continue }
+      guard tabs(inDetachedWindow: windowID).contains(where: { $0.id == activeTabID }) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .detachedWindows,
+          in: container,
+          debugDescription: "Active tab does not exist in its detached window"
+        )
+      }
     }
     if let activeTabID,
       !panelTabs.contains(where: { $0.id == activeTabID })
@@ -1666,14 +1884,30 @@ extension PersistedPanel {
     }
   }
 
+  /// The version a document *needs* to be read, not the newest this build knows.
+  ///
+  /// A layout with no detached window is byte-identical to what version 1 always wrote, so
+  /// declaring 2 on it would refuse a document an older build can read perfectly — and that
+  /// build has no quarantine, so refusing means its next save wipes the panel, the drawer and
+  /// every window slice. Stamping the version by what the document contains keeps the bump
+  /// costing only the sessions that actually used the feature.
+  var requiredFormatVersion: Int {
+    detachedWindows.isEmpty && !tabs.contains(where: \.namesADetachedWindow) ? 1 : 2
+  }
+
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
-    try container.encode(Self.currentFormatVersion, forKey: .formatVersion)
+    try container.encode(requiredFormatVersion, forKey: .formatVersion)
     try container.encode(tabs, forKey: .tabs)
     try container.encodeIfPresent(activeTabID, forKey: .activeTabID)
     try container.encodeIfPresent(observedSignature, forKey: .observedSignature)
     try container.encodeIfPresent(drawerActiveTabID, forKey: .drawerActiveTabID)
     try container.encodeIfPresent(drawerOpen, forKey: .drawerOpen)
+    // Omitted entirely when empty, so a session that has never detached a window writes the
+    // document it always wrote and the key's absence stays the ordinary case.
+    if !detachedWindows.isEmpty {
+      try container.encode(detachedWindows, forKey: .detachedWindows)
+    }
   }
 }
 
@@ -1712,10 +1946,49 @@ struct PersistedTab: Codable {
   var host: String? = nil
 
   static let drawerHost = "drawer"
+
+  /// A detached window's slice. Suffixed with the window's own id, because a session may have
+  /// more than one and their tabs share this single flat list — the host string is what tells
+  /// them apart, exactly as `drawer` separates the drawer's.
+  static let detachedWindowHostPrefix = "window:"
+
+  static func detachedWindowHost(_ windowID: UUID) -> String {
+    detachedWindowHostPrefix + windowID.uuidString
+  }
+
+  /// The detached window this tab belongs to, or nil when its host is the panel or the drawer.
+  ///
+  /// Parsed rather than merely prefix-matched: `window:` followed by anything is a host no
+  /// window will ever claim, so a tab carrying one would be invisible in every pane and dropped
+  /// by the next save. Validation refuses the document instead.
+  var detachedWindowID: UUID? {
+    guard let host, host.hasPrefix(Self.detachedWindowHostPrefix) else { return nil }
+    return UUID(uuidString: String(host.dropFirst(Self.detachedWindowHostPrefix.count)))
+  }
+
+  var namesADetachedWindow: Bool {
+    host?.hasPrefix(Self.detachedWindowHostPrefix) == true
+  }
+}
+
+// MARK: - Detached Window
+
+/// One detached browser window's own state: which session tabs it holds is carried by those
+/// tabs' `host`, so this records only what the window itself knows.
+///
+/// The frame is a string because this model stays Foundation-only — the window controller
+/// converts, the way `setFrameAutosaveName` does for the main window.
+struct PersistedDetachedWindow: Codable {
+  var id: String
+  var frame: String?
+  var activeTabID: String?
+  var isFullScreen: Bool?
 }
 
 /// One attachment reference in the persisted session document.
 struct PersistedSessionAttachment: Codable {
+  let id: String?
+
   /// The directory `relativePath` resolves against. Still written under its original key: it held
   /// only checkouts before the store could take custody of a copy, and every payload already
   /// written says `projectRoot`.
@@ -1733,22 +2006,25 @@ struct PersistedSessionAttachment: Codable {
   /// about those files rather than a gap. Keeping the key out of the common row also keeps a
   /// checkout's own document identical to what earlier builds wrote.
   let isOutsideProject: Bool?
+  let isImmutableSnapshot: Bool?
   let referencedAt: Date
 
   private enum CodingKeys: String, CodingKey {
     case root = "projectRoot"
+    case id
     case relativePath
     case sourcePath
     case kind
     case origin
     case isOutsideProject
+    case isImmutableSnapshot
     case referencedAt
   }
 }
 
 /// A versioned attachment document with an explicit legacy-array migration.
 struct PersistedSessionAttachments: Codable {
-  static let currentFormatVersion = 1
+  static let currentFormatVersion = 2
 
   var entries: [PersistedSessionAttachment]
 
@@ -1772,7 +2048,7 @@ struct PersistedSessionAttachments: Codable {
 
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let version = try container.decode(Int.self, forKey: .formatVersion)
-    guard version == Self.currentFormatVersion else {
+    guard (1...Self.currentFormatVersion).contains(version) else {
       throw DecodingError.dataCorruptedError(
         forKey: .formatVersion,
         in: container,

@@ -51,7 +51,7 @@ enum SessionMigration {
     @discardableResult
     static func move(sessionID: SessionID, to account: AgentAccount) -> Result<Void, MoveError> {
         guard let session = ProjectStore.shared.session(withID: sessionID),
-              let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
             return .failure(MoveError(message: "The session no longer exists."))
         }
 
@@ -162,7 +162,7 @@ enum ConversationContinuation {
         completion: @escaping @MainActor @Sendable (Result<AgentSession, ContinuationError>) -> Void
     ) {
         guard let source = ProjectStore.shared.session(withID: sourceID),
-              let project = ProjectStore.shared.project(forSessionID: sourceID) else {
+              let project = ProjectStore.shared.executionProject(forSessionID: sourceID) else {
             completion(.failure(ContinuationError(message: "The source session no longer exists.")))
             return
         }

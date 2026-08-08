@@ -246,7 +246,11 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
 
     /// The gap this closes: `claude-fable-5[1m]` is selectable on a real login and no alias
     /// names it, so before reading the cache it could not be picked from this menu at all.
-    func testACachedModelNoAliasNamesIsOfferedAfterTheAliases() throws {
+    ///
+    /// It lands beside `fable` rather than after `haiku`: a cached model is a member of a tier,
+    /// not an afterthought appended to the list, and reading the two Fables a menu apart made the
+    /// long-context variant look like a different family.
+    func testACachedModelNoAliasNamesIsOfferedInsideItsTier() throws {
         try writeState(#"""
         {"additionalModelOptionsCache": [
           {"value": "claude-fable-5[1m]", "label": "Fable",
@@ -256,14 +260,18 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
 
         let options = AgentModels.options(for: .claude, account: account())
 
-        XCTAssertEqual(options.map(\.identifier), AgentDefaults.claudeModels + ["claude-fable-5[1m]"])
+        XCTAssertEqual(
+            options.map(\.identifier),
+            ["fable", "claude-fable-5[1m]", "opus", "sonnet", "haiku"]
+        )
         // Ours, not the service's "Fable": two rows reading "Fable" would distinguish nothing,
         // and this name matches what the chip and the usage pill call the same model.
-        XCTAssertEqual(options.last?.displayName, ModelName.display(for: "claude-fable-5[1m]"))
+        XCTAssertEqual(options[1].displayName, ModelName.display(for: "claude-fable-5[1m]"))
     }
 
     /// An id `ModelName` has never seen renders with the service's own word for it rather than
     /// as a raw identifier — the case that arrives when a model ships before Threading does.
+    /// It also sorts last, since a tier nothing names is not a tier to rank.
     func testAnUnrecognisedModelBorrowsTheServicesLabel() throws {
         try writeState(#"""
         {"additionalModelOptionsCache": [{"value": "claude-quasar-9", "label": "Quasar"}]}
@@ -273,6 +281,77 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(options.last?.identifier, "claude-quasar-9")
         XCTAssertEqual(options.last?.displayName, "Quasar")
+    }
+
+    // MARK: - The order
+
+    /// A model picker is a ladder, and the rung a user reaches for first should be the most
+    /// capable model the login can run. The list used to open on whatever order the alias
+    /// constant happened to be written in.
+    func testTheCatalogDescendsFromTheMostCapableTier() {
+        let identifiers = AgentModels.options(for: .claude, account: account()).map(\.identifier)
+
+        XCTAssertEqual(identifiers, ["fable", "opus", "sonnet", "haiku"])
+    }
+
+    /// Inside a tier the alias leads the variants it stands for: `Fable` is the ordinary choice
+    /// and `Fable 5 · 1M` the deliberate one, whatever order the CLI cached them in.
+    func testAnAliasLeadsItsOwnTier() throws {
+        try writeState(#"""
+        {"additionalModelOptionsCache": [
+          {"value": "claude-opus-4-8", "label": "Opus 4.8"},
+          {"value": "claude-fable-5[1m]", "label": "Fable 1M"}
+        ]}
+        """#)
+
+        let identifiers = AgentModels.options(for: .claude, account: account()).map(\.identifier)
+
+        XCTAssertEqual(
+            identifiers,
+            ["fable", "claude-fable-5[1m]", "opus", "claude-opus-4-8", "sonnet", "haiku"]
+        )
+    }
+
+    /// Two openings of the same menu list the same models in the same order. Sorting on an
+    /// explicit index rather than leaving equal keys to `sort`'s own doing is what guarantees it
+    /// — a menu that reshuffled between openings with nothing changed would read as a defect.
+    func testTheOrderIsStableAcrossReads() throws {
+        try writeState(#"""
+        {"additionalModelOptionsCache": [
+          {"value": "claude-quasar-9", "label": "Quasar"},
+          {"value": "claude-pulsar-2", "label": "Pulsar"}
+        ]}
+        """#)
+
+        let first = AgentModels.options(for: .claude, account: account()).map(\.identifier)
+        let second = AgentModels.options(for: .claude, account: account()).map(\.identifier)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(Array(first.suffix(2)), ["claude-quasar-9", "claude-pulsar-2"])
+    }
+
+    /// A conversation pinned to a model this catalog no longer lists still gets a row — placed
+    /// in its tier, not pushed to the front where it would read as the recommendation.
+    func testAPinnedModelJoinsTheListInItsOwnTier() {
+        let identifiers = AgentModels.options(
+            for: .claude,
+            account: account(),
+            including: "claude-sonnet-4-6"
+        ).map(\.identifier)
+
+        XCTAssertEqual(identifiers, ["fable", "opus", "sonnet", "claude-sonnet-4-6", "haiku"])
+    }
+
+    /// A pinned model the catalog already carries is not doubled, and nothing moves.
+    func testAPinnedModelAlreadyInTheCatalogChangesNothing() {
+        let plain = AgentModels.options(for: .claude, account: account()).map(\.identifier)
+        let including = AgentModels.options(
+            for: .claude,
+            account: account(),
+            including: "opus"
+        ).map(\.identifier)
+
+        XCTAssertEqual(plain, including)
     }
 
     /// A cache naming a model an alias already covers must not double it.

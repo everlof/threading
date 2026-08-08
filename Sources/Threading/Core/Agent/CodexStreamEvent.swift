@@ -19,14 +19,14 @@ enum CodexStreamEvent {
         case "turn.completed":
             return .events([.turnFinished(
                 text: nil,
-                isError: false,
+                outcome: .completed,
                 metrics: TurnMetrics(outputTokens: wire.usage?.outputTokens)
             )])
 
         case "turn.failed", "error":
             return .events([.turnFinished(
                 text: errorText(in: wire),
-                isError: true,
+                outcome: .failed,
                 metrics: TurnMetrics(outputTokens: wire.usage?.outputTokens)
             )])
 

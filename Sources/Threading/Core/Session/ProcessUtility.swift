@@ -16,6 +16,18 @@ struct ProcessResourceUsage {
     let memoryBytes: UInt64  // Physical memory footprint
 }
 
+/// When the kernel started a process, to the microsecond.
+///
+/// A pid on its own does not identify a process across a crash: macOS hands pids out again, so
+/// anything that acts on a recorded pid — the live-children ledger's startup sweep, above all —
+/// would otherwise signal whatever now holds that number. The start time is the other half of
+/// the identity, and it is the pair `ps` itself uses. Seconds alone are not enough: two
+/// processes started in the same second are common at launch.
+struct ProcessStartTime: Equatable, Codable, Sendable {
+    let seconds: UInt64
+    let microseconds: UInt64
+}
+
 /// The cheap half of `ProcessDetails`: what one pass over the process table can answer without
 /// a further syscall per process. Enough to reconstruct parentage and name a process.
 struct ProcessSummary {
@@ -198,6 +210,27 @@ enum ProcessUtility {
         // is what Intel reports anyway.
         return info.denom == 0 ? mach_timebase_info_data_t(numer: 1, denom: 1) : info
     }()
+
+    /// The kernel's own start timestamp for a process, which is what makes a recorded pid
+    /// identifiable later. `nil` means the process is gone or its info could not be read — two
+    /// answers a caller must treat the same way, which is to do nothing.
+    ///
+    /// A zombie still answers this, and that matters: a child is only reaped once, so its pid
+    /// cannot be handed out again before the reap, which is what makes reading the start time
+    /// straight after `posix_spawn` race-free.
+    static func startTime(forPid pid: pid_t) -> ProcessStartTime? {
+        guard pid > 0 else { return nil }
+
+        var taskInfo = proc_bsdinfo()
+        let size = MemoryLayout<proc_bsdinfo>.size
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size)) == size,
+              taskInfo.pbi_start_tvsec > 0 else { return nil }
+
+        return ProcessStartTime(
+            seconds: UInt64(taskInfo.pbi_start_tvsec),
+            microseconds: UInt64(taskInfo.pbi_start_tvusec)
+        )
+    }
 
     /// Checks if a process with the given PID exists.
     static func processExists(pid: pid_t) -> Bool {

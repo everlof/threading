@@ -6,9 +6,9 @@ import AppKit
 /// The folders a conversation ran in are deliberately not shown — a wall of checkout paths is
 /// project bookkeeping the user has not opted into yet. Continue performs the import: each
 /// checked conversation's folder becomes (or reuses) a project implicitly, and the checked
-/// conversations are adopted resumable, the same records `ProjectStore.importSession` has
-/// always written. Skip performs nothing; every conversation stays importable later from its
-/// project's composer.
+/// conversations are adopted resumable, the same records `ProjectStore.importSessions` writes
+/// for the import sheet. Skip performs nothing; every conversation stays importable later from
+/// its project's composer.
 final class OnboardingImportPageViewController: NSViewController, OnboardingPage {
 
     private enum Layout {

@@ -26,6 +26,9 @@ final class ClaudeStreamSession:
     ModelSwitchableConversation,
     FastModeConversation,
     PermissionModeSwitchableConversation,
+    InterruptibleConversation,
+    SteerableConversation,
+    MessageLifecycleReportingConversation,
     SubagentReportingConversation,
     SubagentHistoryConversation {
 
@@ -54,8 +57,8 @@ final class ClaudeStreamSession:
 
     private(set) var isRunning = false
 
-    private var process: Process?
-    private var inputPipe: Pipe?
+    private var process: AgentChildProcess?
+    private var input: FileHandle?
 
     /// Partial line carried between reads: a chunk boundary lands mid-JSON far more often
     /// than not, so lines are only parsed once their newline has arrived.
@@ -86,6 +89,31 @@ final class ClaudeStreamSession:
     private var turnStartedAt: TimeInterval?
     private var isTurnInFlight = false
 
+    /// Set between asking the CLI to interrupt and the turn's terminal event arriving. It is the
+    /// only thing that distinguishes a turn the user stopped from one that broke — see
+    /// `outcome(for:)`.
+    private var didRequestInterrupt = false
+
+    var onMessageLifecycle: ((ConversationMessageID, MessageLifecycleState) -> Void)?
+
+    /// The identifier travelling with `pendingPrompt`, so a turn held back by capability
+    /// discovery still reaches the wire under the id the outbox knows it by.
+    private var pendingMessageID: ConversationMessageID?
+
+    /// What `system/init` says this build of the CLI can do.
+    ///
+    /// Read rather than assumed, because the CLI's own schema says older versions answer an
+    /// interrupt with a bare success and no `still_queued` field. Absent a capability, Threading
+    /// reports what it actually knows instead of an empty list that reads as "nothing survived".
+    private var advertisedCapabilities: Set<String> = []
+
+    /// Background work the CLI has told us is running, newest list wins.
+    ///
+    /// Kept so Stop can end the fleet rather than only the parent turn. Positional fallbacks
+    /// (`#0`) are filtered out on the way in: they are display placeholders for an entry with no
+    /// `task_id`, and sending one to `stop_task` would ask the CLI to stop a task called "#0".
+    private var liveTaskIDs: [String] = []
+
     // MARK: - Initialization
 
     init(
@@ -108,21 +136,6 @@ final class ClaudeStreamSession:
 
         let plan = plan()
 
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let error = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-        process.standardInput = input
-        process.standardOutput = output
-
-        // Merged into the same pipe would corrupt the JSON stream, so diagnostics are read
-        // separately and only surfaced when the process dies unexpectedly.
-        process.standardError = error
-
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
         parseDiagnostics.reset()
@@ -135,7 +148,27 @@ final class ClaudeStreamSession:
         capabilityInitializationFinished = onComposerCapabilitiesChange == nil
         replaceComposerCapabilities([])
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let process: AgentChildProcess
+        do {
+            process = try AgentChildProcess.launch(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                sessionID: sessionID
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.handleTermination(status: status)
+                }
+            }
+        } catch {
+            ThreadingLogger.agent.error("Stream session failed to start: \(error.localizedDescription)")
+            Task { @MainActor [weak self] in
+                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+            }
+            return
+        }
+
+        process.standardOutput.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
@@ -143,7 +176,9 @@ final class ClaudeStreamSession:
             }
         }
 
-        error.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // Merged into the same pipe would corrupt the JSON stream, so diagnostics are read
+        // separately and only surfaced when the process dies unexpectedly.
+        process.standardError.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
@@ -151,27 +186,8 @@ final class ClaudeStreamSession:
             }
         }
 
-        process.terminationHandler = { [weak self] process in
-            let status = process.terminationStatus
-            Task { @MainActor [weak self] in
-                self?.handleTermination(status: status)
-            }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            ThreadingLogger.agent.error("Stream session failed to start: \(error.localizedDescription)")
-            output.fileHandleForReading.readabilityHandler = nil
-            (process.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
-            Task { @MainActor [weak self] in
-                self?.onExit?(-1)
-            }
-            return
-        }
-
         self.process = process
-        self.inputPipe = input
+        self.input = process.standardInput
         self.isRunning = true
         onSendAvailabilityChange?()
         if onComposerCapabilitiesChange != nil {
@@ -183,7 +199,7 @@ final class ClaudeStreamSession:
     ///
     /// The CLI accepts the same message envelope the API uses, one JSON object per line.
     var canSend: Bool {
-        isRunning && inputPipe != nil && !isTurnInFlight && pendingPrompt == nil
+        isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil
     }
 
     /// The control channel accepts a request while a turn is active; it applies to the next
@@ -199,9 +215,20 @@ final class ClaudeStreamSession:
 
     @discardableResult
     func send(_ text: String) -> Bool {
+        send(text, identifiedBy: ConversationMessageID())
+    }
+
+    @discardableResult
+    func send(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        send(prompt.transportText, identifiedBy: id)
+    }
+
+    @discardableResult
+    private func send(_ text: String, identifiedBy id: ConversationMessageID) -> Bool {
         guard canSend else { return false }
 
         pendingPrompt = text
+        pendingMessageID = id
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         isTurnInFlight = true
         onSendAvailabilityChange?()
@@ -220,46 +247,176 @@ final class ClaudeStreamSession:
     private func sendPendingTurnIfReady() {
         guard capabilityInitializationFinished,
               let text = pendingPrompt,
-              let inputPipe else { return }
+              let id = pendingMessageID else { return }
 
-        let message: [String: Any] = [
-            "type": "user",
-            "message": ["role": "user", "content": [["type": "text", "text": text]]]
-        ]
-
-        guard var data = try? JSONSerialization.data(withJSONObject: message) else {
+        guard writeUserMessage(text, identifiedBy: id) else {
             pendingPrompt = nil
+            pendingMessageID = nil
             isTurnInFlight = false
             turnStartedAt = nil
             onSendAvailabilityChange?()
             return
         }
+        pendingPrompt = nil
+        pendingMessageID = nil
+    }
+
+    /// Writes one user envelope, carrying the identifier the CLI echoes back on
+    /// `command_lifecycle`.
+    ///
+    /// The `uuid` is the whole reason a queue here can state what a provider is doing with a
+    /// message rather than infer it. Measured against 2.1.223: a message written with
+    /// `"uuid": "u-1"` produces `command_lifecycle` records with `command_uuid: "u-1"` for
+    /// `queued`, `started` and `completed`, and `cancel_async_message` will drop it by the same
+    /// value while it is still pending.
+    @discardableResult
+    private func writeUserMessage(_ text: String, identifiedBy id: ConversationMessageID) -> Bool {
+        guard let input else { return false }
+
+        let message: [String: Any] = [
+            "type": "user",
+            "uuid": id.wireValue,
+            "message": ["role": "user", "content": [["type": "text", "text": text]]]
+        ]
+
+        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
         data.append(0x0A)
 
         // A write to a dead process raises SIGPIPE rather than returning an error, and the
         // process may have exited between the check above and here.
         do {
-            try inputPipe.fileHandleForWriting.write(contentsOf: data)
-            pendingPrompt = nil
+            try input.write(contentsOf: data)
+            return true
         } catch {
             ThreadingLogger.agent.error("Stream session write failed: \(error.localizedDescription)")
-            pendingPrompt = nil
-            isTurnInFlight = false
-            turnStartedAt = nil
-            onSendAvailabilityChange?()
             onEvent?(.turnFinished(
                 text: error.localizedDescription,
-                isError: true,
+                outcome: .failed,
                 metrics: .empty
             ))
+            return false
+        }
+    }
+
+    // MARK: - Turn Control
+
+    var canInterrupt: Bool { isRunning && input != nil && isTurnInFlight }
+
+    /// Claude names no non-steerable turn kinds, so the only refusal here is having nothing to
+    /// steer.
+    var steerAvailability: SteerAvailability {
+        guard isRunning, input != nil else { return .unavailable(.noActiveTurn) }
+        return isTurnInFlight ? .available : .unavailable(.noActiveTurn)
+    }
+
+    /// Adds to the turn in flight.
+    ///
+    /// The wire shape is an ordinary user message — there is no separate steer verb. What makes
+    /// it a steer rather than a queued turn is only that the CLI is busy when it arrives:
+    /// measured against 2.1.223 it goes `queued` → `started` at the instant the next tool result
+    /// lands, joins that turn, and settles under the same terminal event.
+    ///
+    /// Turn state is deliberately untouched. A steer opens no turn, so `turnStartedAt` keeps
+    /// timing the turn it joined and `isTurnInFlight` was already true.
+    @discardableResult
+    func steer(_ prompt: ConversationPrompt, identifiedBy id: ConversationMessageID) -> Bool {
+        guard steerAvailability.isAvailable else { return false }
+        return writeUserMessage(prompt.transportText, identifiedBy: id)
+    }
+
+    /// Stops the running turn and everything it started.
+    ///
+    /// Children first, then the parent. Interrupting only the parent leaves backgrounded shells
+    /// and subagents running — and Stop is reached for precisely when a fleet has run away, so
+    /// the case where this matters most is the case where the parent-only version does least.
+    ///
+    /// Each child stop is best-effort and independently bounded by the control channel's own
+    /// timeout, and the parent interrupt runs whatever they answered: one wedged child must not
+    /// strand the rest or hold up the thing the user actually pressed.
+    func interrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        guard canInterrupt else {
+            completion(.failed(reason: L10n.string("There is nothing running to stop.")))
+            return
+        }
+
+        didRequestInterrupt = true
+
+        let tasks = liveTaskIDs
+        guard !tasks.isEmpty else {
+            sendInterrupt(completion: completion)
+            return
+        }
+
+        var remaining = tasks.count
+        for task in tasks {
+            sendControl(subtype: ClaudeControlRequest.stopTask, body: ["task_id": task]) {
+                [weak self] _ in
+                remaining -= 1
+                guard remaining == 0 else { return }
+                self?.sendInterrupt(completion: completion)
+            }
+        }
+    }
+
+    private func sendInterrupt(completion: @escaping @MainActor (InterruptReceipt) -> Void) {
+        sendControl(subtype: ClaudeControlRequest.interrupt, body: [:]) { [weak self] result in
+            switch result {
+            case .success(let response):
+                completion(self?.receipt(from: response) ?? .acknowledged)
+            case .failure(let error):
+                // The turn may well have ended on its own between the press and the write, so
+                // the flag is cleared: leaving it set would relabel the *next* failure as a stop.
+                self?.didRequestInterrupt = false
+                completion(.failed(reason: error.localizedDescription))
+            }
+        }
+    }
+
+    /// Reads the interrupt's receipt.
+    ///
+    /// `still_queued` is only meaningful when the CLI advertised `interrupt_receipt_v1` on
+    /// `system/init`. Without it an empty payload means "this build says nothing", which must not
+    /// be read as "nothing survived" — so it answers `.acknowledged` and the outbox keeps what it
+    /// is holding.
+    private func receipt(from response: ControlResponse) -> InterruptReceipt {
+        guard advertisedCapabilities.contains(ClaudeStreamDefaults.interruptReceiptCapability),
+              let payload = response.payload,
+              let queued = payload["still_queued"] as? [Any] else {
+            return .acknowledged
+        }
+        return .reported(stillQueued: queued.compactMap { entry in
+            (entry as? String).flatMap(ConversationMessageID.init(uuidString:))
+        })
+    }
+
+    /// Drops a message the CLI has been handed but has not started.
+    ///
+    /// Used only for a message already on the wire. Anything still in Threading's own outbox is
+    /// removed there, without the provider ever hearing about it.
+    func cancelQueuedMessage(
+        _ id: ConversationMessageID,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        sendControl(
+            subtype: ClaudeControlRequest.cancelAsyncMessage,
+            body: ["uuid": id.wireValue]
+        ) { result in
+            guard case .success(let response) = result else {
+                completion(false)
+                return
+            }
+            // "cancelled=false means the message was not in the queue (already dequeued or
+            // never enqueued)" — the CLI's own words, and the answer to the race where the user
+            // clicks remove as the message begins.
+            completion(response.payload?["cancelled"] as? Bool ?? false)
         }
     }
 
     /// Ends the conversation. Closing stdin is the graceful route — the CLI finishes its
     /// current turn and exits on end-of-input.
     func finish() {
-        try? inputPipe?.fileHandleForWriting.close()
-        inputPipe = nil
+        try? input?.close()
+        input = nil
         onSendAvailabilityChange?()
     }
 
@@ -311,10 +468,12 @@ final class ClaudeStreamSession:
         }
     }
 
-    /// Toggles Claude Code's fast mode for the rest of the conversation. Fast mode is off by
-    /// default in this transport and only engages on an Opus 4.7/4.8 model, so a `.success` here
-    /// means the flag was accepted — not that fast mode is actively drawing, which the account's
-    /// subscription, usage credits and org policy still gate.
+    /// Toggles Claude Code's fast mode for the rest of the conversation. Threading's startup
+    /// policy may already have set the same value through `--settings`; this control request
+    /// restates it for the live transport and carries later per-chat changes. Fast only engages
+    /// on a supported Opus model, so a `.success` here means the flag was accepted — not that
+    /// fast mode is actively drawing, which the account's subscription, usage credits and org
+    /// policy still gate.
     func setFastMode(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
         let body: [String: Any] = ["settings": ["fastMode": enabled]]
         sendControl(subtype: ClaudeControlRequest.applyFlagSettings, body: body) { result in
@@ -366,7 +525,7 @@ final class ClaudeStreamSession:
         body: [String: Any],
         completion: @escaping (Result<ControlResponse, Error>) -> Void
     ) {
-        guard isRunning, let inputPipe else {
+        guard isRunning, let input else {
             completion(.failure(ClaudeControlError.notRunning))
             return
         }
@@ -380,7 +539,7 @@ final class ClaudeStreamSession:
         }
 
         do {
-            try inputPipe.fileHandleForWriting.write(contentsOf: data)
+            try input.write(contentsOf: data)
         } catch {
             completion(.failure(ClaudeControlError.writeFailed(error.localizedDescription)))
             return
@@ -435,6 +594,14 @@ final class ClaudeStreamSession:
                 continue
             }
 
+            // The provider's own answer about a message we named. Also transport rather than
+            // content: it says where a message has got to, not what was said.
+            if let lifecycle = ClaudeMessageLifecycleRecord.parse(line) {
+                onMessageLifecycle?(lifecycle.id, lifecycle.state)
+                continue
+            }
+
+            updateAdvertisedCapabilities(from: line)
             updateComposerCapabilities(from: line)
 
             HookOutcomeLog.note(line: line, sessionID: sessionID)
@@ -452,11 +619,38 @@ final class ClaudeStreamSession:
 
             switch StreamEvent.parse(line) {
             case .events(let events):
-                for event in events { onEvent?(completingTurnMetrics(in: event)) }
+                for event in events {
+                    noteBackgroundWork(in: event)
+                    onEvent?(completingTurnMetrics(in: event))
+                }
             case .malformed:
                 parseDiagnostics.recordMalformedLine(provider: "Claude")
             }
         }
+    }
+
+    /// Keeps the list Stop stops.
+    ///
+    /// `background_tasks_changed` restates the whole in-flight set every time, so this is an
+    /// assignment rather than an accumulation. Positional placeholders are dropped: they stand
+    /// for an entry the CLI gave no `task_id`, and there is no such task to stop.
+    private func noteBackgroundWork(in event: StreamEvent) {
+        guard case .backgroundWork(let inFlight) = event else { return }
+        liveTaskIDs = inFlight.map(\.id).filter { !$0.hasPrefix("#") }
+    }
+
+    /// Records what this build of the CLI says it can do.
+    ///
+    /// Capabilities are read once from `system/init` rather than probed, and re-read on every
+    /// init because the CLI emits a fresh one after an interrupt.
+    private func updateAdvertisedCapabilities(from line: String) {
+        guard line.contains("\"capabilities\""),
+              let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["type"] as? String == "system",
+              object["subtype"] as? String == "init",
+              let names = object["capabilities"] as? [String] else { return }
+        advertisedCapabilities = Set(names)
     }
 
     private func receivedError(_ chunk: Data) {
@@ -469,10 +663,10 @@ final class ClaudeStreamSession:
         guard isRunning else { return }
 
         isRunning = false
-        (process?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
-        (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        process?.standardOutput.readabilityHandler = nil
+        process?.standardError.readabilityHandler = nil
         process = nil
-        inputPipe = nil
+        input = nil
         pendingPrompt = nil
         onSendAvailabilityChange?()
 
@@ -489,7 +683,7 @@ final class ClaudeStreamSession:
             if !diagnostics.isEmpty {
                 onEvent?(completingTurnMetrics(in: .turnFinished(
                     text: diagnostics,
-                    isError: true,
+                    outcome: .failed,
                     metrics: .empty
                 )))
             }
@@ -501,7 +695,7 @@ final class ClaudeStreamSession:
     /// Claude supplies its own `duration_ms` on an ordinary result. The monotonic local clock
     /// fills failures and protects against a future result shape omitting it.
     private func completingTurnMetrics(in event: StreamEvent) -> StreamEvent {
-        guard case .turnFinished(let text, let isError, let metrics) = event else {
+        guard case .turnFinished(let text, let outcome, let metrics) = event else {
             return event
         }
 
@@ -511,13 +705,32 @@ final class ClaudeStreamSession:
         turnStartedAt = nil
         isTurnInFlight = false
         pendingPrompt = nil
+
+        let settled = self.outcome(for: outcome)
         onSendAvailabilityChange?()
 
         return .turnFinished(
-            text: text,
-            isError: isError,
+            text: settled == .stopped ? nil : text,
+            outcome: settled,
             metrics: metrics.filling(duration: duration, effort: effort)
         )
+    }
+
+    /// Restates the wire's outcome with the one fact the wire does not carry: whether *we* asked.
+    ///
+    /// Claude answers an interrupt with `result` / `subtype: "error_during_execution"`, which is
+    /// also what a genuine execution fault produces — the parser therefore cannot tell them
+    /// apart and honestly reports `.failed` (see `StreamEvent` `case "result"`). The session
+    /// can: it sent the `interrupt` control request, so a failure arriving while that request is
+    /// outstanding is the one it asked for.
+    ///
+    /// The flag is cleared here rather than on the control response, because the response is
+    /// acknowledgement and this event is completion — measured at 10ms apart, always in that
+    /// order. Clearing on the response would leave the terminal event to be read as a failure.
+    private func outcome(for wire: TurnOutcome) -> TurnOutcome {
+        defer { didRequestInterrupt = false }
+        guard didRequestInterrupt, wire == .failed else { return wire }
+        return .stopped
     }
 
     // MARK: - Composer Capabilities
@@ -699,6 +912,52 @@ enum ClaudeStreamDefaults {
     /// The control channel answers in milliseconds; this only bounds the wait on a reply that
     /// never comes, so a completion cannot be stranded.
     static let controlResponseTimeout: TimeInterval = 5
+
+    /// The `system/init` capability that promises an interrupt answers with `still_queued`.
+    /// Without it the same request succeeds and names nothing, which is a different fact.
+    static let interruptReceiptCapability = "interrupt_receipt_v1"
+
+    /// The `system/init` capability that promises `command_lifecycle` records for a message sent
+    /// with a `uuid`.
+    static let messageLifecycleCapability = "msg_lifecycle_v1"
+}
+
+// MARK: - Message Lifecycle Wire
+
+/// One `command_lifecycle` line: where a message we named has got to.
+///
+/// Measured against CLI 2.1.223, gated behind the `msg_lifecycle_v1` capability:
+/// `{"type":"command_lifecycle","command_uuid":"…","state":"queued|started|completed",
+///   "uuid":"…","session_id":"…"}`. `command_uuid` is the value *we* put on the user envelope;
+/// the sibling `uuid` is the CLI's own record id and is deliberately ignored.
+struct ClaudeMessageLifecycleRecord {
+    let id: ConversationMessageID
+    let state: MessageLifecycleState
+
+    /// Nil for anything that is not a lifecycle record, so the caller falls through to the
+    /// ordinary event parser. The substring guard keeps the JSON parse off the hot path.
+    static func parse(_ line: String) -> ClaudeMessageLifecycleRecord? {
+        guard line.contains("\"command_lifecycle\"") else { return nil }
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["type"] as? String == "command_lifecycle",
+              let raw = object["command_uuid"] as? String,
+              let id = ConversationMessageID(uuidString: raw),
+              let state = state(named: object["state"] as? String) else { return nil }
+        return ClaudeMessageLifecycleRecord(id: id, state: state)
+    }
+
+    /// An unrecognised state is dropped rather than guessed at. A queue row that keeps saying
+    /// what it last knew is honest; one that invents a transition is not.
+    private static func state(named name: String?) -> MessageLifecycleState? {
+        switch name {
+        case "queued": .handedOver
+        case "started": .started
+        case "completed": .completed
+        case "cancelled", "canceled": .cancelled
+        default: nil
+        }
+    }
 }
 
 // MARK: - Capability Protocols
@@ -748,6 +1007,19 @@ enum ClaudeControlRequest {
     static let setPermissionMode = "set_permission_mode"
     static let applyFlagSettings = "apply_flag_settings"
     static let initialize = "initialize"
+
+    /// "Interrupts the currently running conversation turn", in the CLI's own words. Measured
+    /// against 2.1.223: answered in ~10ms, settles the turn as `error_during_execution`, and
+    /// leaves the process alive to take the next one.
+    static let interrupt = "interrupt"
+
+    /// "Drops a pending async user message from the command queue by uuid. No-op if already
+    /// dequeued for execution." The provider-side counterpart to removing a queued row.
+    static let cancelAsyncMessage = "cancel_async_message"
+
+    /// Stops one background task by id. Reached before `interrupt`, because interrupting the
+    /// parent turn leaves its children running.
+    static let stopTask = "stop_task"
 
     /// `{"type":"control_request","request_id":"…","request":{"subtype":"…", …body}}` plus a
     /// trailing newline, matching the one-object-per-line envelope the turns use.

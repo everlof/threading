@@ -276,7 +276,7 @@ enum GlobalSessionScan {
                         kind: .claude,
                         accountHandle: account.handle,
                         title: title,
-                        lastActiveAt: SessionImporter.modificationDate(of: url)
+                        lastActiveAt: SessionImporter.lastActivity(at: url)
                     )
                     return (session, cwd)
                 })
@@ -355,7 +355,7 @@ enum GlobalSessionScan {
                     kind: .codex,
                     accountHandle: account.handle,
                     title: title,
-                    lastActiveAt: SessionImporter.modificationDate(of: url)
+                    lastActiveAt: SessionImporter.lastActivity(at: url)
                 )
                 return (session, header.cwd)
             })

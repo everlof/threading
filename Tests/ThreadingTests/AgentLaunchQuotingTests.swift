@@ -134,6 +134,68 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(plan.arguments.count, 3, "the shell was handed more than one command")
     }
 
+    /// The rename must not force a rewrite of already-approved Codex hook text. Both names
+    /// therefore carry the same routing values, while the permission scope stays absent from a
+    /// terminal launch and present under both names on a native launch.
+    func testHookEnvironmentKeepsPreRenameAliasesEquivalent() throws {
+        let session = AgentSession(kind: .codex, title: "t")
+        let terminal = AgentLauncher.hookEnvironmentWords(
+            for: session,
+            brokersPermissions: false,
+            port: 43210,
+            includesLegacyAliases: true
+        )
+
+        func value(for key: String, in words: [String]) throws -> String {
+            let prefix = "\(key)="
+            let word = try XCTUnwrap(words.first { $0.hasPrefix(prefix) })
+            return String(word.dropFirst(prefix.count))
+        }
+
+        XCTAssertEqual(try value(for: MCPDefaults.portEnvironmentKey, in: terminal), "43210")
+        XCTAssertEqual(
+            try value(for: MCPDefaults.legacyPortEnvironmentKey, in: terminal),
+            try value(for: MCPDefaults.portEnvironmentKey, in: terminal)
+        )
+        XCTAssertEqual(
+            try value(for: MCPDefaults.legacySessionTokenEnvironmentKey, in: terminal),
+            try value(for: MCPDefaults.sessionTokenEnvironmentKey, in: terminal)
+        )
+        XCTAssertFalse(terminal.contains { $0.hasPrefix("\(MCPDefaults.brokerEnvironmentKey)=") })
+        XCTAssertFalse(terminal.contains {
+            $0.hasPrefix("\(MCPDefaults.legacyBrokerEnvironmentKey)=")
+        })
+
+        let native = AgentLauncher.hookEnvironmentWords(
+            for: session,
+            brokersPermissions: true,
+            port: 43210,
+            includesLegacyAliases: true
+        )
+        XCTAssertEqual(try value(for: MCPDefaults.brokerEnvironmentKey, in: native), "1")
+        XCTAssertEqual(try value(for: MCPDefaults.legacyBrokerEnvironmentKey, in: native), "1")
+
+        let optedOut = AgentLauncher.hookEnvironmentWords(
+            for: session,
+            brokersPermissions: true,
+            port: 43210,
+            includesLegacyAliases: false
+        )
+        XCTAssertFalse(optedOut.contains {
+            $0.hasPrefix("\(MCPDefaults.legacyPortEnvironmentKey)=")
+        })
+        XCTAssertFalse(optedOut.contains {
+            $0.hasPrefix("\(MCPDefaults.legacySessionTokenEnvironmentKey)=")
+        })
+        XCTAssertFalse(optedOut.contains {
+            $0.hasPrefix("\(MCPDefaults.legacyBrokerEnvironmentKey)=")
+        })
+    }
+
+    func testHostedLaunchPlanTestsCannotMaintainTheDevelopersCodexHooks() {
+        XCTAssertFalse(AgentLauncher.mayMaintainCodexHookConfiguration)
+    }
+
     func testClaudeEffortIsPinnedOnTerminalAndNativeLaunches() throws {
         let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
         let session = AgentSession(

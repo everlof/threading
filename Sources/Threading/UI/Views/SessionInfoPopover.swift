@@ -61,7 +61,7 @@ final class SessionInfoPopoverViewController: NSViewController {
                 handoffLine = nil
             }
 
-            let project = ProjectStore.shared.project(forSessionID: session.id)
+            let project = ProjectStore.shared.executionProject(forSessionID: session.id)
             let folderPath = project?.folderPath
             workTarget = project.map {
                 .session(
@@ -93,6 +93,17 @@ final class SessionInfoPopoverViewController: NSViewController {
             case .idle:
                 stateText = SessionPopoverDefaults.runningState
                 stateSymbol = SessionPopoverDefaults.runningSymbol
+            case .limitReached:
+                // Read from what has already been scanned rather than re-read here: the card
+                // is built while the pointer rests on a row, and the mark it is explaining was
+                // raised by the same reading. A session whose stop is not in memory still says
+                // it stopped — the state is the row's, the hint is a detail.
+                let hint = project.flatMap {
+                    ObservedUsageLimit.known(for: session, in: $0)?.resetHint
+                }
+                stateText = hint.map(SessionPopoverDefaults.limitState(resetHint:))
+                    ?? SessionPopoverDefaults.limitState
+                stateSymbol = SessionPopoverDefaults.limitSymbol
             }
         }
     }
@@ -330,6 +341,17 @@ enum SessionPopoverDefaults {
     static let waitingSymbol = "questionmark.circle"
     static var finishedState: String { L10n.string("Finished · not yet seen") }
     static let finishedSymbol = "checkmark.circle"
+    static var limitState: String { L10n.string("Stopped · usage limit reached") }
+    static let limitSymbol = "exclamationmark.triangle"
+
+    /// The provider's own words about when it lifts, appended to the state line.
+    ///
+    /// Quoted rather than reformatted: Claude states a wall clock in the *account's* zone with
+    /// no date (`1:20pm (Europe/Rome)`), and rewriting that into the Mac's locale would produce
+    /// a time the provider never promised. See `UsageLimitStop`.
+    static func limitState(resetHint: String) -> String {
+        L10n.format("Stopped · usage limit resets %@", resetHint)
+    }
 
     static func worktreeBranchLabel(_ branch: String, _ worktree: String) -> String {
         "\(branch) · worktree \(worktree)"

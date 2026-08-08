@@ -578,6 +578,13 @@ launch reaches an account other than the default. Reading it off `AgentKind` mea
 arrives already covered. What the terminal path adds on top of this — the colour and pager claims,
 which are about a stream rather than a run — is in [`themes.md`](themes.md).
 
+The MCP routing variables are the deliberate exception to stripping an inherited agent
+identity: `AgentLauncher` creates them for the new child after filtering. With the hook
+integration enabled it exports both the current `THREADING_*` names and their pre-rename
+`SKALMAN_*` aliases with identical values, so a Codex hook already trusted by the hash of its old
+command keeps working without a rewrite. The aliases are per-process routing compatibility, not
+inherited state from the parent.
+
 Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok does not persist
 that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`
 polls the supported `grok sessions list` command and marks it resumable only after it appears.
@@ -824,6 +831,59 @@ A restart the user asked for is no longer one of the crashes. The reset flows le
 quit path, so the marker survived them and Reset Settings — which does not move the support
 directory — read as an unclean exit here: held workspace, crash notice, for a button the user had
 just pressed. `PreviousLaunchOutcome.intentional` restores in full and says nothing.
+
+### Startup speed, per runtime and per conversation
+
+Fast already had two per-conversation delivery mechanisms and no app-wide starting decision.
+That gap mattered most for Codex: a user's `service_tier = "fast"` was inherited by every
+Threading session, so the only way to stop paying for it was to change the account's own config
+or switch each Native chat after it had started. Terminal Claude had the mirror-image hole: the
+session record could hold `fastMode`, but only the Native control channel ever read it.
+
+`AgentStartupSpeed` is the app-wide, per-runtime policy: **Agent's Setting**, **Standard**, or
+**Fast**. Its two keys are deliberately unseeded. An absent or unrecognised value resolves to
+Agent's Setting and writes no provider override, preserving every existing installation's
+behavior. The other two remain explicit all the way to the provider: Standard is `false` for
+Claude and `service_tier="default"` for Codex, because omission would immediately inherit an
+account configured for Fast again.
+
+`AgentLauncher.fastModeAtStartup` is the one resolution order: the conversation's persisted
+`AgentSession.fastMode`, then `AppSettings.startupSpeed(for:)`, then nil. A per-conversation
+choice therefore survives a later default change; a conversation that never chose follows the
+current default on its next launch or resume. Grok and OpenCode have no measured Fast mechanism,
+so the settings store returns Agent's Setting and the resolver returns nil for them rather than
+letting a future runtime borrow another provider's key.
+
+The opening draft and Native reply composer expose that persistence as the same three rows:
+**Follow General Setting**, **Standard**, and **Fast**. The first is a real stored choice, not an
+alias for whatever General says today; it remains nil so a later General change still reaches the
+conversation. An immediate draft carries the optional value through the composer delegate into
+`ProjectStore`, and `ScheduledSessionPlan` freezes it beside model and effort for a delayed start.
+The chip title resolves the inheritance chain so it says what the chat will use, while the menu
+still marks whether that answer is inherited or pinned.
+
+Delivery covers both surfaces:
+
+- Claude writes `fastMode` into the same per-session `--settings` JSON as its hooks and Remote
+  Control on both Terminal and Native launches. The file is still written when hooks are off or
+  the listener failed, because dropping an explicit Standard/Fast choice due to an unrelated
+  telemetry failure would undo the user's setting. Native restates the value through
+  `apply_flag_settings` once the stream is ready, keeping the live process aligned with the
+  launch layer. A known non-Opus model is forced Standard rather than letting Claude's Fast
+  setting silently switch away from an explicit model choice; an unnamed model honours Fast
+  because the user's speed choice is the only answer available.
+- Codex maps the resolved value onto the launch configuration for both its TUI and app-server.
+  Fast also enables `features.fast_mode`; Standard sends the explicit `default` service tier.
+  Native per-chat changes continue to ride `turn/start`, so they take effect on the next turn
+  without restarting the app-server.
+
+The reply chip's effective reading follows the same precedence (conversation, app default,
+account/catalog, runtime fallback). Choosing Follow General can apply an explicit General
+Standard/Fast value through the same live or next-turn channel as a pinned value. If General is
+Agent's Setting, there is no provider-neutral live reset operation; the record returns to
+inheritance, a notice says that the running speed is unchanged, and the provider setting takes
+over on the next start. The General setting remains a startup policy: changing it does not rewrite
+a running session out from under an in-flight turn.
 
 ### Permission mode, per conversation
 

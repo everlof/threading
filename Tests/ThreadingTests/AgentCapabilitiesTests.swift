@@ -40,6 +40,9 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("terminalThreadingBridge", .terminalThreadingBridge),
             ("openingFileAttachments", .openingFileAttachments),
             ("headlessResearch", .headlessResearch),
+            ("transcriptPermissionModeRecord", .transcriptPermissionModeRecord),
+            ("anchoredUsageWindow", .anchoredUsageWindow),
+            ("transcriptUsageLimitRecord", .transcriptUsageLimitRecord),
             ("providerTitleMetadata", .providerTitleMetadata),
             ("providerArchive", .providerArchive)
         ]
@@ -91,15 +94,30 @@ final class AgentCapabilitiesTests: XCTestCase {
     }
 
     /// A runtime whose transcript Threading reads for a title must have a transcript reader in
-    /// the first place. `.transcriptTitles` and `.transcriptModelRecord` are separate facts —
-    /// a runtime could record one and not the other — but both are readings of the same file,
-    /// so neither may be claimed by a runtime with no transcript to read.
+    /// the first place. `.transcriptTitles`, `.transcriptModelRecord` and
+    /// `.transcriptPermissionModeRecord` are separate facts — a runtime could record one and not
+    /// the others — but all three are readings of the same file, so none may be claimed by a
+    /// runtime with no transcript to read.
     func testTranscriptCapabilitiesImplyAResumableTranscript() {
         for kind in AgentKind.allCases where kind.supports(.transcriptTitles)
-            || kind.supports(.transcriptModelRecord) {
+            || kind.supports(.transcriptModelRecord)
+            || kind.supports(.transcriptPermissionModeRecord) {
             XCTAssertTrue(
                 kind.supports(.resume),
                 "\(kind) reads a transcript it has no identifier for"
+            )
+        }
+    }
+
+    /// A runtime whose posture can be observed must also have a posture to observe: reading a
+    /// mode back out of a transcript is only meaningful for a runtime whose modes Threading
+    /// speaks in the first place. The reverse does not hold — Codex takes the vocabulary on its
+    /// launch line and records nothing to read back.
+    func testAnObservablePostureImpliesAPermissionVocabulary() {
+        for kind in AgentKind.allCases where kind.supports(.transcriptPermissionModeRecord) {
+            XCTAssertTrue(
+                kind.supports(.permissionModes),
+                "\(kind) records a posture it has no vocabulary for"
             )
         }
     }
@@ -311,6 +329,88 @@ final class AgentCapabilitiesTests: XCTestCase {
 
     // MARK: - Fast Mode Semantics
 
+    @MainActor
+    func testStartupSpeedDefaultsToTheAgentAndPersistsSeparatelyPerRuntime() throws {
+        let suite = "AgentStartupSpeed.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.startupSpeed(for: .claude), .agentSetting)
+        XCTAssertEqual(settings.startupSpeed(for: .codex), .agentSetting)
+
+        settings.setStartupSpeed(.standard, for: .claude)
+        settings.setStartupSpeed(.fast, for: .codex)
+
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.startupSpeed(for: .claude), .standard)
+        XCTAssertEqual(reloaded.startupSpeed(for: .codex), .fast)
+        XCTAssertEqual(reloaded.startupSpeed(for: .grok), .agentSetting)
+        XCTAssertEqual(reloaded.startupSpeed(for: .openCode), .agentSetting)
+    }
+
+    @MainActor
+    func testStartupSpeedResolvesSessionThenAppThenAgent() {
+        var codex = AgentSession.fixture(kind: .codex)
+        XCTAssertNil(
+            AgentLauncher.fastModeAtStartup(for: codex, defaultSpeed: .agentSetting)
+        )
+        XCTAssertEqual(
+            AgentLauncher.fastModeAtStartup(for: codex, defaultSpeed: .standard),
+            false
+        )
+        XCTAssertEqual(
+            AgentLauncher.fastModeAtStartup(for: codex, defaultSpeed: .fast),
+            true
+        )
+
+        codex.fastMode = false
+        XCTAssertEqual(
+            AgentLauncher.fastModeAtStartup(for: codex, defaultSpeed: .fast),
+            false,
+            "a conversation's choice must outrank the app-wide default"
+        )
+    }
+
+    /// Claude's settings switch can select Opus as a side effect. A speed default may choose a
+    /// tier, but it must not replace a model the user explicitly selected.
+    @MainActor
+    func testClaudeFastStartupDoesNotReplaceAnExplicitUnsupportedModel() {
+        let opus = AgentSession(kind: .claude, title: "Opus", model: "opus")
+        let sonnet = AgentSession(kind: .claude, title: "Sonnet", model: "sonnet")
+
+        XCTAssertEqual(
+            AgentLauncher.fastModeAtStartup(for: opus, defaultSpeed: .fast),
+            true
+        )
+        XCTAssertEqual(
+            AgentLauncher.fastModeAtStartup(for: sonnet, defaultSpeed: .fast),
+            false
+        )
+    }
+
+    func testAppStartupSpeedOutranksTheProviderDefaultInTheEffectiveReading() {
+        let session = AgentSession.fixture(kind: .codex)
+        XCTAssertEqual(
+            AgentModels.effectiveFastMode(
+                for: session,
+                model: nil,
+                account: nil,
+                startupSpeed: .standard
+            ),
+            false
+        )
+        XCTAssertEqual(
+            AgentModels.effectiveFastMode(
+                for: session,
+                model: nil,
+                account: nil,
+                startupSpeed: .fast
+            ),
+            true
+        )
+    }
+
     /// A live control-channel flag starts off until Threading sends it, so an unset choice is a
     /// known `false` rather than an unknown.
     func testUnsetFastModeIsOffForALiveControlChannel() {
@@ -451,6 +551,100 @@ final class AgentCapabilitiesTests: XCTestCase {
                 "\(kind) states different axes depending on the mode"
             )
         }
+    }
+
+    // MARK: - Usage Windows
+
+    /// A runtime whose window can be opened deliberately has a command that opens it, and one
+    /// whose window cannot is refused.
+    ///
+    /// The pairing is the point. `UsageWindowPoker` gates on the capability and never on a
+    /// runtime's name, so granting `.anchoredUsageWindow` to a fifth runtime with no branch in
+    /// `usageWindowPokeCommand` would produce a scheduler that fires every morning and silently
+    /// does nothing.
+    @MainActor
+    func testAPokeCommandExistsExactlyWhereTheWindowIsAnchored() {
+        for kind in AgentKind.allCases {
+            let account = AgentAccount(
+                provider: kind,
+                handle: .standard,
+                configPath: "/tmp/\(kind.rawValue)"
+            )
+            let command = AgentLauncher.usageWindowPokeCommand(kind: kind, account: account)
+
+            XCTAssertEqual(
+                command != nil,
+                kind.supports(.anchoredUsageWindow),
+                "\(kind) claims .anchoredUsageWindow: \(kind.supports(.anchoredUsageWindow)), "
+                    + "but a poke command \(command == nil ? "does not exist" : "exists")"
+            )
+        }
+    }
+
+    /// A poke reaches the login it was asked about, and carries nothing else.
+    ///
+    /// Both halves have cost something before. Routing is the reason the feature works at all —
+    /// a window belongs to an account, so a poke on the default login buys the named one
+    /// nothing. And the emptiness is what keeps it cheap: the run's reply is discarded, so any
+    /// tool catalogue or MCP server it loaded would be input tokens charged to the weekly limit
+    /// this feature exists to spend more carefully.
+    @MainActor
+    func testAPokeIsRoutedToItsAccountAndCarriesNoContext() throws {
+        let kind = try XCTUnwrap(AgentKind.allCases.first { $0.supports(.anchoredUsageWindow) })
+
+        let alternate = AgentAccount(
+            provider: kind,
+            handle: AccountHandle(storedName: "work"),
+            configPath: "/Users/somebody/.claude-work"
+        )
+        let routed = try XCTUnwrap(
+            AgentLauncher.usageWindowPokeCommand(kind: kind, account: alternate)
+        ).source
+
+        XCTAssertTrue(
+            routed.contains("\(kind.accountEnvironmentKey)=/Users/somebody/.claude-work"),
+            "a poke has to name the account whose window it is opening: \(routed)"
+        )
+
+        let standard = AgentAccount(provider: kind, handle: .standard, configPath: "/tmp/claude")
+        let unset = try XCTUnwrap(
+            AgentLauncher.usageWindowPokeCommand(kind: kind, account: standard)
+        ).source
+
+        XCTAssertTrue(
+            unset.contains("-u") && unset.contains(kind.accountEnvironmentKey),
+            "the default login is reached by unsetting the override: \(unset)"
+        )
+        XCTAssertFalse(
+            unset.contains("\(kind.accountEnvironmentKey)="),
+            "the default login is unset rather than pointed somewhere: \(unset)"
+        )
+        XCTAssertFalse(
+            unset.contains("--mcp-config"),
+            "a poke must load no MCP servers: \(unset)"
+        )
+    }
+
+    /// A poke on the wrong runtime is refused rather than routed with a mismatched key.
+    ///
+    /// `AccountID` pairs a provider with a handle, so an account and a kind that disagree can
+    /// only arrive from a caller that lost track of one of them. Building the command anyway
+    /// would export Claude's environment key at a Codex config directory.
+    @MainActor
+    func testAPokeRefusesAnAccountFromAnotherRuntime() throws {
+        let kind = try XCTUnwrap(AgentKind.allCases.first { $0.supports(.anchoredUsageWindow) })
+        let other = try XCTUnwrap(AgentKind.allCases.first { $0 != kind })
+
+        XCTAssertNil(
+            AgentLauncher.usageWindowPokeCommand(
+                kind: kind,
+                account: AgentAccount(
+                    provider: other,
+                    handle: .standard,
+                    configPath: "/tmp/other"
+                )
+            )
+        )
     }
 }
 

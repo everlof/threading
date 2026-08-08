@@ -284,6 +284,48 @@ final class ModelNameTests: XCTestCase {
         XCTAssertTrue(ModelName.scope("Haiku 4.5", meters: "claude-haiku-4-5-20251001"))
     }
 
+    // MARK: - Tiers
+
+    /// The ranking a model picker is ordered by. Anthropic's own tiering, which is also the order
+    /// of the list prices — so this is checkable against something outside the app.
+    func testTheTiersDescendFromTheMostCapable() {
+        XCTAssertEqual(
+            ModelName.Tier.allCases,
+            [.fable, .opus, .sonnet, .haiku],
+            "the tier order is the menu order; a reshuffle here reorders every model picker"
+        )
+    }
+
+    /// Every spelling of the same model answers the same tier. The id a CLI hands us is `fable`,
+    /// `claude-fable-5` or `claude-fable-5[1m]` depending on where it was read, and a tier that
+    /// matched only one of them would sort the other two as unranked.
+    func testEverySpellingOfAModelSharesItsTier() {
+        XCTAssertEqual(ModelName.tier(of: "fable"), .fable)
+        XCTAssertEqual(ModelName.tier(of: "claude-fable-5"), .fable)
+        XCTAssertEqual(ModelName.tier(of: "claude-fable-5[1m]"), .fable)
+        XCTAssertEqual(ModelName.tier(of: "CLAUDE-FABLE-5"), .fable)
+        XCTAssertEqual(ModelName.tier(of: "opus"), .opus)
+        XCTAssertEqual(ModelName.tier(of: "claude-opus-4-8"), .opus)
+        XCTAssertEqual(ModelName.tier(of: "claude-sonnet-4-6"), .sonnet)
+        XCTAssertEqual(ModelName.tier(of: "claude-haiku-4-5-20251001"), .haiku)
+    }
+
+    /// Mythos is Fable's tier: the same capabilities at the same price through a different
+    /// distribution, so a picker that ranked it apart would be describing the channel, not the
+    /// model.
+    func testMythosRanksWithFable() {
+        XCTAssertEqual(ModelName.tier(of: "claude-mythos-5"), .fable)
+    }
+
+    /// A model no tier names keeps a nil rank rather than being guessed into one — an
+    /// organisation's own grant sorted above Opus on a hunch would be worse than one left where
+    /// its source listed it.
+    func testAnUnknownModelHasNoTier() {
+        XCTAssertNil(ModelName.tier(of: "claude-quasar-9"))
+        XCTAssertNil(ModelName.tier(of: "gpt-5-codex"))
+        XCTAssertNil(ModelName.tier(of: ""))
+    }
+
     private func temporaryAccountDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-model-tests-\(UUID().uuidString)")
