@@ -92,11 +92,17 @@ extension ConversationViewController {
         isPreparingTurn = true
         refreshInputControl()
 
-        GitTurnBaselineStore.shared.prepareTurn(sessionID: sessionID) { [weak self] in
+        NativeGitTurnAdmission.admit(
+            sessionID: sessionID,
+            userTurnID: item.id.wireValue,
+            transport: { [weak self] _ in
+                self?.stream.send(item.prompt, identifiedBy: item.id) ?? false
+            }
+        ) { [weak self] admitted, _ in
             guard let self else { return }
             self.isPreparingTurn = false
 
-            guard self.stream.send(item.prompt, identifiedBy: item.id) else {
+            guard admitted else {
                 // The transport refused after all — it exited between the settle and here. The
                 // message goes back to the front of the queue rather than being lost.
                 self.outbox.reclaim(item.id)

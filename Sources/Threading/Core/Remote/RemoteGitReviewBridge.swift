@@ -26,7 +26,8 @@ enum RemoteGitReviewBridge {
         mode: RemoteGitReviewMode,
         completion: @escaping (RemoteGitReviewSnapshotDTO) -> Void
     ) {
-        guard let root = repositoryRoot(for: sessionID) else {
+        let ordinaryRoot = repositoryRoot(for: sessionID)
+        guard ordinaryRoot != nil || mode == .lastTurn else {
             completion(snapshot(
                 mode: mode,
                 message: Failure.notRepository.localizedDescription,
@@ -46,7 +47,8 @@ enum RemoteGitReviewBridge {
         case .branch:
             request = .branch
         case .lastTurn:
-            guard let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: sessionID) else {
+            guard let checkpoint = GitTurnBaselineStore.shared
+                .latestCheckpoint(forSessionID: sessionID) else {
                 let message: String
                 let localizationKey: String
                 if GitTurnBaselineStore.shared.captureFailure(forSessionID: sessionID) != nil {
@@ -66,7 +68,34 @@ enum RemoteGitReviewBridge {
                 ))
                 return
             }
-            request = .lastTurn(baseline)
+            guard checkpoint.canPresentDiff else {
+                completion(snapshot(
+                    mode: mode,
+                    message: checkpoint.failureDescription
+                        ?? L10n.string("This turn did not reach a complete checkpoint."),
+                    localizationKey: "This turn did not reach a complete checkpoint."
+                ))
+                return
+            }
+            request = .turnCheckpoint(checkpoint)
+        }
+
+        let root: URL?
+        if case .turnCheckpoint(let checkpoint) = request {
+            root = GitTurnBaselineStore.shared.repositoryRoot(
+                for: checkpoint,
+                preferredPath: ordinaryRoot?.path
+            )
+        } else {
+            root = ordinaryRoot
+        }
+        guard let root else {
+            completion(snapshot(
+                mode: mode,
+                message: Failure.notRepository.localizedDescription,
+                localizationKey: "Not a git repository."
+            ))
+            return
         }
 
         GitReviewReader.diff(request, in: root) { result in

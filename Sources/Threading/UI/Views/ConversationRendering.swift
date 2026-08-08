@@ -128,7 +128,10 @@ extension ConversationViewController {
                 foldTurn(startingAt: startIndex, outcome: .completed)
             }
             if !isReplaying { noteMinimapTurnSettled(at: startIndex) }
-            appendChangedFilesCard(forTurnStartingAt: startIndex)
+            appendChangedFilesCard(
+                forTurnStartingAt: startIndex,
+                checkpointID: settlingGitCheckpointID
+            )
 
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
@@ -278,16 +281,19 @@ extension ConversationViewController {
     /// Asks git what the settled turn changed and, when the answer is non-empty, leaves the
     /// summary card at the end of the turn.
     ///
-    /// Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
-    /// against it would attribute later work to an old exchange. The diff reuses the Last Turn
-    /// machinery — the same immutable tree baseline, the same reader — so the card and the
-    /// review pane cannot disagree about what a turn touched.
-    func appendChangedFilesCard(forTurnStartingAt startIndex: Int) {
+    /// Live turns bind the card to the exact durable checkpoint handed through their completion
+    /// boundary. Replayed transcripts do not expose stable provider row ids, so historical
+    /// selection after relaunch lives in Git Review rather than guessing an association by row.
+    func appendChangedFilesCard(
+        forTurnStartingAt startIndex: Int,
+        checkpointID: GitTurnCheckpointID?
+    ) {
         guard !isReplaying,
               !changedFilesCardTurns.contains(startIndex),
-              let project = ProjectStore.shared.executionProject(forSessionID: agentSession.id),
-              let root = GitInfo.repositoryRoot(for: project.folderPath),
-              let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: agentSession.id)
+              let checkpointID,
+              let checkpoint = GitTurnBaselineStore.shared.checkpoint(id: checkpointID),
+              checkpoint.isComplete,
+              let root = GitTurnBaselineStore.shared.repositoryRoot(for: checkpoint)
         else { return }
 
         changedFilesCardTurns.insert(startIndex)
@@ -297,7 +303,7 @@ extension ConversationViewController {
         // belongs to the turn that earned it, not to the bottom of the conversation.
         let anchor = presentationItems.last?.id
 
-        GitReviewReader.diff(.lastTurn(baseline), in: root) { [weak self] result in
+        GitReviewReader.diff(.turnCheckpoint(checkpoint), in: root) { [weak self] result in
             guard let self, case .success(let files) = result, !files.isEmpty else { return }
 
             let tree = ChangedFilesTree.build(from: files.map {
@@ -309,6 +315,7 @@ extension ConversationViewController {
             self.insertChangedFilesCard(
                 tree,
                 previews: ChangedFileDiffPreview.previews(from: files),
+                checkpointID: checkpointID,
                 after: anchor
             )
         }
@@ -317,6 +324,7 @@ extension ConversationViewController {
     private func insertChangedFilesCard(
         _ tree: ChangedFilesTree,
         previews: [String: ChangedFileDiffPreview],
+        checkpointID: GitTurnCheckpointID,
         after anchor: PresentationID?
     ) {
         let cardID = PresentationID.retained(UUID())
@@ -325,16 +333,15 @@ extension ConversationViewController {
             previews: previews,
             onViewDiff: { [weak self] in
                 guard let self else { return }
-                self.delegate?.conversationDidRequestTurnDiff(self)
+                self.delegate?.conversation(
+                    self,
+                    didRequestTurnDiff: checkpointID
+                )
             },
             onHeightChange: { [weak self] in
                 self?.notePresentationHeightChanged(cardID)
             }
         )
-
-        // Only the newest card's View diff still describes what the Last Turn scope shows.
-        latestChangedFilesCard?.hideViewDiff()
-        latestChangedFilesCard = card
 
         let position = anchor
             .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }

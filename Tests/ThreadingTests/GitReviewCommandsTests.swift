@@ -110,6 +110,19 @@ final class GitReviewCommandsTests: XCTestCase {
         )
     }
 
+    func testTurnCheckpointRefCommandsNameOneExactRef() {
+        let ref = "refs/threading/turn-checkpoints/v1/session/checkpoint/before"
+        XCTAssertEqual(
+            GitReviewCommands.updateRef(ref, to: "tree"),
+            ["update-ref", ref, "tree", ""]
+        )
+        XCTAssertEqual(GitReviewCommands.deleteRef(ref), ["update-ref", "-d", ref])
+        XCTAssertEqual(
+            GitReviewCommands.checkpointRefs(),
+            ["for-each-ref", "--format=%(refname)", GitTurnCheckpointRefs.prefix]
+        )
+    }
+
     func testCommonFlagsNeverTakeLocks() {
         XCTAssertEqual(
             GitReviewCommands.common,

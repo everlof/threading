@@ -140,9 +140,11 @@ be edited again before the first commit, and the regular full-working-copy mode 
 latest bytes.
 
 The menu states the endpoints under every name — HEAD→working tree, index→working tree,
-HEAD→index, turn start→working tree, merge base→working tree, or committed history — because
+HEAD→index, turn start→turn end, merge base→working tree, or committed history — because
 "staged" and "unstaged" alone are easy to read as filters rather than comparisons. Last Turn
-renames itself **This Turn** while the session has a turn in flight. Mobile exposes the five
+renames itself **This Turn** while its selected turn is in flight. A second chip selects any
+retained **Turn N**, newest first; the changed-files card in each conversation turn opens that
+exact checkpoint instead of redirecting every old card to the newest one. Mobile exposes the five
 working-copy comparisons and defaults to Uncommitted too; Commits remains the desktop history
 navigator rather than pretending to be another compact diff mode.
 
@@ -167,33 +169,62 @@ in a freshly scaffolded project. Size-capped (256 KB), binary-sniffed by git's o
 heuristic. Last Turn does not synthesize: both of its endpoints are complete trees, so a file
 untracked at either boundary is an ordinary tree entry and git reports its exact bytes.
 
-**Last Turn's baseline is an immutable tree written through a private alternate index.** The
+**Each turn has two immutable trees written through a private alternate index.** The
 real index is copied only for its tracked-file roster; `GIT_INDEX_FILE=<temporary>` plus
 `git add -A -- .` overlays the exact worktree bytes and admits non-ignored untracked files,
-then `git write-tree` records the result without moving a ref or touching the checkout's index
-or worktree. A current tree is produced the same way when Last Turn is read, and the comparison
-is tree→tree. This closes the path-set hole of the former `stash create` baseline: modifying or
+then `git write-tree` records the result without touching the checkout's real index or worktree.
+The start and authoritative end trees are published at
+`refs/threading/turn-checkpoints/v1/<session UUID>/<checkpoint UUID>/{before,after}`. This is the
+only namespace the checkpoint store can create or delete, and every deletion validates the full
+shape again; branches, tags, remotes and every ref outside it are out of reach. The comparison is
+the recorded tree→tree pair, never a historical start against today's worktree. This closes both
+the temporal hole in the former in-memory Last Turn and the path-set hole of `stash create`:
+modifying or
 deleting a file that was already untracked at turn start is now visible, unchanged untracked
 files are absent, and unborn repositories work the same as repositories with commits.
 
 The snapshot is an **admission boundary**, not an activity-edge side effect. Native Chat holds
-provider transport until `GitTurnBaselineStore.prepareTurn` completes. Terminal
+provider transport until `GitTurnBaselineStore.prepareTurn` publishes `before`. Terminal
 `UserPromptSubmit`/turn-start hooks hold only that lifecycle HTTP response; the CLI cannot run
-the turn's first tool until the tree is stored. Other lifecycle hooks remain immediate. The
+the turn's first tool until the tree is stored. Completion is a barrier too: native Chat holds
+the provider's `turnFinished` event before applying it (and therefore before admitting a queued
+message), while terminal Stop/turn-finished holds its HTTP response until `after` is published.
+Stop is the provider's authoritative interactive-turn boundary even when it names work left
+running: later background bytes are not silently folded into this turn or the next. Other
+lifecycle hooks remain immediate. The
 later entering-working notification consumes the prepared edge instead of capturing again;
 an entering-working notification that arrives while preparation is still running consumes the
 in-flight edge as well, so terminal repaint inference cannot start a later second capture;
 an inferred terminal with hooks disabled still has the old entering-working path as a
 best-effort fallback. Answering an agent question from `awaitingUser` resumes the existing
-turn and keeps its original baseline. Captures run concurrently on their own queue, so neither
+turn and keeps its original start. Captures run concurrently on their own queue, so neither
 an open megabyte diff nor another session's slow checkout can delay turn admission. Starting a
-capture clears the previous baseline, and a failed
-capture records an explicit unavailable state rather than silently showing an older turn.
+capture always creates a new stable checkpoint identity; a failed capture records an explicit
+unavailable turn rather than silently showing an older one. A transition left at
+`capturingBefore`, `inProgress`, or `capturingAfter` across launch becomes **incomplete**, never
+complete by inference. Likewise, a reporting provider process that exits without its authoritative
+finish hook marks the active record incomplete; only non-reporting terminals retain the inferred
+idle-edge final capture as their necessarily best-effort fallback.
 
-In-memory only: the unreferenced tree is gc-prunable, and a persisted hash whose object has
-vanished is a worse answer after relaunch than "No turn recorded yet" — a pruned baseline is
-detected by `rev-parse --verify <hash>^{tree}` and reported as expired, not as an unrelated git
-failure.
+The ref makes the objects durable; `git-turn-checkpoints.json` makes their ownership and meaning
+durable. Each record connects project, logical and execution checkouts, repository and worktree
+identities, session, ordinal, stable native/provider turn ids, both refs and hashes, capture status,
+failure and timestamps. Reading proves that the current checkout has the recorded repository
+identity, each exact ref still exists, and it still resolves to the recorded tree. A missing or
+replaced ref is an explicit unavailable checkpoint — the loose object hash is not accepted as a
+fallback. Any current checkout of the same repository can read the pair, which is why a managed
+worktree's history remains readable through the logical checkout after disposal.
+
+Ref publication and collection are serialized per repository identity, not globally: two sessions
+sharing a repository have ordered ref transactions, while unrelated repositories never wait on one
+another. Retention keeps 50 records per session and 1,000 total. Overflow and permanent deletion
+remove exact recorded refs first and metadata after successful removal; an unavailable repository
+keeps the cleanup record so it is retryable. Archive/Restore retain both because the owning session
+still exists. Only permanent session/project deletion collects them. Normal startup also enumerates
+the private namespace in every reachable catalog repository and removes well-formed app refs that
+no metadata record owns. That reconciliation is what keeps retention bounded after metadata
+quarantine or an exit between the two halves of collection; it cannot name a branch, tag, remote,
+or any ref outside the private prefix.
 
 Rendering shares the `NativeDiffCore` model with edit tools, but not their view-tree shape.
 `DiffView` still gives a short conversation edit one AppKit row per line. Git Review uses
@@ -701,7 +732,7 @@ text, and its diff says more than a render of it would) becomes expandable, its 
 fade, difference, side by side). The bytes come from `GitReviewReader.endpointFilePair`, which
 states each mode's two endpoints as addresses one file can be read from — the same pairs the
 diff commands imply: HEAD→worktree, index→worktree, HEAD→index, merge-base→worktree,
-turn-baseline→worktree, `commit^`→`commit` — and titles the sides accordingly, so the captions
+turn-start→turn-end, `commit^`→`commit` — and titles the sides accordingly, so the captions
 beside the image say *which* two things are compared. A side git does not hold comes back nil rather
 than failing the pair: that is what added, deleted and untracked look like, and half a pair is
 still worth showing. Two accepted gaps, both from the parser's binary collapse

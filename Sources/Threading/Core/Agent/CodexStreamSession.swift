@@ -235,7 +235,10 @@ final class CodexStreamSession:
     }
 
     @discardableResult
-    func send(_ invocation: ComposerInvocation) -> Bool {
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool {
         guard composerCapabilities.contains(where: {
             $0.id == invocation.capability.id && $0.isEnabled
         }) else {
@@ -247,7 +250,8 @@ final class CodexStreamSession:
                 input: [
                     ["type": "text", "text": invocation.sourceText],
                     ["type": "skill", "name": skill.name, "path": skill.path]
-                ]
+                ],
+                messageID: id
             ))
         }
 

@@ -360,6 +360,28 @@ the editor back is not the user asking for the caret to move out of the middle o
 
 ## The Composer
 
+### Turn admission and completion checkpoints
+
+A native prompt is not placed on the provider wire immediately after the composer accepts it.
+`ConversationViewController` first mints the `ConversationMessageID`, asks
+`NativeGitTurnAdmission` to publish the repository's before checkpoint, and passes that same id to
+`stream.send(_:identifiedBy:)` from inside the gate. Direct sends and outbox hand-off use the
+identical path.
+If the transport refuses after preparation, the checkpoint is marked not admitted and collected;
+it cannot become a numbered conversation turn or be reused by the next attempt.
+
+The opposite boundary is equally ordered. A live `.turnFinished` event is held while the matching
+after checkpoint is captured, then applied to the timeline with that checkpoint id in scope. The
+changed-files card therefore binds to the exact turn that just settled, and an outbox message cannot
+start until the final tree exists. Transcript replay skips capture: replay describes an already
+finished provider history and must never manufacture new Git boundaries.
+
+Terminal sessions use the provider hook's stable `turn_id` when present. Their turn-start HTTP
+response is the admission fence and their authoritative turn-finished/Stop response is the
+completion fence, including a Stop that reports work left running. Activity inference remains a
+best-effort fallback for runtimes without hooks, but it creates its own honest record and never
+adopts the preceding turn's refs.
+
 The composer hangs from the pane's **bottom** edge — input below, room above, the shape every
 chat product has taught — and the room above holds a **hero**: the Threading mark over a
 greeting (`ComposerGreeting`). The greeting is deliberately inconsistent: when the calendar

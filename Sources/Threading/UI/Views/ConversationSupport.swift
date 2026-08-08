@@ -26,8 +26,11 @@ protocol ConversationViewControllerDelegate: AnyObject {
         didUpdateSelectedSubagent agent: SubagentTimeline.Agent
     )
 
-    /// The latest turn's changed-files card asked for its diff — Git Review's Last Turn scope.
-    func conversationDidRequestTurnDiff(_ controller: ConversationViewController)
+    /// A changed-files card asked for the immutable diff belonging to its exact turn.
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestTurnDiff checkpointID: GitTurnCheckpointID
+    )
 
     /// The handoff divider's direct source endpoint was chosen.
     func conversation(

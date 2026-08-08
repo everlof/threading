@@ -1,8 +1,9 @@
 import Foundation
 
 /// Checkout-preserving git operations for the review pane: diffs, status, history and turn
-/// snapshots. Snapshots write unreachable objects through a private alternate index; no
-/// operation here moves a ref or mutates the checkout's real index or worktree.
+/// snapshots. Snapshots use a private alternate index; durable turn endpoints are then published
+/// under Threading's private ref hierarchy. No operation mutates the checkout's real index or
+/// worktree.
 ///
 /// Everything runs `git` on a dedicated queue and completes on main — a branch diff can be
 /// megabytes, and neither spawning nor parsing belongs on the thread that draws. Every
@@ -23,6 +24,7 @@ enum GitReviewReader {
         case staged
         case branch
         case lastTurn(GitTurnBaseline)
+        case turnCheckpoint(GitTurnCheckpoint)
         case commit(hash: String)
     }
 
@@ -47,6 +49,12 @@ enum GitReviewReader {
         label: "codes.threading.git-summary",
         qos: .userInitiated
     )
+
+    /// Ref transactions are serialized within one repository, while unrelated repositories can
+    /// still capture concurrently. Git already locks its ref backend; this narrower app-level
+    /// ordering additionally keeps retention deletion from racing a final publication we own.
+    private static let refQueueLock = NSLock()
+    nonisolated(unsafe) private static var refQueues: [String: DispatchQueue] = [:]
 
     // MARK: - Public Methods
 
@@ -246,6 +254,75 @@ enum GitReviewReader {
         }
     }
 
+    /// Captures the exact working-copy bytes and publishes the resulting tree at an app-owned
+    /// ref. The real index and worktree are only read. Completion arrives on main.
+    static func createCheckpointSnapshot(
+        ref: String,
+        expectedRepositoryIdentity: String,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<GitTurnBaseline, Failure>) -> Void
+    ) {
+        perform("git.write.create-turn-checkpoint", on: snapshotQueue, completion) {
+            guard GitTurnCheckpointRefs.isOwned(ref),
+                  GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
+                    == expectedRepositoryIdentity else {
+                throw Failure.checkpointRepositoryMismatch
+            }
+
+            let baseline = GitTurnBaseline(
+                treeHash: try workingTreeSnapshot(in: root),
+                capturedAt: Date()
+            )
+            try refQueue(for: expectedRepositoryIdentity).sync {
+                _ = try run(GitReviewCommands.updateRef(ref, to: baseline.treeHash), in: root)
+            }
+            return baseline
+        }
+    }
+
+    /// Removes only explicitly named refs inside Threading's namespace. A caller cannot turn
+    /// this into a branch, tag, remote-ref, or namespace-wide deletion.
+    static func deleteCheckpointRefs(
+        _ refs: [String],
+        expectedRepositoryIdentity: String,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<Void, Failure>) -> Void
+    ) {
+        perform("git.write.delete-turn-checkpoints", on: snapshotQueue, completion) {
+            guard !refs.isEmpty else { return }
+            guard refs.allSatisfy(GitTurnCheckpointRefs.isOwned),
+                  GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
+                    == expectedRepositoryIdentity else {
+                throw Failure.checkpointRepositoryMismatch
+            }
+
+            try refQueue(for: expectedRepositoryIdentity).sync {
+                for ref in refs {
+                    _ = try run(GitReviewCommands.deleteRef(ref), in: root)
+                }
+            }
+        }
+    }
+
+    /// Lists only well-formed refs in Threading's private namespace for startup reconciliation.
+    /// Repository identity is checked before the namespace is read, matching capture and delete.
+    static func checkpointRefs(
+        expectedRepositoryIdentity: String,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
+    ) {
+        perform("git.read.turn-checkpoint-refs", on: snapshotQueue, completion) {
+            guard GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
+                    == expectedRepositoryIdentity else {
+                throw Failure.checkpointRepositoryMismatch
+            }
+            return GitDiffParser.decode(try run(GitReviewCommands.checkpointRefs(), in: root))
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map(String.init)
+                .filter(GitTurnCheckpointRefs.isOwned)
+        }
+    }
+
     // MARK: - Private Methods
 
     private static func perform<Value: Sendable>(
@@ -292,6 +369,7 @@ enum GitReviewReader {
         case .staged: return "staged"
         case .branch: return "branch"
         case .lastTurn: return "last-turn"
+        case .turnCheckpoint: return "turn-checkpoint"
         case .commit: return "commit"
         }
     }
@@ -310,7 +388,7 @@ enum GitReviewReader {
         switch request {
         case .unstaged, .uncommitted, .branch:
             return try tracked + untrackedDiffs(in: root, excluding: [])
-        case .lastTurn:
+        case .lastTurn, .turnCheckpoint:
             // Both endpoints are trees, so untracked files are already represented exactly.
             return tracked
         case .staged, .commit:
@@ -370,6 +448,17 @@ enum GitReviewReader {
                 in: root
             )
 
+        case .turnCheckpoint(let checkpoint):
+            let trees = try checkpointTrees(checkpoint, in: root)
+            return try run(
+                GitReviewCommands.diff(
+                    from: trees.before,
+                    to: trees.after,
+                    ignoringWhitespace: ws
+                ),
+                in: root
+            )
+
         case .commit(let hash):
             return try run(GitReviewCommands.show(hash, ignoringWhitespace: ws), in: root)
         }
@@ -420,6 +509,17 @@ enum GitReviewReader {
             return (
                 .revision(baseline.treeHash, title: L10n.string("Turn Start")),
                 .revision(currentTree, title: L10n.string("Working Tree"))
+            )
+        case .turnCheckpoint(let checkpoint):
+            let trees = try checkpointTrees(checkpoint, in: root)
+            return (
+                .revision(trees.before, title: L10n.string("Turn Start")),
+                .revision(
+                    trees.after,
+                    title: checkpoint.status == .complete
+                        ? L10n.string("Turn End")
+                        : L10n.string("Working Tree")
+                )
             )
         case .commit(let hash):
             let short = String(hash.prefix(7))
@@ -492,6 +592,60 @@ enum GitReviewReader {
         (try? run(GitReviewCommands.verifyTree(ref), in: root)) != nil
     }
 
+    /// Resolves and validates both checkpoint endpoints before any bytes are presented. The ref
+    /// itself must still exist and resolve to the exact tree recorded in metadata; falling back
+    /// to a loose object hash would silently turn a deleted or replaced checkpoint into another
+    /// record's diff.
+    private static func checkpointTrees(
+        _ checkpoint: GitTurnCheckpoint,
+        in root: URL
+    ) throws -> (before: String, after: String) {
+        guard let repositoryIdentity = checkpoint.repositoryIdentity,
+              GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
+                == repositoryIdentity else {
+            throw Failure.checkpointRepositoryMismatch
+        }
+        let expectedRefs = GitTurnCheckpointRefs.pair(
+            sessionID: checkpoint.sessionID,
+            checkpointID: checkpoint.id
+        )
+        guard let beforeRef = checkpoint.beforeRef,
+              beforeRef == expectedRefs.before,
+              let beforeHash = checkpoint.beforeTreeHash,
+              resolvedTree(beforeRef, in: root) == beforeHash else {
+            throw Failure.checkpointMissing
+        }
+
+        switch checkpoint.status {
+        case .complete:
+            guard let afterRef = checkpoint.afterRef,
+                  afterRef == expectedRefs.after,
+                  let afterHash = checkpoint.afterTreeHash,
+                  resolvedTree(afterRef, in: root) == afterHash else {
+                throw Failure.checkpointMissing
+            }
+            return (beforeHash, afterHash)
+
+        case .inProgress, .capturingAfter:
+            return (beforeHash, try workingTreeSnapshot(in: root))
+
+        case .capturingBefore, .beforeCaptureFailed, .finalCaptureFailed, .incomplete,
+             .notAdmitted:
+            throw Failure.checkpointIncomplete(
+                checkpoint.failureDescription
+                    ?? L10n.string("This turn did not reach a complete checkpoint.")
+            )
+        }
+    }
+
+    private static func resolvedTree(_ ref: String, in root: URL) -> String? {
+        guard let data = try? run(GitReviewCommands.verifyTree(ref), in: root) else {
+            return nil
+        }
+        let hash = decodeTrimmed(data)
+        return hash.isEmpty ? nil : hash
+    }
+
     /// Writes rather than hard-codes the empty-tree id so SHA-256 repositories get the object
     /// format they use. The object is unreachable and harmlessly deduplicated by git.
     private static func emptyTree(in root: URL) throws -> String {
@@ -531,6 +685,18 @@ enum GitReviewReader {
 
     private static func decodeTrimmed(_ data: Data) -> String {
         GitDiffParser.decode(data).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func refQueue(for repositoryIdentity: String) -> DispatchQueue {
+        refQueueLock.lock()
+        defer { refQueueLock.unlock() }
+        if let existing = refQueues[repositoryIdentity] { return existing }
+        let queue = DispatchQueue(
+            label: "codes.threading.git-turn-refs." + String(repositoryIdentity.hashValue),
+            qos: .userInitiated
+        )
+        refQueues[repositoryIdentity] = queue
+        return queue
     }
 
     private static func repositoryFilePaths(in root: URL) throws -> [String] {

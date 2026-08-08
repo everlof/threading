@@ -124,9 +124,9 @@ extension GitReviewViewController {
         case .staged: return .staged
         case .branch: return .branch
         case .lastTurn:
-            return GitTurnBaselineStore.shared
-                .baseline(forSessionID: sessionID)
-                .map { GitReviewReader.DiffRequest.lastTurn($0) }
+            return selectedTurnID
+                .flatMap(GitTurnBaselineStore.shared.checkpoint(id:))
+                .map { GitReviewReader.DiffRequest.turnCheckpoint($0) }
         case .commit: return nil
         }
     }
@@ -167,7 +167,8 @@ extension GitReviewViewController {
     }
 
     @objc private func copyGitApplyCommand() {
-        guard let root = repositoryRoot, let request = currentDiffRequest else { return }
+        guard let root = loadedDiffRoot ?? repositoryRoot,
+              let request = currentDiffRequest else { return }
 
         GitReviewReader.rawDiff(request, in: root, ignoringWhitespace: ignoresWhitespace) { [weak self] result in
             guard let self else { return }

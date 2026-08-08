@@ -107,6 +107,24 @@ enum GitReviewCommands {
         ["rev-parse", "--verify", "--quiet", ref + "^{tree}"]
     }
 
+    /// Publishes an immutable checkpoint tree under Threading's private ref namespace. The
+    /// empty expected-old value makes creation compare-and-swap: a UUID collision or foreign
+    /// pre-existing ref is a failure, never something this app overwrites.
+    static func updateRef(_ ref: String, to tree: String) -> [String] {
+        ["update-ref", ref, tree, ""]
+    }
+
+    /// Deletes one app-owned checkpoint ref. `git update-ref -d` is idempotent for a missing ref.
+    static func deleteRef(_ ref: String) -> [String] {
+        ["update-ref", "-d", ref]
+    }
+
+    /// Enumerates the app namespace for bounded orphan collection. The reader still validates
+    /// every returned name before it can become a deletion target.
+    static func checkpointRefs() -> [String] {
+        ["for-each-ref", "--format=%(refname)", GitTurnCheckpointRefs.prefix]
+    }
+
     /// The real index is copied only as the tracked-file roster for a private alternate index.
     /// `--path-format=absolute` also resolves linked-worktree indexes correctly.
     static func indexPath() -> [String] {

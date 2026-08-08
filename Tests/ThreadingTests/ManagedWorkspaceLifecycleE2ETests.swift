@@ -70,8 +70,25 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             managedWorkspace: workspace,
             id: sessionID
         ))
+        let checkpointStore = GitTurnBaselineStore(
+            directory: fixture.container.appendingPathComponent("checkpoint-state"),
+            contextProvider: { requestedSessionID in
+                guard requestedSessionID == sessionID,
+                      let location = GitInfo.worktreeLocation(
+                        for: workspace.executionURL.path
+                      ) else { return nil }
+                return GitTurnCaptureContext(
+                    projectID: project.id,
+                    logicalProjectPath: fixture.project.path,
+                    root: location.root,
+                    repositoryIdentity: location.repositoryIdentity,
+                    worktreeIdentity: location.worktreeIdentity
+                )
+            }
+        )
 
         let priorHandler = MCPServer.shared.handler
+        let priorCheckpointStoreProvider = MCPServer.shared.gitTurnCheckpointStoreProvider
         let priorLifecycleObserver = HookLifecycleRelay.observe
         let priorSettleDelay = SessionArchiveScheduler.shared.settleDelay
         let priorSessionTools = AppSettings.shared.isToolGroupEnabled(MCPToolCatalog.session.id)
@@ -81,6 +98,7 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             AgentRuntime.shared.discard(sessionID: sessionID)
             AgentRuntime.shared.removeFixtureLaunchPlan(for: sessionID)
             MCPServer.shared.handler = priorHandler
+            MCPServer.shared.gitTurnCheckpointStoreProvider = priorCheckpointStoreProvider
             HookLifecycleRelay.observe = priorLifecycleObserver
             SessionArchiveScheduler.shared.settleDelay = priorSettleDelay
             AppSettings.shared.setToolGroup(
@@ -88,6 +106,10 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
                 enabled: priorSessionTools
             )
             if !serverWasRunning { MCPServer.shared.stop() }
+            checkpointStore.remove(sessionID: session.id)
+            _ = waitForMainRunLoop(timeout: 5) {
+                checkpointStore.checkpoints(forSessionID: session.id).isEmpty
+            }
             store.removeProject(id: project.id)
             fixture.remove()
         }
@@ -116,6 +138,7 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             windowProvider: { nil }
         )
         MCPServer.shared.handler = toolCoordinator
+        MCPServer.shared.gitTurnCheckpointStoreProvider = { checkpointStore }
         HookLifecycleRelay.observe = { AgentRuntime.shared.applyLifecycle($0) }
         SessionArchiveScheduler.shared.settleDelay = 0.05
         AppSettings.shared.setToolGroup(MCPToolCatalog.session.id, enabled: true)
@@ -161,6 +184,37 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             try fixture.output("worktree", "list", "--porcelain")
                 .contains(workspace.worktreeRoot)
         )
+
+        // This is the terminal admission path, not a direct store fixture: the external process
+        // crossed the real blocking lifecycle endpoint before writing and crossed Stop before
+        // the coordinator integrated its checkout. Both app-owned refs must therefore survive
+        // disposal of the managed worktree and still describe exactly that provider turn.
+        let checkpoint = try XCTUnwrap(
+            checkpointStore.latestCheckpoint(forSessionID: session.id)
+        )
+        XCTAssertEqual(checkpoint.status, .complete)
+        XCTAssertEqual(checkpoint.providerTurnID, "fixture-turn")
+        let checkpointRoot = try XCTUnwrap(
+            checkpointStore.repositoryRoot(for: checkpoint)
+        )
+        var checkpointPatch: Result<String, GitFailure>?
+        GitReviewReader.rawDiff(.turnCheckpoint(checkpoint), in: checkpointRoot) {
+            checkpointPatch = $0
+        }
+        XCTAssertTrue(
+            waitForMainRunLoop(timeout: 5) { checkpointPatch != nil },
+            "the terminal turn checkpoint diff did not complete"
+        )
+        let patch = try XCTUnwrap(checkpointPatch).get()
+        XCTAssertTrue(patch.contains("agent-change.txt"))
+        XCTAssertTrue(patch.contains(ManagedWorkspaceFixtureAgent.changeContents))
+
+        // Let the asynchronous ref transaction finish while the temporary logical checkout is
+        // still present. The deferred fixture removal deliberately erases that checkout.
+        checkpointStore.remove(sessionID: session.id)
+        XCTAssertTrue(waitForMainRunLoop(timeout: 5) {
+            checkpointStore.checkpoint(id: checkpoint.id) == nil
+        })
         withExtendedLifetime((sessionCoordinator, toolCoordinator)) {}
     }
 
@@ -604,11 +658,14 @@ private enum ManagedWorkspaceFixtureAgent {
             + "?\(MCPDefaults.lifecycleEventParameter)=\(HookLifecycleEvent.turnStarted.rawValue)"
         let turnFinished = lifecycleBase
             + "?\(MCPDefaults.lifecycleEventParameter)=\(HookLifecycleEvent.turnFinished.rawValue)"
+        // The duplicate Stop pins retry convergence too: the first one must publish `after`;
+        // the second lets the activity ledger recognize the standing work as carried over and
+        // release the archive scheduler without moving that already-complete checkpoint.
         let script = """
         set -eu
         cd \(shellQuoted(directory.path))
         /usr/bin/curl --fail --silent --show-error --request POST \\
-          --header 'Content-Type: application/json' --data '{}' \\
+          --header 'Content-Type: application/json' --data '{"turn_id":"fixture-turn"}' \\
           \(shellQuoted(turnStarted)) >/dev/null
         printf '%s\\n' 'fixture-agent: started'
         printf '%s\\n' \(shellQuoted(changeContents)) > agent-change.txt
@@ -622,7 +679,10 @@ private enum ManagedWorkspaceFixtureAgent {
         printf '%s\\n' 'fixture-agent: archive_session returned'
         printf '%s\\n' 'fixture-agent: final reply complete'
         /usr/bin/curl --fail --silent --show-error --request POST \\
-          --header 'Content-Type: application/json' --data '{}' \\
+          --header 'Content-Type: application/json' --data '{"turn_id":"fixture-turn","background_tasks":[{"id":"fixture-background","type":"shell","status":"running"}]}' \\
+          \(shellQuoted(turnFinished)) >/dev/null
+        /usr/bin/curl --fail --silent --show-error --request POST \\
+          --header 'Content-Type: application/json' --data '{"turn_id":"fixture-turn","background_tasks":[{"id":"fixture-background","type":"shell","status":"running"}]}' \\
           \(shellQuoted(turnFinished)) >/dev/null
         /bin/sleep 30
         """

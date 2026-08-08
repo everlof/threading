@@ -25,6 +25,7 @@ extension GitReviewViewController {
         // ends; an explicit mode change is a different surface and still happens immediately.
         if isFileLiveScrolling,
            renderedMode == mode,
+           renderedTurnID == selectedTurnID,
            scrollView.documentView === fileTableView,
            case .files = phase {
             deferredPhaseDuringLiveScroll = phase
@@ -53,13 +54,16 @@ extension GitReviewViewController {
         // reload of the *same* surface is what makes that tolerable; a mode switch or a commit
         // opening is a different page and starts at the top.
         let previousPhase = self.phase
-        let keepsPlace = renderedMode == mode && Self.isSameSurface(previousPhase, phase)
+        let keepsPlace = renderedMode == mode
+            && renderedTurnID == selectedTurnID
+            && Self.isSameSurface(previousPhase, phase)
         let offset = scrollView.documentVisibleRect.origin
         let fileAnchor = keepsPlace ? currentFileScrollAnchor() : nil
         let composerWasFocused = isFocused(commitComposer)
 
         self.phase = phase
         renderedMode = mode
+        renderedTurnID = selectedTurnID
         if !keepsPlace {
             bulkExpansionOverride = nil
         }
@@ -324,7 +328,7 @@ extension GitReviewViewController {
 
         // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
         // branch comparison can list hundreds of files.
-        renderedFileRoot = repositoryRoot
+        renderedFileRoot = loadedDiffRoot ?? repositoryRoot
 
         // `reloadData()` immediately asks for the first row views. Make the clip adopt the
         // pane's current frame first, otherwise those expanded rows still see the 240pt
@@ -679,7 +683,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         // The row knows it holds a picture; the pane knows which two endpoints the mode
         // measures between. `currentDiffRequest` already answers for an opened commit too.
         row.imagePairProvider = { [weak self] file, completion in
-            guard let self, let root = self.repositoryRoot,
+            guard let self, let root = self.loadedDiffRoot ?? self.repositoryRoot,
                   let request = self.currentDiffRequest else {
                 completion(.failure(.gitFailed("No comparison to read from.")))
                 return

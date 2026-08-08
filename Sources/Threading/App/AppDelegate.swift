@@ -454,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // legacy key. A recovery launch removes nothing.
         if plan.startsBackgroundServices {
             cleanupOrphanedHistoryFiles()
+            cleanupOrphanedTurnCheckpoints()
             StateManager.shared.clearLegacySessionState()
         }
 
@@ -1184,6 +1185,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         })
         HistoryManager.cleanupOrphanedHistoryFiles(activeIdentities: activeIdentities)
+    }
+
+    /// Retries ref collection for records whose permanent deletion was interrupted by exit.
+    /// A failed project load is not evidence that every checkpoint is orphaned, just as it is
+    /// not evidence that every terminal history is.
+    @MainActor
+    private func cleanupOrphanedTurnCheckpoints() {
+        guard ProjectStore.shared.didLoadStateSuccessfully else {
+            ThreadingLogger.git.error(
+                "Skipping orphaned turn checkpoint cleanup because project state failed to load"
+            )
+            return
+        }
+        let projects = ProjectStore.shared.projects
+        let sessionIDs = Set(projects.flatMap { $0.sessions.map(\.id) })
+        let store = GitTurnBaselineStore.shared
+        store.retainOnly(sessionIDs: sessionIDs)
+
+        var checkouts = projects.map { URL(fileURLWithPath: $0.folderPath) }
+        checkouts.append(contentsOf: sessionIDs.compactMap {
+            ProjectStore.shared.executionProject(forSessionID: $0)
+                .map { URL(fileURLWithPath: $0.folderPath) }
+        })
+        store.garbageCollectOrphanedRefs(in: checkouts)
     }
 
     // MARK: - Menu Setup

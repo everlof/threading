@@ -346,9 +346,13 @@ final class ConversationViewController: NSViewController {
     /// Both native transports keep their process open between turns.
     var isTurnInFlight = false
 
-    /// The prompt has been accepted locally but is held behind the git-baseline barrier. During
-    /// this short window neither the local composer nor a remote mirror may start another turn.
+    /// A turn boundary is held behind its git checkpoint. This covers both admission's before
+    /// capture and completion's final capture; during either window another turn must not start.
     var isPreparingTurn = false
+
+    /// Passed synchronously through `timeline.apply(.turnFinished)` so the changed-files card
+    /// binds to the exact checkpoint that settled, even if another turn is queued immediately.
+    var settlingGitCheckpointID: GitTurnCheckpointID?
 
     /// The backgrounded shells, children and monitors the agent currently has running.
     ///
@@ -509,10 +513,6 @@ final class ConversationViewController: NSViewController {
         strip.setAccessibilityIdentifier("composer.conversation-reply.scheduled")
         return strip
     }()
-
-    /// The newest turn's card — the only one whose View diff still describes what Git
-    /// Review's Last Turn scope shows. Superseded cards lose the button.
-    weak var latestChangedFilesCard: ChangedFilesCardView?
 
     /// Visible native tool rows waiting for their asynchronous result. Offscreen calls need no
     /// retained view: their result is already authoritative in `timeline` and is picked up when
@@ -1946,20 +1946,29 @@ final class ConversationViewController: NSViewController {
 
         let transportedPrompt = ConversationPrompt(text: transportedText, context: context)
 
+        let messageID = ConversationMessageID()
         isPreparingTurn = true
-        latestChangedFilesCard?.hideViewDiff()
         refreshInputControl()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
 
-        GitTurnBaselineStore.shared.prepareTurn(sessionID: sessionID) { [weak self] in
+        NativeGitTurnAdmission.admit(
+            sessionID: sessionID,
+            userTurnID: messageID.wireValue,
+            transport: { [weak self] _ in
+                guard let self else { return false }
+                return self.sendPreparedTurn(
+                    localPrompt: localPrompt,
+                    transportedPrompt: transportedPrompt,
+                    invocation: invocation,
+                    sourceText: trimmed,
+                    messageID: messageID
+                )
+            }
+        ) { [weak self] _, _ in
             guard let self else { return }
             self.isPreparingTurn = false
-            self.sendPreparedTurn(
-                localPrompt: localPrompt,
-                transportedPrompt: transportedPrompt,
-                invocation: invocation,
-                sourceText: trimmed
-            )
+            self.refreshInputControl()
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
         return true
     }
@@ -1969,22 +1978,23 @@ final class ConversationViewController: NSViewController {
         localPrompt: ConversationPrompt,
         transportedPrompt: ConversationPrompt,
         invocation: ComposerInvocation?,
-        sourceText: String
-    ) {
+        sourceText: String,
+        messageID: ConversationMessageID
+    ) -> Bool {
         let sent: Bool
         if let invocation,
            let capabilityStream = stream as? ComposerCapabilityProviding {
             // Provider actions are syntax-bearing protocol messages. Do not prepend the shared
             // chat participant envelope or reconstruct their arguments; the resolver has kept
             // the exact trimmed source for this purpose.
-            sent = capabilityStream.send(invocation)
+            sent = capabilityStream.send(invocation, identifiedBy: messageID)
         } else {
-            sent = stream.send(transportedPrompt)
+            sent = stream.send(transportedPrompt, identifiedBy: messageID)
         }
         guard sent else {
             refreshInputControl()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
-            return
+            return false
         }
         refreshConversationControls()
         runProgress = nil
@@ -1999,6 +2009,7 @@ final class ConversationViewController: NSViewController {
         promptView.clear()
         SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+        return true
     }
 
     /// Draws a user turn that has just gone over the wire.
@@ -2098,6 +2109,26 @@ final class ConversationViewController: NSViewController {
     /// belongs to an earlier call, and when a streamed placeholder is thrown away are all
     /// `ConversationTimeline`'s, and tested there.
     private func handle(_ event: StreamEvent) {
+        if !isReplaying, case .turnFinished = event {
+            isPreparingTurn = true
+            refreshInputControl()
+            GitTurnBaselineStore.shared.finishTurn(sessionID: sessionID) { [weak self] checkpoint in
+                guard let self else { return }
+                self.isPreparingTurn = false
+                self.settlingGitCheckpointID = checkpoint?.id
+                self.applyHandledEvent(event)
+                self.settlingGitCheckpointID = nil
+                self.refreshComposerMode()
+                self.flushOutboxIfReady()
+                self.refreshInputControl()
+                RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
+            }
+            return
+        }
+        applyHandledEvent(event)
+    }
+
+    private func applyHandledEvent(_ event: StreamEvent) {
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
             if storedSession.isCrossProviderContinuation {

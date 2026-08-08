@@ -311,7 +311,7 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("true \(MCPDefaults.hookMarker)"))
     }
 
-    func testTurnStartAllowsSnapshotBarrierWhileOtherLifecycleHooksStayBrief() {
+    func testTurnBoundariesAllowSnapshotBarriersWhileOtherLifecycleHooksStayBrief() {
         XCTAssertGreaterThan(
             MCPDefaults.turnStartLifecycleTimeout,
             GitReviewDefaults.timeout * 4,
@@ -323,7 +323,11 @@ final class CodexHookInstallerTests: XCTestCase {
         )
         XCTAssertTrue(
             CodexHookInstaller.command(for: .turnFinished)
-                .contains("--max-time \(Int(MCPDefaults.lifecycleTimeout))")
+                .contains("--max-time \(Int(MCPDefaults.turnFinishLifecycleTimeout))")
+        )
+        XCTAssertEqual(
+            MCPDefaults.lifecycleTimeout(for: .sessionStarted),
+            MCPDefaults.lifecycleTimeout
         )
     }
 

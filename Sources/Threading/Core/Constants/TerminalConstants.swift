@@ -420,7 +420,7 @@ enum MCPDefaults {
     /// for is a person reading a dialog, not a machine.
     static let permissionTimeout: TimeInterval = 600
 
-    /// How long a lifecycle hook waits before giving up.
+    /// How long an observational lifecycle hook waits before giving up.
     ///
     /// Deliberately tiny for observational boundaries. An unreachable app must cost a moment,
     /// not a turn. Turn start has its own timeout below because that reply is an admission
@@ -431,6 +431,18 @@ enum MCPDefaults {
     /// hook alive for that full worst case plus transport overhead, or curl could release the
     /// agent while the baseline was still moving. Other observational hooks stay at 2s.
     static let turnStartLifecycleTimeout: TimeInterval = 62
+
+    /// Stop is the other checkpoint barrier. Releasing it early would let the next queued turn
+    /// alter the checkout before the authoritative final tree had been published.
+    static let turnFinishLifecycleTimeout: TimeInterval = 62
+
+    static func lifecycleTimeout(for event: HookLifecycleEvent) -> TimeInterval {
+        switch event {
+        case .turnStarted: return turnStartLifecycleTimeout
+        case .turnFinished: return turnFinishLifecycleTimeout
+        default: return lifecycleTimeout
+        }
+    }
 
     /// Also cleaned up when a session is deleted. Kept alongside the retained tokens so a
     /// revoked endpoint leaves no settings file pointing at it.

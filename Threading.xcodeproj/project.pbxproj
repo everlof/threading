@@ -329,6 +329,7 @@
 		E608B83E8D4ECC5B86B1408B /* ThemeLeakSweepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8648626115C25C919CD87C8E /* ThemeLeakSweepTests.swift */; };
 		2CE5D19C2C23F7E9D6A794FF /* UsageBarTravelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */; };
 		51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */; };
+		732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -714,6 +715,7 @@
 		8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageBarTravelTests.swift; sourceTree = "<group>"; };
 		26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationTestSupport.swift; sourceTree = "<group>"; };
 		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitTurnCheckpointTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1176,6 +1178,7 @@
 				8648626115C25C919CD87C8E /* ThemeLeakSweepTests.swift */,
 				8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */,
 				26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */,
+				4583D201A44E4993A9899A74 /* GitTurnCheckpointTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2005,6 +2008,7 @@
 				E608B83E8D4ECC5B86B1408B /* ThemeLeakSweepTests.swift in Sources */,
 				2CE5D19C2C23F7E9D6A794FF /* UsageBarTravelTests.swift in Sources */,
 				51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */,
+				732E51F0776E1282FE7FD0B1 /* GitTurnCheckpointTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -13,6 +13,9 @@ enum GitFailure: LocalizedError, Equatable, Sendable {
     case noCommits
     case noDefaultBranch
     case baselineExpired
+    case checkpointIncomplete(String)
+    case checkpointMissing
+    case checkpointRepositoryMismatch
 
     /// Another git — the agent's, usually — holds `index.lock`. Named apart from a general
     /// failure because it is the one error that is worth simply trying again.
@@ -29,6 +32,11 @@ enum GitFailure: LocalizedError, Equatable, Sendable {
         case .noCommits: return L10n.string("No commits yet.")
         case .noDefaultBranch: return L10n.string("No default branch found.")
         case .baselineExpired: return L10n.string("The turn baseline has expired.")
+        case .checkpointIncomplete(let detail): return detail
+        case .checkpointMissing:
+            return L10n.string("This turn’s checkpoint is missing from the repository.")
+        case .checkpointRepositoryMismatch:
+            return L10n.string("This turn belongs to a different repository.")
         case .indexLocked:
             return L10n.string(
                 "The index is in use — the agent is running a git command. Try again."

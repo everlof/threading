@@ -2682,7 +2682,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         )
     }
 
-    func showReview(mode: GitReviewMode? = nil) {
+    func showReview(
+        mode: GitReviewMode? = nil,
+        checkpointID: GitTurnCheckpointID? = nil
+    ) {
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
@@ -2691,7 +2694,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         let review = displayPaneController.activateReview(for: sessionID)
-        if let mode { review?.show(mode: mode) }
+        if let mode { review?.show(mode: mode, checkpointID: checkpointID) }
         displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
@@ -3473,8 +3476,11 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         showSharing()
     }
 
-    func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController) {
-        showReview(mode: .lastTurn)
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestTurnDiff checkpointID: GitTurnCheckpointID
+    ) {
+        showReview(mode: .lastTurn, checkpointID: checkpointID)
     }
 
     func terminalContainer(
@@ -3507,7 +3513,8 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         // watches every change and finds that edge itself.
         GitTurnBaselineStore.shared.noteActivity(
             AgentRuntime.shared.activity(sessionID: sessionID),
-            sessionID: sessionID
+            sessionID: sessionID,
+            hasAuthoritativeReporting: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
         )
 
         if AgentRuntime.shared.activity(sessionID: sessionID) == .working {

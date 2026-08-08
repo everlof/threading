@@ -731,7 +731,8 @@ final class StreamSessionLifecycleTests: XCTestCase {
             in: "$release 1.2.3",
             capabilities: session.composerCapabilities
         ))
-        XCTAssertTrue(session.send(invocation))
+        let messageID = ConversationMessageID()
+        XCTAssertTrue(session.send(invocation, identifiedBy: messageID))
         wait(for: [finished], timeout: 2)
 
         let data = try Data(contentsOf: capture)
@@ -740,6 +741,7 @@ final class StreamSessionLifecycleTests: XCTestCase {
         )
         XCTAssertEqual(request["method"] as? String, "turn/start")
         let parameters = try XCTUnwrap(request["params"] as? [String: Any])
+        XCTAssertEqual(parameters["clientUserMessageId"] as? String, messageID.wireValue)
         let input = try XCTUnwrap(parameters["input"] as? [[String: Any]])
         XCTAssertEqual(input.first?["text"] as? String, "$release 1.2.3")
         XCTAssertEqual(input.last?["type"] as? String, "skill")

@@ -36,6 +36,14 @@ remain provider-neutral for a future GitLab merge-request adapter.
 
 ## Lifecycle
 
+Turn checkpoints belong to the repository, not to the lifetime of the managed worktree. Capture
+records both identities: `worktreeIdentity` proves which execution checkout supplied the bytes,
+while `repositoryIdentity` scopes and serializes the private ref update in the shared Git directory.
+The refs therefore survive normal managed-worktree disposal. Historical tree-to-tree reads may use
+the logical checkout after proving it has the same repository identity; they never recreate or
+restore the execution worktree. Permanent session deletion performs checkpoint cleanup before the
+owning checkout association is discarded, while Archive/Restore leaves it intact.
+
 ```text
 draft opt-in
     |

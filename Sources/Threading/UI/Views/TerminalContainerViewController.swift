@@ -2145,9 +2145,11 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
     /// Its audience row was clicked: open who can reach this chat and who is on it.
     func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController)
-    /// A turn's changed-files card asked for its diff; the window opens the review tab on
-    /// the Last Turn scope.
-    func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController)
+    /// A turn's changed-files card asked for its immutable checkpoint diff.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestTurnDiff checkpointID: GitTurnCheckpointID
+    )
     /// A native conversation's handoff divider asked to reveal its source session.
     func terminalContainer(
         _ container: TerminalContainerViewController,
@@ -2177,8 +2179,11 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         delegate?.terminalContainer(self, sessionDidExit: controller.sessionID, exitCode: code)
     }
 
-    func conversationDidRequestTurnDiff(_ controller: ConversationViewController) {
-        delegate?.terminalContainerDidRequestTurnDiff(self)
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestTurnDiff checkpointID: GitTurnCheckpointID
+    ) {
+        delegate?.terminalContainer(self, didRequestTurnDiff: checkpointID)
     }
 
     func conversation(

@@ -174,6 +174,13 @@ final class MCPServer: @unchecked Sendable {
     /// Handles tool calls. Set by the app delegate once the window exists.
     @MainActor weak var handler: AgentCommandHandling?
 
+    /// Lifecycle endpoints resolve their checkpoint store lazily so unit and process fixtures
+    /// can use isolated persistence without opening or mutating the user's Application Support
+    /// file. Production keeps the app-wide durable store.
+    @MainActor var gitTurnCheckpointStoreProvider: @MainActor () -> GitTurnBaselineStore = {
+        .shared
+    }
+
     /// The listening port, or nil until the listener is ready. Launches read this to decide
     /// whether to register the server at all.
     var port: UInt16? {

@@ -238,11 +238,14 @@ final class ClaudeStreamSession:
     }
 
     @discardableResult
-    func send(_ invocation: ComposerInvocation) -> Bool {
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool {
         guard composerCapabilities.contains(where: {
             $0.id == invocation.capability.id && $0.isEnabled
         }) else { return false }
-        return send(invocation.sourceText)
+        return send(invocation.sourceText, identifiedBy: id)
     }
 
     private func sendPendingTurnIfReady() {

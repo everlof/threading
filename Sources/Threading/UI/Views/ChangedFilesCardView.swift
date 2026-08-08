@@ -6,8 +6,8 @@ import AppKit
 /// Collapse all and View diff — and each directory row folds its own subtree. Small turns
 /// open expanded (`ChangedFilesTree.autoExpands`); big ones start with every directory
 /// folded, so a wide sweep is one line per top-level scope rather than forty rows in the
-/// transcript. View diff opens Git Review's Last Turn scope, so it is offered only while
-/// this card is the latest turn's — an older card's diff is no longer what that scope shows.
+/// transcript. View diff opens Git Review on this card's immutable turn checkpoint, so older
+/// cards remain accurate after later turns.
 ///
 /// Resting on a file row shows that file's diff on a popover: the card names what changed, and
 /// the preview answers the question the name raises without spending the pane on it.
@@ -96,11 +96,6 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
     }
 
     // MARK: - Public Methods
-
-    /// A newer turn settled: Last Turn no longer shows this card's diff, so the door closes.
-    func hideViewDiff() {
-        viewDiffButton.isHidden = true
-    }
 
     /// The preview a file row raises, built apart from the pointer that asks for it so it can
     /// be drawn and asserted without a live popover over a window on screen.

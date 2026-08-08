@@ -18,9 +18,14 @@ final class GitReviewViewController: NSViewController {
     let folderPath: String
 
     private(set) var mode: GitReviewMode
+    private(set) var selectedTurnID: GitTurnCheckpointID?
 
     private var isTurnInFlight: Bool {
-        AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+        guard mode == .lastTurn else {
+            return AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+        }
+        return selectedTurnID == GitTurnBaselineStore.shared
+            .activeCheckpoint(forSessionID: sessionID)?.id
     }
 
     private var modeTitle: String {
@@ -57,8 +62,19 @@ final class GitReviewViewController: NSViewController {
         }
         return chip
     }()
+    lazy var turnChip: ChipView = {
+        let chip = ChipView()
+        chip.isHidden = true
+        chip.itemsProvider = { [weak self] in self?.turnItems() ?? [] }
+        chip.onSelect = { [weak self] item in
+            guard let raw = item.representedValue as? String,
+                  let checkpointID = GitTurnCheckpointID(uuidString: raw) else { return }
+            self?.selectTurn(checkpointID)
+        }
+        return chip
+    }()
     private lazy var headerCluster: NSStackView = {
-        let cluster = NSStackView(views: [backButton, modeChip])
+        let cluster = NSStackView(views: [backButton, modeChip, turnChip])
         cluster.orientation = .horizontal
         cluster.alignment = .centerY
         cluster.spacing = Design.Spacing.tight
@@ -209,6 +225,8 @@ final class GitReviewViewController: NSViewController {
     /// The mode the body on screen was drawn for, so a reload of the same surface can keep the
     /// reader's place while a mode switch starts at the top.
     var renderedMode: GitReviewMode?
+    var renderedTurnID: GitTurnCheckpointID?
+    var loadedDiffRoot: URL?
 
     /// Which files the user has opened or closed by hand. Consulted ahead of the initial expanded
     /// state, so a watched checkout re-reading itself does not undo what the reader chose.
@@ -289,11 +307,13 @@ final class GitReviewViewController: NSViewController {
         sessionID: SessionID,
         folderPath: String,
         mode: GitReviewMode,
+        selectedTurnID: GitTurnCheckpointID? = nil,
         changeRequestClient: GitHubPullRequestClient? = nil
     ) {
         self.sessionID = sessionID
         self.folderPath = folderPath
         self.mode = mode
+        self.selectedTurnID = selectedTurnID
         self.changeRequestClient = changeRequestClient ?? .live()
         super.init(nibName: nil, bundle: nil)
     }
@@ -336,6 +356,11 @@ final class GitReviewViewController: NSViewController {
                   event.repositoryIdentity == GitInfo.repositoryIdentity(for: self.folderPath)
             else { return }
             self.renderChangeRequestBar()
+        }
+        appEvents.observe(GitTurnCheckpointsDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.refreshModePresentation()
+            if self.mode == .lastTurn { self.refresh(force: true) }
         }
     }
 
@@ -440,7 +465,10 @@ final class GitReviewViewController: NSViewController {
             ),
             headerClusterLeading,
 
-            counterLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Design.Spacing.medium),
+            counterLabel.leadingAnchor.constraint(
+                equalTo: headerCluster.trailingAnchor,
+                constant: Design.Spacing.medium
+            ),
             counterLabel.firstBaselineAnchor.constraint(equalTo: modeChip.contentFirstBaselineAnchor),
             counterLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: menuButton.leadingAnchor,
@@ -534,9 +562,40 @@ final class GitReviewViewController: NSViewController {
                Date().timeIntervalSince(last) < GitReviewDefaults.refreshDebounce { return }
         }
 
-        guard let root = repositoryRoot else {
+        let root: URL?
+        if mode == .lastTurn {
+            let checkpoints = GitTurnBaselineStore.shared.checkpoints(forSessionID: sessionID)
+            guard !checkpoints.isEmpty else {
+                setChangeRequestBarVisible(false)
+                show(.message(L10n.string(
+                    "No turn recorded yet.\nThe checkpoint is captured before the agent starts working."
+                )))
+                return
+            }
+            if selectedTurnID == nil || !checkpoints.contains(where: { $0.id == selectedTurnID }) {
+                selectedTurnID = checkpoints.last?.id
+                refreshModePresentation()
+            }
+            root = selectedTurnID
+                .flatMap(GitTurnBaselineStore.shared.checkpoint(id:))
+                .flatMap {
+                    GitTurnBaselineStore.shared.repositoryRoot(
+                        for: $0,
+                        preferredPath: folderPath
+                    )
+                }
+        } else {
+            root = repositoryRoot
+        }
+
+        guard let root else {
             setChangeRequestBarVisible(false)
-            show(.message("Not a git repository."))
+            if mode == .lastTurn,
+               GitTurnBaselineStore.shared.latestCheckpoint(forSessionID: sessionID) != nil {
+                show(.message(L10n.string("The checkpoint repository is no longer available.")))
+            } else {
+                show(.message("Not a git repository."))
+            }
             return
         }
 
@@ -550,20 +609,21 @@ final class GitReviewViewController: NSViewController {
             loadCommitList(in: root, skip: 0)
 
         case .lastTurn:
-            guard let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: sessionID) else {
-                if let failure = GitTurnBaselineStore.shared.captureFailure(forSessionID: sessionID) {
-                    show(.message(
-                        L10n.string("Couldn’t capture this turn’s starting state.")
-                            + "\n" + failure.localizedDescription
-                    ))
-                } else {
-                    show(.message(L10n.string(
-                        "No turn recorded yet.\nThe baseline is captured before the agent starts working."
-                    )))
-                }
+            guard let checkpointID = selectedTurnID,
+                  let checkpoint = GitTurnBaselineStore.shared.checkpoint(id: checkpointID) else {
+                show(.message(L10n.string(
+                    "No turn recorded yet.\nThe checkpoint is captured before the agent starts working."
+                )))
                 return
             }
-            loadDiff(.lastTurn(baseline), in: root)
+            guard checkpoint.canPresentDiff else {
+                show(.message(
+                    checkpoint.failureDescription
+                        ?? L10n.string("This turn did not reach a complete checkpoint.")
+                ))
+                return
+            }
+            loadDiff(.turnCheckpoint(checkpoint), in: root)
 
         case .uncommitted: loadDiff(.uncommitted, in: root)
         case .unstaged: loadDiff(.unstaged, in: root)
@@ -651,6 +711,7 @@ final class GitReviewViewController: NSViewController {
 
             switch result {
             case .success(let files):
+                self.loadedDiffRoot = root
                 self.show(files.isEmpty ? .message("No changes.") : .files(files))
                 span.end(metadata: [
                     "result": "success",
@@ -733,6 +794,7 @@ final class GitReviewViewController: NSViewController {
 
             switch result {
             case .success(let files):
+                self.loadedDiffRoot = root
                 if files.isEmpty {
                     self.show(.message("No textual changes (likely a merge commit)."))
                 } else {
@@ -765,13 +827,51 @@ final class GitReviewViewController: NSViewController {
         }
     }
 
+    private func turnItems() -> [ThemedMenuEntry] {
+        GitTurnBaselineStore.shared.checkpoints(forSessionID: sessionID).reversed().map { checkpoint in
+            .item(ThemedMenuItem(
+                title: L10n.format("Turn %lld", Int64(checkpoint.ordinal)),
+                subtitle: turnSubtitle(checkpoint),
+                representedValue: checkpoint.id.uuidString,
+                isSelected: checkpoint.id == selectedTurnID
+            ))
+        }
+    }
+
+    private func turnSubtitle(_ checkpoint: GitTurnCheckpoint) -> String {
+        switch checkpoint.status {
+        case .complete:
+            return L10n.string("Turn Start → Turn End")
+        case .inProgress, .capturingAfter:
+            return L10n.string("Turn Start → Working Tree")
+        case .capturingBefore:
+            return L10n.string("Capturing turn start…")
+        case .beforeCaptureFailed, .finalCaptureFailed, .incomplete:
+            return checkpoint.failureDescription ?? L10n.string("Checkpoint incomplete")
+        case .notAdmitted:
+            return L10n.string("Turn not admitted")
+        }
+    }
+
     /// Switches the comparison from outside — the changed-files card's View diff lands on the
     /// Last Turn scope through here. Same path as the chip, so persistence and the reader's
     /// place follow the same rules.
-    func show(mode: GitReviewMode) {
+    func show(mode: GitReviewMode, checkpointID: GitTurnCheckpointID? = nil) {
         // Touching `view` is the macOS-13-compatible `loadViewIfNeeded()`; the mode chip must
         // exist before the switch renames it.
         _ = view
+        if mode == .lastTurn, let checkpointID {
+            selectedTurnID = checkpointID
+        }
+        if mode == self.mode {
+            if mode == .lastTurn, checkpointID != nil {
+                expansionOverrides.removeAll()
+                bulkExpansionOverride = nil
+                refreshModePresentation()
+                refresh(force: true)
+            }
+            return
+        }
         switchMode(to: mode)
     }
 
@@ -780,6 +880,17 @@ final class GitReviewViewController: NSViewController {
     func refreshModePresentation() {
         guard isViewLoaded else { return }
         modeChip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: modeTitle)
+        if mode == .lastTurn,
+           let checkpointID = selectedTurnID,
+           let checkpoint = GitTurnBaselineStore.shared.checkpoint(id: checkpointID) {
+            turnChip.configure(
+                symbolName: GitReviewUIDefaults.turnSymbol,
+                title: L10n.format("Turn %lld", Int64(checkpoint.ordinal))
+            )
+            turnChip.isHidden = false
+        } else {
+            turnChip.isHidden = true
+        }
     }
 
     private func switchMode(to newMode: GitReviewMode) {
@@ -790,6 +901,18 @@ final class GitReviewViewController: NSViewController {
         expansionOverrides.removeAll()
         refreshModePresentation()
         onModeChange?()
+        refresh(force: true)
+    }
+
+    private func selectTurn(_ checkpointID: GitTurnCheckpointID) {
+        guard checkpointID != selectedTurnID,
+              GitTurnBaselineStore.shared.checkpoint(id: checkpointID)?.sessionID == sessionID else {
+            return
+        }
+        selectedTurnID = checkpointID
+        expansionOverrides.removeAll()
+        bulkExpansionOverride = nil
+        refreshModePresentation()
         refresh(force: true)
     }
 
@@ -815,6 +938,7 @@ final class GitReviewViewController: NSViewController {
 enum GitReviewUIDefaults {
     /// The chip's mark for every mode: the change itself, not any one comparison.
     static let modeSymbol = "plus.forwardslash.minus"
+    static let turnSymbol = "clock.arrow.circlepath"
 
     static var commitPlaceholder: String { L10n.string("Commit staged changes…") }
 

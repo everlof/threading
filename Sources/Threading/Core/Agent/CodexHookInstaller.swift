@@ -161,9 +161,7 @@ enum CodexHookInstaller {
 
         // Output is discarded and failure swallowed for the same reason as Claude's: a
         // lifecycle report must not be able to say anything back to the model.
-        let timeout = event == .turnStarted
-            ? MCPDefaults.turnStartLifecycleTimeout
-            : MCPDefaults.lifecycleTimeout
+        let timeout = MCPDefaults.lifecycleTimeout(for: event)
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
             + " printf '%s' \"$\(Key.payloadVariable)\" |"
@@ -229,9 +227,7 @@ enum CodexHookInstaller {
             let registration = event.codexRegistration
             guard registration.isSupported else { continue }
 
-            let timeout = event == .turnStarted
-                ? MCPDefaults.turnStartLifecycleTimeout
-                : MCPDefaults.lifecycleTimeout
+            let timeout = MCPDefaults.lifecycleTimeout(for: event)
             let compatibleCommand = legacyCommand(for: event)
 
             for name in registration.eventNames {

@@ -143,10 +143,16 @@ final class GrokACPStreamSession:
     }
 
     @discardableResult
-    func send(_ invocation: ComposerInvocation) -> Bool {
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool {
         guard composerCapabilities.contains(where: {
             $0.id == invocation.capability.id && $0.isEnabled
         }) else { return false }
+        // ACP has no client message-id field. The durable checkpoint still owns `id`; the wire
+        // transport cannot echo it back the way Claude and Codex do.
+        _ = id
         return send(invocation.sourceText)
     }
 

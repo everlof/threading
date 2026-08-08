@@ -266,7 +266,18 @@ protocol ComposerCapabilityProviding: AnyObject {
     var onComposerCapabilitiesChange: (() -> Void)? { get set }
 
     @discardableResult
-    func send(_ invocation: ComposerInvocation) -> Bool
+    func send(
+        _ invocation: ComposerInvocation,
+        identifiedBy id: ConversationMessageID
+    ) -> Bool
+}
+
+extension ComposerCapabilityProviding {
+    /// Convenience for callers that do not already own a stable message identity.
+    @discardableResult
+    func send(_ invocation: ComposerInvocation) -> Bool {
+        send(invocation, identifiedBy: ConversationMessageID())
+    }
 }
 
 /// The leading command token is the only syntax Threading owns. Everything after it remains an

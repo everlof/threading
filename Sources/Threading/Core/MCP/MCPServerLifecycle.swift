@@ -74,6 +74,24 @@ extension MCPServer {
             return
         }
 
+        if event == .turnFinished {
+            DispatchQueue.main.async {
+                self.gitTurnCheckpointStoreProvider().finishTurn(
+                    sessionID: sessionID,
+                    assistantTurnID: report.turnID,
+                    providerTurnID: report.turnID
+                ) { _ in
+                    // Stop is the provider's authoritative interactive-turn boundary even when
+                    // it reports work left running. Publish first so the next prompt cannot be
+                    // admitted into the same capture window; later background bytes belong to
+                    // neither adjacent interactive turn unless the provider reports otherwise.
+                    respond(.accepted)
+                    HookLifecycleRelay.deliver(report)
+                }
+            }
+            return
+        }
+
         guard event == .turnStarted else {
             respond(.accepted)
             DispatchQueue.main.async {
@@ -83,7 +101,11 @@ extension MCPServer {
         }
 
         DispatchQueue.main.async {
-            GitTurnBaselineStore.shared.prepareTurn(sessionID: sessionID) {
+            self.gitTurnCheckpointStoreProvider().prepareTurn(
+                sessionID: sessionID,
+                userTurnID: report.turnID,
+                providerTurnID: report.turnID
+            ) { _ in
                 // Stored before the response: once curl sees this acknowledgement the CLI may
                 // run a tool immediately, and Last Turn must already have its immutable start.
                 respond(.accepted)

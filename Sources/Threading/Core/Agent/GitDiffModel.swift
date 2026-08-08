@@ -47,7 +47,7 @@ enum GitReviewMode: String, Codable, CaseIterable, Sendable {
         case .staged:
             return L10n.string("HEAD → Index")
         case .lastTurn:
-            return L10n.string("Turn Start → Working Tree")
+            return L10n.string("Turn Start → Turn End")
         case .branch:
             return L10n.string("Merge Base → Working Tree")
         case .commit:
@@ -167,6 +167,118 @@ struct GitRepositoryFile: Sendable {
 struct GitTurnBaseline: Sendable {
     let treeHash: String
     let capturedAt: Date
+}
+
+// MARK: - Durable Turn Checkpoints
+
+/// Threading's stable identity for one admitted provider turn.
+///
+/// This is deliberately independent of transcript row numbers. Native transports may also
+/// carry a client-minted message id and terminal hooks may carry a provider turn id, but neither
+/// exists on every surface. The checkpoint id is the common identity that survives relaunches.
+struct GitTurnCheckpointID: Hashable, Sendable, Codable, CustomStringConvertible {
+    let rawValue: UUID
+
+    init(_ rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+
+    init?(uuidString: String) {
+        guard let value = UUID(uuidString: uuidString) else { return nil }
+        rawValue = value
+    }
+
+    var uuidString: String { rawValue.uuidString }
+    var description: String { uuidString }
+
+    init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(UUID.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+/// How far a turn's two-phase capture got. Transitional states are written before their git
+/// operation begins; if the process exits there, the next launch converts them to `incomplete`.
+enum GitTurnCaptureStatus: String, Codable, Sendable {
+    case capturingBefore
+    case inProgress
+    case capturingAfter
+    case complete
+    case beforeCaptureFailed
+    case finalCaptureFailed
+    case incomplete
+    case notAdmitted
+
+    var hasDurableBefore: Bool {
+        switch self {
+        case .inProgress, .capturingAfter, .complete, .finalCaptureFailed, .incomplete:
+            return true
+        case .capturingBefore, .beforeCaptureFailed, .notAdmitted:
+            return false
+        }
+    }
+
+    var isTransitional: Bool {
+        self == .capturingBefore || self == .inProgress || self == .capturingAfter
+    }
+}
+
+/// The persisted association between a stable session turn and its app-owned git objects.
+///
+/// Successful records always carry the project, execution checkout, repository and worktree
+/// identities. The checkout paths are retained as access hints for cleanup; repository identity
+/// is the authority used before a diff or ref deletion is allowed.
+struct GitTurnCheckpoint: Codable, Equatable, Sendable {
+    let id: GitTurnCheckpointID
+    let projectID: ProjectID?
+    let sessionID: SessionID
+    let ordinal: Int
+    let userTurnID: String
+    var assistantTurnID: String
+    var providerTurnID: String?
+
+    let logicalProjectPath: String?
+    let executionCheckoutPath: String?
+    let repositoryIdentity: String?
+    let worktreeIdentity: String?
+
+    let beforeRef: String?
+    let afterRef: String?
+    var beforeTreeHash: String?
+    var afterTreeHash: String?
+
+    var status: GitTurnCaptureStatus
+    let requestedAt: Date
+    var beforeCapturedAt: Date?
+    var finalRequestedAt: Date?
+    var completedAt: Date?
+    var failureDescription: String?
+
+    var canPresentDiff: Bool {
+        switch status {
+        case .inProgress, .capturingAfter:
+            return beforeRef != nil && beforeTreeHash != nil
+        case .complete:
+            return beforeRef != nil && beforeTreeHash != nil
+                && afterRef != nil && afterTreeHash != nil
+        case .capturingBefore, .beforeCaptureFailed, .finalCaptureFailed, .incomplete,
+             .notAdmitted:
+            return false
+        }
+    }
+
+    var isComplete: Bool { status == .complete }
+}
+
+/// A narrow notification for review surfaces. Checkpoint writes are per session, so refreshing
+/// every open review pane would turn one turn boundary into repository work across the app.
+struct GitTurnCheckpointsDidChange: AppEvent {
+    static let name = Notification.Name("gitTurnCheckpointsDidChange")
+    let sessionID: SessionID
 }
 
 /// One file's bytes at a review request's two endpoints, with what each endpoint is called —

@@ -290,9 +290,7 @@ enum MCPSessionRegistry {
                 // lifecycle report that leaked any of them would change the conversation it is
                 // only supposed to observe. This is what keeps the ask hooks *observational*:
                 // they sit on the same event a broker would, and say nothing back.
-                let timeout = event == .turnStarted
-                    ? MCPDefaults.turnStartLifecycleTimeout
-                    : MCPDefaults.lifecycleTimeout
+                let timeout = MCPDefaults.lifecycleTimeout(for: event)
                 let command = "curl -s --max-time \(Int(timeout))"
                     + " -H 'Content-Type: application/json' --data-binary @- \(url)"
                     + " >/dev/null 2>&1 || true"

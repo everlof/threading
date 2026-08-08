@@ -120,6 +120,26 @@ SHA-256-linked JSONL chain per session under `ExecutionAudit/`. Its directory an
 owner-only, rotation is reported as a verified suffix rather than a complete history, and deleting
 a session or project synchronously removes all of that session's segments.
 
+Per-turn Git attribution also lives beside rather than inside SQLite. `git-turn-checkpoints.json`
+is a `RecoverableFileStore` document whose records connect a session and stable turn identity to
+the app-owned before/after refs described in [Git Review](git.md#git-review). The transition is
+written before each Git operation, so a crash leaves evidence that becomes `incomplete` on the
+next launch rather than a plausible-looking older result. Corrupt metadata is quarantined under
+the normal user-authored-store policy; ref names are schema-validated to Threading's namespace
+before the document is accepted.
+
+The metadata and Git refs form one ownership unit. Retention is bounded to 50 turns per session
+and 1,000 globally. Garbage collection removes only the two exact validated app refs and removes
+the metadata only after Git confirms that operation; if no checkout of the recorded repository is
+available, the record remains as a retryable cleanup receipt. Archiving is reversible and keeps
+the unit. Permanent session or project deletion starts collection while the checkout association
+still exists, and Reset Everything receives its existing recoverable support-directory behavior
+without claiming to rewrite arbitrary repositories. On a normal launch, reachable project
+repositories are reconciled against the loaded document: unowned, well-formed refs inside the app
+namespace are collected, closing the leak left by quarantined metadata or an interrupted cleanup.
+Recovery launch and failed project-state load perform no such sweep because an empty catalog is not
+evidence that every checkpoint is orphaned.
+
 `ProjectDatabaseTests` imports **the machine's own `projects.json`** into a throwaway database
 and compares ids, order, titles, accounts and resume identifiers. A fixture proves the code
 path; that one proves the file the user will actually migrate, which is the only copy they

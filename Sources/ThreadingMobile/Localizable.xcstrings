@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "This turn did not reach a complete checkpoint.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen nådde inte en fullständig kontrollpunkt." } } }
+    },
     "Attachment unavailable": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilagan är inte tillgänglig" } } }
     },

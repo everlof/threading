@@ -35,6 +35,7 @@ coarse operation. The current entry points are:
 - project-sidebar tree build, outline reload, structure application and disclosure persistence;
 - Git Review's end-to-end load-and-render;
 - Git reader queue wait plus work;
+- per-turn Git checkpoint capture and private-ref publication;
 - each git child process;
 - Git Review's main-thread render and file-row construction;
 - the debounced attachment scan of a terminal's rendered buffer.
@@ -42,6 +43,12 @@ coarse operation. The current entry points are:
 Do not add spans per diff line, table cell, terminal frame, token, or streamed event. A profiler
 that changes the hot path is measuring itself. Prefer a nested span only where it separates two
 actionable owners, such as background parsing from main-thread view construction.
+
+Turn checkpoints obey the same boundary as review reads. Alternate-index construction, object
+writes, ref verification and tree diffs stay off main. Admission/completion wait for their result,
+but unrelated repositories have independent ref queues and checkpoint work does not sit behind a
+large review parse. Selecting an older Turn N changes only the immutable diff request; the existing
+virtual file table and lazy per-row TextKit/image endpoint rendering remain the scaling boundary.
 
 Names are static schema (`StaticString`). Metadata is aggregate and bounded: counts, modes,
 results, and byte sizes. Never record repository paths, commit hashes, diff text, prompts,

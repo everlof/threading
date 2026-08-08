@@ -161,6 +161,63 @@
     "Use Left and Right Arrow to inspect points.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd vänster- och högerpil för att granska punkter." } } } },
     "Weekly": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Veckovis" } } } },
     "What Threading could measure, including unsupported and partial sources.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad Threading kunde mäta, inklusive källor som saknas eller bara stöds delvis." } } } },
+    "A newer turn began before this turn’s checkpoint was complete.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En nyare tur började innan den här turens kontrollpunkt var fullständig." } } }
+    },
+    "Capturing turn start…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparar turens start…" } } }
+    },
+    "Checkpoint incomplete": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ofullständig kontrollpunkt" } } }
+    },
+    "Couldn’t persist this turn’s checkpoint metadata.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att spara turens kontrollpunktsmetadata." } } }
+    },
+    "No turn recorded yet.\nThe checkpoint is captured before the agent starts working.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tur har registrerats ännu.\nKontrollpunkten sparas innan agenten börjar arbeta." } } }
+    },
+    "The checkpoint repository is no longer available.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollpunktens kodförråd är inte längre tillgängligt." } } }
+    },
+    "The provider did not admit this turn.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantören startade inte turen." } } }
+    },
+    "The provider process exited before the turn end checkpoint was captured.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsprocessen avslutades innan turens slutkontrollpunkt sparades." } } }
+    },
+    "The session’s execution checkout is not a git repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionens arbetskopia är inte ett git-kodförråd." } } }
+    },
+    "The turn end was captured, but its metadata could not be persisted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens sluttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
+    },
+    "The turn start was captured, but its metadata could not be persisted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens starttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
+    },
+    "This turn belongs to a different repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen tillhör ett annat kodförråd." } } }
+    },
+    "This turn did not reach a complete checkpoint.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen nådde inte en fullständig kontrollpunkt." } } }
+    },
+    "This turn’s checkpoint is missing from the repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens kontrollpunkt saknas i kodförrådet." } } }
+    },
+    "Threading exited before this turn’s checkpoint was complete.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading avslutades innan turens kontrollpunkt blev fullständig." } } }
+    },
+    "Turn %lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tur %lld" } } }
+    },
+    "Turn End": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens slut" } } }
+    },
+    "Turn Start → Turn End": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens start → turens slut" } } }
+    },
+    "Turn not admitted": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turen startades inte" } } }
+    },
     "A bounded diff-shaped slice for a code comment: target rows keep their marker, additions and removals keep theirs, and a large source never turns into a large sheet.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett begränsat, diff-format utdrag för en kodkommentar: målrader behåller sin markör, tillägg och borttagningar sina, och en stor källfil blir aldrig ett stort blad." } } }
@@ -20390,12 +20447,11 @@
       }
     },
     "Turn Start": {
-      "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vrid Start"
+            "value": "Turens start"
           }
         }
       }

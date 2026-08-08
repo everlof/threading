@@ -198,6 +198,11 @@ final class ProjectStore {
             ProjectIconStore.remove(fileName: icon.fileName)
         }
         for session in removedProject.sessions {
+            // Checkpoint refs are collected here rather than before the commit, with the same
+            // reasoning as the cleanup above. Losing the repository is not destructive: discard
+            // keeps a checkpoint's metadata when its root no longer resolves, and the orphaned-ref
+            // reconciliation pass collects it later.
+            GitTurnBaselineStore.shared.remove(sessionID: session.id)
             ConversationHandoffStore.remove(for: session.id)
             ExecutionAuditStore.shared.remove(sessionID: session.id)
             ScheduledMessageStore.shared.forget(sessionID: session.id)
@@ -824,6 +829,10 @@ final class ProjectStore {
             return .persistenceRefused
         }
 
+        // Archive/Restore never enters this method. Permanent removal collects only refs in
+        // Threading's private namespace, and follows the authoritative commit so a refused
+        // deletion cannot erase the history of a session that is still there.
+        GitTurnBaselineStore.shared.remove(sessionID: sessionID)
         AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
         ConversationHandoffStore.remove(for: sessionID)
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
