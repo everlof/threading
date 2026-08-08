@@ -28,6 +28,34 @@ enum ToastDefaults {
     /// Between the band's edge and its content.
     static let contentInset: CGFloat = Design.Spacing.inset
 
+    /// Between the message and the ✕ standing in the corner beside it.
+    static let closeGap: CGFloat = Design.Spacing.small
+
+    /// How far the pointer travels sideways before a press on the band becomes a carry.
+    ///
+    /// The tab strip's slop, for the tab strip's reason: a hand that is not quite still must not
+    /// turn a press into a one-point throw. Measured on the horizontal alone, so a gesture aimed
+    /// down the sidebar never lifts the band at all.
+    static let throwSlop: CGFloat = Design.Spacing.tight
+
+    /// How far the band has to be carried before letting go throws it out, as a fraction of its
+    /// own width.
+    ///
+    /// A fraction rather than a distance, because the band is as wide as the column it is in: the
+    /// same 80 points is most of the way across a narrow sidebar and a nudge on a band at its
+    /// full `maxWidth`. Set where a deliberate push clears it and the sideways part of a diagonal
+    /// scroll does not.
+    static let throwCommitFraction: CGFloat = 0.32
+
+    /// How fast a flick has to be going to throw the band from wherever it got to, in points per
+    /// second.
+    ///
+    /// The distance alone is the wrong test for a *throw*: the gesture people make at a band they
+    /// want gone is short and fast, and it releases well before a third of the way across. Speed
+    /// counts only when it is going the way the band already is, so a flick back towards the rest
+    /// position is a change of mind rather than a throw in the other direction.
+    static let throwVelocity: CGFloat = 450
+
     /// Between the band and the pane it floats in.
     static let hostInset: CGFloat = Design.Spacing.medium
 
@@ -144,6 +172,24 @@ struct ToastRequest {
     var hasAction: Bool { actionTitle != nil && action != nil }
 }
 
+// MARK: - Departure
+
+/// How a band leaves, which is the one thing about its exit the presenter cannot decide alone.
+///
+/// The clock running out, the ✕ and a throw all end in the same removal; what differs is where
+/// the band goes on the way, and a band that was pushed sideways must not drop straight down
+/// instead. A thrown receipt carries on the way it was sent, because the gesture is the animation
+/// — the hand did the first half of it and the band owes it the second.
+enum ToastDeparture: Equatable {
+
+    /// Its time ran out, or the ✕ was pressed: it settles back the way it arrived.
+    case settled
+
+    /// It was thrown, and leaves the way it was going. `-1` towards the leading edge, `1` towards
+    /// the trailing one.
+    case thrown(direction: CGFloat)
+}
+
 // MARK: - View
 
 /// A floating band that reports something already done and offers to take it back.
@@ -155,11 +201,19 @@ struct ToastRequest {
 /// on a control that is waiting to be used; a band that leaves by itself in six seconds has to
 /// be legible for all six.
 ///
-/// The band handles no clicks of its own. Its action is a `ThemedButton`, which is what gives
-/// the way back a keyboard route, a focus ring and an accessible name for free — and what keeps
-/// this class out of the interactive-component contract, which exists so that a *drawn control*
-/// cannot be mouse-only. Hover is the exception, and it is not an interaction: the presenter
-/// reads it to hold the clock while somebody is reaching for the button.
+/// Its two controls are a `ThemedButton` and a `ThemedIconButton`, which is what gives the way
+/// back and the way out a keyboard route, a focus ring and an accessible name for free — and what
+/// keeps the band itself out of the interactive-component contract, which exists so that a *drawn
+/// control* cannot be mouse-only. The band draws nothing that is pressable.
+///
+/// It does read two gestures over its own surface, and neither is a control:
+///
+/// - **Hover** stops the clock. The presenter reads it, because what a held band means is a
+///   decision about time and this view owns none.
+/// - **A carry** — a drag, or a two-finger swipe — takes the band sideways, and letting go past
+///   `throwCommitFraction` or above `throwVelocity` throws it out. Every part of that is also on
+///   the ✕, so the gesture is an accelerator rather than the only route: a receipt whose only way
+///   out was a mouse gesture would be one a keyboard could not be rid of.
 final class ToastView: NSView {
 
     // MARK: - Properties
@@ -167,16 +221,31 @@ final class ToastView: NSView {
     /// Pressed the way back. The presenter dismisses the band; the caller undoes the work.
     var onAction: (() -> Void)?
 
-    /// Whether the pointer is on the band. Reported rather than acted on, because what it means
-    /// — the dwell pauses — is the presenter's decision and not this view's.
-    var onHoverChanged: ((Bool) -> Void)?
+    /// Asked for the band to go now — the ✕, or a throw that carried far enough to commit.
+    ///
+    /// It reports *how* it was sent away rather than only that it was, so the departure finishes
+    /// the movement the hand started. See `ToastDeparture`.
+    var onDismiss: ((ToastDeparture) -> Void)?
+
+    /// Whether the band is being held: the pointer is on it, or a gesture is carrying it.
+    ///
+    /// Reported rather than acted on, because what it means — the dwell pauses — is the
+    /// presenter's decision and not this view's. The two are one signal because they are one
+    /// fact: a band under a hand is a band being read, and a carry that let the clock run would
+    /// expire under the very gesture aimed at it.
+    var onHoldChanged: ((Bool) -> Void)?
 
     private(set) var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
-            onHoverChanged?(isHovered)
+            reportHold()
         }
     }
+
+    /// What was last reported through `onHoldChanged`, so a pointer arriving on a band already
+    /// held by its own carry is not a second hold — the presenter reads the remainder of a stopped
+    /// clock when one is handed to it, and handing it two would spend the pause twice.
+    private var isHeld = false
 
     let request: ToastRequest
 
@@ -194,8 +263,27 @@ final class ToastView: NSView {
     private let messageLabel: NSTextField
     private let detailLabel: NSTextField?
     private let actionButton: ThemedButton?
+
+    /// The way out, as against the way back.
+    ///
+    /// **Visible whenever the band is, rather than under the pointer.** Revealing it on hover is
+    /// what a tab's ✕ does, and it is the wrong grammar here for a reason particular to this
+    /// surface: hovering the band *stops its clock*, so the gesture that would discover a
+    /// hidden ✕ is the same gesture that makes the band stay. A receipt that has to be leant on
+    /// before it admits how to be rid of it is a receipt that answers "make this go away" with
+    /// "it will stay as long as you keep looking for the button".
+    ///
+    /// Quiet all the same: an icon button rests at `secondary` and only lifts to full strength
+    /// under the pointer, which is the vocabulary's quiet-until-relevant without hiding the
+    /// affordance.
+    private let closeButton: ThemedIconButton
     private let dwellRail = ToastDwellRail()
     private var hoverTracking: NSTrackingArea?
+
+    /// What each wrapping label is held to, measured the way its cell draws rather than the way it
+    /// reports itself. See `layout()`.
+    private var messageHeight: NSLayoutConstraint?
+    private var detailHeight: NSLayoutConstraint?
 
     // MARK: - Initialization
 
@@ -206,12 +294,19 @@ final class ToastView: NSView {
         actionButton = request.hasAction
             ? ThemedButton(title: request.actionTitle ?? "", target: nil, action: nil)
             : nil
+        closeButton = ThemedIconButton(
+            symbolName: "xmark",
+            accessibility: L10n.string("Dismiss"),
+            target: .inline,
+            inkSource: .chrome
+        )
 
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
         configureLabels()
         configureAction()
+        configureClose()
         installContent()
         applyBandSurface()
 
@@ -231,16 +326,47 @@ final class ToastView: NSView {
     // MARK: - Layout
 
     /// A wrapping label measures its height against a width it has to be told, and the width
-    /// here is whatever the host column left — capped, but never fixed. Guarded on the value
-    /// actually changing: assigning it unconditionally in `layout()` invalidates the size that
+    /// here is whatever the host column left — capped, but never fixed. Guarded on the values
+    /// actually changing: assigning them unconditionally in `layout()` invalidates the size that
     /// caused the layout.
+    ///
+    /// **Each label is told its own width, not the band's.** The message stops short of the ✕ and
+    /// the detail runs the full width under it, so one figure derived from the band cannot be
+    /// right for both — handed the band's, the message believed it had 26 points it did not have
+    /// and laid a receipt out as one line that the band then clipped: *Archived “Refactor* with
+    /// the rest of the session's name simply gone. The label's own frame is the answer the solver
+    /// already computed, and it is not circular: these labels neither hug nor resist at any
+    /// meaningful priority (`ToastDefaults.contentWidthPriority`), so their width comes from the
+    /// pins alone and never from the text being measured against it.
+    ///
+    /// **And the height is measured the way the label is drawn, rather than asked for.** An
+    /// `NSTextField`'s `intrinsicContentSize` and the cell that actually typesets it can disagree
+    /// about whether a string wraps, and at a width the string very nearly fits they do: under
+    /// Claymorphism's rounded face the same receipt measured 175 points on one line — inside the
+    /// 178 it had — while the cell laid out at exactly 178 broke it in two. The band was built one
+    /// line tall and clipped the second, which is the same missing session name arriving by a
+    /// different route and is why this asks the cell instead. It costs a constraint per label and
+    /// removes an entire class of theme-specific clipping: a font whose measurement is a hair
+    /// optimistic can no longer cost a receipt its last line.
     override func layout() {
         super.layout()
-        let available = max(0, bounds.width - ToastDefaults.contentInset * 2)
-        for label in [messageLabel, detailLabel].compactMap({ $0 })
-        where abs(label.preferredMaxLayoutWidth - available) > 0.5 {
-            label.preferredMaxLayoutWidth = available
-            label.invalidateIntrinsicContentSize()
+        for (label, height) in [(messageLabel, messageHeight), (detailLabel, detailHeight)]
+            .compactMap({ label, height -> (NSTextField, NSLayoutConstraint)? in
+                guard let label, let height else { return nil }
+                return (label, height)
+            }) {
+            let width = label.frame.width
+            guard width > 0 else { continue }
+
+            if abs(label.preferredMaxLayoutWidth - width) > 0.5 {
+                label.preferredMaxLayoutWidth = width
+                label.invalidateIntrinsicContentSize()
+            }
+
+            let drawn = label.cell?.cellSize(
+                forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
+            ).height ?? label.intrinsicContentSize.height
+            if abs(height.constant - drawn) > 0.5 { height.constant = drawn }
         }
     }
 
@@ -270,6 +396,214 @@ final class ToastView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
+    }
+
+    /// The pointer on the band and a gesture carrying it are one signal, because they are one
+    /// fact — see `onHoldChanged`. Reported only on a change, so a pointer crossing a band that
+    /// its own carry already holds does not hand the presenter a second pause to spend.
+    private func reportHold() {
+        let held = isHovered || isCarried
+        guard held != isHeld else { return }
+        isHeld = held
+        onHoldChanged?(held)
+    }
+
+    // MARK: - The Throw
+
+    /// How far the band has been carried from where the presenter put it. Zero at rest.
+    private(set) var carryOffset: CGFloat = 0
+
+    /// Whether a gesture currently has the band. Readable so the hold can be asserted where it
+    /// happens rather than by watching something fail to leave.
+    private(set) var isCarried = false
+
+    /// How fast the band was last moving, in points per second, and which way. What tells a throw
+    /// from a push: the gesture aimed at a band somebody wants gone is short and fast.
+    private var carrySpeed: CGFloat = 0
+
+    /// The last place and moment the carry was measured at, which is what a speed is measured
+    /// between.
+    private var carrySample: (offset: CGFloat, time: TimeInterval)?
+
+    /// Where a press went down and when, in window coordinates. Nil when nothing is tracking.
+    private var press: (origin: CGPoint, sample: CGPoint, time: TimeInterval)?
+
+    /// A trackpad gesture in flight: what it has covered so far, and whether the band has already
+    /// handed it to the list underneath.
+    private var swipe: (dx: CGFloat, dy: CGFloat, declined: Bool)?
+
+    /// How far the band has to go before letting go throws it — a fraction of the width it was
+    /// given, not a constant. See `ToastDefaults.throwCommitFraction`.
+    private var throwCommitDistance: CGFloat {
+        max(1, bounds.width * ToastDefaults.throwCommitFraction)
+    }
+
+    /// The gesture, stated as what it does to the band rather than as the events that drive it.
+    ///
+    /// Both routes in — the pointer's drag and the trackpad's swipe — end here, so the rules about
+    /// when a carry becomes a throw are written once. It is also what a test drives: synthesising
+    /// a pointer means synthesising its modifiers too, and a `CGEvent` built here reads the
+    /// keyboard the developer's hands are actually on.
+    func carryBegan() {
+        guard !isCarried else { return }
+        isCarried = true
+        carrySpeed = 0
+        carrySample = nil
+        reportHold()
+    }
+
+    /// Moves the carried band to `offset` points from where it rests, as measured at `time`.
+    func carryChanged(to offset: CGFloat, at time: TimeInterval) {
+        guard isCarried else { return }
+        if let last = carrySample, time > last.time {
+            carrySpeed = (offset - last.offset) / CGFloat(time - last.time)
+        }
+        carrySample = (offset, time)
+        carryOffset = offset
+        applyCarry(animated: false)
+    }
+
+    /// Lets the band go. It leaves if it was carried far enough or thrown hard enough, and springs
+    /// back to where the presenter put it if it was neither.
+    func carryEnded() {
+        guard isCarried else { return }
+        isCarried = false
+        carrySample = nil
+        let direction: CGFloat = carryOffset < 0 ? -1 : 1
+        // Speed counts only in the direction the band already went: a flick back towards the rest
+        // position is somebody changing their mind, and throwing on it would send the band out of
+        // the side they just pulled it away from.
+        let flung = abs(carrySpeed) >= ToastDefaults.throwVelocity
+            && (carrySpeed < 0) == (carryOffset < 0)
+            && carryOffset != 0
+        let committed = flung || abs(carryOffset) >= throwCommitDistance
+        reportHold()
+        guard committed else { return springBack() }
+        onDismiss?(.thrown(direction: direction))
+    }
+
+    /// Sends the band the rest of the way out, the way it was thrown.
+    ///
+    /// Called from inside the departure's own animation group, so the translation rides it rather
+    /// than starting a second animation beside the fade. Far enough to clear the pane either way:
+    /// the band's own width plus the inset it rests at is past the leading edge going one way and
+    /// past the trailing edge going the other.
+    func flyOut(_ direction: CGFloat) {
+        layer?.transform = CATransform3DMakeTranslation(
+            direction * (bounds.width + ToastDefaults.hostInset),
+            0,
+            0
+        )
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Taken rather than passed on, whether or not it becomes a carry: a card floating over a
+        // list must not hand a click through to the row it is covering, and this is the one place
+        // that can say so — the band is the topmost view in the pane.
+        press = (event.locationInWindow, event.locationInWindow, event.timestamp)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var tracking = press else { return super.mouseDragged(with: event) }
+        let location = event.locationInWindow
+        let offset = location.x - tracking.origin.x
+
+        // A slop before the carry begins, and a sideways one: a press with an unsteady hand stays
+        // a press, and a gesture aimed down the list the band floats over never lifts it at all.
+        if !isCarried {
+            guard abs(offset) > ToastDefaults.throwSlop else { return }
+            carryBegan()
+        }
+
+        tracking.sample = location
+        tracking.time = event.timestamp
+        press = tracking
+        carryChanged(to: offset, at: event.timestamp)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        press = nil
+        carryEnded()
+    }
+
+    /// The same throw with two fingers, which is the gesture a trackpad has for it — and the one
+    /// macOS's own notifications answer to.
+    ///
+    /// Only a *phased* gesture qualifies. A wheel reports no phase, and a band that a wheel could
+    /// throw would be thrown by somebody scrolling the list underneath it. A gesture that turns
+    /// out to be going down the list rather than across the band is declined for its whole life
+    /// and handed on, so the pane behind still scrolls with the pointer over a receipt.
+    override func scrollWheel(with event: NSEvent) {
+        guard !event.phase.isEmpty || !event.momentumPhase.isEmpty else {
+            return super.scrollWheel(with: event)
+        }
+        if event.phase.contains(.began) { swipe = (0, 0, false) }
+        guard var gesture = swipe, !gesture.declined else {
+            return super.scrollWheel(with: event)
+        }
+
+        gesture.dx += event.scrollingDeltaX
+        gesture.dy += event.scrollingDeltaY
+
+        if !isCarried {
+            guard abs(gesture.dx) > ToastDefaults.throwSlop, abs(gesture.dx) > abs(gesture.dy)
+            else {
+                gesture.declined = abs(gesture.dy) > ToastDefaults.throwSlop
+                swipe = gesture
+                if gesture.declined { super.scrollWheel(with: event) }
+                return
+            }
+            carryBegan()
+        }
+
+        swipe = gesture
+        carryChanged(to: gesture.dx, at: event.timestamp)
+
+        // Decided when the fingers lift rather than when the momentum stops, for the reason the
+        // mouse decides on release: the throw is over when the hand is done with it, and a band
+        // still sliding after that is an animation rather than a gesture.
+        guard event.phase.contains(.ended) || event.phase.contains(.cancelled) else { return }
+        swipe = nil
+        carryEnded()
+    }
+
+    /// Puts a band that was not thrown back where the presenter had it.
+    private func springBack() {
+        carryOffset = 0
+        carrySpeed = 0
+        applyCarry(animated: true)
+    }
+
+    /// The transform, not the frame: layout still owns the band's place in the pane, and the
+    /// gesture only borrows the pixels — the same division `ThemedTabStripView` drags a tab under.
+    ///
+    /// The band also fades as it goes, to `Design.Opacity.dragAway` at the distance that commits
+    /// it. That opacity is the token for exactly this — still visible where it came from, clearly
+    /// on its way out — and it is the only thing that says *let go now and it goes*, on a gesture
+    /// whose threshold is otherwise invisible until it is crossed.
+    private func applyCarry(animated: Bool) {
+        let travelled = min(1, abs(carryOffset) / throwCommitDistance)
+        let fade = 1 - (1 - Design.Opacity.dragAway) * travelled
+        let transform = CATransform3DMakeTranslation(carryOffset, 0, 0)
+
+        guard animated, Design.Motion.quick > 0 else {
+            // Tracking a hand rather than reporting a change: the band belongs under the fingers
+            // now, not eased after them.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.transform = transform
+            CATransaction.commit()
+            alphaValue = fade
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.quick
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            layer?.transform = transform
+            animator().alphaValue = fade
+        }
     }
 
     // MARK: - The Clock, Drawn
@@ -351,17 +685,54 @@ final class ToastView: NSView {
         }
     }
 
+    private func configureClose() {
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.onPress = { [weak self] in self?.onDismiss?(.settled) }
+        if let identifier = request.identifier {
+            closeButton.setAccessibilityIdentifier("\(identifier).dismiss")
+        }
+    }
+
     private func installContent() {
         addSubview(messageLabel)
         detailLabel.map { addSubview($0) }
         actionButton.map { addSubview($0) }
+        addSubview(closeButton)
         addSubview(dwellRail)
 
         let inset = ToastDefaults.contentInset
+        // **Aligned by ink, so the ✕ is inset like the words rather than like a box.** An icon
+        // button carries its own padding around its glyph; pinned at the content inset outright,
+        // the mark itself would sit a further four points in from every edge than the message
+        // beside it, which reads as a control that missed the corner it was aimed at.
+        let closeInset = inset - closeButton.opticalHorizontalInset
+
+        // Each label's height, restated from the cell on every layout. Starts at whatever the
+        // label reports for itself, so a band that is measured before it is ever laid out — a
+        // fitting size asked for off screen — is no worse off than it was.
+        messageHeight = messageLabel.heightAnchor.constraint(
+            equalToConstant: messageLabel.intrinsicContentSize.height
+        )
+        detailHeight = detailLabel.map {
+            $0.heightAnchor.constraint(equalToConstant: $0.intrinsicContentSize.height)
+        }
+
         var constraints: [NSLayoutConstraint] = [
             messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            messageLabel.trailingAnchor.constraint(
+                equalTo: closeButton.leadingAnchor,
+                constant: -ToastDefaults.closeGap
+            ),
+
+            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: closeInset),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -closeInset),
+            // The band is never shorter than its own corner control, however few words it carries
+            // — measured from the button's ink for the same reason its top and trailing pins are.
+            bottomAnchor.constraint(
+                greaterThanOrEqualTo: closeButton.bottomAnchor,
+                constant: closeInset
+            ),
 
             // Flush to three edges, and no inset anywhere: the clock is the band's own bottom
             // border, tinted, rather than a rule laid across the band's field. It sits *in* the
@@ -372,15 +743,37 @@ final class ToastView: NSView {
             dwellRail.bottomAnchor.constraint(equalTo: bottomAnchor)
         ]
 
+        // **The message clears the ✕; whatever is under it runs the full width.** Only the first
+        // line of a receipt is beside the corner control, and holding the fine print to the same
+        // column would spend 26 points of a 240-point sidebar on every line of it for a mark that
+        // occupies one. So the row directly under the message is asked to clear the button
+        // instead — inert at every stock size, and load-bearing only where a large message font
+        // would otherwise walk that row up into it.
+        //
+        // The spacing is stated *below* that guard rather than beside it. Two required opinions
+        // about one edge is a constraint the solver has to break and log; demoted, the spacing is
+        // exact whenever the guard is satisfied and yields by exactly the difference when it is
+        // not, which is the whole intent written as an order of preference.
+        func under(_ previous: NSLayoutYAxisAnchor, by gap: CGFloat, clearingClose: Bool)
+            -> (NSLayoutYAxisAnchor) -> [NSLayoutConstraint] {
+            { top in
+                let spacing = top.constraint(equalTo: previous, constant: gap)
+                guard clearingClose else { return [spacing] }
+                spacing.priority = .defaultHigh
+                return [spacing, top.constraint(greaterThanOrEqualTo: self.closeButton.bottomAnchor)]
+            }
+        }
+
         var lastText: NSView = messageLabel
         if let detailLabel {
+            constraints += under(
+                messageLabel.bottomAnchor,
+                by: Design.Spacing.hairline,
+                clearingClose: true
+            )(detailLabel.topAnchor)
             constraints += [
-                detailLabel.topAnchor.constraint(
-                    equalTo: messageLabel.bottomAnchor,
-                    constant: Design.Spacing.hairline
-                ),
                 detailLabel.leadingAnchor.constraint(equalTo: messageLabel.leadingAnchor),
-                detailLabel.trailingAnchor.constraint(equalTo: messageLabel.trailingAnchor)
+                detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
             ]
             lastText = detailLabel
         }
@@ -395,11 +788,12 @@ final class ToastView: NSView {
             // the right answer for a footer aligning a row of plain controls by their words, and
             // the wrong one here, where subtracting it left the pill three points from the
             // band's own border.
+            constraints += under(
+                lastText.bottomAnchor,
+                by: Design.Spacing.small,
+                clearingClose: lastText === messageLabel
+            )(actionButton.topAnchor)
             constraints += [
-                actionButton.topAnchor.constraint(
-                    equalTo: lastText.bottomAnchor,
-                    constant: Design.Spacing.small
-                ),
                 actionButton.trailingAnchor.constraint(
                     equalTo: trailingAnchor,
                     constant: -inset
@@ -414,6 +808,7 @@ final class ToastView: NSView {
             constraints.append(bottomAnchor.constraint(equalTo: lastText.bottomAnchor, constant: inset))
         }
 
+        constraints += [messageHeight, detailHeight].compactMap { $0 }
         NSLayoutConstraint.activate(constraints)
     }
 
@@ -608,7 +1003,8 @@ private final class ToastDwellRail: NSView, ThemedComponent {
     }
 
     private var usesClassicProgress: Bool {
-        AppThemePalette.current.material(for: effectiveAppearance).progressStyle == .segmented
+        let style = AppThemePalette.current.material(for: effectiveAppearance).progressStyle
+        return style == .segmented
     }
 
     private var classicTrackRect: NSRect {
@@ -673,7 +1069,14 @@ private final class ToastDwellRail: NSView, ThemedComponent {
     /// field is the loudest thing on a sidebar reporting the least. On the edge that reasoning
     /// inverts: the line adds no ink the band was not already spending on its border, and half an
     /// accent over a hairline is not a quieter clock, it is a smudged one.
-    private var inkColour: NSColor { Design.Surface.accent }
+    private var inkColour: NSColor {
+        let style = AppThemePalette.current.material(for: effectiveAppearance).progressStyle
+        if style == .amiga {
+            return WindowChromeAppearance.resolve()?.activeGradient.colors.first
+                ?? Design.Surface.accent
+        }
+        return Design.Surface.accent
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -902,9 +1305,12 @@ final class ToastPresenter {
         refreshStack(animated: true)
     }
 
-    /// Takes the current band away early — the action was taken, or what it reported no longer
-    /// holds.
-    func dismiss() {
+    /// Takes the current band away early — the action was taken, the ✕ was pressed, the band was
+    /// thrown, or what it reported no longer holds.
+    ///
+    /// The queue is unaffected by *how* it went: a receipt sent away by hand still hands the pane
+    /// to whatever was waiting behind it, so throwing one card after another walks the deck.
+    func dismiss(_ departure: ToastDeparture = .settled) {
         guard let toast = current else { return }
         stopClock()
         toast.stopDwell()
@@ -916,7 +1322,12 @@ final class ToastPresenter {
         let leaving: [NSView] = [toast] + stackEdges
         stackEdges = []
 
-        bottomConstraint?.constant = -ToastDefaults.hostInset - ToastDefaults.rise
+        // A band that was pushed sideways does not then drop: the throw is half an animation the
+        // hand already performed, and the departure owes it the other half. Only the band travels
+        // — the deck behind it was not thrown and stays where it stood while it fades.
+        if departure == .settled {
+            bottomConstraint?.constant = -ToastDefaults.hostInset - ToastDefaults.rise
+        }
         let host = self.host
         guard Design.Motion.vanish > 0 else {
             leaving.forEach { $0.alphaValue = 0 }
@@ -929,6 +1340,7 @@ final class ToastPresenter {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.vanish
             context.allowsImplicitAnimation = true
+            if case .thrown(let direction) = departure { toast.flyOut(direction) }
             leaving.forEach { $0.animator().alphaValue = 0 }
             host?.layoutSubtreeIfNeeded()
         }, completionHandler: { [weak self, leaving] in
@@ -971,9 +1383,12 @@ final class ToastPresenter {
             request.action?()
             self?.dismiss()
         }
-        toast.onHoverChanged = { [weak self] isHovered in
+        toast.onDismiss = { [weak self] departure in
+            self?.dismiss(departure)
+        }
+        toast.onHoldChanged = { [weak self] isHeld in
             guard let self else { return }
-            isHovered ? holdOpen() : scheduleDismissal()
+            isHeld ? holdOpen() : scheduleDismissal()
         }
 
         // Topmost in the pane: the band floats over the list, the settings sidebar, and

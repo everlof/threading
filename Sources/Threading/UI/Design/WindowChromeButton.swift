@@ -184,6 +184,11 @@ final class WindowChromeButton: ThemedControl {
         let resolved = fixtureStyle ?? WindowChromeAppearance.resolve()
         let anatomy = WindowChromeCaptionAnatomy.of(resolved?.glyphStyle)
 
+        if resolved?.glyphStyle == .classicPlayer {
+            drawClassicPlayerButton(resolved: resolved, anatomy: anatomy)
+            return
+        }
+
         // A keyed 4Dwm title is one continuous indexed-palette frame: the button bevels
         // share dither phase and rails with the surrounding band. The parent paints that
         // resting construction in one pass while these controls retain their semantic hit
@@ -250,8 +255,11 @@ final class WindowChromeButton: ThemedControl {
         case .reverseVideo:
             if isHovered || isPressed {
                 let cell = bandInk(of: resolved)
-                (isPressed ? cell.withAlphaComponent(0.72) : cell).setFill()
-                bounds.fill()
+                cell.setFill()
+                // A terminal cell has no translucent pressed material. Seat the keyed face
+                // one hard pixel inside its hover cell instead: the same two inks, with the
+                // ground becoming a tiny mechanical edge around the depressed face.
+                (isPressed ? bounds.insetBy(dx: 1, dy: 1) : bounds).fill()
             }
         }
         if anatomy.outlinedInBorder {
@@ -314,6 +322,82 @@ final class WindowChromeButton: ThemedControl {
             rect: bounds,
             radius: Design.Radius.control(fitting: bounds.size)
         ))
+    }
+
+    /// Draws either the exact sprite from a user-imported `.wsz` sheet or the stock
+    /// clean-room Classic Player button. Behaviour remains semantic: the skin's Shade image
+    /// is Threading's Zoom/Restore operation, and its Options image opens the app-owned window
+    /// menu rather than running code from the archive.
+    private func drawClassicPlayerButton(
+        resolved: WindowChromeAppearance.Resolved?,
+        anatomy: WindowChromeCaptionAnatomy
+    ) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        NSGraphicsContext.current?.imageInterpolation = .none
+
+        if let sheet = resolved?.classicSkin?.titleBarImage,
+           drawClassicPlayerSprite(from: sheet) {
+            drawKeyboardFocus(around: ThemedSurface.Shape(rect: bounds, radius: 0))
+            return
+        }
+
+        ThemedSurface.draw(
+            bounds,
+            fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
+            border: Design.Surface.border,
+            bevel: isPressed ? .sunken : .automatic
+        )
+        let glyphBounds = isPressed
+            ? bounds.offsetBy(
+                dx: anatomy.pressedGlyphOffset.x,
+                dy: anatomy.pressedGlyphOffset.y
+            )
+            : bounds
+        WindowChromeCaptionArtwork.draw(
+            WindowChromeCaptionArtwork.classicPlayer(role, restored: displaysRestore),
+            in: glyphBounds,
+            ink: bandInk(of: resolved)
+        )
+        drawKeyboardFocus(around: ThemedSurface.Shape(rect: bounds, radius: 0))
+    }
+
+    /// Classic TITLEBAR.BMP coordinates, independently cross-checked against Webamp's MIT
+    /// sprite table and Audacious's GPLv3 skins plugin. Source coordinates are top-left;
+    /// `NSImage.draw` consumes bottom-left coordinates, hence the y conversion.
+    @discardableResult
+    private func drawClassicPlayerSprite(from sheet: NSImage) -> Bool {
+        let topLeft: NSPoint
+        switch role {
+        case .windowMenu:
+            topLeft = NSPoint(x: 0, y: isPressed ? 9 : 0)
+        case .minimize:
+            topLeft = NSPoint(x: 9, y: isPressed ? 9 : 0)
+        case .zoom, .depth:
+            topLeft = NSPoint(x: isPressed ? 9 : 0, y: 18)
+        case .close:
+            topLeft = NSPoint(x: 18, y: isPressed ? 9 : 0)
+        }
+
+        let side: CGFloat = 9
+        guard sheet.size.width >= topLeft.x + side,
+              sheet.size.height >= topLeft.y + side else { return false }
+        let source = NSRect(
+            x: topLeft.x,
+            y: sheet.size.height - topLeft.y - side,
+            width: side,
+            height: side
+        )
+        sheet.draw(
+            in: bounds,
+            from: source,
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.none]
+        )
+        return true
     }
 
     /// Mac OS 9's resting caption boxes are thirteen-pixel indexed-palette plates inside a

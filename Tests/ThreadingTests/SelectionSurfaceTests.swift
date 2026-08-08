@@ -6,7 +6,7 @@ import XCTest
 ///
 /// They were two, made in different files, and they drifted apart in both directions at once: a
 /// list row and a menu row filled with the theme's `selection` and wrote `Design.Text.label` on it
-/// — 1.47:1 under Windows 98's 90%-opaque navy — while the audit row and the completion row filled
+/// — 1.31:1 under Windows 98's solid navy — while the audit row and the completion row filled
 /// with the same role and wrote `Design.Text.selected`, an ink measured against the *opaque*
 /// accent, which under a theme whose selection is that accent at 20% is white on a pale wash.
 ///
@@ -127,8 +127,8 @@ final class SelectionSurfaceTests: XCTestCase {
         XCTAssertGreaterThan(untouched, 0, "no theme exercised the leave-it-alone path")
     }
 
-    /// Windows 98 is the reported case and the worst of them: `#000080` at 90% over the `#C0C0C0`
-    /// sidebar leaves its own near-black label at 1.47:1. It is held back — and only as far as it
+    /// Windows 98 is the reported case and the worst of them: solid `#000080` over the `#C0C0C0`
+    /// sidebar leaves its own near-black label at 1.31:1. It is held back — and only as far as it
     /// has to be, so the row is still visibly navy rather than a wash.
     func testTheReportedThemeIsHeldBackAndOnlyAsFarAsItMust() throws {
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
@@ -162,7 +162,7 @@ final class SelectionSurfaceTests: XCTestCase {
     // MARK: - Stated: a surface that inks its own contents
 
     /// The ink follows the fill rather than a constant, so it comes out *opposite* under the two
-    /// families of theme — light on a near-opaque navy, dark on a pale wash — without either call
+    /// families of theme — light on a solid navy, dark on a pale wash — without either call
     /// site knowing which it has.
     func testStatedInkReadsOnWhateverTheThemeAuthored() throws {
         for (theme, appearance) in try styledThemesAndAppearances() {
@@ -181,7 +181,7 @@ final class SelectionSurfaceTests: XCTestCase {
     }
 
     /// Both directions of the original bug, in one assertion each, against the two themes that
-    /// produced them: the near-opaque selection wants light ink and the wash wants dark, and
+    /// produced them: the solid selection wants light ink and the wash wants dark, and
     /// neither `Design.Text.label` nor `Design.Text.selected` could have answered both.
     func testTheInkInvertsBetweenAnOpaqueSelectionAndAWash() throws {
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
@@ -192,7 +192,7 @@ final class SelectionSurfaceTests: XCTestCase {
                 of: SelectionSurface.stated(over: Design.Surface.background).ink.label
             )
         }
-        XCTAssertGreaterThan(navyInk, 0.5, "a 90% navy selection should be written on in light ink")
+        XCTAssertGreaterThan(navyInk, 0.5, "a solid navy selection should be written on in light ink")
 
         var washInk = CGFloat.nan
         withTheme(AppThemeStyles.christmas, under: appearance) {

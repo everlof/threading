@@ -406,7 +406,10 @@ struct AppTheme: Codable, Equatable {
         var menuAppearance: MenuAppearance = .automatic
 
         /// How determinate progress is painted. Continuous is the cross-theme default;
-        /// segmented is the classic Win32 block control, whose smooth form was opt-in.
+        /// segmented is the classic Win32 block control, whose smooth form was opt-in. Amiga
+        /// Workbench's horizontal gauge has its own hard trough and title-blue fill; its native
+        /// pixels are not preserved by the surviving manual, so that recipe remains explicitly
+        /// source-inferred.
         var progressStyle: ProgressStyle = .continuous
 
         /// The silhouette and internal anatomy of compact value choosers. A chip is the app's
@@ -421,6 +424,10 @@ struct AppTheme: Codable, Equatable {
         /// system mark colour. `automatic` preserves the pre-field inference for old theme
         /// documents; authored themes can state the exact family without a stock-theme branch.
         var checkboxStyle: CheckboxStyle = .automatic
+
+        /// The anatomy of an immediate binary toggle. Existing documents keep the animated
+        /// sliding switch; compact hardware themes may state a labelled latching button.
+        var toggleStyle: ToggleStyle = .automatic
 
         enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
@@ -495,6 +502,10 @@ struct AppTheme: Codable, Equatable {
         enum ProgressStyle: String, Codable, CaseIterable {
             case continuous
             case segmented
+            /// Indigo Magic's measured scale: a square recessed well with a slanted leading
+            /// edge rather than either the modern line or Win32's separated blocks.
+            case irix
+            case amiga
         }
 
         enum ChoiceStyle: String, Codable, CaseIterable {
@@ -520,6 +531,15 @@ struct AppTheme: Codable, Equatable {
             case recessedTick = "recessed_tick"
             case windows98Tick = "windows_98_tick"
             case beOSCross = "beos_cross"
+        }
+
+        enum ToggleStyle: String, Codable, CaseIterable {
+            /// The modern sliding track and travelling knob used by existing theme documents.
+            case automatic
+            /// A compact hardware latch whose raised OFF face seats into a black ON well. Both
+            /// states carry one-bit labels and a status lamp, so the state never depends on
+            /// colour or knob position alone.
+            case onOffButton = "on_off_button"
         }
 
         struct BackdropPattern: Codable, Equatable {
@@ -606,6 +626,9 @@ struct AppTheme: Codable, Equatable {
             var shadow: Shadow = .automatic
             var density: Density = .regular
             var glyphStyle: GlyphStyle = .system
+            /// Optional radius for the anchored surface. Nil follows the active panel radius;
+            /// period help tags can state their near-square plate without changing every card.
+            var cornerRadius: CGFloat?
 
             static let system = PopoverStyle()
 
@@ -615,7 +638,8 @@ struct AppTheme: Codable, Equatable {
                 edge: Edge = .flat,
                 shadow: Shadow = .automatic,
                 density: Density = .regular,
-                glyphStyle: GlyphStyle = .system
+                glyphStyle: GlyphStyle = .system,
+                cornerRadius: CGFloat? = nil
             ) {
                 self.arrow = arrow
                 self.surfaceRole = surfaceRole
@@ -623,10 +647,11 @@ struct AppTheme: Codable, Equatable {
                 self.shadow = shadow
                 self.density = density
                 self.glyphStyle = glyphStyle
+                self.cornerRadius = cornerRadius
             }
 
             private enum CodingKeys: String, CodingKey {
-                case arrow, surfaceRole, edge, shadow, density, glyphStyle
+                case arrow, surfaceRole, edge, shadow, density, glyphStyle, cornerRadius
             }
 
             init(from decoder: Decoder) throws {
@@ -641,6 +666,7 @@ struct AppTheme: Codable, Equatable {
                 glyphStyle = try container.decodeIfPresent(
                     GlyphStyle.self, forKey: .glyphStyle
                 ) ?? .system
+                cornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .cornerRadius)
             }
         }
 
@@ -648,6 +674,14 @@ struct AppTheme: Codable, Equatable {
             enum TextTransform: String, Codable, CaseIterable {
                 case none
                 case uppercase
+            }
+
+            enum TitleRendering: String, Codable, CaseIterable {
+                /// Draw the title with the authored scalable font recipe.
+                case font
+                /// Draw supported characters as a clean-room one-bit alphabet in five-by-six
+                /// cells. Unsupported localized copy falls back to `font` intact.
+                case pixel5x6 = "pixel_5x6"
             }
 
             enum FontWeight: String, Codable, CaseIterable {
@@ -684,6 +718,7 @@ struct AppTheme: Codable, Equatable {
             }
 
             var textTransform: TextTransform = .none
+            var titleRendering: TitleRendering = .font
             var fontWeight: FontWeight = .medium
             /// Nil inherits the material's prose face. A button may name its own face because
             /// display-led references commonly pair action labels with headings rather than
@@ -704,9 +739,9 @@ struct AppTheme: Codable, Equatable {
             /// Classic disabled pushbuttons engrave shadow-coloured ink with a one-pixel lit
             /// echo instead of lowering the whole label's opacity.
             var embossesDisabledTitle: Bool = false
-            /// Whether Core Graphics may soften the title's glyph edges. Bitmap-era systems
-            /// such as Win32 and Workbench drew their small UI strikes on the device grid;
-            /// turning this off preserves that construction without making modern themes jagged.
+            /// Whether Core Graphics may soften a scalable-font title's glyph edges. Some
+            /// bitmap-era systems used hard font strikes; a sprite-style alphabet should use
+            /// `titleRendering` instead of asking an outline font to imitate one.
             var antialiasesTitle: Bool = true
             var primaryTreatment: PrimaryTreatment = .filled
             /// The semantic colour supplying a primary button's fill, border, and title.
@@ -737,6 +772,7 @@ struct AppTheme: Codable, Equatable {
 
             init(
                 textTransform: TextTransform = .none,
+                titleRendering: TitleRendering = .font,
                 fontWeight: FontWeight = .medium,
                 typeface: Typeface? = nil,
                 fontFamily: String? = nil,
@@ -759,6 +795,7 @@ struct AppTheme: Codable, Equatable {
                 collapseShadowOnHover: Bool = false
             ) {
                 self.textTransform = textTransform
+                self.titleRendering = titleRendering
                 self.fontWeight = fontWeight
                 self.typeface = typeface
                 self.fontFamily = fontFamily
@@ -782,7 +819,7 @@ struct AppTheme: Codable, Equatable {
             }
 
             private enum CodingKeys: String, CodingKey {
-                case textTransform, fontWeight, typeface, fontFamily, tracking
+                case textTransform, titleRendering, fontWeight, typeface, fontFamily, tracking
                 case fontScale, minimumWidth, minimumHeight, embossesDisabledTitle
                 case antialiasesTitle
                 case primaryTreatment, primaryRole, secondaryRole, secondaryHoverRole
@@ -798,6 +835,9 @@ struct AppTheme: Codable, Equatable {
                 textTransform = try container.decodeIfPresent(
                     TextTransform.self, forKey: .textTransform
                 ) ?? .none
+                titleRendering = try container.decodeIfPresent(
+                    TitleRendering.self, forKey: .titleRendering
+                ) ?? .font
                 fontWeight = try container.decodeIfPresent(
                     FontWeight.self, forKey: .fontWeight
                 ) ?? .medium
@@ -933,7 +973,8 @@ struct AppTheme: Codable, Equatable {
             menuAppearance: MenuAppearance = .automatic,
             progressStyle: ProgressStyle = .continuous,
             choiceStyle: ChoiceStyle = .chip,
-            checkboxStyle: CheckboxStyle = .automatic
+            checkboxStyle: CheckboxStyle = .automatic,
+            toggleStyle: ToggleStyle = .automatic
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -958,6 +999,7 @@ struct AppTheme: Codable, Equatable {
             self.progressStyle = progressStyle
             self.choiceStyle = choiceStyle
             self.checkboxStyle = checkboxStyle
+            self.toggleStyle = toggleStyle
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -966,7 +1008,7 @@ struct AppTheme: Codable, Equatable {
             case glow, popoverStyle, controlGlow, buttonStyle, headingStyle, bevel, typeface, fontFamily
             case fontFallbacks
             case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
-            case progressStyle, choiceStyle, checkboxStyle
+            case progressStyle, choiceStyle, checkboxStyle, toggleStyle
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -1031,6 +1073,10 @@ struct AppTheme: Codable, Equatable {
             checkboxStyle = try container.decodeIfPresent(
                 CheckboxStyle.self,
                 forKey: .checkboxStyle
+            ) ?? .automatic
+            toggleStyle = try container.decodeIfPresent(
+                ToggleStyle.self,
+                forKey: .toggleStyle
             ) ?? .automatic
         }
     }
@@ -1236,6 +1282,10 @@ struct AppTheme: Codable, Equatable {
             return roles[.panel]
         case .floatingSurface:
             return roles[.elevated]
+                ?? roles[.panel]?.lightened(by: kind == .dark ? 0.06 : -0.04)
+        case .tooltipSurface:
+            return roles[.floatingSurface]
+                ?? roles[.elevated]
                 ?? roles[.panel]?.lightened(by: kind == .dark ? 0.06 : -0.04)
         case .elevated:
             return roles[.panel]?.lightened(by: kind == .dark ? 0.06 : -0.04)

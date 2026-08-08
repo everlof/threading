@@ -302,6 +302,7 @@ enum ThemedSurface {
         fill: NSColor,
         border: NSColor? = nil,
         radius: CGFloat? = nil,
+        borderWidth: CGFloat? = nil,
         bevel: SurfaceBevel = .automatic
     ) -> Shape {
         // A bevel material bevels the drawn controls too — this is the draw-time half of
@@ -335,7 +336,7 @@ enum ThemedSurface {
             }
         }
 
-        let width = Design.Radius.controlBorder
+        let width = borderWidth ?? Design.Radius.controlBorder
         // Half a point in, so a one-point border falls inside the control rather than straddling
         // its edge and drawing at half intensity.
         let rect = border == nil ? bounds : bounds.insetBy(dx: width / 2, dy: width / 2)

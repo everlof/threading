@@ -105,6 +105,15 @@ struct WindowChromeStyle: Codable, Equatable {
         /// this list only lets a system omit furniture it never had (BeOS has no Minimize box).
         var visibleButtons: [ButtonRole]
 
+        /// A user-imported classic Winamp skin sheet.
+        ///
+        /// The theme document stores only the normalized local asset name. The `.wsz` archive
+        /// itself is never copied into preferences or shipped with the app; `ThemeAssetStore`
+        /// owns the PNG beside the custom theme. Absence is the stock, clean-room Classic
+        /// Player drawing. Presence lets the same semantic title-bar component draw the
+        /// imported 275x14 skin at native pixels and extend its groove for a resizable window.
+        var classicSkin: ClassicSkin?
+
         init(
             activeGradient: SidebarStyle.Gradient,
             inactiveGradient: SidebarStyle.Gradient? = nil,
@@ -121,7 +130,8 @@ struct WindowChromeStyle: Codable, Equatable {
             inactiveTexture: Texture? = nil,
             shape: Shape = .fullWidth,
             tabWidth: Double? = nil,
-            visibleButtons: [ButtonRole] = ButtonRole.standardOperations
+            visibleButtons: [ButtonRole] = ButtonRole.standardOperations,
+            classicSkin: ClassicSkin? = nil
         ) {
             self.activeGradient = activeGradient
             self.inactiveGradient = inactiveGradient
@@ -139,6 +149,7 @@ struct WindowChromeStyle: Codable, Equatable {
             self.shape = shape
             self.tabWidth = tabWidth
             self.visibleButtons = visibleButtons
+            self.classicSkin = classicSkin
         }
 
         enum Alignment: String, Codable, CaseIterable {
@@ -178,6 +189,10 @@ struct WindowChromeStyle: Codable, Equatable {
             /// Unlike its siblings this family reproduces no single system — it is the
             /// box-drawing idiom every full-screen terminal program shares.
             case tui
+            /// The 9x9 title controls and fourteen-pixel band used by classic Winamp skins.
+            /// With no imported sheet, the shared component draws original one-bit fallback
+            /// figures; an imported sheet supplies the exact resting and pressed sprites.
+            case classicPlayer = "classic_player"
         }
 
         enum ButtonPlacement: String, Codable, CaseIterable {
@@ -230,6 +245,10 @@ struct WindowChromeStyle: Codable, Equatable {
                 /// Horizontal one-pixel rules interrupted by the centred title — Platinum's
                 /// active-window signature.
                 case pinstripes
+                /// A short, raised three-row rail on each side of a centred title. Unlike
+                /// pinstripes these do not fill the band: they begin after the leading
+                /// hardware, stop before the trailing hardware, and part around the caption.
+                case captionRails = "caption_rails"
                 /// Cheetah's four-line Aqua rib: a soft dark rule and a white reflection over
                 /// a vertical silver gradient. It is deliberately distinct from Platinum's
                 /// two-line, hard-gray pinstripes.
@@ -245,6 +264,19 @@ struct WindowChromeStyle: Codable, Equatable {
                 /// `spacing` — there is one line, not a field of them — and it is the only
                 /// texture whose job is to *end* the band rather than fill it.
                 case rule
+            }
+        }
+
+        struct ClassicSkin: Codable, Equatable {
+            /// A normalized PNG name resolved in the custom theme's `ThemeAssetStore` folder.
+            var titleBarAsset: String
+
+            init(titleBarAsset: String) {
+                self.titleBarAsset = titleBarAsset
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case titleBarAsset
             }
         }
     }
@@ -288,7 +320,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         case activeGradient, inactiveGradient, ink, inactiveInk
         case titleAlignment, titleFontStyle, titleFontSize, height
         case buttonGlyphStyle, buttonPlacement, showsAppIcon
-        case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons
+        case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons, classicSkin
     }
 
     /// Every field but the active gradient is optional on the wire, the `Material` rule: a
@@ -327,6 +359,7 @@ extension WindowChromeStyle.TitleBar: Codable {
             [ButtonRole].self,
             forKey: .visibleButtons
         ) ?? ButtonRole.standardOperations
+        classicSkin = try container.decodeIfPresent(ClassicSkin.self, forKey: .classicSkin)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -347,6 +380,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encode(shape, forKey: .shape)
         try container.encodeIfPresent(tabWidth, forKey: .tabWidth)
         try container.encode(visibleButtons, forKey: .visibleButtons)
+        try container.encodeIfPresent(classicSkin, forKey: .classicSkin)
     }
 
     private static func decodeColor(
@@ -404,14 +438,17 @@ extension WindowChromeStyle.TitleBar.Texture: Codable {
 /// The bounds `AppThemeEditing.validate` holds a chrome block to, stated beside the model so
 /// a limit and the field it limits travel together — the `SidebarStyleLimits` rule.
 enum WindowChromeStyleLimits {
-    /// Points. Below 16 the band cannot hold its compact caption buttons; past 44 it
+    /// Points. Below 14 the band cannot hold its compact caption buttons; past 44 it
     /// stops being a title bar and starts being a pane.
     ///
     /// The floor was 18 on the reasoning that nothing smaller holds a caption box, until a
     /// measured Platinum band came in at 17 carrying 14pt boxes with a point of air either
     /// side. A limit that a shipped stock theme cannot meet is the limit being wrong, not the
     /// theme — and stock styles are held to exactly the contract agent-authored ones are.
-    static let bandHeightRange: ClosedRange<Double> = 16...44
+    /// Classic Winamp's main title bar is the lower bound: fourteen pixels holding 9x9
+    /// controls with three pixels above and two below. It is a source format's fixed hardware,
+    /// not a density chosen for ordinary app controls.
+    static let bandHeightRange: ClosedRange<Double> = 14...44
     /// What a band measures when the theme does not say — the native pane-tab height's
     /// neighbourhood, so the window's top does not jump between modes more than it must.
     static let defaultBandHeight: Double = 28

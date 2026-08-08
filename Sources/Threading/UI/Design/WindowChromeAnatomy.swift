@@ -56,9 +56,11 @@ struct WindowChromeCaptionAnatomy {
         /// Tiger share the semantic traffic-light family but not the same glass construction.
         case gel(GelRecipe)
         /// Nothing at rest, and the cell inverted under the pointer: the band's ink becomes
-        /// the fill and the band's ground becomes the figure. This is how a terminal has
-        /// marked the cell you are on since it was the only thing it could do, and it is the
-        /// one plate whose *glyph* ink is decided by the plate rather than by `glyphInk`.
+        /// the fill and the band's ground becomes the figure. Press seats that same face one
+        /// hard pixel inward rather than introducing a translucent material. This is how a
+        /// terminal has marked the cell you are on since it was the only thing it could do,
+        /// and it is the one plate whose *glyph* ink is decided by the plate rather than by
+        /// `glyphInk`.
         case reverseVideo
     }
 
@@ -380,6 +382,26 @@ struct WindowChromeCaptionAnatomy {
                 leadingEdgeInset: Design.Spacing.medium,
                 trailingEdgeInset: Design.Spacing.medium
             )
+        case .classicPlayer:
+            // Classic Winamp's main window is fixed at 275x116 and its title controls are
+            // 9x9 inside a 275x14 band: Options at x=6, then Minimize/Shade/Close at
+            // x=244/254/264. Threading keeps those native hit slots and gaps while pinning
+            // the trailing trio to a resizable window's far edge.
+            return WindowChromeCaptionAnatomy(
+                slotSize: NSSize(width: 9, height: 9),
+                rendering: .pixel,
+                plate: .none,
+                outlinedInBorder: false,
+                glyphInk: .band,
+                glyphsRequireHover: false,
+                pressedGlyphOffset: NSPoint(x: 1, y: -1),
+                clusterSpacing: 1,
+                titleGap: 10,
+                alphabet: .bitmap(WindowChromeCaptionArtwork.classicPlayer),
+                clusterVerticalOffset: -0.5,
+                leadingEdgeInset: 6,
+                trailingEdgeInset: 2
+            )
         }
     }
 }
@@ -503,6 +525,46 @@ enum WindowChromeCaptionArtwork {
                 "#......#.#",
                 "#......#..",
                 "########.."
+            ])
+        }
+    }
+
+    /// Original clean-room fallback marks for the stock Classic Player theme. Imported
+    /// `.wsz` themes draw the source sheet's own normal/pressed sprites instead; these keep
+    /// the stock theme useful without bundling Winamp artwork or trademarks.
+    static func classicPlayer(_ role: WindowChromeButton.Role, restored: Bool) -> Bitmap {
+        switch role {
+        case .windowMenu:
+            return Bitmap(rowsTopToBottom: [
+                "#.....",
+                ".#....",
+                "..###.",
+                ".#....",
+                "#....."
+            ])
+        case .minimize:
+            return Bitmap(rowsTopToBottom: ["#####"])
+        case .zoom where restored:
+            return Bitmap(rowsTopToBottom: [
+                "..####",
+                "..#..#",
+                "####.#",
+                "#..#.#",
+                "####.."
+            ])
+        case .zoom, .depth:
+            return Bitmap(rowsTopToBottom: [
+                "######",
+                "#....#",
+                "######"
+            ])
+        case .close:
+            return Bitmap(rowsTopToBottom: [
+                "#...#",
+                ".#.#.",
+                "..#..",
+                ".#.#.",
+                "#...#"
             ])
         }
     }

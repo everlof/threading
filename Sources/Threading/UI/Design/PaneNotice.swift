@@ -90,6 +90,14 @@ final class PaneNoticeView: NSView, ThemedComponent {
     private let glyph = GlyphView()
     private let messageLabel: NSTextField
     private let separator = SeparatorView()
+    private let contentAreaGuide = NSLayoutGuide()
+    private lazy var minimumHeightConstraint = heightAnchor.constraint(
+        greaterThanOrEqualToConstant: PaneNoticeDefaults.bandHeight
+    )
+    private lazy var preferredHeightConstraint = heightAnchor.constraint(
+        equalToConstant: PaneNoticeDefaults.bandHeight
+    )
+    private var appliedBandHeight: CGFloat?
     /// Kept beside the buttons rather than captured in them: a `ThemedControl` is an
     /// `NSControl`, so its press arrives as target/action and the sender's tag is what names
     /// which of the band's answers was pressed.
@@ -122,11 +130,15 @@ final class PaneNoticeView: NSView, ThemedComponent {
         themeRedraw = ThemeRedraw(self)
 
         setupViews(actions: actions, onDismiss: onDismiss)
+        applyMetrics()
         applyInk()
 
         // The ink is read from roles at draw and set on labels here, so a live theme switch has
         // to reach both halves — the fill follows `draw`, the label colours follow this.
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyInk() }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyMetrics()
+            self?.applyInk()
+        }
         appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
             self?.applyInk()
         }
@@ -165,6 +177,11 @@ final class PaneNoticeView: NSView, ThemedComponent {
         announce()
     }
 
+    override func layout() {
+        applyMetrics()
+        super.layout()
+    }
+
     // MARK: - Private Methods
 
     private func setupViews(actions: [PaneNoticeAction], onDismiss: (() -> Void)?) {
@@ -177,7 +194,12 @@ final class PaneNoticeView: NSView, ThemedComponent {
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.applyFont(.control)
         messageLabel.maximumNumberOfLines = PaneNoticeDefaults.maximumLines
-        messageLabel.lineBreakMode = .byTruncatingTail
+        // Word wrapping with a truncated *last* line, rather than `lineBreakMode =
+        // .byTruncatingTail`. A truncating line-break mode turns wrapping off outright, so the
+        // two-line budget above was never spent: at a 760pt pane the band drew one clipped line
+        // ending "…browser windows were…", losing the half of the sentence that says the
+        // workspace was held and the half that Restore is the answer to.
+        messageLabel.cell?.truncatesLastVisibleLine = true
         // The sentence yields before the buttons do: a band too narrow for both wraps and then
         // truncates its own words rather than squeezing the control that answers it.
         messageLabel.setContentCompressionResistancePriority(
@@ -197,6 +219,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
         addSubview(glyph)
         addSubview(messageLabel)
         addSubview(separator)
+        addLayoutGuide(contentAreaGuide)
 
         handlers = actions.map(\.handler)
         actionButtons = actions.enumerated().map { index, action in
@@ -226,23 +249,28 @@ final class PaneNoticeView: NSView, ThemedComponent {
     private func installConstraints() {
         // The band floors at the header's height so a pane's two chrome rows read as the same
         // kind of row, and grows only if the sentence needs a second line.
-        let height = heightAnchor.constraint(equalToConstant: PaneNoticeDefaults.bandHeight)
-        height.priority = .defaultLow
+        preferredHeightConstraint.priority = .defaultLow
 
         var constraints: [NSLayoutConstraint] = [
-            heightAnchor.constraint(greaterThanOrEqualToConstant: PaneNoticeDefaults.bandHeight),
-            height,
+            minimumHeightConstraint,
+            preferredHeightConstraint,
 
             // Edge to edge, like every other rule a pane folds on.
             separator.leadingAnchor.constraint(equalTo: leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: trailingAnchor),
             separator.bottomAnchor.constraint(equalTo: bottomAnchor),
 
+            // The rule follows the row; it is not part of the row's lower breathing room.
+            contentAreaGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentAreaGuide.bottomAnchor.constraint(equalTo: separator.topAnchor),
+            contentAreaGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentAreaGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
+
             glyph.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: PaneNoticeDefaults.contentInset
             ),
-            glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
+            glyph.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
             glyph.widthAnchor.constraint(equalToConstant: PaneNoticeDefaults.glyphSlot),
             glyph.heightAnchor.constraint(equalToConstant: PaneNoticeDefaults.glyphSlot),
 
@@ -250,13 +278,13 @@ final class PaneNoticeView: NSView, ThemedComponent {
                 equalTo: glyph.trailingAnchor,
                 constant: Design.Spacing.small
             ),
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            messageLabel.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
             messageLabel.topAnchor.constraint(
-                greaterThanOrEqualTo: topAnchor,
+                greaterThanOrEqualTo: contentAreaGuide.topAnchor,
                 constant: Design.Spacing.small
             ),
             messageLabel.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
+                lessThanOrEqualTo: contentAreaGuide.bottomAnchor,
                 constant: -Design.Spacing.small
             )
         ]
@@ -266,7 +294,9 @@ final class PaneNoticeView: NSView, ThemedComponent {
         // glyph button's frame carries its click target, and its edge is not its mark.
         var trailingNeighbour: NSView?
         for view in ([dismissButton].compactMap { $0 } + actionButtons.reversed()) {
-            constraints.append(view.centerYAnchor.constraint(equalTo: centerYAnchor))
+            constraints.append(
+                view.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor)
+            )
             if let trailingNeighbour {
                 constraints.append(view.trailingAnchor.constraint(
                     equalTo: trailingNeighbour.leadingAnchor,
@@ -295,6 +325,16 @@ final class PaneNoticeView: NSView, ThemedComponent {
         }
 
         NSLayoutConstraint.activate(constraints)
+    }
+
+    private func applyMetrics() {
+        let height = PaneNoticeDefaults.bandHeight
+        guard appliedBandHeight != height else { return }
+        appliedBandHeight = height
+        minimumHeightConstraint.constant = height
+        preferredHeightConstraint.constant = height
+        invalidateIntrinsicContentSize()
+        needsLayout = true
     }
 
     @objc private func actionPressed(_ sender: NSControl) {
@@ -331,11 +371,12 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
 // MARK: - Pane Notice Defaults
 
+@MainActor
 enum PaneNoticeDefaults {
 
     /// The pane's own header height, so a notice under it reads as the same kind of row rather
     /// than as a second, differently proportioned strip.
-    static let bandHeight: CGFloat = PaneHeaderView.bandHeight
+    static var bandHeight: CGFloat { PaneHeaderView.bandHeight }
 
     /// Ink-to-edge distance. The pane's inset rather than the corner-adapted region: this band
     /// is stacked between two pane-width surfaces and meets no window corner, which is

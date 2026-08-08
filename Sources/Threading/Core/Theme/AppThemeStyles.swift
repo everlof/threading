@@ -34,6 +34,7 @@ enum AppThemeStyles {
         openStep,
         irix,
         amiga,
+        classicPlayer,
         win98,
         tui,
         christmas
@@ -59,6 +60,19 @@ enum AppThemeStyles {
         shadow: .none,
         density: .compact,
         glyphStyle: .classic
+    )
+
+    /// Aqua Help Tags are compact, stemless plates rather than modern speech bubbles. The
+    /// pale-yellow surface and near-square corner come from the period HIG figures; Cheetah's
+    /// figure is later than 10.0.x, so that family remains source-shaped in its ledger.
+    static let aquaHelpTagPopoverStyle = AppTheme.Material.PopoverStyle(
+        arrow: .none,
+        surfaceRole: .tooltipSurface,
+        edge: .flat,
+        shadow: .system,
+        density: .compact,
+        glyphStyle: .system,
+        cornerRadius: 1
     )
 
     static let windowsInfotipStyle = AppTheme.Material.PopoverStyle(

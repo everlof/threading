@@ -315,6 +315,9 @@ one transform and then composed with the user's scale. It lets a dense visual la
 Windows 98 state period-sized chrome throughout instead of hard-coding an eight-point exception
 in one title label. Absence is 1, so every older document is byte-for-byte the previous geometry;
 the user remains the final multiplier. The app-theme tools and remote material DTO expose it.
+The stock Windows 98 material deliberately stops at `0.80`, rather than mathematically reducing
+every role to the shell's eight-point default: title, menu, and control copy stay compact while
+the project tree and longer application text remain readable on a modern high-resolution display.
 
 The conversation gets its own slot for the reason the terminal always had one: it is the surface
 that is *read*. `Typography.FontSurface` is a parameter on that single transform rather than a
@@ -380,9 +383,10 @@ and drives itself — so `draw(_:)` runs on every display pass and calls both pa
 unconditionally. AppKit's own parts answer by painting nothing whatsoever: measured, a standalone
 `NSScroller` covers zero pixels in either style, whatever the user's scroll-bar preference. That
 is why the terminal had no visible scrollbar at all until the theme drew one, and why the one it
-drew then stayed up through every session. `ThemedScroller` therefore owns the fade wherever its
-superview is not an `NSScrollView`: down at rest, up when the *position* moves, held while the
-pointer is on it, and gone `Design.Motion.scrollerHold` later. Deliberately not on
+drew then stayed up through every session. An automatic `ThemedScroller` therefore owns the fade
+wherever its superview is not an `NSScrollView`: down at rest, up when the *position* moves, held
+while the pointer is on it, and gone `Design.Motion.scrollerHold` later. Named period controls
+stay visible, as their occupied track and arrows are permanent window furniture. Deliberately not on
 `knobProportion` — a terminal pinned to the bottom of a growing buffer reports the same position
 while its thumb shrinks on every line an agent prints, so revealing on the thumb would hold the
 bar up for the whole of a streaming answer. "Always show scroll bars" is honoured by never
@@ -436,10 +440,15 @@ seam: themes state specs (`AppTheme.Material`), one interpreter draws them
 
 The optional `glow.highlight` is the second outer shadow, not another halo blended into the
 first. It has its own role, radius, opacity and offset, is subject to the same gutter gate, and
-is drawn by a transparent shadow-only companion layer. This keeps the primary lower-right shade
-diffuse while the upper-left light travels the other way — the paired construction the
-Claymorphism source actually uses. Documents without it decode exactly as before; theme tools
-can set it, remove it independently, and read it back.
+is drawn by an expanded exterior-only companion layer. A transparent Core Animation layer with
+only a `shadowPath` is not exterior-only: as a sublayer its shadow composites above the parent's
+background, so Cyberpunk's centred opaque highlight painted its entire dark card lime. The
+companion now draws into a canvas large enough for the blur and offset, then clears the caster's
+exact rounded face; the authored fill and its text remain untouched while both shadows survive
+outside it. This keeps the primary lower-right shade diffuse while the upper-left light travels
+the other way — the paired construction the Claymorphism source actually uses. Documents
+without it decode exactly as before; theme tools can set it, remove it independently, and read
+it back.
 
 `material.controlGlow` is the same paired vocabulary at control scale. It is separate rather
 than an automatic fraction of `glow` because the live Clay source makes a semantic distinction:
@@ -449,6 +458,13 @@ same participation for the theme sweep. A compact control that is pressed drops 
 and tertiary marks cast nothing. Custom-theme tools expose `control_glow`,
 `remove_control_glow`, and the nested highlight with the same partial-update and validation rules
 as panel glow. Older documents decode it as nil and keep flat controls.
+
+Buttons choose that depth semantically rather than by size. A primary action uses `controlGlow`;
+`buttonStyle.secondaryShadow` tells an ordinary bordered action to reuse the compact `control`
+shadow, the broader neutral `panel` shadow, or `none`. Industrial needs this split exactly: the
+live reference gives coral CTAs a tight coral pair, while grey secondary actions keep the
+grey/white neumorphic panel pair. The authoring wire spells the field `secondary_shadow`, and
+older documents default to `control`.
 
 `material.popoverStyle` is the floating-surface grammar shared by every product popover. It
 states whether the anchor has a triangle stem, which semantic role fills it, whether its edge is
@@ -473,6 +489,17 @@ where a white status card became a border around apparent empty space. Platinum,
 IRIX, and Amiga use the same stemless compact language and consume their hard material bevels.
 Claymorphism and Neo Brutalism use stemless material edges and their authored shadow construction
 instead of the unconditional macOS one.
+
+`tooltipSurface` is the narrower role for a hover/help tag when a period's information plate is
+not the same object as its modal or floating card. Aqua Cheetah and Aqua Tiger use a pale-yellow
+ground with a compact, stemless, near-square plate (`corner_radius: 1`) and native-looking dark
+Lucida copy. Tiger's 2005 HIG figure supplies measured plate geometry (about 125 x 18 points,
+one-pixel warm edge and a soft lower/right shadow); Cheetah's surviving figure is from the later
+2001 HIG, so that material is explicitly source-shaped rather than claimed as a measured 10.0.x
+pixel match. Alerts continue to consume `floatingSurface`, so a Help Tag's yellow role cannot
+leak into a modal requester. Custom themes may author both the role and the optional
+`popover_style.corner_radius`; older documents decode to the existing panel radius and the
+existing `floatingSurface` fallback.
 
 `material.buttonStyle` carries the action language that palette and geometry cannot express:
 title transform, weight, a button-only typeface class or installed family, and tracking; filled
@@ -527,6 +554,14 @@ place that already knows a theme changed; a view that states no intrinsic size i
 the sweep across the whole catalogue is `ThemedIndicatorsTests`
 (`testEveryStockThemeRulesAtOneWeightThroughoutTheWindow`), entering each style from the heaviest
 one so a stale rule has somewhere to show.
+
+The same rule applies to a band's *budget*. A pane header used to be `tabHeight + 2 × small`
+while its separator was pinned inside that fixed height. That happened to look balanced with a
+hairline, but Bauhaus's four-point rule took four of the six points below the selected tab and
+left all six above it. `PaneHeaderView.bandHeight` now includes the current rule *after* both
+content margins, and both `PaneHeaderView` and `ThemedTabStripView` centre their row in the area
+above it. The height constraints remeasure on `AppThemeDidChange`; `PaneNoticeView`, which shares
+the header's floor, does the same rather than caching the first theme's answer.
 
 **A rule's *ink* is budgeted, and the budget is the text stem (2026-07-31).** Weight agreeing
 everywhere made the loud themes uniformly loud: Neo Brutalism states `divider` at full label ink
@@ -772,6 +807,17 @@ whole startup on, for the same reason. Everything that records a theme *choice* 
 and then assert the app read it; a seam under those would break the thing they are testing. The
 line is *recorded choice* versus *behaviour under test*, not "everything in `UserDefaults`".
 
+**A recovery launch wears System without recording it.** `restore(_:)` pins `.system` under
+`.recovery`, in memory: nothing in `restore` writes, so the whole guarantee is bought by taking that
+path and never `apply`, which records even a pick that changes nothing on screen. It is System
+rather than "the stored choice if it happens to be stock", because a stock theme carrying a
+`WindowChromeStyle` opts the window into the app-drawn frame — a great deal of launch-time
+machinery and a plausible place to die. The Appearance page therefore selects
+`AppThemeLibrary.storedThemeID` rather than what is in force, or clicking the entry that already
+looks selected would record System over the user's theme; a pick made there still records, because
+what recovery forbids is the *launch* writing a choice nobody made. See
+[`crash-recovery.md`](crash-recovery.md).
+
 A test that needs to read a choice back reads it through `PreferenceStore.shared` too —
 `ExtensionAppearanceTests` does, because reaching past the seam would assert against a key the
 app no longer writes. `PreferenceStore.isRedirected` exists so the redirect is asserted rather
@@ -870,6 +916,14 @@ the native backing (including on a takeover-to-takeover switch), allowing AppKit
 follow the tab plus body instead of a hidden rectangular title strip. Shape, width, and button
 set have the same create/update/get parity as the earlier fields.
 
+Its check gadget cannot be inferred from the same hard bevel. Haiku's pinned MIT
+`BeControlLook::DrawCheckBox` preserves R5's construction: a compact white nested well followed
+by a two-pixel X in the system control-mark colour. Workbench uses the same broad square/bevel
+material facts but a gray recessed field and tick, so `material.checkbox_style` names the
+independent anatomy (`automatic`, `recessed_tick`, or `beos_cross`). Old documents retain the
+former square-bevel inference; BeOS and Workbench state their source-backed recipes explicitly,
+and create/update/get round-trip the field for custom historical themes.
+
 **OPENSTEP 4.2** (`openstep-42`) adds two more period primitives, again without a stock-ID
 branch. `button_placement: bookends` puts the first authored visible operation at the leading
 edge and the remaining operations at the trailing edge, so `[minimize, close]` reproduces the
@@ -891,6 +945,21 @@ theme asks. Windows 98 does, producing a sunken trough with discrete accent bloc
 progress indicators, usage meters, and the toast dwell clock; old documents decode to continuous. The field
 round-trips through create/update/get so a custom nineties theme can opt in without a stock-theme
 identity check.
+
+Workbench additionally states `progress_style: amiga`: a hard horizontal gauge filled from the
+active title blue. The manual confirms the percentage-gauge grammar but preserves no native pixels,
+so its thickness and relief remain explicitly source-inferred rather than measured. Its DiskCopy
+requester also carries the documented left-Amiga+V and left-Amiga+B Continue/Cancel accelerators;
+the requester panel consumes those only for the Amiga material.
+
+IRIX additionally states `progress_style: irix`: the Indigo Magic scale is a square recessed well
+with an eight-pixel slanted leading edge, measured from SGI's Figure 9-7 and repeated in the
+Figure 10-6 Working dialog. Its figure is grayscale, so the construction is measured while fill
+colour continues to come from the theme's authored accent rather than from a guessed screenshot
+colour. The same interpreter is used by determinate bars and usage gauges; old documents decode to
+the continuous modern rail. Its measured logout requester is the classic exception to the
+icon-free period alert: a 30px bright-green question field sits beside the message well, and the
+IRIX title strip uses the authored 13px italic caption rather than the Workbench one-bit title.
 
 **Compact controls carry period anatomy and measure, not only period colours.** `fieldSurface` is
 an optional semantic role that derives from `panel` for every older theme, while Windows 98 states
@@ -1002,6 +1071,12 @@ Old theme documents decode to
 `scroller_appearance: automatic`, so adding the family does not silently turn an existing custom
 theme into a persistent legacy scrollbar.
 
+The Aqua popover evidence has an important confidence boundary. The Cheetah reference set confirms
+Help Tags in the period HIG family but its available figure postdates the 10.0 release; the Cheetah
+recipe therefore records the shared Aqua plate grammar as source-shaped. The Tiger reference is a
+measured 10.4-era Help Tag. Both are represented by the dedicated `tooltipSurface` role and the
+stemless compact popover style, while the alert path remains on the ordinary floating surface.
+
 Menus are a separate material axis for the same reason. A popup field can share a downward
 arrow across several systems while the panel it opens differs in frame construction, row
 rhythm, separators, selection, submenu overlap, shadow, and glyph placement. The authorable
@@ -1055,3 +1130,45 @@ travel together: monospaced glyphs are wider than the proportional ones every me
 `Design` was chosen against, so the same words need more room, and 0.94 buys that width back
 inside the panes. Widening the panes would have been the wrong lever — pane widths are the
 window's, not a theme's, which is the line `AppThemeStyles` draws in its own header.
+
+## 2026-08-08 — classic player chrome and local `.wsz` assets
+
+**Classic Player** (`classic-player`) is the tenth takeover and the first whose window band can
+be supplied by the user. The stock theme is clean-room: its palette, bevels, and one-bit caption
+figures are authored here, and the app ships no Winamp logo, screenshot, bitmap, or skin. The
+fourteen-point band and nine-point caption slots follow the public Winamp 2.x-compatible `.wsz`
+format as independently implemented by Webamp and Audacious.
+
+Importing a `.wsz` creates an ordinary custom dark theme derived from Classic Player, then stores
+one normalized `classic-titlebar.png` in that theme's `ThemeAssetStore` folder. The theme document
+contains only that local asset name in `chrome.titleBar.classicSkin`; it contains neither archive
+bytes nor an absolute path. Duplication copies the folder, deletion removes it, and a missing file
+falls back to the stock clean-room band. The public theme tools may author
+`button_glyph_style: classic_player`, but they cannot name or ingest local skin assets: importing
+user-selected bytes remains a Settings-only trust boundary.
+
+The import is intentionally the window-chrome slice of the format. It consumes `TITLEBAR.BMP`
+(or PNG), including its active/inactive bands and options/minimize/shade/close state sprites. It
+does not apply playlist, equalizer, transport, font, cursor, or logo resources to unrelated app
+controls. On a resizable window the two hardware ends remain at native size and only the centre
+groove expands. The sprite semantics remain native to Threading: Options opens the app-owned
+window menu, Shade means Zoom/Restore, and Close still follows the window delegate.
+
+The stock fallback uses the same shared theme vocabulary to evoke the original player's
+material hierarchy without copying its pixels: violet gunmetal structural planes, black sunken
+display wells, green display ink, hard bevels, and pale raised `caption_rails` on either side of
+the title. `caption_rails` derives its endpoints from the live title and button stacks, so it is
+an authorable texture rather than a `classic-player` drawing branch. Imported title-bar pixels
+still replace that clean-room fallback completely.
+
+The second fidelity pass makes binary toggles part of that vocabulary too.
+`material.toggle_style: on_off_button` replaces the modern travelling knob with a compact
+hardware latch: OFF is a raised face, ON is a black sunken well, and both states carry one-bit
+words plus a small status lamp. `ThemedToggle` still owns the same Boolean value, target/action,
+keyboard activation, and accessibility role; only its theme-selected drawing and measure change.
+Classic Player also states uppercase `button_style.title_rendering: pixel_5x6`. This follows the
+construction of the source skin's five-by-six `TEXT` sprite cells instead of disabling smoothing
+on a small scalable font—the latter malformed letters rather than creating bitmap type. The
+stock alphabet is clean-room and ships no Winamp pixels. A title containing any unsupported
+localized character falls back as a whole to the ordinary antialiased font, preserving the copy
+instead of mixing alphabets or drawing a missing glyph.

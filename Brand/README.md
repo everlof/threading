@@ -2,6 +2,9 @@
 
 `ThreadingMark.svg` is the canonical two-orange display mark.
 `ThreadingMarkMono.svg` is the canonical single-color small mark.
+`ThreadingAvatar.svg` is the social account avatar — the mono mark on the navy
+ground, held to 68% of the frame so the circular crop every network applies
+cannot reach the hexagon's corners. Upload `ThreadingAvatar-400.png` to X.
 
 The locked provisional palette is:
 

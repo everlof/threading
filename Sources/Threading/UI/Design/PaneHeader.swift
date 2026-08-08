@@ -16,9 +16,13 @@ final class PaneHeaderView: NSView {
 
     // MARK: - Geometry
 
-    /// Deep enough for a tab or an inline control, with the same air above and below.
-    /// `nonisolated` so the content pane's layout constants can restate it without an actor hop.
-    nonisolated static let bandHeight: CGFloat = Design.Size.tabHeight + Design.Spacing.small * 2
+    /// Deep enough for a tab or an inline control, with the same air above and below, followed
+    /// by the rule that ends the band. The rule is outside that air: counting it inside the old
+    /// fixed height made a one-point separator almost invisible to the geometry and let
+    /// Bauhaus's four-point rule consume most of the lower margin.
+    static var bandHeight: CGFloat {
+        Design.Size.tabHeight + Design.Spacing.small * 2 + Design.Radius.border
+    }
 
     private enum Layout {
         /// Ink-to-edge distance, measured from the corner-adapted content region.
@@ -35,7 +39,18 @@ final class PaneHeaderView: NSView {
     private let margin: PaneBandMargin
     private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
+    /// The vertical content region, ending where the separator begins. Exposed as an anchor so
+    /// composite pane headers can align their host-owned controls to the same row without
+    /// re-deriving the separator's theme-dependent thickness.
+    private let contentAreaGuide = NSLayoutGuide()
+    var contentCenterYAnchor: NSLayoutYAxisAnchor { contentAreaGuide.centerYAnchor }
+
     private let separator = SeparatorView()
+    private lazy var bandHeightConstraint = heightAnchor.constraint(
+        equalToConstant: Self.bandHeight
+    )
+    private let appEvents = AppEventObservations()
+    private var appliedBandHeight: CGFloat?
 
     // MARK: - Initialization
 
@@ -49,15 +64,26 @@ final class PaneHeaderView: NSView {
         self.margin = margin
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Self.bandHeight).isActive = true
+        bandHeightConstraint.isActive = true
         _ = contentGuide
         installSeparator()
+        installContentAreaGuide()
         install(leading: leading, trailing: trailing)
+        applyMetrics()
+
+        // Theme materials own rule weight, so changing theme is a remeasure as well as a
+        // redraw. The layout pass is the guarantee for a detached band that missed the event.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyMetrics() }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        applyMetrics()
+        super.layout()
     }
 
     // MARK: - Private Methods
@@ -88,13 +114,23 @@ final class PaneHeaderView: NSView {
         ])
     }
 
+    private func installContentAreaGuide() {
+        addLayoutGuide(contentAreaGuide)
+        NSLayoutConstraint.activate([
+            contentAreaGuide.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor),
+            contentAreaGuide.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor),
+            contentAreaGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentAreaGuide.bottomAnchor.constraint(equalTo: separator.topAnchor)
+        ])
+    }
+
     private func install(leading: [NSView], trailing: [NSView]) {
         for view in leading + trailing {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
-            // Centred in the band rather than pinned to an edge, so the air above the row
-            // and the air below it are the same air — and both are the band's, stated once.
-            view.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+            // Centred above the rule rather than across it, so the air above the row and the
+            // air below it are the same air at every authored rule weight.
+            view.centerYAnchor.constraint(equalTo: contentCenterYAnchor).isActive = true
         }
 
         if let first = leading.first {
@@ -137,5 +173,14 @@ final class PaneHeaderView: NSView {
 
     private func opticalInset(of view: NSView) -> CGFloat {
         (view as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
+    }
+
+    private func applyMetrics() {
+        let height = Self.bandHeight
+        guard appliedBandHeight != height else { return }
+        appliedBandHeight = height
+        bandHeightConstraint.constant = height
+        invalidateIntrinsicContentSize()
+        needsLayout = true
     }
 }

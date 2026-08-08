@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "chrome_id": "classic-player",
+  "target": {
+    "platform": "Classic Winamp skin format",
+    "release": "Winamp 2.x compatible .wsz",
+    "version": "2.x"
+  },
+  "sources": [
+    {
+      "id": "webamp-sprite-map",
+      "page_url": "https://github.com/captbaritone/webamp/blob/5f56a5369c3e2346f4f6e045f214856ef9abaad4/packages/webamp/js/skinSprites.ts",
+      "owner": "Webamp contributors (MIT-licensed implementation code)",
+      "kind": "recreation",
+      "storage": "remote_only"
+    },
+    {
+      "id": "audacious-skin-loader",
+      "page_url": "https://github.com/audacious-media-player/audacious-plugins/blob/f41ec33e008c2dd74015bc2b75fc1912a592bd59/src/skins/skin.cc",
+      "owner": "Audacious contributors (GPLv3 implementation code)",
+      "kind": "recreation",
+      "storage": "remote_only"
+    }
+  ],
+  "coverage": {
+    "window_frame": { "status": "not_applicable", "note": "The surrounding two-point hard frame is Threading's clean-room Classic Player material. A .wsz supplies player bitmaps, not a resizable macOS window frame." },
+    "title_bar": { "status": "source_found", "note": "Two independent compatible implementations pin the classic TITLEBAR.BMP sheet, its 275x14 active and inactive bands, and its top-left source coordinates. Threading reads user-supplied artwork locally and preserves both hardware ends while extending only the centre groove." },
+    "window_buttons": { "status": "source_found", "note": "Webamp's sprite table and Audacious's loader independently establish the 9x9 options, minimize, shade and close states. Threading maps those images onto semantic window menu, minimize, zoom/restore and delegate-consulted close actions." },
+    "toolbar": { "status": "not_applicable", "note": "This feature skins Threading's window chrome, not the original player's application toolbar or playback controls." },
+    "buttons": { "status": "not_applicable", "note": "Application buttons use the authored Classic Player material; user skin bitmaps are never stretched across unrelated controls." },
+    "choice_controls": { "status": "not_applicable", "note": "Choice controls use Threading's square, bevelled material and are outside the TITLEBAR compatibility slice." },
+    "fields": { "status": "not_applicable", "note": "Fields use Threading's authored dark player material and are outside the imported skin slice." },
+    "menus": { "status": "not_applicable", "note": "The options sprite opens Threading's own window operations menu. No menu code or menu pixels are loaded from the archive." },
+    "popovers": { "status": "not_applicable", "note": "Popovers use the shared compact period style; the .wsz title-band artwork does not reach transient UI." },
+    "scrollbars": { "status": "not_applicable", "note": "Classic player playlist scrollbars are outside this window-chrome import and are not projected onto Threading content." },
+    "lists_tables": { "status": "not_applicable", "note": "Playlist artwork is outside this window-chrome import and is not projected onto Threading lists." },
+    "progress": { "status": "not_applicable", "note": "Playback-position and volume sprites are application controls, not window chrome, and are not loaded." },
+    "alerts_toasts": { "status": "not_applicable", "note": "Alerts remain Threading surfaces in the authored Classic Player material." },
+    "typography": { "status": "not_applicable", "note": "An imported band contains its own baked title pixels. Elsewhere the clean-room stock theme uses the system monospaced design and imports no font." },
+    "icons": { "status": "not_applicable", "note": "No Winamp logo or icon ships with Threading. The imported title sheet remains a user-owned local theme asset." }
+  },
+  "crops": [],
+  "reproductions": []
+}

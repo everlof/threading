@@ -8,7 +8,10 @@ enum WorkingOrbStyle: String, CaseIterable {
     case searching
     case solving
     case listening
+    case connecting
+    case weaving
     case composing
+    case breathing
     case shaping
 
     var displayName: String {
@@ -18,7 +21,10 @@ enum WorkingOrbStyle: String, CaseIterable {
         case .searching: return L10n.string("Searching")
         case .solving: return L10n.string("Solving")
         case .listening: return L10n.string("Listening")
+        case .connecting: return L10n.string("Connecting")
+        case .weaving: return L10n.string("Weaving")
         case .composing: return L10n.string("Composing")
+        case .breathing: return L10n.string("Breathing")
         case .shaping: return L10n.string("Shaping")
         }
     }

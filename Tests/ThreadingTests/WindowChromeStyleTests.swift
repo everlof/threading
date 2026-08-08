@@ -85,7 +85,8 @@ final class WindowChromeStyleTests: XCTestCase {
                 inactiveTexture: .init(kind: .pinstripes),
                 shape: .leadingTab,
                 tabWidth: 210,
-                visibleButtons: [.close, .zoom, .depth]
+                visibleButtons: [.close, .zoom, .depth],
+                classicSkin: .init(titleBarAsset: "classic-titlebar.png")
             ),
             frame: .init(width: 4, cornerRadius: 6)
         )
@@ -119,6 +120,19 @@ final class WindowChromeStyleTests: XCTestCase {
         )
         let data = try JSONEncoder().encode(texture)
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("aqua_pinstripes"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(WindowChromeStyle.TitleBar.Texture.self, from: data),
+            texture
+        )
+    }
+
+    func testCaptionRailsRoundTripByTheirStableWireName() throws {
+        let texture = WindowChromeStyle.TitleBar.Texture(
+            kind: .captionRails,
+            color: NSColor(hex: "#E4DEA0")
+        )
+        let data = try JSONEncoder().encode(texture)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("caption_rails"))
         XCTAssertEqual(
             try JSONDecoder().decode(WindowChromeStyle.TitleBar.Texture.self, from: data),
             texture

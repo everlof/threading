@@ -1,5 +1,135 @@
 import AppKit
 
+/// Geometry and period indicator ink shared by both chooser implementations.
+///
+/// `ChipView` serves the composer while `ThemedPopUp` serves forms and extension UI; a retro
+/// material cannot acquire two different arrow wells merely because the caller used the other
+/// semantic wrapper.
+@MainActor
+enum ClassicChoiceDrawing {
+    static let edge: CGFloat = 2
+    static let arrowWidth: CGFloat = 18
+    static let textInset: CGFloat = 5
+
+    static func arrowRect(
+        in bounds: NSRect,
+        style: AppTheme.Material.ChoiceStyle
+    ) -> NSRect {
+        if style == .dropdown {
+            return NSRect(
+                x: bounds.maxX - edge - arrowWidth,
+                y: edge,
+                width: arrowWidth,
+                height: max(0, bounds.height - edge * 2)
+            )
+        }
+        return NSRect(
+            x: bounds.maxX - arrowWidth,
+            y: 0,
+            width: arrowWidth,
+            height: bounds.height
+        )
+    }
+
+    static func drawIntegratedSeparator(at x: CGFloat, in bounds: NSRect) {
+        Design.Surface.bevelShadow.setFill()
+        NSRect(x: x, y: 2, width: 1, height: max(0, bounds.height - 4)).fill()
+        Design.Surface.bevelHighlight.setFill()
+        NSRect(x: x + 1, y: 2, width: 1, height: max(0, bounds.height - 4)).fill()
+    }
+
+    static func drawAquaArrowWell(in rect: NSRect, pressed: Bool) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSBezierPath(rect: rect).addClip()
+        let accent = Design.Surface.accent
+        let bright = accent.blended(withFraction: pressed ? 0.36 : 0.63, of: .white) ?? accent
+        let deep = accent.blended(withFraction: pressed ? 0.36 : 0.18, of: .black) ?? accent
+        let body = rect.insetBy(dx: 0.5, dy: 0.5)
+        NSGradient(colors: [bright, accent, deep])?.draw(in: body, angle: -90)
+        Design.Surface.border.withAlphaComponent(0.70).setStroke()
+        let edge = NSBezierPath(rect: body)
+        edge.lineWidth = 1
+        edge.stroke()
+        NSColor.white.withAlphaComponent(pressed ? 0.24 : 0.58).setFill()
+        NSRect(
+            x: body.minX + 1,
+            y: body.maxY - 3,
+            width: max(0, body.width - 2),
+            height: 1
+        ).fill()
+    }
+
+    static func drawIndicator(
+        _ style: AppTheme.Material.ChoiceStyle,
+        in rect: NSRect,
+        color: NSColor
+    ) {
+        color.setFill()
+        switch style {
+        case .chip:
+            return
+        case .dropdown, .popup:
+            triangle(
+                center: NSPoint(x: rect.midX, y: rect.midY - 1),
+                width: 7,
+                height: 4,
+                pointsUp: false
+            ).fill()
+        case .doubleArrowPopup, .aquaPopup:
+            triangle(
+                center: NSPoint(x: rect.midX, y: rect.midY + 3),
+                width: 5,
+                height: 3,
+                pointsUp: true
+            ).fill()
+            triangle(
+                center: NSPoint(x: rect.midX, y: rect.midY - 3),
+                width: 5,
+                height: 3,
+                pointsUp: false
+            ).fill()
+        case .cycle:
+            horizontalTriangle(
+                center: NSPoint(x: rect.midX + 1, y: rect.midY + 3),
+                pointsRight: true
+            ).fill()
+            horizontalTriangle(
+                center: NSPoint(x: rect.midX - 1, y: rect.midY - 3),
+                pointsRight: false
+            ).fill()
+        }
+    }
+
+    private static func triangle(
+        center: NSPoint,
+        width: CGFloat,
+        height: CGFloat,
+        pointsUp: Bool
+    ) -> NSBezierPath {
+        let direction: CGFloat = pointsUp ? 1 : -1
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: center.x, y: center.y + direction * height / 2))
+        path.line(to: NSPoint(x: center.x - width / 2, y: center.y - direction * height / 2))
+        path.line(to: NSPoint(x: center.x + width / 2, y: center.y - direction * height / 2))
+        path.close()
+        return path
+    }
+
+    private static func horizontalTriangle(
+        center: NSPoint,
+        pointsRight: Bool
+    ) -> NSBezierPath {
+        let direction: CGFloat = pointsRight ? 1 : -1
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: center.x + direction * 3, y: center.y))
+        path.line(to: NSPoint(x: center.x - direction * 2, y: center.y + 2))
+        path.line(to: NSPoint(x: center.x - direction * 2, y: center.y - 2))
+        path.close()
+        return path
+    }
+}
+
 /// A flat pill that opens a menu.
 ///
 /// The app's standard way to offer a choice. `NSPopUpButton` was the obvious control and
@@ -9,14 +139,6 @@ import AppKit
 /// See `Design` for the vocabulary this belongs to.
 final class ChipView: ThemedControl {
 
-    private enum ClassicLayout {
-        static let edge: CGFloat = 2
-        static let arrowWidth: CGFloat = 18
-        static let textInset: CGFloat = 5
-        static let triangleWidth: CGFloat = 7
-        static let triangleHeight: CGFloat = 4
-    }
-
     enum HeightStyle {
         /// A compact chooser among other compact controls.
         case compact
@@ -25,7 +147,7 @@ final class ChipView: ThemedControl {
 
         fileprivate var value: CGFloat {
             switch self {
-            case .compact: return Design.Size.chipHeight
+            case .compact: return Design.Size.choiceHeight
             case .field: return Design.Size.fieldHeight
             }
         }
@@ -41,6 +163,7 @@ final class ChipView: ThemedControl {
     private var contentTrailingConstraint: NSLayoutConstraint?
     private var configuredIcon: NSImage?
     private var appliedChoiceStyle: AppTheme.Material.ChoiceStyle?
+    private var appliedChoiceHeight: CGFloat?
 
     private var isPresentingMenu = false {
         didSet {
@@ -54,10 +177,29 @@ final class ChipView: ThemedControl {
     var heightStyle: HeightStyle = .compact {
         didSet {
             guard heightStyle != oldValue else { return }
-            heightConstraint?.constant = heightStyle.value
-            invalidateIntrinsicContentSize()
-            updateBackground()
+            applyHeight()
         }
+    }
+
+    /// The height a `ControlRowView` this chip stands in has stated, which wins over the style's
+    /// own. Nil everywhere else, which is every chip that is not in a row.
+    ///
+    /// Under `.compact` the two agree by construction — a row's compact height *is*
+    /// `choiceHeight`, because the chooser is what a theme authors. It is `.field` rows that
+    /// need this: there the chip stands beside a text field and takes the field's height, and
+    /// that used to be a `heightStyle` each host had to remember to set.
+    private var rowHeight: CGFloat?
+
+    /// What this chip is actually drawn at.
+    private var controlHeight: CGFloat { rowHeight ?? heightStyle.value }
+
+    /// Restates the height wherever it is held: the constraint, the intrinsic size, and the
+    /// pill radius the background is drawn from — which is a function of the height, so a chip
+    /// that resized without this kept the silhouette of the size it used to be.
+    private func applyHeight() {
+        heightConstraint?.constant = controlHeight
+        invalidateIntrinsicContentSize()
+        updateBackground()
     }
 
     /// Widens the chip to its full contents while hovered, so a label truncated to fit the row
@@ -78,7 +220,7 @@ final class ChipView: ThemedControl {
     var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: heightStyle.value)
+        NSSize(width: NSView.noIntrinsicMetric, height: controlHeight)
     }
 
     /// A neighbouring reading can align to the title's ink rather than the pill's geometric
@@ -99,8 +241,18 @@ final class ChipView: ThemedControl {
     /// ThemeRedraw invalidates drawing, while a chooser style also changes which children take
     /// part and how much trailing room the independent arrow button owns.
     override func setNeedsDisplay(_ invalidRect: NSRect) {
+        let anatomyChanged = choiceStyle != appliedChoiceStyle
+            || controlHeight != appliedChoiceHeight
         super.setNeedsDisplay(invalidRect)
         needsLayout = true
+        // `AppThemeLibrary.apply` first re-resolves every recorded layer surface and then posts
+        // the redraw event. When the new theme changes this control from a chip into a classic
+        // chooser, that first pass necessarily re-applies the *old* chip recipe. Restate the
+        // surface after resolving the new anatomy so a live switch gets the field/raised face
+        // immediately rather than only after the next hover.
+        if anatomyChanged {
+            updateBackground()
+        }
     }
 
     override func layout() {
@@ -125,7 +277,7 @@ final class ChipView: ThemedControl {
     private func setupViews() {
         applySurface(
             fill: Design.Surface.controlResting,
-            radius: .pill(height: heightStyle.value),
+            radius: .pill(height: controlHeight),
             controlGlow: true
         )
 
@@ -136,6 +288,12 @@ final class ChipView: ThemedControl {
         titleLabel.applyFont(.control)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
+        // A chip's own compression resistance decides whether the row may make it narrower.
+        // Once it may, the label has to be the part that yields; leaving NSTextField's default
+        // 750 here let the hidden inner label push through an already-compressible ChipView and
+        // ultimately widen a split pane. The full value remains in the tooltip and the chip
+        // expands to its fitting width while hovered.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         chevronView.image = NSImage(
             systemSymbolName: DesignSymbols.chevron,
@@ -161,7 +319,7 @@ final class ChipView: ThemedControl {
 
         addSubview(contentStack)
 
-        let heightConstraint = heightAnchor.constraint(equalToConstant: heightStyle.value)
+        let heightConstraint = heightAnchor.constraint(equalToConstant: controlHeight)
         self.heightConstraint = heightConstraint
         let leading = contentStack.leadingAnchor.constraint(
             equalTo: leadingAnchor,
@@ -203,7 +361,7 @@ final class ChipView: ThemedControl {
     func configure(icon: NSImage?, title: String) {
         configuredIcon = icon
         iconView.image = icon
-        iconView.isHidden = icon == nil || choiceStyle == .dropdown
+        iconView.isHidden = icon == nil || choiceStyle.isClassic
         titleLabel.stringValue = title
         toolTip = title
     }
@@ -345,17 +503,29 @@ final class ChipView: ThemedControl {
                 fill: isHovered || isPresentingMenu
                     ? Design.Surface.controlHover
                     : Design.Surface.controlResting,
-                radius: .pill(height: heightStyle.value),
+                radius: .pill(height: controlHeight),
                 border: focused ? Design.Surface.accent : nil,
                 controlGlow: true
             )
-        case .dropdown, .popup, .doubleArrowPopup, .aquaPopup, .cycle:
+        case .dropdown:
             // The editable/value half of a Win32 combo is a white sunken well. The arrow is a
             // separate raised button drawn below, not a modern glyph floating in a gray pill.
             applySurface(
                 fill: Design.Surface.field,
                 radius: .fixed(0),
                 bevel: .sunken
+            )
+        case .popup, .doubleArrowPopup, .cycle:
+            applySurface(
+                fill: Design.Surface.controlResting,
+                radius: .fixed(0),
+                bevel: isPresentingMenu ? .sunken : .automatic
+            )
+        case .aquaPopup:
+            applySurface(
+                fill: Design.Surface.controlResting,
+                radius: .fixed(5),
+                border: Design.Surface.border
             )
         }
         alphaValue = isEnabled ? 1 : 0.5
@@ -368,8 +538,11 @@ final class ChipView: ThemedControl {
 
     private func updateChoiceStyleIfNeeded() {
         let style = choiceStyle
-        guard style != appliedChoiceStyle else { return }
+        let height = controlHeight
+        guard style != appliedChoiceStyle || height != appliedChoiceHeight else { return }
         appliedChoiceStyle = style
+        appliedChoiceHeight = height
+        heightConstraint?.constant = height
 
         switch style {
         case .chip:
@@ -384,54 +557,42 @@ final class ChipView: ThemedControl {
             // value and the small filled arrow; the menu rows remain free to carry their marks.
             iconView.isHidden = true
             chevronView.isHidden = true
-            contentLeadingConstraint?.constant = ClassicLayout.textInset
+            contentLeadingConstraint?.constant = ClassicChoiceDrawing.textInset
             contentTrailingConstraint?.constant = -(
-                ClassicLayout.arrowWidth + ClassicLayout.textInset
+                ClassicChoiceDrawing.arrowWidth + ClassicChoiceDrawing.textInset
             )
         }
         invalidateIntrinsicContentSize()
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard choiceStyle == .dropdown else { return }
+        let style = choiceStyle
+        guard style.isClassic else { return }
 
-        let arrowRect = NSRect(
-            x: bounds.maxX - ClassicLayout.edge - ClassicLayout.arrowWidth,
-            y: ClassicLayout.edge,
-            width: ClassicLayout.arrowWidth,
-            height: max(0, bounds.height - ClassicLayout.edge * 2)
-        )
-        _ = ThemedSurface.draw(
-            arrowRect,
-            fill: Design.Surface.controlResting,
-            radius: 0,
-            bevel: isPresentingMenu ? .sunken : .automatic
-        )
-
-        let centre = NSPoint(x: arrowRect.midX, y: arrowRect.midY - 1)
-        let triangle = NSBezierPath()
-        triangle.move(to: NSPoint(
-            x: centre.x - ClassicLayout.triangleWidth / 2,
-            y: centre.y + ClassicLayout.triangleHeight / 2
-        ))
-        triangle.line(to: NSPoint(
-            x: centre.x + ClassicLayout.triangleWidth / 2,
-            y: centre.y + ClassicLayout.triangleHeight / 2
-        ))
-        triangle.line(to: NSPoint(x: centre.x, y: centre.y - ClassicLayout.triangleHeight / 2))
-        triangle.close()
-        Design.Text.label.setFill()
-        triangle.fill()
+        let arrowRect = ClassicChoiceDrawing.arrowRect(in: bounds, style: style)
+        if style == .dropdown {
+            _ = ThemedSurface.draw(
+                arrowRect,
+                fill: Design.Surface.controlResting,
+                radius: 0,
+                bevel: isPresentingMenu ? .sunken : .automatic
+            )
+        } else if style == .aquaPopup {
+            ClassicChoiceDrawing.drawAquaArrowWell(in: arrowRect, pressed: isPresentingMenu)
+        } else {
+            ClassicChoiceDrawing.drawIntegratedSeparator(at: arrowRect.minX, in: bounds)
+        }
+        ClassicChoiceDrawing.drawIndicator(style, in: arrowRect, color: Design.Text.label)
 
         guard window?.firstResponder === self else { return }
         let valueRect = NSRect(
-            x: ClassicLayout.textInset - 1,
-            y: ClassicLayout.edge + 2,
+            x: ClassicChoiceDrawing.textInset - 1,
+            y: ClassicChoiceDrawing.edge + 2,
             width: max(
                 0,
-                arrowRect.minX - ClassicLayout.textInset * 2
+                arrowRect.minX - ClassicChoiceDrawing.textInset * 2
             ),
-            height: max(0, bounds.height - ClassicLayout.edge * 2 - 4)
+            height: max(0, bounds.height - ClassicChoiceDrawing.edge * 2 - 4)
         )
         let focus = NSBezierPath(rect: valueRect)
         focus.lineWidth = 1
@@ -474,12 +635,35 @@ final class ChipView: ThemedControl {
     override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
 }
 
+// MARK: - ControlRowMember
+
+extension ChipView: ControlRowMember {
+
+    /// Under a compact row this confirms the height the chip already had — the row takes its
+    /// compact measure *from* the chooser. It is the taller rows that move it, and the live
+    /// theme switch: `choiceHeight` is the material's, so a style change resizes every chip in
+    /// a row along with the row itself.
+    func adopt(_ metrics: ControlRowMetrics) {
+        guard rowHeight != metrics.height else { return }
+        rowHeight = metrics.height
+        applyHeight()
+    }
+}
+
 // MARK: - Design Symbols
 
 /// Symbols the design system uses itself, as opposed to ones a feature chooses.
 enum DesignSymbols {
     static let chevron = "chevron.down"
     static let submit = "return"
+
+    /// The send glyph's other face, while a turn is running. A filled square rather than an
+    /// outlined one: Stop is the only control in the box that acts on something already
+    /// happening, and it has to read as the more definite of the two at 18pt.
+    static let stop = "stop.fill"
+
+    /// Adding to the turn already running, as opposed to starting another one.
+    static let steer = "arrow.turn.down.right"
     static let search = "magnifyingglass"
     static let removeAttachment = "xmark"
     /// Entering annotation mode on a browser page, and being in it.
@@ -489,5 +673,8 @@ enum DesignSymbols {
     /// pair carries the outcome without relying on the colour they are tinted.
     static let reportFiled = "checkmark.circle"
     static let reportRefused = "exclamationmark.triangle"
+
+    /// A `PaneNoticeView` stating a fact rather than a problem. Its shape differs from the
+    /// warning triangle beside it so the two are told apart without their tints.
     static let noticeInformational = "info.circle"
 }

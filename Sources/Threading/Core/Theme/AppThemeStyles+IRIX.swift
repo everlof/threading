@@ -31,7 +31,10 @@ extension AppThemeStyles {
                 .controlResting: hex("#BDBDBD"),
                 .controlHover: hex("#D5D5D5"),
                 .selection: hex("#8C799F").withAlphaComponent(0.82),
-                .statusPositive: hex("#137A45"),
+                // The requester's measured bright field is historical artwork, not semantic
+                // status ink (see `ThemedAlert.irixQuestionImage`). The role itself must remain
+                // legible against the neutral window ground under the public theme contract.
+                .statusPositive: hex("#2F8A4F"),
                 .statusWarning: hex("#8A6500"),
                 .statusNegative: hex("#9B2929"),
                 .syntaxKeyword: hex("#3D4F98"),
@@ -83,6 +86,7 @@ extension AppThemeStyles {
                 fontFamily: "Helvetica",
                 scrollerAppearance: .irix,
                 menuAppearance: .irix,
+                progressStyle: .irix,
                 choiceStyle: .popup
             ),
             sidebar: SidebarStyle(

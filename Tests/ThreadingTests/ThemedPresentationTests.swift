@@ -128,6 +128,60 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(renders.count, anchors.count, "an arrow edge rendered as another edge")
     }
 
+    /// Aqua Help Tags are compact pale-yellow plates, not the modern rounded speech bubble. The
+    /// Tiger HIG measures that grammar directly; Cheetah's surviving plate is the nearest later
+    /// figure and remains source-shaped in its manifest rather than promoted to native 10.0
+    /// pixels.
+    func testAquaHelpTagPopoverUsesThePeriodPlateGrammar() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+
+        for (theme, fixture) in [
+            (AppThemeStyles.aqua, "popover-chrome-aqua-cheetah-help-tag"),
+            (AppThemeStyles.aquaTiger, "popover-chrome-aqua-tiger-help-tag")
+        ] {
+            AppThemePalette.set(theme)
+            let material = theme.material
+            let contentSize = NSSize(width: 125, height: 18)
+            let placement = ThemedPopoverLayout.place(
+                anchor: NSRect(x: 300, y: 390, width: 20, height: 20),
+                contentSize: contentSize,
+                visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+                preferredEdge: .maxY,
+                style: material.popoverStyle,
+                hasMaterialShadow: false,
+                bevelWidth: material.bevel?.width
+            )
+
+            XCTAssertFalse(placement.hasArrow, "Help Tags are stemless plates")
+            XCTAssertFalse(placement.classic, "Aqua Help Tag copy keeps Lucida-style text")
+            XCTAssertEqual(material.popoverStyle.cornerRadius, 1)
+
+            let chrome = ThemedPopoverChromeView(
+                frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+            )
+            chrome.placement = placement
+            let rep = try rendered(chrome, scale: 2)
+            try writeRender(of: rep, named: fixture)
+
+            let centre = try pixel(
+                of: rep,
+                at: NSPoint(x: placement.bodyFrame.midX, y: placement.bodyFrame.midY),
+                in: chrome
+            )
+            let expected = AppThemePalette.current.resolved(.tooltipSurface)
+            XCTAssertEqual(centre.hexString, expected.hexString)
+
+            let edge = try pixel(
+                of: rep,
+                at: NSPoint(x: placement.bodyFrame.minX + 0.5, y: placement.bodyFrame.midY),
+                in: chrome
+            )
+            XCTAssertGreaterThan(contrast(edge, centre), 0.05,
+                                 "the Help Tag lost its one-pixel warm edge")
+        }
+    }
+
     func testWindows98PopoverUsesAPaleSquareStemlessInfotip() throws {
         AppThemePalette.set(AppThemeStyles.win98)
         defer { AppThemePalette.set(.system) }
@@ -455,6 +509,99 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(Set(buttons.compactMap { $0.accessibilityTitle() }), ["Remove", "Cancel"])
         XCTAssertEqual(checkboxes.first?.accessibilityTitle(), "Don't ask again")
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: root), [])
+    }
+
+    func testClassicRequesterMaterialDropsModernStatusIcon() throws {
+        let previous = AppThemeLibrary.current
+        defer {
+            AppThemePalette.set(previous)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previous.id))
+        }
+
+        AppThemePalette.set(AppThemeStyles.amiga)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.amiga.id))
+
+        let alert = ThemedAlert()
+        alert.messageText = "DiskCopy Request"
+        alert.informativeText = "Insert the destination disk and select Continue."
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+
+        XCTAssertEqual(ThemedAlert.workbenchShortcutIndex(for: "V"), 0)
+        XCTAssertEqual(ThemedAlert.workbenchShortcutIndex(for: "b"), 1)
+        XCTAssertNil(ThemedAlert.workbenchShortcutIndex(for: "x"))
+
+        let root = sized(alert.makeContentView())
+        let imageViews = ([root] + descendants(in: root)).compactMap { $0 as? NSImageView }
+        XCTAssertFalse(imageViews.isEmpty)
+        XCTAssertTrue(
+            imageViews.allSatisfy(\.isHidden),
+            "Workbench requesters are text-led, not modern SF-symbol alerts"
+        )
+        XCTAssertNotNil(
+            ([root] + descendants(in: root)).compactMap { $0 as? WindowChromeButton }
+                .first(where: { $0.role == .depth }),
+            "Workbench requesters carry the source title strip's depth gadget"
+        )
+        let buttons = themedButtons(in: root)
+        XCTAssertEqual(buttons.map(\.title), ["Continue", "Cancel"])
+        let leading = try XCTUnwrap(buttons.first)
+        let trailing = try XCTUnwrap(buttons.last)
+        let leadingFrame = leading.convert(leading.bounds, to: root)
+        let trailingFrame = trailing.convert(trailing.bounds, to: root)
+        XCTAssertLessThan(
+            leadingFrame.midX,
+            trailingFrame.midX,
+            "Workbench requesters put Continue at the leading edge and Cancel at the trailing edge"
+        )
+        XCTAssertGreaterThan(
+            trailingFrame.minX - leadingFrame.maxX,
+            root.bounds.width * 0.25,
+            "Workbench requester gadgets should bookend the bottom rail"
+        )
+        XCTAssertEqual(
+            AppThemePalette.current.resolved(
+                AppThemePalette.current.material(for: root.effectiveAppearance)
+                    .popoverStyle.surfaceRole,
+                appearance: root.effectiveAppearance
+            ).hexString,
+            "#AAAAAA",
+            "Workbench requesters should use the stock application gray"
+        )
+
+        root.appearance = NSAppearance(named: .aqua)
+        root.layoutSubtreeIfNeeded()
+        try writeRender(of: rendered(root, scale: 2), named: "alert-requester-amiga-workbench-31")
+    }
+
+    /// IRIX's measured logout requester is the classic exception: its square frame keeps the
+    /// period title/message grammar but carries a bright green question field beside the copy.
+    func testIRIXRequesterRestoresTheMeasuredQuestionIcon() throws {
+        let previous = AppThemeLibrary.current
+        defer {
+            AppThemePalette.set(previous)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previous.id))
+        }
+
+        AppThemePalette.set(AppThemeStyles.irix)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.irix.id))
+
+        let alert = ThemedAlert()
+        alert.messageText = "Confirm"
+        alert.informativeText = "Do you want to log out now?"
+        alert.addButton(withTitle: "Yes")
+        alert.addButton(withTitle: "No")
+
+        let root = sized(alert.makeContentView())
+        let image = try XCTUnwrap(
+            ([root] + descendants(in: root)).compactMap { $0 as? NSImageView }.first
+        )
+        XCTAssertFalse(image.isHidden, "IRIX requester lost its measured question field")
+        XCTAssertEqual(image.image?.size, NSSize(width: 30, height: 30))
+
+        root.appearance = NSAppearance(named: .aqua)
+        root.layoutSubtreeIfNeeded()
+        try writeRender(of: rendered(root, scale: 2), named: "alert-requester-irix-indigo-magic")
     }
 
     /// Prominence follows Return everywhere else, and must not here.

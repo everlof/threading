@@ -131,6 +131,13 @@ enum Design {
         static let toolbarButtonWidth: CGFloat = 30
         static let toolbarButtonHeight: CGFloat = 28
 
+        /// A single navigation action floating over scrollable content.
+        ///
+        /// Larger than an inline or toolbar target because it has no row around it to extend
+        /// the hit area, and shared by Git Review and Native Chat so the same down-arrow never
+        /// arrives at two sizes.
+        static let floatingNavigationTarget: CGFloat = 40
+
         /// The chevron half of a split control — narrower than the press it is welded to.
         ///
         /// The two halves are not equals: one takes the action, the other offers the exceptions,
@@ -138,6 +145,11 @@ enum Design {
         /// happens to be touching the first. Still comfortably above the pointer target the rest
         /// of the chrome uses, because it is full toolbar height. See `SplitIconButtonView`.
         static let splitMenuWidth: CGFloat = 24
+
+        /// The split-menu half beside a compact composer send glyph. This pair is smaller than
+        /// toolbar chrome because it lives inside the prompt footer rather than standing alone.
+        static let compactSubmitHeight: CGFloat = 18
+        static let compactSplitMenuWidth: CGFloat = 12
 
         /// A chrome-takeover window's own buttons — close, minimize, zoom — in the app-drawn
         /// title band. Wider than tall, the proportion every windowing system's buttons share,
@@ -434,6 +446,11 @@ enum Design {
         static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .semibold), surface: surface) }
         /// Strong body copy used only by legacy form section labels.
         static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .bold), surface: surface) }
+        /// The one-bit question mark drawn into a period requester's fixed-size indexed artwork.
+        /// This is generated chrome rather than prose, so its source-matched face does not scale.
+        static func classicRequesterMark() -> NSFont {
+            .systemFont(ofSize: 22, weight: .bold)
+        }
         /// Labels on controls. Buttons may ask for the weight their material authors; other
         /// controls keep the historical medium default.
         static func control(

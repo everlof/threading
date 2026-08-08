@@ -534,7 +534,8 @@ extension AgentToolCoordinator {
                     throw AppThemeEditingError.invalid(
                         "chrome.title_bar.button_glyph_style must be \"squares\", "
                             + "\"platinum\", \"beos\", \"openstep\", \"irix\", "
-                            + "\"amiga\", \"aqua\", \"aqua_tiger\", \"tui\", or \"plain\"."
+                            + "\"amiga\", \"aqua\", \"aqua_tiger\", \"classic_player\", "
+                            + "\"tui\", or \"plain\"."
                     )
                 }
                 style.titleBar.buttonGlyphStyle = parsed
@@ -642,8 +643,8 @@ extension AgentToolCoordinator {
         if let rawKind = cleaned(patch.kind) {
             guard let parsed = WindowChromeStyle.TitleBar.Texture.Kind(rawValue: rawKind) else {
                 throw AppThemeEditingError.invalid(
-                    "\(path).kind must be \"pinstripes\", \"aqua_pinstripes\", \"dither\", "
-                        + "\"brushed_metal\", or \"rule\"."
+                    "\(path).kind must be \"pinstripes\", \"caption_rails\", "
+                        + "\"aqua_pinstripes\", \"dither\", \"brushed_metal\", or \"rule\"."
                 )
             }
             kind = parsed
@@ -1091,6 +1092,14 @@ extension AgentToolCoordinator {
                 }
                 style.glyphStyle = parsed
             }
+            if let value = popoverPatch.cornerRadius {
+                guard (0...24).contains(value) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.popover_style.corner_radius must be between 0 and 24."
+                    )
+                }
+                style.cornerRadius = CGFloat(value)
+            }
             material.popoverStyle = style
         }
 
@@ -1135,7 +1144,8 @@ extension AgentToolCoordinator {
         if let rawProgress = cleaned(patch.progressStyle) {
             guard let parsed = AppTheme.Material.ProgressStyle(rawValue: rawProgress) else {
                 throw AppThemeEditingError.invalid(
-                    "material.progress_style must be \"continuous\" or \"segmented\"."
+                    "material.progress_style must be \"continuous\", \"segmented\", \"irix\", "
+                        + "or \"amiga\"."
                 )
             }
             material.progressStyle = parsed
@@ -1158,6 +1168,14 @@ extension AgentToolCoordinator {
             }
             material.checkboxStyle = parsed
         }
+        if let rawToggle = cleaned(patch.toggleStyle) {
+            guard let parsed = AppTheme.Material.ToggleStyle(rawValue: rawToggle) else {
+                throw AppThemeEditingError.invalid(
+                    "material.toggle_style must be \"automatic\" or \"on_off_button\"."
+                )
+            }
+            material.toggleStyle = parsed
+        }
 
         if patch.removeButtonStyle == true {
             material.buttonStyle = .system
@@ -1178,6 +1196,16 @@ extension AgentToolCoordinator {
                     )
                 }
                 style.textTransform = parsed
+            }
+            if let raw = cleaned(buttonPatch.titleRendering) {
+                guard let parsed = AppTheme.Material.ButtonStyle.TitleRendering(
+                    rawValue: raw
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "material.button_style.title_rendering must be \"font\" or \"pixel_5x6\"."
+                    )
+                }
+                style.titleRendering = parsed
             }
             if let raw = cleaned(buttonPatch.fontWeight) {
                 guard let parsed = AppTheme.Material.ButtonStyle.FontWeight(rawValue: raw) else {
@@ -1697,7 +1725,8 @@ extension AgentToolCoordinator {
             "menu_appearance": material.menuAppearance.rawValue,
             "progress_style": material.progressStyle.rawValue,
             "choice_style": material.choiceStyle.rawValue,
-            "checkbox_style": material.checkboxStyle.rawValue
+            "checkbox_style": material.checkboxStyle.rawValue,
+            "toggle_style": material.toggleStyle.rawValue
         ]
         if let width = material.controlBorderWidth {
             document["control_border_width"] = Double(width)
@@ -1712,7 +1741,7 @@ extension AgentToolCoordinator {
             ]
         }
         let popover = material.popoverStyle
-        document["popover_style"] = [
+        var popoverDocument: [String: Any] = [
             "arrow": popover.arrow.rawValue,
             "surface_role": popover.surfaceRole.wireName,
             "edge": popover.edge.rawValue,
@@ -1720,9 +1749,14 @@ extension AgentToolCoordinator {
             "density": popover.density.rawValue,
             "glyph_style": popover.glyphStyle.rawValue
         ]
+        if let radius = popover.cornerRadius {
+            popoverDocument["corner_radius"] = Double(radius)
+        }
+        document["popover_style"] = popoverDocument
         let button = material.buttonStyle
         var buttonDocument: [String: Any] = [
             "text_transform": button.textTransform.rawValue,
+            "title_rendering": button.titleRendering.rawValue,
             "font_weight": button.fontWeight.rawValue,
             "tracking": Double(button.tracking),
             "font_scale": Double(button.fontScale),

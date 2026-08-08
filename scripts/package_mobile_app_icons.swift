@@ -28,6 +28,7 @@ private let themes: [ThemeIcon] = [
     .init(id: "amiga-workbench-31", suffix: "Amiga"),
     .init(id: "retro-98", suffix: "Windows98"),
     .init(id: "tui", suffix: "TUI"),
+    .init(id: "classic-player", suffix: "ClassicPlayer"),
     .init(id: "christmas", suffix: "Christmas"),
 ]
 

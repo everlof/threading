@@ -29,6 +29,17 @@ enum WindowChromeAppearance {
             let spacing: CGFloat
         }
 
+        struct ClassicSkin: Equatable {
+            let assetName: String
+            let titleBarImage: NSImage
+
+            static func == (lhs: Self, rhs: Self) -> Bool {
+                lhs.assetName == rhs.assetName
+                    && lhs.titleBarImage.size == rhs.titleBarImage.size
+                    && lhs.titleBarImage.isEqual(rhs.titleBarImage)
+            }
+        }
+
         let activeGradient: Gradient
         let inactiveGradient: Gradient
         let ink: NSColor
@@ -45,6 +56,7 @@ enum WindowChromeAppearance {
         let shape: WindowChromeStyle.TitleBar.Shape
         let tabWidth: CGFloat
         let visibleButtons: [WindowChromeStyle.TitleBar.ButtonRole]
+        let classicSkin: ClassicSkin?
         let frameWidth: CGFloat
         let frameCornerRadius: CGFloat
     }
@@ -56,14 +68,20 @@ enum WindowChromeAppearance {
     }
 
     static func resolve(for appearance: NSAppearance) -> Resolved? {
-        AppThemePalette.current.windowChrome(for: appearance).map(resolved(from:))
+        let theme = AppThemePalette.current
+        return theme.windowChrome(for: appearance).map {
+            resolved(from: $0, themeID: theme.id)
+        }
     }
 
     /// The document-to-drawable transform on its own, for a fixture — a gallery story, a
     /// render test — that shows the chrome without a takeover theme being in force. The
     /// chrome views take the result as a per-instance override, never through global state:
     /// a preview must not dress the real window.
-    static func resolved(from chrome: WindowChromeStyle) -> Resolved {
+    static func resolved(
+        from chrome: WindowChromeStyle,
+        themeID: AppThemeID? = nil
+    ) -> Resolved {
         let titleBar = chrome.titleBar
         let active = gradient(from: titleBar.activeGradient)
         let inactive = titleBar.inactiveGradient.map(gradient(from:))
@@ -92,6 +110,7 @@ enum WindowChromeAppearance {
             shape: titleBar.shape,
             tabWidth: CGFloat(titleBar.tabWidth ?? WindowChromeStyleLimits.defaultTabWidth),
             visibleButtons: titleBar.visibleButtons,
+            classicSkin: resolvedClassicSkin(titleBar.classicSkin, themeID: themeID),
             frameWidth: CGFloat(
                 chrome.frame?.width ?? WindowChromeStyleLimits.defaultFrameWidth
             ),
@@ -100,6 +119,17 @@ enum WindowChromeAppearance {
                     ?? WindowChromeStyleLimits.defaultFrameCornerRadius
             )
         )
+    }
+
+    private static func resolvedClassicSkin(
+        _ skin: WindowChromeStyle.TitleBar.ClassicSkin?,
+        themeID: AppThemeID?
+    ) -> Resolved.ClassicSkin? {
+        guard let skin,
+              let themeID,
+              let image = ThemeAssetStore.image(named: skin.titleBarAsset, for: themeID)
+        else { return nil }
+        return Resolved.ClassicSkin(assetName: skin.titleBarAsset, titleBarImage: image)
     }
 
     // MARK: - The Band as a Ground

@@ -304,13 +304,13 @@
       "path": "Sources/Threading/UI/Design/ThreadingMarkView.swift",
       "kind": "frozenLayerColor",
       "symbol": "fillColor",
-      "reason": "The mark's core fill is reapplied from draw(_:) on every theme refresh beside its strokes."
+      "reason": "The mark's core and individually tinted particle fills are reapplied from draw(_:) on every theme refresh beside its strokes."
     },
     {
       "path": "Sources/Threading/UI/Design/ThreadingMarkView.swift",
       "kind": "motionDuration",
       "symbol": "duration",
-      "reason": "The draw-in threads Design.Motion tokens through one stroke builder, and playDrawIn returns before constructing any animation under Reduce Motion."
+      "reason": "The draw-in and opt-in particle cadences take named Design.Motion tokens; playDrawIn and pointer entry both return before constructing any animation under Reduce Motion, and particle repetition is removed on pointer exit."
     },
     {
       "path": "Sources/Threading/UI/Design/SidebarBrandView.swift",
@@ -353,6 +353,12 @@
       "kind": "interactiveComponent",
       "symbol": "WindowTitleBandView",
       "reason": "The press is a titlebar's press: it hands the window to performDrag, and a double-click performs the user's own System Settings choice — the gestures NSWindow ran before the takeover theme replaced its frame. Subclassing ThemedControl would give the whole band a focus ring, an enabled state and a press action, none of which a titlebar has; every activation in the band belongs to its buttons, which are real ThemedControls with the full accessibility contract."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/Toast.swift",
+      "kind": "interactiveComponent",
+      "symbol": "ToastView",
+      "reason": "The press carries the band sideways and throws it away, which is a notification's swipe rather than an activation: it targets nothing, has no pressed state, and a press that goes nowhere leaves the receipt exactly where it was. Subclassing ThemedControl would give a transient card a focus ring, an enabled state and a press action for a gesture that is none of those. Nothing here is mouse-only, which is the rule's actual concern: the throw does exactly what the band's own ✕ does, and that ✕ is a ThemedIconButton with the full keyboard and accessibility contract, beside the ThemedButton carrying the way back. The mouseDown is also what stops a click falling through a card floating over the very list it reports on."
     }
   ]
 }

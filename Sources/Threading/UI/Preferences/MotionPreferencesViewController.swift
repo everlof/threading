@@ -11,7 +11,7 @@ import AppKit
 /// remain for the choice already made, but the comparison happens in the dropdown.
 ///
 /// The two dropdowns differ in *when* they move, and the reason is legibility rather than cost.
-/// Seven orbs run at once because comparing animations means seeing them together. Eleven names
+/// Ten orb rows run at once because comparing animations means seeing them together. Eleven names
 /// morphing at once would be unreadable, so a name transition plays on the highlighted row only.
 final class MotionPreferencesViewController: NSViewController {
 

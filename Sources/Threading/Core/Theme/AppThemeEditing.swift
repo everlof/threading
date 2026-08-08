@@ -388,6 +388,13 @@ enum AppThemeEditing {
                     + "one coherent silhouette."
             )
         }
+        if let radius = popover.cornerRadius {
+            guard (0...24).contains(radius) else {
+                throw AppThemeEditingError.invalid(
+                    "popover_style.corner_radius must be between 0 and 24."
+                )
+            }
+        }
         // Ground, surface, and panel were checked above. Derived roles intentionally inherit
         // those guarantees, so only separately-authored popover colours need another gate.
         // This keeps old sparse documents valid now that every material has a default style.

@@ -291,6 +291,7 @@ final class AppIconRenderTests: XCTestCase {
             "amiga-workbench-31": "Amiga",
             "retro-98": "Windows98",
             "tui": "TUI",
+            "classic-player": "ClassicPlayer",
             "christmas": "Christmas",
         ]
         let stockIDs = Set(

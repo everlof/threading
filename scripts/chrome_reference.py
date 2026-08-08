@@ -67,6 +67,10 @@ REPRODUCTION_FIXTURES = {
         "ThreadingTests/ThemedPresentationTests/"
         "testClassicRequesterMaterialDropsModernStatusIcon"
     ),
+    "retro-aqua-help-tag-family": (
+        "ThreadingTests/ThemedPresentationTests/"
+        "testAquaHelpTagPopoverUsesThePeriodPlateGrammar"
+    ),
 }
 STATE_LABELS = {
     "missing": "Missing",

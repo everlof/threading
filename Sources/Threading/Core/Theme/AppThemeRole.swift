@@ -30,6 +30,9 @@ enum AppThemeRole: String, CaseIterable, Codable {
     /// An anchored floating surface. Derived from `elevated` unless a theme needs a distinct
     /// period answer, such as the pale information ground used by Windows 98 infotips.
     case floatingSurface
+    /// A short hover/help tag. Derived from `floatingSurface` unless an Aqua generation states
+    /// the pale-yellow help-tag ground documented by its period HIG.
+    case tooltipSurface
     /// A control at rest, below full opacity so a row of them stays quiet.
     case controlResting
     /// The same control under the pointer.
@@ -103,6 +106,7 @@ enum AppThemeRole: String, CaseIterable, Codable {
         case .fieldSurface: return .textBackgroundColor
         case .elevated: return .controlBackgroundColor
         case .floatingSurface: return .controlBackgroundColor
+        case .tooltipSurface: return .controlBackgroundColor
         case .controlResting: return .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
         case .controlHover: return .unemphasizedSelectedContentBackgroundColor
         case .border: return .separatorColor

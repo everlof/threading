@@ -35,4 +35,5 @@ for agent_file in "$repo_root/AGENTS.md" "$repo_root/CLAUDE.md"; do
     fi
 done
 
+"$script_dir/chrome_reference.py" validate
 "$script_dir/check_localization_boundaries.sh"

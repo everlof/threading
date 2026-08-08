@@ -41,9 +41,17 @@ final class ThemedSegmentedControl: NSView {
 
     private var segmentViews: [SegmentView] = []
     private let stack = NSStackView()
+    private var heightConstraint: NSLayoutConstraint?
+
+    /// The height a `ControlRowView` this run stands in has stated. Nil everywhere else, where
+    /// the run keeps the constant a chip used to be.
+    private var rowHeight: CGFloat?
+
+    /// What this run is actually drawn at — its height, and the pill radius derived from it.
+    private var controlHeight: CGFloat { rowHeight ?? Design.Size.chipHeight }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Design.Size.chipHeight)
+        NSSize(width: NSView.noIntrinsicMetric, height: controlHeight)
     }
 
     // MARK: - Initialization
@@ -64,7 +72,7 @@ final class ThemedSegmentedControl: NSView {
         wantsLayer = true
         applySurface(
             fill: Design.Surface.controlResting,
-            radius: .pill(height: Design.Size.chipHeight)
+            radius: .pill(height: controlHeight)
         )
 
         stack.orientation = .horizontal
@@ -75,12 +83,14 @@ final class ThemedSegmentedControl: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
+        let height = heightAnchor.constraint(equalToConstant: controlHeight)
+        heightConstraint = height
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: Design.Size.chipHeight)
+            height
         ])
 
         // The run is one choice, so it reads as one group with the segments as its buttons.
@@ -263,6 +273,25 @@ private final class SegmentView: ThemedControl {
     override func accessibilityTitle() -> String? { titleLabel.stringValue }
     override func accessibilityValue() -> Any? { isSelected }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
+}
+
+// MARK: - ControlRowMember
+
+extension ThemedSegmentedControl: ControlRowMember {
+
+    /// The track is a pill, so its radius is a function of its height — a run that resized
+    /// without restating the surface would keep the silhouette of the size it used to be.
+    func adopt(_ metrics: ControlRowMetrics) {
+        guard rowHeight != metrics.height else { return }
+        rowHeight = metrics.height
+        heightConstraint?.constant = metrics.height
+        applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .pill(height: metrics.height)
+        )
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
 }
 
 // MARK: - Defaults

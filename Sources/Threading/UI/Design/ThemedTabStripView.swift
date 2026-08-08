@@ -15,13 +15,22 @@ struct TabStripItem {
     /// changes its title is renaming itself.
     let identity: AnyHashable?
 
+    /// Overrides the strip's own answer for this one chip. Nil means "whatever the strip does",
+    /// which is what every ordinary tab wants. A chip that *stands for* something rather than
+    /// holding it — the proxy for a page now in a window of its own — sets `false`, because a ✕
+    /// on it would have to mean something, and every honest meaning is either destructive from a
+    /// misclick or inconsistent with the ✕ on every other chip.
+    let showsClose: Bool?
+
     init(
         id: UUID,
         title: String,
         symbolName: String,
         isActive: Bool,
-        identity: AnyHashable? = nil
+        identity: AnyHashable? = nil,
+        showsClose: Bool? = nil
     ) {
+        self.showsClose = showsClose
         self.id = id
         self.title = title
         self.symbolName = symbolName
@@ -134,6 +143,21 @@ final class ThemedTabStripView: NSView {
 
     private let stack = NSStackView()
     private let scrollView = ThemedScrollView()
+    private let contentAreaGuide = NSLayoutGuide()
+
+    /// The row above the host's separator. Controls beside the strip use this anchor so a heavy
+    /// rule cannot pull the tab and its neighbouring actions onto different centrelines.
+    var contentCenterYAnchor: NSLayoutYAxisAnchor { contentAreaGuide.centerYAnchor }
+
+    private lazy var bandHeightConstraint = heightAnchor.constraint(
+        equalToConstant: Self.bandHeight
+    )
+    private lazy var contentBottomConstraint = contentAreaGuide.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Design.Radius.border
+    )
+    private let appEvents = AppEventObservations()
+    private var appliedBandHeight: CGFloat?
 
     private struct Chip {
         let tab: ThemedTabItemView
@@ -203,6 +227,7 @@ final class ThemedTabStripView: NSView {
         scrollView.documentView = stack
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
+        addLayoutGuide(contentAreaGuide)
 
         scrollView.wantsLayer = true
         fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
@@ -220,8 +245,15 @@ final class ThemedTabStripView: NSView {
         )
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bandHeightConstraint,
+
+            contentAreaGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentBottomConstraint,
+            contentAreaGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentAreaGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            scrollView.topAnchor.constraint(equalTo: contentAreaGuide.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentAreaGuide.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
@@ -232,6 +264,9 @@ final class ThemedTabStripView: NSView {
             stack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             stack.heightAnchor.constraint(equalTo: scrollView.contentView.heightAnchor)
         ])
+
+        applyMetrics()
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyMetrics() }
     }
 
     // MARK: - Update
@@ -262,7 +297,7 @@ final class ThemedTabStripView: NSView {
             chip.tab.update(
                 title: item.title,
                 symbolName: item.symbolName,
-                showsClose: showsClose,
+                showsClose: item.showsClose ?? showsClose,
                 identity: item.identity ?? AnyHashable(item.id)
             )
             chip.tab.isSelected = item.isActive
@@ -313,7 +348,7 @@ final class ThemedTabStripView: NSView {
             title: item.title,
             symbolName: item.symbolName,
             placement: .horizontal,
-            showsClose: showsClose,
+            showsClose: item.showsClose ?? showsClose,
             inkSource: inkSource
         )
         tab.onSelect = { [weak self] in self?.onSelect?(id) }
@@ -502,14 +537,25 @@ final class ThemedTabStripView: NSView {
     /// its own: the pins fix the strip's width against the **host's**, which leaves the hugging
     /// priority to argue with whatever places the host — see that property.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: ceil(stack.fittingSize.width), height: NSView.noIntrinsicMetric)
+        NSSize(width: ceil(stack.fittingSize.width), height: Self.bandHeight)
     }
 
     // MARK: - Overflow Fade
 
     override func layout() {
+        applyMetrics()
         super.layout()
         updateFade()
+    }
+
+    private func applyMetrics() {
+        let height = Self.bandHeight
+        guard appliedBandHeight != height else { return }
+        appliedBandHeight = height
+        bandHeightConstraint.constant = height
+        contentBottomConstraint.constant = -Design.Radius.border
+        invalidateIntrinsicContentSize()
+        needsLayout = true
     }
 
     @objc private func updateFade() {

@@ -42,6 +42,51 @@ extension NSView {
         return unclipped.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 
+    /// Whether something else in the window is drawn between the pointer and this view at
+    /// `pointInWindow`.
+    ///
+    /// **A tracking area answers for a rectangle, and a rectangle knows nothing about what is
+    /// drawn over it.** Two overlapping views are both sent `mouseEntered`, whichever one a click
+    /// would actually reach — so a card floating over a list hands a pointer to every row it
+    /// covers. The sidebar's receipt is the case that reported it: hovering the band lit the row
+    /// hidden behind it, and since the row's highlight and the band are inset from the column by
+    /// the same step, the 6% wash surfaced as a plate poking out above the band's own top edge —
+    /// a backplate the band appeared to own, drawn to a corner that was not its.
+    ///
+    /// Hit-testing is how a *click* is aimed, so it is also what says which view the pointer is
+    /// on. Asked of this window's tree alone: a popover or a menu is a window of its own and
+    /// covers nothing here, which is right — a row must not drop its hover because the popover it
+    /// opened is floating over it.
+    ///
+    /// A view with no window, or a pointer the content view does not claim at all, is **not**
+    /// covered. This only ever reports what it can see for itself, so a fixture built without a
+    /// window behaves exactly as it did before.
+    ///
+    /// **Asked for, never folded into `hoverIsStale`.** A dropdown's dismissing surface is a view
+    /// in this same window and covers every control under it, so a shared correction would put out
+    /// the chip that a menu is open *on* — and the overlay's handoff rule depends on that chip
+    /// staying lit and clickable (see
+    /// [`design-system.md`](../../../../docs/architecture/design-system.md)). Whether being covered
+    /// means anything is the covered view's own question: for a list under a card it is the whole
+    /// answer, and for a control under a menu it is not.
+    func isPointerCovered(at pointInWindow: CGPoint) -> Bool {
+        // `hitTest` takes its point in the *superview's* coordinates, and the content view's
+        // superview is the window's frame view — whose coordinates are the window's.
+        guard let hit = window?.contentView?.hitTest(pointInWindow) else { return false }
+
+        // `isDescendant(of:)` counts the view itself, so this reads "neither of us contains the
+        // other". An ancestor answering the hit — a table view where the row declined it — is
+        // this view being reached through, not something standing over it.
+        return !hit.isDescendant(of: self) && !isDescendant(of: hit)
+    }
+
+    /// The same question wherever the pointer is now, for the moments when there is no event to
+    /// read a location off.
+    var isPointerCovered: Bool {
+        guard let window else { return false }
+        return isPointerCovered(at: window.mouseLocationOutsideOfEventStream)
+    }
+
     /// Whether a hover flag this view is holding has gone stale — the pointer is no longer on it.
     ///
     /// **Only ever answers "the pointer has left", never "the pointer has arrived."** A view that
@@ -49,6 +94,10 @@ extension NSView {
     /// timers, popovers and highlight callbacks here, and synthesising those on every relayout
     /// would flash a popover under a pointer that never moved. Leaving is the direction that goes
     /// wrong visibly, and the only one that can be corrected without a side effect.
+    ///
+    /// It answers for the pointer's *position* alone. A surface rising over a still pointer leaves
+    /// this true and is a separate question, because being covered does not mean the same thing to
+    /// every view — see `isPointerCovered(at:)`.
     func hoverIsStale(_ isHovered: Bool) -> Bool {
         isHovered && !isPointerInside
     }

@@ -145,6 +145,17 @@
         "max_normalized_rgb_rmse": 0.04
       },
       "note": "Production ThemedScroller rendered against the tight 633×16 control extraction with the same horizontal axis, 16px trough, long recolorable gel thumb, and distinct measured bookends. The left end cap is pixel-identical; the right differs only in a few source color-fringe pixels. The wider crop remains above as frame and resize-corner context."
+    },
+    {
+      "id": "help-tag-family",
+      "component": "popovers",
+      "fixture_id": "retro-aqua-help-tag-family",
+      "output": "popover-chrome-aqua-cheetah-help-tag.png",
+      "reference_crop_ids": ["help-tag-october-2001-plate"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production Aqua Help Tag recipe: pale-yellow compact plate, near-square corner, one-pixel edge, no modern speech stem. The surviving Apple figure is October 2001 and postdates Cheetah, so this is a source-shaped family review rather than a native 10.0 pixel claim."
     }
   ],
   "crops": [

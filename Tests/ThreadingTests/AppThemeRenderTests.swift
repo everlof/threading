@@ -304,6 +304,95 @@ final class AppThemeRenderTests: XCTestCase {
         XCTAssertEqual(written, 3)
     }
 
+    /// The composer's clock, hovered, beside the primary it offers the other half of.
+    ///
+    /// The pair is rendered rather than merely measured because the defect it pins was visible
+    /// only in a picture: at `.inline`'s nested 20 points the clock hovered a plate six points
+    /// shorter than Start Session — a smudge under the System theme's soft corners, a hard
+    /// square that had plainly missed its size under Bauhaus, which is where it was reported.
+    /// `.besidePrimary` stands the button at the primary's own base height, and the equality is
+    /// asserted beside the render so the picture review has a tripwire under it.
+    func testRendersTheClockHoveredBesideThePrimaryLevelWithIt() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for (name, theme) in [("system", AppTheme.system), ("bauhaus", AppThemeStyles.bauhaus)] {
+            AppThemePalette.set(theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 90))
+            root.appearance = appearance
+
+            let start = ThemedButton(title: "Start Session", target: nil, action: nil)
+            start.emphasis = .primary
+            let clock = ThemedIconButton(
+                symbolName: "clock",
+                accessibility: "Start this session later",
+                target: .besidePrimary
+            )
+            clock.presentsMenu = true
+            for view in [start, clock] {
+                view.translatesAutoresizingMaskIntoConstraints = false
+                root.addSubview(view)
+            }
+            NSLayoutConstraint.activate([
+                start.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
+                start.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+                clock.trailingAnchor.constraint(
+                    equalTo: start.leadingAnchor, constant: -Design.Spacing.small
+                ),
+                clock.centerYAnchor.constraint(equalTo: root.centerYAnchor)
+            ])
+
+            let window = NSWindow(
+                contentRect: root.bounds,
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.appearance = appearance
+            window.contentView = root
+            defer { window.close() }
+
+            markNeedingLayout(root)
+            root.layoutSubtreeIfNeeded()
+            // The hover is forced through the same entry the tracking area uses; the event's
+            // contents are never read, so any event stands in for the pointer's arrival.
+            if let event = key(125) { clock.mouseEntered(with: event) }
+
+            XCTAssertEqual(
+                clock.frame.height,
+                start.frame.height,
+                accuracy: 0.5,
+                "the clock's hover plate stands short of the primary under \(name)"
+            )
+
+            root.wantsLayer = true
+            root.layer?.backgroundColor = AppThemePalette.current.resolved(.ground).cgColor
+
+            let scale = 3
+            let rep = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(root.bounds.width) * scale,
+                pixelsHigh: Int(root.bounds.height) * scale,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ))
+            rep.size = root.bounds.size
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+            appearance.performAsCurrentDrawingAppearance {
+                root.displayIgnoringOpacity(root.bounds, in: context)
+            }
+            let url = directory.appendingPathComponent("composer-clock-hover-\(name).png")
+            try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
+        }
+    }
+
     private func submenuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 320))
         root.appearance = appearance

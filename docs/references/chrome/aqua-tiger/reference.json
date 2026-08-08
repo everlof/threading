@@ -165,6 +165,17 @@
         "max_normalized_rgb_rmse": 0.065
       },
       "note": "Production ThemedScroller rendered against the tight 15×479 control extraction. Its trough and flat shaft match the measured pixels, the thumb length is exact, and both trailing arrow plates are pixel-identical; the wider crop remains above as list-edge and resize-corner context."
+    },
+    {
+      "id": "help-tag-family",
+      "component": "popovers",
+      "fixture_id": "retro-aqua-help-tag-family",
+      "output": "popover-chrome-aqua-tiger-help-tag.png",
+      "reference_crop_ids": ["help-tag-plate"],
+      "comparison_mode": "component_fixture",
+      "review_status": "pending",
+      "scale": 1,
+      "note": "Production Aqua Help Tag recipe at the measured Tiger 125×18 grammar: pale-yellow compact plate, near-square corner, one-pixel warm edge, and no speech stem. The HIG plate is a component reference, so this remains pending visual review rather than an automatic pixel-equality claim."
     }
   ],
   "crops": [

@@ -349,6 +349,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         titleLabel.isHidden = resolvedStyle?.glyphStyle == .openStep
             || (resolvedStyle?.glyphStyle == .irix && drawsAsKey)
             || resolvedStyle?.glyphStyle == .amiga
+            || resolvedStyle?.classicSkin != nil
             || usesPlatinumBitmapTitle
     }
 
@@ -535,6 +536,10 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let resolved = resolvedStyle else { return }
+        if let skin = resolved.classicSkin,
+           drawClassicPlayerBand(from: skin.titleBarImage, active: drawsAsKey, in: bounds) {
+            return
+        }
         if resolved.glyphStyle == .irix, drawsAsKey, bounds.height == 32 {
             drawIRIXActiveBand(in: bounds)
             drawIRIXTitle()
@@ -596,6 +601,107 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         )
         drawTabEdge(ifNeededFor: resolved, in: bandRect)
         drawAmigaTitleIfNeeded()
+    }
+
+    /// A classic skin contains complete 275-by-14 active and inactive title bands. The
+    /// hardware at either edge stays at native size; only the otherwise repeating centre
+    /// groove grows with a modern resizable Threading window.
+    @discardableResult
+    private func drawClassicPlayerBand(
+        from sheet: NSImage,
+        active: Bool,
+        in rect: NSRect
+    ) -> Bool {
+        let sourceTopY: CGFloat = active ? 0 : 15
+        let sourceX: CGFloat = 27
+        let sourceWidth: CGFloat = 275
+        let sourceHeight: CGFloat = 14
+        guard sheet.size.width >= sourceX + sourceWidth,
+              sheet.size.height >= sourceTopY + sourceHeight,
+              rect.width > 0,
+              rect.height > 0 else { return false }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        NSGraphicsContext.current?.imageInterpolation = .none
+
+        let sourceY = sheet.size.height - sourceTopY - sourceHeight
+        if rect.width < sourceWidth {
+            sheet.draw(
+                in: rect,
+                from: NSRect(
+                    x: sourceX,
+                    y: sourceY,
+                    width: sourceWidth,
+                    height: sourceHeight
+                ),
+                operation: .copy,
+                fraction: 1,
+                respectFlipped: true,
+                hints: [.interpolation: NSImageInterpolation.none]
+            )
+            return true
+        }
+
+        let leftWidth: CGFloat = 238
+        let rightWidth = sourceWidth - leftWidth
+        let leftDestination = NSRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: leftWidth,
+            height: rect.height
+        )
+        let rightDestination = NSRect(
+            x: rect.maxX - rightWidth,
+            y: rect.minY,
+            width: rightWidth,
+            height: rect.height
+        )
+        let middleDestination = NSRect(
+            x: leftDestination.maxX,
+            y: rect.minY,
+            width: max(0, rightDestination.minX - leftDestination.maxX),
+            height: rect.height
+        )
+
+        sheet.draw(
+            in: leftDestination,
+            from: NSRect(x: sourceX, y: sourceY, width: leftWidth, height: sourceHeight),
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.none]
+        )
+        if middleDestination.width > 0 {
+            sheet.draw(
+                in: middleDestination,
+                from: NSRect(
+                    x: sourceX + leftWidth - 2,
+                    y: sourceY,
+                    width: 2,
+                    height: sourceHeight
+                ),
+                operation: .copy,
+                fraction: 1,
+                respectFlipped: true,
+                hints: [.interpolation: NSImageInterpolation.none]
+            )
+        }
+        sheet.draw(
+            in: rightDestination,
+            from: NSRect(
+                x: sourceX + leftWidth,
+                y: sourceY,
+                width: rightWidth,
+                height: sourceHeight
+            ),
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.none]
+        )
+        return true
     }
 
     /// The 4Dwm title is a single indexed-palette assembly. Its menu plate, centre field,
@@ -935,6 +1041,8 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                     backdrop.fill()
                 }
             }
+        case .captionRails:
+            drawCaptionRails(texture, in: rect)
         case .aquaPinstripes:
             // Cheetah's stripe is a four-row glass rib, not Platinum's hard line every other
             // pixel. Two neutral rows let the vertical silver gradient through; a faint dark
@@ -1025,6 +1133,54 @@ final class WindowTitleBandView: NSView, ThemedComponent {
                 NSRect(x: rect.minX, y: y.rounded(), width: rect.width, height: 1).fill()
                 y += texture.spacing
                 line += 1
+            }
+        }
+    }
+
+    /// Two compact raised rails, used by small hardware-like caption bands. Their endpoints
+    /// come from the live button stacks and title frame, so the texture remains authorable for
+    /// other centred, bookended chromes rather than encoding one stock theme's pixel widths.
+    private func drawCaptionRails(
+        _ texture: WindowChromeAppearance.Resolved.Texture,
+        in rect: NSRect
+    ) {
+        guard resolvedStyle?.titleAlignment == .center,
+              !titleLabel.frame.isEmpty else { return }
+
+        let hardwareGap = Design.Spacing.tight
+        let titleGap = Design.Spacing.small
+        let start = max(rect.minX + hardwareGap, ceil(leadingButtonStack.frame.maxX) + hardwareGap)
+        let end = min(rect.maxX - hardwareGap, floor(buttonStack.frame.minX) - hardwareGap)
+        let titleStart = floor(titleLabel.frame.minX) - titleGap
+        let titleEnd = ceil(titleLabel.frame.maxX) + titleGap
+        let segments: [(x: CGFloat, width: CGFloat)] = [
+            (start, titleStart - start),
+            (titleEnd, end - titleEnd)
+        ].filter { $0.width >= Design.Spacing.small }
+        guard !segments.isEmpty else { return }
+
+        // Draw in top-down order even when a bitmap-cache context flips the view. A dark lip,
+        // the authored face, and a light catch make a three-pixel moulding instead of three
+        // unrelated rules.
+        let shadow = texture.color.blended(withFraction: 0.58, of: .black) ?? texture.color
+        let highlight = texture.color.blended(withFraction: 0.22, of: .white) ?? texture.color
+        let rows: [NSColor] = [shadow, texture.color, highlight]
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        let firstTopDownRow = max(1, floor((rect.height - CGFloat(rows.count)) / 2))
+
+        for (row, color) in rows.enumerated() {
+            color.setFill()
+            let topDown = firstTopDownRow + CGFloat(row)
+            let y = isFlipped
+                ? rect.minY + topDown
+                : rect.maxY - topDown - 1
+            for segment in segments {
+                NSRect(
+                    x: segment.x,
+                    y: y,
+                    width: segment.width,
+                    height: 1
+                ).fill()
             }
         }
     }

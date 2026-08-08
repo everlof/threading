@@ -153,6 +153,62 @@
           "sha256": "8dd7908c3fcf600b4d378d5f425eebe45663e0d0d8df1004e1317d4580ce7f10"
         }
       ]
+    },
+    {
+      "id": "captbaritone-webamp-classic-skins",
+      "name": "Webamp classic skin parser and sprite map",
+      "chrome_ids": ["classic-player"],
+      "repository_url": "https://github.com/captbaritone/webamp",
+      "revision": "5f56a5369c3e2346f4f6e045f214856ef9abaad4",
+      "license_spdx": "MIT",
+      "license_url": "https://github.com/captbaritone/webamp/blob/5f56a5369c3e2346f4f6e045f214856ef9abaad4/LICENSE.txt",
+      "scope": ["title_bar", "window_buttons"],
+      "note": "Pinned compatible implementation used to cross-check TITLEBAR.BMP coordinates and case-insensitive archive naming. Threading implements its own bounded ZIP reader and AppKit renderer; no Webamp assets or source files are bundled.",
+      "files": [
+        {
+          "path": "packages/webamp/js/skinSprites.ts",
+          "url": "https://raw.githubusercontent.com/captbaritone/webamp/5f56a5369c3e2346f4f6e045f214856ef9abaad4/packages/webamp/js/skinSprites.ts",
+          "sha256": "44ce6dc4f62a759ce155474584693990424c83b65544a3a633b2478ac22e9267"
+        },
+        {
+          "path": "packages/webamp/js/skinParser.js",
+          "url": "https://raw.githubusercontent.com/captbaritone/webamp/5f56a5369c3e2346f4f6e045f214856ef9abaad4/packages/webamp/js/skinParser.js",
+          "sha256": "a5eb5e079db4b5059e9df76e8b92d5af945522ae6e1574acdda42e80a8e99669"
+        },
+        {
+          "path": "packages/webamp/js/skinParserUtils.ts",
+          "url": "https://raw.githubusercontent.com/captbaritone/webamp/5f56a5369c3e2346f4f6e045f214856ef9abaad4/packages/webamp/js/skinParserUtils.ts",
+          "sha256": "96c5b659f33c49035a5d951220b12413e48db92ee85064661e3c4c3efac63567"
+        },
+        {
+          "path": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/captbaritone/webamp/5f56a5369c3e2346f4f6e045f214856ef9abaad4/LICENSE.txt",
+          "sha256": "fc7f2696d3e70b5c04659de0a843c1d7defebbb14eb2a07a38808fead88d9279"
+        }
+      ]
+    },
+    {
+      "id": "audacious-classic-skins",
+      "name": "Audacious classic skins plugin",
+      "chrome_ids": ["classic-player"],
+      "repository_url": "https://github.com/audacious-media-player/audacious-plugins",
+      "revision": "f41ec33e008c2dd74015bc2b75fc1912a592bd59",
+      "license_spdx": "GPL-3.0-only",
+      "license_url": "https://github.com/audacious-media-player/audacious-plugins/blob/f41ec33e008c2dd74015bc2b75fc1912a592bd59/src/skins/skin.cc",
+      "scope": ["title_bar", "window_buttons"],
+      "note": "A second compatible implementation used to independently cross-check classic bitmap names and title-bar layout. Threading's implementation is native Swift and bundles no Audacious source or artwork.",
+      "files": [
+        {
+          "path": "src/skins/skin.h",
+          "url": "https://raw.githubusercontent.com/audacious-media-player/audacious-plugins/f41ec33e008c2dd74015bc2b75fc1912a592bd59/src/skins/skin.h",
+          "sha256": "38b66c812b4f67587ba32420e5f66d99133a2aa38e5d4d95e29fbeb51b445c40"
+        },
+        {
+          "path": "src/skins/skin.cc",
+          "url": "https://raw.githubusercontent.com/audacious-media-player/audacious-plugins/f41ec33e008c2dd74015bc2b75fc1912a592bd59/src/skins/skin.cc",
+          "sha256": "55c20f1542668f8459ab8fc3b04d178386510ef4340f86f0b7df61201d0c34be"
+        }
+      ]
     }
   ]
 }

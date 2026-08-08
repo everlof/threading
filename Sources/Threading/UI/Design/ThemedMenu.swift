@@ -39,6 +39,10 @@ struct ThemedMenuSubtitleSegment {
 struct ThemedMenuItem {
     let title: String
     var subtitle: String?
+    /// The action's command-key equivalent, without its modifier glyph. The row owns that
+    /// glyph because the same semantic shortcut is a cloverleaf in Platinum and an Amiga-key
+    /// cap in Workbench; padding the title with spaces cannot form an aligned shortcut column.
+    var keyEquivalent: String?
     /// Toned runs over `subtitle`, set through `setSubtitle(_:)` so the two cannot disagree.
     /// The row draws these when present; everything that is not drawing — the tooltip, the
     /// type-to-filter, the measured width — keeps reading the plain string. One font across
@@ -60,6 +64,7 @@ struct ThemedMenuItem {
     init(
         title: String,
         subtitle: String? = nil,
+        keyEquivalent: String? = nil,
         image: NSImage? = nil,
         preview: ThemedMenuPreview? = nil,
         representedValue: Any? = nil,
@@ -70,6 +75,7 @@ struct ThemedMenuItem {
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.keyEquivalent = keyEquivalent
         self.image = image
         self.preview = preview
         self.representedValue = representedValue
@@ -159,8 +165,12 @@ enum ThemedMenuAnchor {
 /// - no second window steals key status or introduces system material;
 /// - one surface owns outside-click dismissal and keyboard navigation.
 ///
-/// The returned object is an opaque retention token. A control holds it for as long as the menu
-/// is open and releases it from `onDismiss`; callers never depend on the implementation class.
+/// The returned object is an opaque token for programmatic dismissal and for forwarding a held
+/// press's drag; callers never depend on the implementation class. **The menu does not need it
+/// to stay alive**: the session owns itself for as long as it is on screen (see
+/// `ThemedMenuSession.open`). It used to be the caller's retention that kept the menu working,
+/// and a call site that dropped the token got the worst possible failure — the overlay stayed
+/// over the whole window, every dismissal callback already dead, and the window read as hung.
 @MainActor
 enum ThemedMenuPresenter {
 
@@ -411,12 +421,18 @@ enum ThemedMenuLayout {
 @MainActor
 private final class ThemedMenuSession: NSObject {
 
-    /// The sessions currently up, which is how `ThemedMenuPresenter.isMenuOpen(in:)` answers
-    /// for a window. Weak, and dropped in `finish`, so the roster ends where the session does
-    /// rather than where its exit animation does. The presenter closes a window's current
-    /// session before adding its replacement; keeping the roster as sessions still lets the
-    /// dismiss-and-open handoff complete synchronously inside one click.
-    static let open = NSHashTable<ThemedMenuSession>.weakObjects()
+    /// The sessions currently up — how `ThemedMenuPresenter.isMenuOpen(in:)` answers for a
+    /// window, and the session's **owner** while its menu is on screen. Strong on purpose:
+    /// nothing else is obliged to retain a session — the overlay's callbacks hold it weakly,
+    /// and the token `present` returns is optional to keep. When the roster was weak, a call
+    /// site that dropped that token (the composer's clock) had its session deallocate under a
+    /// menu that had just opened, which stranded the overlay across the whole window with every
+    /// dismissal callback dead — no click, no Escape, nothing; the window read as hung.
+    /// Dropped in `finish`, which every exit path funnels through exactly once, so ownership
+    /// ends where the session does rather than where its exit animation does. The presenter
+    /// closes a window's current session before adding its replacement; keeping the roster as
+    /// sessions still lets the dismiss-and-open handoff complete synchronously inside one click.
+    static let open = NSHashTable<ThemedMenuSession>(options: .strongMemory)
 
     private weak var source: NSView?
     fileprivate weak var window: NSWindow?
@@ -491,10 +507,14 @@ private final class ThemedMenuSession: NSObject {
         window.makeFirstResponder(overlay)
         overlay.animateIn()
 
+        // `willClose` joined the list when the roster became the session's owner: a session
+        // that outlived a closing window would otherwise sit in the roster holding its dead
+        // overlay, because nothing else ends a session whose window simply left.
         for name in [
             NSWindow.didResignKeyNotification,
             NSWindow.didMiniaturizeNotification,
-            NSWindow.didResizeNotification
+            NSWindow.didResizeNotification,
+            NSWindow.willCloseNotification
         ] {
             NotificationCenter.default.addObserver(
                 self,
@@ -559,13 +579,19 @@ private final class ThemedMenuSession: NSObject {
     private func finish(exit: ThemedMenuExit) {
         guard !isClosed else { return }
         isClosed = true
-        Self.open.remove(self)
-        NotificationCenter.default.removeObserver(self)
-        if let window, window.firstResponder === overlay, let source {
-            window.makeFirstResponder(source)
+        // The roster may be this session's only owner (see `open`), so hold one more
+        // reference across the teardown: `remove` freeing the session mid-`finish` would be a
+        // use-after-free dressed as a menu closing. The removal still comes first, because
+        // `onDismiss` runs inside this call and may ask `isMenuOpen(in:)` about the window.
+        withExtendedLifetime(self) {
+            Self.open.remove(self)
+            NotificationCenter.default.removeObserver(self)
+            if let window, window.firstResponder === overlay, let source {
+                window.makeFirstResponder(source)
+            }
+            overlay.tearDown(exit: exit)
+            onDismiss()
         }
-        overlay.tearDown(exit: exit)
-        onDismiss()
     }
 }
 
@@ -1553,6 +1579,25 @@ enum ThemedMenuMetrics {
         }
     }
 
+    static var shortcutGap: CGFloat { usesClassicGrammar ? 8 : Design.Spacing.large }
+
+    /// One shared trailing column, measured from the widest key equivalent. Workbench draws
+    /// the modifier as artwork rather than a font character, so its fixed key cap participates
+    /// in the same measurement as the following Topaz key.
+    static func shortcutColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        entries.compactMap { entry -> CGFloat? in
+            guard case .item(let item) = entry,
+                  let key = item.keyEquivalent,
+                  !key.isEmpty else { return nil }
+            let keyWidth = ceil(key.size(withAttributes: [.font: titleFont]).width)
+            if appearance == .amiga {
+                return 13 + 2 + keyWidth
+            }
+            let prefix = appearance == .windows98 ? "Ctrl+" : "⌘"
+            return ceil((prefix + key).size(withAttributes: [.font: titleFont]).width)
+        }.max() ?? 0
+    }
+
     /// Where a row's content begins, per column, so a *drawn* title and a *hosted* preview land
     /// in the same place. A preview replaces the text rather than joining it, and a column of
     /// names that shifted sideways when one of them animated would read as a layout bug in the
@@ -1640,11 +1685,13 @@ enum ThemedMenuMetrics {
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
         let chevronColumn = hasSubmenuColumn(entries) ? submenuChevronSlot : 0
+        let shortcutColumn = shortcutColumnWidth(entries)
         let leadingColumns = appearance == .windows98
             ? max(imageColumn == 0 ? leadingSlot : imageColumn, previewColumn)
             : leadingSlot + imageColumn + previewColumn
         let content = outerInset * 2 + contentInset * 2
             + leadingColumns + text + chevronColumn
+            + (shortcutColumn > 0 ? shortcutGap + shortcutColumn : 0)
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
 }
@@ -1706,6 +1753,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         let hasImageColumn = ThemedMenuMetrics.hasImageColumn(entries)
         let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
         let hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
+        let shortcutColumnWidth = ThemedMenuMetrics.shortcutColumnWidth(entries)
 
         for (index, entry) in entries.enumerated() {
             switch entry {
@@ -1718,7 +1766,8 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     isSelected: item.isSelected || index == selectedEntryIndex,
                     hasImageColumn: hasImageColumn,
                     hasPreviewColumn: hasPreviewColumn,
-                    hasSubmenuColumn: hasSubmenuColumn
+                    hasSubmenuColumn: hasSubmenuColumn,
+                    shortcutColumnWidth: shortcutColumnWidth
                 )
                 madeRows[index] = row
                 views.append(row)
@@ -2150,6 +2199,7 @@ private final class ThemedMenuRowView: ThemedControl {
     private let hasImageColumn: Bool
     private let hasPreviewColumn: Bool
     private let hasSubmenuColumn: Bool
+    private let shortcutColumnWidth: CGFloat
     private var pressed = false { didSet { needsDisplay = true } }
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
@@ -2169,7 +2219,8 @@ private final class ThemedMenuRowView: ThemedControl {
         isSelected: Bool,
         hasImageColumn: Bool,
         hasPreviewColumn: Bool,
-        hasSubmenuColumn: Bool
+        hasSubmenuColumn: Bool,
+        shortcutColumnWidth: CGFloat
     ) {
         self.entryIndex = entryIndex
         self.item = item
@@ -2177,6 +2228,7 @@ private final class ThemedMenuRowView: ThemedControl {
         self.hasImageColumn = hasImageColumn
         self.hasPreviewColumn = hasPreviewColumn
         self.hasSubmenuColumn = hasSubmenuColumn
+        self.shortcutColumnWidth = shortcutColumnWidth
         preferredHeight = item.subtitle?.isEmpty == false
             ? ThemedMenuMetrics.subtitleRowHeight
             : ThemedMenuMetrics.rowHeight
@@ -2525,16 +2577,21 @@ private final class ThemedMenuRowView: ThemedControl {
             ? blockBottom + subtitleHeight
             : bounds.midY - titleHeight / 2) + ThemedMenuMetrics.titleBaselineOffset
         let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
+        let shortcutReservation = shortcutColumnWidth > 0
+            ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth
+            : 0
         let textWidth = max(
             0,
-            bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn - x
+            bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+                - shortcutReservation - x
         )
-        // Win98's GDI text and Platinum's QuickDraw menu face are indexed bitmaps. Letting
-        // CoreGraphics smooth either fallback produces the right outline under a gray veil,
-        // but does not reproduce the source pixels. Keep this deliberately narrower than the
-        // whole theme so ordinary prose remains readable.
+        // Win98's GDI text, Platinum's QuickDraw menu face, and Workbench's Topaz menu strike
+        // are indexed bitmaps. Letting CoreGraphics smooth a fallback produces the right
+        // outline under a gray veil, but does not reproduce the source pixels. Keep this
+        // deliberately narrower than the whole theme so ordinary prose remains readable.
         let drawsIndexedText = ThemedMenuMetrics.appearance == .windows98
             || ThemedMenuMetrics.appearance == .platinum
+            || ThemedMenuMetrics.appearance == .amiga
         if drawsIndexedText {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current?.shouldAntialias = false
@@ -2572,6 +2629,22 @@ private final class ThemedMenuRowView: ThemedControl {
             )
         }
 
+        if let key = item.keyEquivalent, !key.isEmpty, shortcutColumnWidth > 0 {
+            let shortcutX = bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+                - shortcutColumnWidth
+            drawKeyEquivalent(
+                key,
+                in: NSRect(
+                    x: shortcutX,
+                    y: bounds.midY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset,
+                    width: shortcutColumnWidth,
+                    height: titleHeight
+                ),
+                font: titleFont,
+                color: label
+            )
+        }
+
         if let subtitle = item.subtitle, !subtitle.isEmpty {
             let line = NSMutableAttributedString()
             // Toned runs are resolved to colours *here*, per draw, so a theme switch under an
@@ -2606,6 +2679,38 @@ private final class ThemedMenuRowView: ThemedControl {
         if drawsIndexedText {
             NSGraphicsContext.restoreGraphicsState()
         }
+    }
+
+    private func drawKeyEquivalent(
+        _ key: String,
+        in rect: NSRect,
+        font: NSFont,
+        color: NSColor
+    ) {
+        if ThemedMenuMetrics.appearance == .amiga {
+            // The Workbench manual does not spell "Amiga" in this column: it uses the black
+            // Amiga-key cap followed by one Topaz character. Keep the cap as indexed geometry
+            // so it remains exact even when the user's font override lacks a logo glyph.
+            let cap = NSRect(x: rect.minX, y: rect.midY - 6.5, width: 13, height: 13).integral
+            color.setFill()
+            cap.fill()
+            let capInk = ThemedMenuMetrics.panelFill
+            ("A" as NSString).draw(
+                in: NSRect(x: cap.minX + 2, y: cap.minY, width: 10, height: 13),
+                withAttributes: [.font: font, .foregroundColor: capInk]
+            )
+            (key as NSString).draw(
+                in: NSRect(x: cap.maxX + 2, y: rect.minY, width: rect.maxX - cap.maxX - 2, height: rect.height),
+                withAttributes: [.font: font, .foregroundColor: color]
+            )
+            return
+        }
+
+        let prefix = ThemedMenuMetrics.appearance == .windows98 ? "Ctrl+" : "⌘"
+        ((prefix + key) as NSString).draw(
+            in: rect,
+            withAttributes: [.font: font, .foregroundColor: color]
+        )
     }
 
     private func draw(_ image: NSImage, in rect: NSRect, tint: NSColor) {

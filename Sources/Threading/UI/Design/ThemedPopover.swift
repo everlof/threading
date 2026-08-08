@@ -755,9 +755,10 @@ final class ThemedPopoverChromeView: NSView, ThemedComponent {
             && material.bevel != nil
             && !placement.hasArrow
         let width: CGFloat = style.edge == .none || materialEdge ? 0 : Design.Radius.border
+        let radius = style.cornerRadius ?? Design.Radius.panel
         let outline = ThemedPopoverLayout.outline(
             for: placement,
-            cornerRadius: Design.Radius.panel,
+            cornerRadius: radius,
             strokeWidth: width
         )
         applyMaterialShadow(material.glow, to: outline, enabled: placement.hasMaterialShadow)
@@ -769,7 +770,7 @@ final class ThemedPopoverChromeView: NSView, ThemedComponent {
             ThemedSurface.draw(
                 placement.bodyFrame,
                 fill: fill,
-                radius: Design.Radius.panel
+                radius: radius
             )
             return
         }

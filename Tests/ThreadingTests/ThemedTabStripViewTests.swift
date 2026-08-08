@@ -16,6 +16,7 @@ final class ThemedTabStripViewTests: XCTestCase {
 
     override func tearDown() {
         window = nil
+        AppThemePalette.set(.system)
         super.tearDown()
     }
 
@@ -55,8 +56,7 @@ final class ThemedTabStripViewTests: XCTestCase {
         NSLayoutConstraint.activate([
             strip.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             strip.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            strip.topAnchor.constraint(equalTo: content.topAnchor),
-            strip.heightAnchor.constraint(equalToConstant: ThemedTabStripView.bandHeight)
+            strip.topAnchor.constraint(equalTo: content.topAnchor)
         ])
         content.layoutSubtreeIfNeeded()
         return strip
@@ -288,6 +288,45 @@ final class ThemedTabStripViewTests: XCTestCase {
 
     func testTheStripBandMatchesThePaneHeaderBand() {
         XCTAssertEqual(ThemedTabStripView.bandHeight, PaneHeaderView.bandHeight)
+    }
+
+    /// The visible regression: Bauhaus's four-point rule sat inside a band sized only for the
+    /// tab and its two margins, leaving two points below the selected plate and six above it.
+    /// The strip already on screen must grow with the rule and keep both margins at the token.
+    func testALiveBauhausSwitchKeepsEqualAirAboveAndBelowTheTab() throws {
+        AppThemePalette.set(.system)
+        let item = TabStripItem(
+            id: UUID(),
+            title: "Attachments",
+            symbolName: "paperclip",
+            isActive: true
+        )
+        let strip = makeStrip(items: [item])
+        let host = try XCTUnwrap(strip.superview)
+        let systemHeight = strip.frame.height
+        let systemRule = Design.Radius.border
+
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.bauhaus.id))
+        host.layoutSubtreeIfNeeded()
+
+        let tab = try XCTUnwrap(strip.chipView(for: item.id))
+        let frame = tab.convert(tab.bounds, to: strip)
+        XCTAssertEqual(
+            strip.frame.height - systemHeight,
+            Design.Radius.border - systemRule,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            strip.bounds.maxY - frame.maxY,
+            Design.Spacing.small,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            frame.minY - Design.Radius.border,
+            Design.Spacing.small,
+            accuracy: 0.5
+        )
     }
 
     /// A chip whose title had to be shortened must end where the shortened title ends.

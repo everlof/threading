@@ -77,6 +77,17 @@ records why it cannot be removed.
    it through `OpticalInsetProviding`, and the container subtracts it, so a titled button and
    a bare glyph land on the same visual margin. Equal frame margins are not equal visual
    margins.
+
+   The same rule applies *inside* a component: what a view draws is centred by its ink, through
+   `NSBezierPath.centringInk(in:)`, never by the geometry it was built from. A rounded corner is
+   a tangent arc and eats the vertex it replaces, a stroke puts half its width outside the path,
+   and artwork carries whatever margin it was exported with — so a shape centred on its
+   construction points draws off the line while every container above it places its frame
+   correctly. The optical part is measured, not asserted: `OpticalCentring` weighs the shape's
+   own centre of mass, so a symmetric mark is left alone and a lopsided one (an upward triangle,
+   a mark that points) is corrected without the component claiming anything about itself. Ink
+   that cannot be weighed — a template image, a glyph run, a layer's contents — states an
+   `InkMass` instead, and never a number invented at the call site.
 10. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
    `applySurface`, or use the refresh-aware layer-colour helpers.
 11. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled

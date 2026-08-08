@@ -102,9 +102,21 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         didSet { contentChanged() }
     }
 
+    /// Optional keyboard mnemonic. Its underline is part of the label and Option+character
+    /// activates the same action as a click—the behavior behind the underlined B/N in the
+    /// imported Win32 action row, not fixture-only decoration.
+    var mnemonicCharacter: Character? {
+        didSet { needsDisplay = true }
+    }
+
     var image: NSImage? {
         didSet { contentChanged() }
     }
+
+    /// The semantic name passed to the symbol initializer. It is deliberately independent of
+    /// `toolTip`: a caller may make the Help Tag more explanatory without silently renaming the
+    /// button for VoiceOver and UI automation.
+    private var iconAccessibilityName: String?
 
     /// `NSControl.font`, observed. Left nil it takes the scale's control size; a call site sets
     /// it where the title is not really type — the accounts page puts an *emoji* in a button and
@@ -134,7 +146,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     /// wrapping. Without it `NSString.draw(in:)` wraps to the rect it is given, so a title
     /// measured a hair too narrow silently breaks at its space and draws its second word off the
     /// bottom — "Add Project" in the sidebar footer read as "Add".
-    private var titleAttributes: [NSAttributedString.Key: Any] {
+    private func titleAttributes(foreground: NSColor) -> [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         var attributes: [NSAttributedString.Key: Any] = [
@@ -146,8 +158,48 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         return attributes
     }
 
+    private var titleAttributes: [NSAttributedString.Key: Any] {
+        titleAttributes(foreground: foreground)
+    }
+
+    private func attributedDisplayTitle(foreground: NSColor) -> NSAttributedString {
+        let result = NSMutableAttributedString(
+            string: displayTitle,
+            attributes: titleAttributes(foreground: foreground)
+        )
+        if let mnemonicCharacter {
+            let range = (displayTitle as NSString).range(
+                of: String(mnemonicCharacter),
+                options: .caseInsensitive
+            )
+            if range.location != NSNotFound {
+                result.addAttribute(
+                    .underlineStyle,
+                    value: NSUnderlineStyle.single.rawValue,
+                    range: range
+                )
+            }
+        }
+        return result
+    }
+
+    /// The pixel alphabet is deliberately finite. Copy outside it is still copy, not artwork:
+    /// keep every localized character intact and let the scalable font path draw that title.
+    private var usesPixelTitle: Bool {
+        buttonStyle.titleRendering == .pixel5x6
+            && PixelTitleArtwork.canDraw(displayTitle)
+    }
+
     private var titleWidth: CGFloat {
-        displayTitle.isEmpty ? 0 : ceil(displayTitle.size(withAttributes: titleAttributes).width)
+        guard !displayTitle.isEmpty else { return 0 }
+        if usesPixelTitle { return PixelTitleArtwork.width(of: displayTitle) }
+        return ceil(attributedDisplayTitle(foreground: foreground).size().width)
+    }
+
+    private var titleLineHeight: CGFloat {
+        usesPixelTitle
+            ? PixelTitleArtwork.cellHeight
+            : Design.Typography.lineHeight(of: titleFont)
     }
 
     /// The chord this button answers to, drawn on its face — `⌘↩` beside "Start session".
@@ -193,7 +245,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     /// The accent-filled shape, for the action a sheet or a card is asking about.
     var isProminent: Bool = false {
-        didSet { needsDisplay = true }
+        didSet { contentChanged() }
     }
 
     /// What a *plain* button raises under the pointer, when the resting control surface is not
@@ -213,6 +265,16 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     /// sheet wants and what a pane holding a text field must not use — `shortcut` above is the
     /// one to reach for there.
     var keyEquivalent: String = ""
+
+    /// Whether a bare Return presses this button, however that was stated.
+    ///
+    /// A sheet asks in order to focus its default, and either spelling is a real answer: the
+    /// plain `keyEquivalent`, or the exact-match `shortcut` a sheet switches to once ⌘Return is
+    /// also on offer. Reading `keyEquivalent` alone made the alert focus Cancel.
+    var answersReturn: Bool {
+        keyEquivalent == "\r"
+            || (shortcut?.key == "\r" && shortcut?.modifiers.isEmpty == true)
+    }
 
     // MARK: - State
 
@@ -270,6 +332,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             target: target,
             action: action
         )
+        iconAccessibilityName = accessibility
         toolTip = accessibility
     }
 
@@ -282,7 +345,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     override var intrinsicContentSize: NSSize {
         let inset = isBordered ? Layout.titleInset : Layout.plainInset
-        var width = inset * 2 + titleWidth
+        // A raised primary adds a one-point default-action frame *outside* the ordinary face.
+        // Its drawing therefore insets the face one point on both sides. Reserve that pair here
+        // or an intrinsically sized title loses two pixels of its content budget: the 11-cell
+        // "NEW SESSION" display label measured 55px, received 53px, and correctly—but
+        // needlessly—truncated its final ON to an ellipsis.
+        let raisedPrimaryFrameWidth: CGFloat = isBordered
+            && isProminent
+            && buttonStyle.primaryTreatment == .raised
+            ? 2
+            : 0
+        var width = inset * 2 + titleWidth + raisedPrimaryFrameWidth
         if image != nil {
             width += Layout.imageSize
             if !title.isEmpty { width += Layout.imageTitleGap }
@@ -291,11 +364,37 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             width += shortcutWidth
             if !title.isEmpty || image != nil { width += Layout.shortcutGap }
         }
-        let height = isBordered
-            ? max(Layout.height, ceil(titleFont.boundingRectForFont.height) + Layout.plainInset * 2)
-            : max(Layout.imageSize + Layout.plainInset * 2, ceil(titleFont.boundingRectForFont.height))
-        return NSSize(width: width, height: height)
+        if isBordered, let minimumWidth = buttonStyle.minimumWidth {
+            width = max(width, minimumWidth)
+        }
+        let borderedHeight = buttonStyle.minimumHeight ?? Layout.height
+        let naturalTitleHeight = usesPixelTitle
+            ? PixelTitleArtwork.cellHeight
+            : ceil(titleFont.boundingRectForFont.height)
+        let natural = isBordered
+            ? max(borderedHeight, naturalTitleHeight + Layout.plainInset * 2)
+            : max(Layout.imageSize + Layout.plainInset * 2, naturalTitleHeight)
+        // A row's height wins, but never below the line the title actually sets: a theme may
+        // author a control height shorter than its own face draws at, and a clipped title is a
+        // worse answer than a button standing a point proud of its row.
+        //
+        // The *line*, not `boundingRectForFont` — which is the union of a family's glyph
+        // extremes and is why a rect measured from it top-aligns the words it meant to centre
+        // (see the 2026-07-31 note). Geneva reports 24.41 against a 16pt line, so a floor taken
+        // from it would have stood every button in a 16pt Platinum row nine points proud of the
+        // chooser beside it, which is the imbalance this adoption exists to remove.
+        let floor = rowHeight.map {
+            max($0, buttonStyle.minimumHeight ?? 0, titleLineHeight)
+        }
+        return NSSize(width: width, height: floor ?? natural)
     }
+
+    /// The height a `ControlRowView` this button stands in has stated. Nil everywhere else.
+    ///
+    /// `Layout.height` is `chipHeight`, a constant — which was right while a chip was one too,
+    /// and stopped being right when the chooser's height became the theme's. A bordered button
+    /// beside a chip under Platinum stood ten points taller than it.
+    private var rowHeight: CGFloat?
 
     // MARK: - Interaction
 
@@ -407,6 +506,14 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             performClick()
             return true
         }
+        if let mnemonicCharacter,
+           event.modifierFlags.intersection(Self.chordModifiers) == .option,
+           event.charactersIgnoringModifiers?.compare(
+               String(mnemonicCharacter), options: .caseInsensitive
+           ) == .orderedSame {
+            performClick()
+            return true
+        }
         return false
     }
 
@@ -434,7 +541,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     /// where an icon-only button's tooltip belongs and where a titled button's text does not —
     /// a screen reader and a UI script both ask for the title first.
     override func accessibilityTitle() -> String? { title.isEmpty ? nil : title }
-    override func accessibilityLabel() -> String? { title.isEmpty ? toolTip : nil }
+    override func accessibilityLabel() -> String? {
+        title.isEmpty ? (iconAccessibilityName ?? toolTip) : nil
+    }
     override func accessibilityPerformPress() -> Bool {
         performPrimaryAction()
     }
@@ -452,7 +561,24 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // material may state that tighter depth independently from the broad panel shadow; a
         // pressed control drops the outer lift while the existing sunken drawing reports press.
         let collapsesOnHover = isHovered && buttonStyle.collapseShadowOnHover
-        applyThemeControlGlow(isBordered && !isPressed && !collapsesOnHover, radius: corner)
+        // A disabled clay control is the whole object at reduced emphasis in the reference,
+        // not faint ink floating above a full-strength violet bloom. Removing its lift leaves
+        // the still-visible face and dimmed content to communicate the state cleanly.
+        let material = AppThemePalette.current.material(for: effectiveAppearance)
+        let shadow: AppTheme.Glow?
+        if isProminent {
+            shadow = material.controlGlow
+        } else {
+            switch buttonStyle.secondaryShadow {
+            case .control: shadow = material.controlGlow
+            case .panel: shadow = material.glow
+            case .none: shadow = nil
+            }
+        }
+        applyThemeControlGlow(
+            isBordered && isEnabled && !isPressed && !collapsesOnHover ? shadow : nil,
+            radius: corner
+        )
 
         // The hit target stays put while the face travels, exactly like the translated CSS
         // control in the references. AppKit's Y axis points up, while the authored response
@@ -559,7 +685,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // rect it is given. Under SF the two heights all but coincide, so this looked right —
         // under a serif theme family the bounding rect runs several points taller and every
         // title quietly sat that much above centre.
-        let height = lineHeight(of: titleFont)
+        let height = titleLineHeight
         let titleTop = content.midY + height / 2
 
         if !displayTitle.isEmpty {
@@ -572,36 +698,216 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             // The chord keeps its own width out of that: a hint is what the title truncates
             // *around*, never over.
             let available = max(0, content.maxX - x - shortcutWidth - shortcutGap)
-            (displayTitle as NSString).draw(
-                in: NSRect(
-                    x: x,
-                    y: titleTop - height,
-                    width: available,
-                    height: height
-                ),
-                withAttributes: titleAttributes
+            let titleRect = NSRect(
+                x: x,
+                y: titleTop - height,
+                width: available,
+                height: height
             )
+            if !isEnabled && buttonStyle.embossesDisabledTitle {
+                drawDisplayTitle(
+                    foreground: Design.Surface.bevelHighlight,
+                    in: titleRect.offsetBy(dx: 1, dy: -1)
+                )
+            }
+            drawDisplayTitle(foreground: foreground, in: titleRect)
             x += min(titleWidth, available) + shortcutGap
         }
 
         guard shortcutWidth > 0 else { return }
         let shortcutHeight = lineHeight(of: shortcutFont)
         let top = shortcutRectTop(titleTop: title.isEmpty ? nil : titleTop, centre: content.midY)
-        (shortcutText as NSString).draw(
-            in: NSRect(
-                x: x,
-                y: top - shortcutHeight,
-                width: max(0, content.maxX - x),
-                height: shortcutHeight
-            ),
-            withAttributes: shortcutAttributes
-        )
+        withTitleRasterization {
+            (shortcutText as NSString).draw(
+                in: NSRect(
+                    x: x,
+                    y: top - shortcutHeight,
+                    width: max(0, content.maxX - x),
+                    height: shortcutHeight
+                ),
+                withAttributes: shortcutAttributes
+            )
+        }
+    }
+
+    private func drawDisplayTitle(foreground: NSColor, in rect: NSRect) {
+        if usesPixelTitle {
+            PixelTitleArtwork.draw(
+                displayTitle,
+                in: rect,
+                ink: foreground,
+                mnemonicCharacter: mnemonicCharacter
+            )
+            return
+        }
+        withTitleRasterization {
+            attributedDisplayTitle(foreground: foreground).draw(in: rect)
+        }
+    }
+
+    /// Font smoothing is a construction choice for the tiny bitmap strikes used by Win32 and
+    /// Workbench, not a process-wide preference. Saving the graphics state confines their hard
+    /// device pixels to this title while neighbouring Aqua or application prose stays smooth.
+    private func withTitleRasterization(_ draw: () -> Void) {
+        guard !buttonStyle.antialiasesTitle, let context = NSGraphicsContext.current else {
+            draw()
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        context.cgContext.setAllowsAntialiasing(false)
+        context.cgContext.setShouldAntialias(false)
+        context.cgContext.setAllowsFontSmoothing(false)
+        context.cgContext.setShouldSmoothFonts(false)
+        draw()
+    }
+
+    /// A clean-room display alphabet using the same fixed cell as classic Winamp's `TEXT`
+    /// sheet: five device pixels wide by six high. The source skin used a sprite atlas rather
+    /// than asking a scalable font renderer to become jagged; keeping this as authored vectors
+    /// of one-bit cells gives custom themes the same construction without shipping its artwork.
+    ///
+    /// This is intentionally not a prose renderer. `canDraw` rejects the whole title when one
+    /// character is absent, so a localized action never becomes a mixture of pixels and missing
+    /// glyphs. That title takes the ordinary antialiased font path intact.
+    enum PixelTitleArtwork {
+        static let cellWidth: CGFloat = 5
+        static let cellHeight: CGFloat = 6
+        private static let glyphHeight = 5
+
+        static func canDraw(_ title: String) -> Bool {
+            title.allSatisfy { glyphs[$0] != nil }
+        }
+
+        static func width(of title: String) -> CGFloat {
+            CGFloat(title.count) * cellWidth
+        }
+
+        static func draw(
+            _ title: String,
+            in rect: NSRect,
+            ink: NSColor,
+            mnemonicCharacter: Character?
+        ) {
+            guard canDraw(title), rect.width >= cellWidth else { return }
+            let capacity = max(1, Int(floor(rect.width / cellWidth)))
+            var cells = Array(title)
+            if cells.count > capacity {
+                cells = capacity == 1
+                    ? ["…"]
+                    : Array(cells.prefix(capacity - 1)) + ["…"]
+            }
+
+            NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
+            let context = NSGraphicsContext.current
+            context?.shouldAntialias = false
+            context?.cgContext.setAllowsAntialiasing(false)
+            context?.cgContext.setShouldAntialias(false)
+            ink.setFill()
+
+            let isFlipped = context?.isFlipped ?? false
+            let originY = floor(rect.midY - cellHeight / 2)
+            let mnemonic = mnemonicCharacter.map { String($0).uppercased() }
+
+            for (cellIndex, character) in cells.enumerated() {
+                guard let rows = glyphs[character] else { continue }
+                let originX = floor(rect.minX + CGFloat(cellIndex) * cellWidth)
+                for (rowIndex, row) in rows.enumerated() {
+                    let y = isFlipped
+                        ? originY + CGFloat(rowIndex)
+                        : originY + CGFloat(glyphHeight - rowIndex)
+                    for (column, pixel) in row.enumerated() where pixel == "#" {
+                        NSRect(
+                            x: originX + CGFloat(column),
+                            y: y,
+                            width: 1,
+                            height: 1
+                        ).fill()
+                    }
+                }
+
+                if mnemonic == String(character).uppercased() {
+                    NSRect(
+                        x: originX,
+                        y: isFlipped ? originY + CGFloat(glyphHeight) : originY,
+                        width: cellWidth - 1,
+                        height: 1
+                    ).fill()
+                }
+            }
+        }
+
+        // Five rows of ink plus the sixth-row baseline/spacing cell. The shapes are designed
+        // here, not sampled from a skin; leading/trailing blanks keep adjacent cells distinct.
+        private static let glyphs: [Character: [String]] = [
+            "A": [".###.", "#...#", "#####", "#...#", "#...#"],
+            "B": ["####.", "#...#", "####.", "#...#", "####."],
+            "C": [".####", "#....", "#....", "#....", ".####"],
+            "D": ["####.", "#...#", "#...#", "#...#", "####."],
+            "E": ["#####", "#....", "####.", "#....", "#####"],
+            "F": ["#####", "#....", "####.", "#....", "#...."],
+            "G": [".###.", "#....", "#.###", "#...#", ".###."],
+            "H": ["#...#", "#...#", "#####", "#...#", "#...#"],
+            "I": [".###.", "..#..", "..#..", "..#..", ".###."],
+            "J": ["..###", "...#.", "...#.", "#..#.", ".##.."],
+            "K": ["#..#.", "#.#..", "##...", "#.#..", "#..#."],
+            "L": ["#....", "#....", "#....", "#....", "#####"],
+            "M": ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+            "N": ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
+            "O": [".###.", "#...#", "#...#", "#...#", ".###."],
+            "P": ["####.", "#...#", "####.", "#....", "#...."],
+            "Q": [".###.", "#...#", "#...#", "#.#.#", ".####"],
+            "R": ["####.", "#...#", "####.", "#.#..", "#..#."],
+            "S": [".####", "#....", ".###.", "....#", "####."],
+            "T": ["#####", "..#..", "..#..", "..#..", "..#.."],
+            "U": ["#...#", "#...#", "#...#", "#...#", ".###."],
+            "V": ["#...#", "#...#", "#...#", ".#.#.", "..#.."],
+            "W": ["#...#", "#...#", "#.#.#", "##.##", "#...#"],
+            "X": ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
+            "Y": ["#...#", ".#.#.", "..#..", "..#..", "..#.."],
+            "Z": ["#####", "...#.", "..#..", ".#...", "#####"],
+            "0": [".###.", "#..##", "#.#.#", "##..#", ".###."],
+            "1": ["..#..", ".##..", "..#..", "..#..", ".###."],
+            "2": [".###.", "#...#", "...#.", "..#..", "#####"],
+            "3": ["####.", "....#", ".###.", "....#", "####."],
+            "4": ["#..#.", "#..#.", "#####", "...#.", "...#."],
+            "5": ["#####", "#....", "####.", "....#", "####."],
+            "6": [".###.", "#....", "####.", "#...#", ".###."],
+            "7": ["#####", "...#.", "..#..", ".#...", ".#..."],
+            "8": [".###.", "#...#", ".###.", "#...#", ".###."],
+            "9": [".###.", "#...#", ".####", "....#", ".###."],
+            " ": [".....", ".....", ".....", ".....", "....."],
+            ".": [".....", ".....", ".....", ".....", "..#.."],
+            ",": [".....", ".....", ".....", "..#..", ".#..."],
+            ":": [".....", "..#..", ".....", "..#..", "....."],
+            "-": [".....", ".....", ".###.", ".....", "....."],
+            "_": [".....", ".....", ".....", ".....", "#####"],
+            "+": [".....", "..#..", ".###.", "..#..", "....."],
+            "!": ["..#..", "..#..", "..#..", ".....", "..#.."],
+            "?": [".###.", "...#.", "..#..", ".....", "..#.."],
+            "/": ["....#", "...#.", "..#..", ".#...", "#...."],
+            "\\": ["#....", ".#...", "..#..", "...#.", "....#"],
+            "(": ["...#.", "..#..", "..#..", "..#..", "...#."],
+            ")": [".#...", "..#..", "..#..", "..#..", ".#..."],
+            "[": [".###.", ".#...", ".#...", ".#...", ".###."],
+            "]": [".###.", "...#.", "...#.", "...#.", ".###."],
+            "'": ["..#..", "..#..", ".....", ".....", "....."],
+            "\"": [".#.#.", ".#.#.", ".....", ".....", "....."],
+            "#": [".#.#.", "#####", ".#.#.", "#####", ".#.#."],
+            "=": [".....", ".###.", ".....", ".###.", "....."],
+            "…": [".....", ".....", ".....", ".....", "#.#.#"]
+        ]
     }
 
     /// The height `draw(in:)` actually lays a single line out at, so a rect made from it
     /// centres the text instead of top-aligning it in slack the font's extremes reserved.
+    ///
+    /// The rule this button was the first to need is now the design system's, so every surface
+    /// that places drawn text answers the same way: the menu row and the closed chooser had the
+    /// same defect, invisible under SF and 4pt under Platinum's Geneva.
     private func lineHeight(of font: NSFont) -> CGFloat {
-        ceil(font.ascender - font.descender + font.leading)
+        Design.Typography.lineHeight(of: font)
     }
 
     /// Where the chord's drawing rect starts, so the hint reads as part of the title's line
@@ -715,7 +1021,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     private var surfaceFill: NSColor {
         if isProminent {
             if buttonStyle.primaryTreatment == .raised {
-                return dimmed(Design.Surface.controlResting)
+                return dimmed(secondaryFill)
             }
             if buttonStyle.primaryTreatment == .outlined {
                 return isPressed || isHovered
@@ -726,7 +1032,15 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
                 ? primaryColor.withAlphaComponent(Layout.pressedDim)
                 : primaryColor
         }
-        return dimmed(isPressed || isHovered ? Design.Surface.controlHover : Design.Surface.controlResting)
+        return dimmed(secondaryFill)
+    }
+
+    private var secondaryFill: NSColor {
+        AppThemePalette.color(
+            isPressed || isHovered
+                ? buttonStyle.secondaryHoverRole
+                : buttonStyle.secondaryRole
+        )
     }
 
     private var surfaceBorder: NSColor? {
@@ -769,6 +1083,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     private var foreground: NSColor {
         if let contentTintColor { return dimmed(contentTintColor) }
+        if !isEnabled && buttonStyle.embossesDisabledTitle {
+            return Design.Surface.bevelShadow
+        }
         if isProminent {
             if buttonStyle.primaryTreatment == .raised { return dimmed(Design.Text.label) }
             if buttonStyle.primaryTreatment == .outlined { return dimmed(primaryColor) }
@@ -794,5 +1111,53 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         path.setLineDash([1, 1], count: 2, phase: 0)
         dimmed(Design.Text.label).setStroke()
         path.stroke()
+    }
+}
+
+// MARK: - Shared Presentations
+
+extension ThemedButton {
+
+    /// The one down-arrow used to return to the live end of a scrolling surface.
+    ///
+    /// The component owns its target, surface and semantic shape; hosts contribute only the
+    /// wording, action and placement. Keeping those together is what makes Git Review and Native
+    /// Chat one affordance rather than two buttons that happen to use the same symbol.
+    static func floatingScrollToEnd(
+        accessibility: String,
+        target: AnyObject?,
+        action: Selector?
+    ) -> ThemedButton {
+        let button = ThemedButton(
+            symbol: "arrow.down",
+            accessibility: accessibility,
+            target: target,
+            action: action
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isBordered = false
+        button.toolTip = accessibility
+        button.applySurface(
+            fill: Design.Surface.elevated,
+            radius: .pill(height: Design.Size.floatingNavigationTarget),
+            border: Design.Surface.border,
+            glow: true
+        )
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: Design.Size.floatingNavigationTarget),
+            button.heightAnchor.constraint(equalToConstant: Design.Size.floatingNavigationTarget)
+        ])
+        return button
+    }
+}
+
+// MARK: - ControlRowMember
+
+extension ThemedButton: ControlRowMember {
+
+    func adopt(_ metrics: ControlRowMetrics) {
+        guard rowHeight != metrics.height else { return }
+        rowHeight = metrics.height
+        contentChanged()
     }
 }

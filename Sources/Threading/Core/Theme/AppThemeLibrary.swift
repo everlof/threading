@@ -254,11 +254,34 @@ enum AppThemeLibrary {
 
     private(set) static var current: AppTheme = .system
 
+    /// The user's standing choice, whatever is in force right now.
+    ///
+    /// Exposed for the one screen where the two can differ: in recovery the app wears System and
+    /// the Appearance page must still show what the user actually chose, or opening the page and
+    /// clicking the entry that looks selected would overwrite their theme with System.
+    static var storedThemeID: AppThemeID? {
+        defaults.string(forKey: Keys.currentThemeID).map { AppThemeID($0) }
+    }
+
     /// Reads the stored choice at launch. Called before the first window is built, so nothing
     /// has to be refreshed — everything is created already themed.
-    static func restore() {
-        let stored = defaults.string(forKey: Keys.currentThemeID)
-        let restored = stored.flatMap { theme(withID: AppThemeID($0)) } ?? AppTheme.system
+    ///
+    /// **A recovery launch pins System, in memory only.** Nothing here writes, today or after —
+    /// the write lives in `apply`, which records even a pick that changes nothing on screen — so
+    /// "recovery cannot re-persist the theme" is bought by taking this path and never that one.
+    ///
+    /// System rather than "the stored choice if it happens to be stock": a stock theme carrying a
+    /// `WindowChromeStyle` opts the main window into the app-drawn frame, which is a great deal
+    /// of launch-time machinery and a plausible place to die. System is the one theme that needs
+    /// no theme document, no asset store, no contributed package and no chrome takeover.
+    static func restore(_ mode: LaunchMode = .normal) {
+        let restored: AppTheme
+        switch mode {
+        case .normal:
+            restored = storedThemeID.flatMap { theme(withID: $0) } ?? AppTheme.system
+        case .recovery:
+            restored = .system
+        }
         current = restored
         AppThemePalette.set(restored)
         applyAppearance(for: restored)

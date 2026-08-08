@@ -8,6 +8,11 @@ import XCTest
 @MainActor
 final class PaneHeaderTests: XCTestCase {
 
+    override func tearDown() {
+        AppThemePalette.set(.system)
+        super.tearDown()
+    }
+
     /// The ink-to-edge inset the header states, `Design.Spacing.inset` — restated here so a
     /// drive-by change to the band's margin fails a test rather than passing silently.
     private let contentInset: CGFloat = Design.Spacing.inset
@@ -39,6 +44,11 @@ final class PaneHeaderTests: XCTestCase {
         let header = PaneHeaderView()
         _ = host(header)
         XCTAssertEqual(header.frame.height, PaneHeaderView.bandHeight)
+        XCTAssertEqual(
+            header.frame.height,
+            Design.Size.tabHeight + Design.Spacing.small * 2 + Design.Radius.border,
+            "the rule consumed one of the tab's margins instead of following them"
+        )
     }
 
     /// The height the content pane's strip states is this band's, read from one place — the
@@ -59,11 +69,60 @@ final class PaneHeaderTests: XCTestCase {
         XCTAssertEqual(frame.minY, 0)
     }
 
-    func testControlsAreCentredInTheBand() {
+    func testControlsAreCentredAboveTheRule() throws {
         let button = inlineButton()
         let header = PaneHeaderView(trailing: [button])
         _ = host(header)
-        XCTAssertEqual(button.frame.midY, header.bounds.midY, accuracy: 0.5)
+        let separator = try XCTUnwrap(
+            header.subviews.compactMap { $0 as? SeparatorView }.first
+        )
+        XCTAssertEqual(
+            button.frame.midY,
+            (separator.frame.maxY + header.bounds.maxY) / 2,
+            accuracy: 0.5,
+            "the rule was counted as lower breathing room"
+        )
+    }
+
+    /// Bauhaus is the case that exposed the bug: its four-point structural rule used to take
+    /// four of the six points below a tab while leaving all six above it. The band must remeasure
+    /// in place when that rule arrives, not only when it is constructed under the theme.
+    func testALiveThemeSwitchKeepsTheRuleOutsideTheContentMargins() throws {
+        AppThemePalette.set(.system)
+        let tab = ThemedTabItemView(
+            title: "Attachments",
+            symbolName: "paperclip",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .chrome
+        )
+        let header = PaneHeaderView(leading: [tab], margin: .paneEdge)
+        let host = host(header)
+        let systemHeight = header.frame.height
+        let systemRule = Design.Radius.border
+
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.bauhaus.id))
+        host.layoutSubtreeIfNeeded()
+
+        let separator = try XCTUnwrap(
+            header.subviews.compactMap { $0 as? SeparatorView }.first
+        )
+        XCTAssertEqual(
+            header.frame.height - systemHeight,
+            Design.Radius.border - systemRule,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            header.bounds.maxY - tab.frame.maxY,
+            Design.Spacing.small,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            tab.frame.minY - separator.frame.maxY,
+            Design.Spacing.small,
+            accuracy: 0.5
+        )
     }
 
     // MARK: - Ink alignment

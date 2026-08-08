@@ -65,6 +65,50 @@ final class ThemeSettingsRenderTests: XCTestCase {
         XCTAssertGreaterThan(controller.view.frame.height, 200)
     }
 
+    @MainActor
+    func testHistoricalFontFallbackNoticeExplainsTheActualResolution() {
+        let fallback = ThemePreferencesViewController.historicalFontFallbackMessage(
+            themeName: "Mac OS 9 Platinum",
+            fontFamilies: ["Charcoal", "Geneva"],
+            availableFamilies: ["Geneva"],
+            overrideFamily: nil
+        )
+        XCTAssertEqual(
+            fallback,
+            "“Mac OS 9 Platinum” requests Charcoal, which is not installed. Using Geneva. "
+                + "Install a legitimately licensed copy of Charcoal to use it automatically."
+        )
+        XCTAssertNil(
+            ThemePreferencesViewController.historicalFontFallbackMessage(
+                themeName: "Mac OS 9 Platinum",
+                fontFamilies: ["Charcoal", "Geneva"],
+                availableFamilies: ["Charcoal", "Geneva"],
+                overrideFamily: nil
+            ),
+            "no warning is needed when the requested historical face is installed"
+        )
+        XCTAssertNil(
+            ThemePreferencesViewController.historicalFontFallbackMessage(
+                themeName: "Mac OS 9 Platinum",
+                fontFamilies: ["Charcoal", "Geneva"],
+                availableFamilies: ["Geneva"],
+                overrideFamily: "Avenir Next"
+            ),
+            "an explicit app-font override is the user's choice, not an implicit fallback"
+        )
+
+        XCTAssertEqual(
+            ThemePreferencesViewController.historicalFontFallbackMessage(
+                themeName: "Windows 98",
+                fontFamilies: ["MS Sans Serif", "Microsoft Sans Serif", "W95FA", "Geneva"],
+                availableFamilies: ["W95FA", "Geneva"],
+                overrideFamily: nil
+            ),
+            "“Windows 98” requests MS Sans Serif, which is not installed. Using W95FA. "
+                + "Install a legitimately licensed copy of MS Sans Serif to use it automatically."
+        )
+    }
+
     // MARK: - The Halo Contract
 
     /// A glowing theme's halo must fade on all four sides of a card, and only a render can
@@ -143,6 +187,108 @@ final class ThemeSettingsRenderTests: XCTestCase {
 
         print("Rendered \(written.count) theme pages to \(directory.path)")
         XCTAssertEqual(written.count, Render.widths.count * 2)
+    }
+
+    /// The page that first exposed the Clay button problem: secondary actions had no readable
+    /// white body, so their violet depth looked like a detached blur. Keep a deterministic
+    /// theme-specific fixture instead of relying on whichever preference the test host restored.
+    @MainActor
+    func testRendersClayThemeSettingsToImage() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+        AppThemeLibrary.apply(AppThemeStyles.claymorphism)
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let controller = ThemePreferencesViewController()
+        let host = laidOut(
+            controller.view,
+            width: SettingsUIDefaults.pageWidth,
+            height: Render.height
+        )
+        host.appearance = appearance
+        controller.view.appearance = appearance
+
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+            data = png(of: host)
+        }
+
+        let url = directory.appendingPathComponent("themes-claymorphism.png")
+        try XCTUnwrap(data, "Failed to render the Claymorphism themes page").write(to: url)
+    }
+
+    /// The fixture for the centred-glow failure: a Core Animation companion shadow used to
+    /// composite above every dark card and turn the whole Themes page lime. Keep the complete
+    /// page beside the pixel-level surface assertion so hierarchy changes cannot hide a repeat.
+    @MainActor
+    func testRendersCyberpunkThemeSettingsToImage() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+        AppThemeLibrary.apply(AppThemeStyles.cyberpunk)
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let controller = ThemePreferencesViewController()
+        let host = laidOut(
+            controller.view,
+            width: SettingsUIDefaults.pageWidth,
+            height: Render.height
+        )
+        host.appearance = appearance
+        controller.view.appearance = appearance
+
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+            data = png(of: host)
+        }
+
+        let url = directory.appendingPathComponent("themes-cyberpunk.png")
+        try XCTUnwrap(data, "Failed to render the Cyberpunk themes page").write(to: url)
+    }
+
+    /// Industrial separates two kinds of raised action: coral CTAs keep the tight coral pair,
+    /// while ordinary grey actions reuse the broad grey/white neumorphic relief. The full page
+    /// catches regressions where every compact action becomes a detached coral blur.
+    @MainActor
+    func testRendersIndustrialThemeSettingsToImage() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+        AppThemeLibrary.apply(AppThemeStyles.industrial)
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let controller = ThemePreferencesViewController()
+        let host = laidOut(
+            controller.view,
+            width: SettingsUIDefaults.pageWidth,
+            height: Render.height
+        )
+        host.appearance = appearance
+        controller.view.appearance = appearance
+
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+            data = png(of: host)
+        }
+
+        let url = directory.appendingPathComponent("themes-industrial.png")
+        try XCTUnwrap(data, "Failed to render the Industrial themes page").write(to: url)
     }
 
     // MARK: - Current App Theme

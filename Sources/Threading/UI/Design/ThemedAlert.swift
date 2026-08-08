@@ -25,6 +25,15 @@ final class ThemedAlert {
         var hasDestructiveAction = false
         var keyEquivalent = ""
 
+        /// A *chord* this button answers to, and draws on its face — `⌘↩` beside "Send".
+        ///
+        /// Separate from `keyEquivalent` because the two match differently: a key equivalent
+        /// answers its character whatever is held with it, which is what a sheet's Return and
+        /// Escape want, and exactly wrong for a sheet that offers Return and ⌘Return as two
+        /// different answers. Setting this on any button therefore restates the plain Return
+        /// as an exact-match chord too — see `makeButtonRow`.
+        var shortcut: KeyboardShortcut?
+
         init(title: String) { self.title = title }
     }
 
@@ -70,10 +79,40 @@ final class ThemedAlert {
             ?? ""
     }
 
-    func addButton(withTitle title: String) {
+    @discardableResult
+    func addButton(withTitle title: String) -> Button {
         let button = Button(title: title)
         if buttons.isEmpty { button.keyEquivalent = "\r" }
         buttons.append(button)
+        return button
+    }
+
+    /// What each button ends up answering to once the sheet is read as a whole.
+    ///
+    /// **Return stops being a key equivalent the moment ⌘Return is also an answer.**
+    /// `ThemedButton.keyEquivalent` matches its character whatever is held with it, so a sheet
+    /// offering both "Add to Chat" (↩) and "Send" (⌘↩) would answer both chords with whichever
+    /// button the view tree reached first — the accelerated one is unreachable, or the default
+    /// one is, depending on subview order. Where a sibling carries a modifier-bearing chord on
+    /// the same key, the plain one is restated as an exact-match `shortcut`, which also puts
+    /// `↩` on its face beside the sibling's `⌘↩`: a pair is only findable if both are drawn.
+    ///
+    /// A whole-sheet answer rather than a per-button one, and public so it can be read without
+    /// running a modal.
+    static func resolvedChords(
+        for buttons: [Button]
+    ) -> [(keyEquivalent: String, shortcut: KeyboardShortcut?)] {
+        let acceleratedKeys = Set(buttons.compactMap { model -> String? in
+            guard let shortcut = model.shortcut, !shortcut.modifiers.isEmpty else { return nil }
+            return shortcut.key
+        })
+        return buttons.map { model in
+            guard !model.keyEquivalent.isEmpty,
+                  acceleratedKeys.contains(model.keyEquivalent) else {
+                return (model.keyEquivalent, model.shortcut)
+            }
+            return ("", KeyboardShortcut(key: model.keyEquivalent, modifiers: []))
+        }
     }
 
     @discardableResult
@@ -140,6 +179,18 @@ final class ThemedAlert {
         )
     }
 
+    /// Workbench's DiskCopy requester documents left-Amiga+V for Continue and left-Amiga+B for
+    /// Cancel. On macOS the Amiga key is the Command modifier; keeping the mapping here lets the
+    /// panel consume only those two source-backed chords while every other period requester
+    /// retains its ordinary Return/Escape contract.
+    static func workbenchShortcutIndex(for key: String) -> Int? {
+        switch key.lowercased() {
+        case "v": return 0
+        case "b": return 1
+        default: return nil
+        }
+    }
+
     private func prepareDefaultButtonIfNeeded() {
         if buttons.isEmpty { addButton(withTitle: L10n.string("OK")) }
     }
@@ -154,9 +205,22 @@ final class ThemedAlert {
         let panel = ThemedAlertPanel(contentSize: size)
         panel.contentView = content
         panel.onCancel = { [weak self] in self?.finish(with: .abort) }
+        panel.onWorkbenchShortcut = { [weak self] key in
+            self?.finishWorkbenchShortcut(key) ?? false
+        }
         panel.appearance = parentWindow?.appearance ?? NSApp.keyWindow?.appearance
         presentedWindow = panel
         return panel
+    }
+
+    private func finishWorkbenchShortcut(_ key: String) -> Bool {
+        let material = AppThemePalette.current.material(for: NSApp.effectiveAppearance)
+        guard material.menuAppearance == .amiga,
+              let index = Self.workbenchShortcutIndex(for: key),
+              index < buttons.count,
+              buttons[index].isEnabled else { return false }
+        finish(with: Self.response(forButtonAt: index))
+        return true
     }
 
     private func focusInitialResponder(in panel: NSWindow) {
@@ -201,6 +265,7 @@ final class ThemedAlert {
 @MainActor
 private final class ThemedAlertPanel: NSPanel {
     var onCancel: (() -> Void)?
+    var onWorkbenchShortcut: ((String) -> Bool)?
 
     init(contentSize: NSSize) {
         super.init(
@@ -228,6 +293,12 @@ private final class ThemedAlertPanel: NSPanel {
             onCancel?()
             return true
         }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers.contains(.command),
+           let key = event.charactersIgnoringModifiers?.lowercased(),
+           onWorkbenchShortcut?(key) == true {
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 }
@@ -247,14 +318,37 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     private let choose: (Int) -> Void
     private let titleLabel: NSTextField
     private let messageLabel: NSTextField
+    private let requesterTitleBand: ThemedAlertRequesterTitleBandView
     private let iconView = NSImageView()
     private var buttonControls: [ThemedButton] = []
     private var checkbox: ThemedCheckbox?
+    private var requesterMessageWell: ThemedAlertRequesterMessageWellView?
+    private weak var sectionStack: NSStackView?
+    private var modernStackTopConstraint: NSLayoutConstraint?
+    private var requesterStackTopConstraint: NSLayoutConstraint?
     private let appEvents = AppEventObservations()
+
+    /// Period requester materials do not carry the modern status-symbol heading. Their source
+    /// dialogs are compact, square, and text-led; the same popover grammar that drives their
+    /// transient cards is the data-backed signal for this presentation.
+    private var usesClassicRequester: Bool {
+        AppThemePalette.current
+            .material(for: effectiveAppearance)
+            .popoverStyle
+            .glyphStyle == .classic
+    }
+
+    /// Indigo Magic's measured logout requester is still a square classic requester, but unlike
+    /// Workbench it carries a bright green question mark field beside the message well.
+    private var usesIRIXRequester: Bool {
+        AppThemePalette.current
+            .material(for: effectiveAppearance)
+            .menuAppearance == .irix
+    }
 
     var preferredFirstResponder: NSResponder? {
         alert.initialFirstResponder
-            ?? buttonControls.first(where: { $0.keyEquivalent == "\r" && $0.isEnabled })
+            ?? buttonControls.first(where: { $0.answersReturn && $0.isEnabled })
             ?? buttonControls.first(where: \.isEnabled)
     }
 
@@ -263,6 +357,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         self.choose = choose
         titleLabel = NSTextField(wrappingLabelWithString: alert.messageText)
         messageLabel = NSTextField(wrappingLabelWithString: alert.informativeText)
+        requesterTitleBand = ThemedAlertRequesterTitleBandView(title: alert.messageText)
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
@@ -276,11 +371,12 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     override var wantsUpdateLayer: Bool { false }
 
     private func setup() {
-        titleLabel.applyFont(.heading)
+        titleLabel.applyFont(usesClassicRequester ? .controlRegular : .heading)
+        titleLabel.isHidden = usesClassicRequester
         titleLabel.maximumNumberOfLines = 0
         titleLabel.preferredMaxLayoutWidth = Layout.maximumTextWidth
 
-        messageLabel.applyFont(.body)
+        messageLabel.applyFont(usesClassicRequester ? .controlRegular : .body)
         messageLabel.maximumNumberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = Layout.maximumTextWidth
         messageLabel.isHidden = alert.informativeText.isEmpty
@@ -304,7 +400,9 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         heading.alignment = .top
         heading.spacing = Design.Spacing.inset
 
-        var sections: [NSView] = [heading]
+        let messageSection = ThemedAlertRequesterMessageWellView(contentView: heading)
+        requesterMessageWell = messageSection
+        var sections: [NSView] = [messageSection]
         if let accessory = alert.accessoryView {
             sections.append(wrappedAccessory(accessory))
         }
@@ -325,15 +423,36 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.large
         stack.translatesAutoresizingMaskIntoConstraints = false
+        sectionStack = stack
+        requesterTitleBand.isHidden = !usesClassicRequester
+        addSubview(requesterTitleBand)
         addSubview(stack)
 
+        let modernTop = stack.topAnchor.constraint(
+            equalTo: topAnchor,
+            constant: Design.Spacing.large
+        )
+        let requesterTop = stack.topAnchor.constraint(
+            equalTo: requesterTitleBand.bottomAnchor,
+            constant: Design.Spacing.small
+        )
+        modernTop.isActive = !usesClassicRequester
+        requesterTop.isActive = usesClassicRequester
+        modernStackTopConstraint = modernTop
+        requesterStackTopConstraint = requesterTop
+
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.large),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.large),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.large),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.large),
             stack.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minimumContentWidth),
-            heading.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            messageSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            requesterTitleBand.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            requesterTitleBand.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
+            requesterTitleBand.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
+            requesterTitleBand.heightAnchor.constraint(
+                equalToConstant: WindowChromeAppearance.resolve()?.bandHeight ?? 18
+            )
         ])
         for section in sections.dropFirst() {
             section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -366,7 +485,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     private func makeButtonRow() -> NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [spacer])
+        let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.small
@@ -393,18 +512,38 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         // colours mean, which is the only thing it ever should have rested on.
         let hasDestructiveAction = alert.buttons.contains(where: \.hasDestructiveAction)
 
-        for index in alert.buttons.indices.reversed() {
+        // See `ThemedAlert.resolvedChords` for why a plain Return is sometimes restated.
+        let chords = ThemedAlert.resolvedChords(for: alert.buttons)
+
+        // AppKit's modern sheet convention places the last-added Cancel at the leading edge
+        // after this row's spacer. Workbench's requester figure is the opposite: Continue is
+        // the leading gadget and Cancel bookends the trailing edge. The same compact requester
+        // grammar is used by the other indexed/classic materials, so their authored action order
+        // remains visible instead of inheriting the modern sheet reversal.
+        let indices = usesClassicRequester
+            ? Array(alert.buttons.indices)
+            : Array(alert.buttons.indices.reversed())
+        for index in indices {
             let model = alert.buttons[index]
             let button = ThemedButton(title: model.title, target: self, action: #selector(buttonPressed(_:)))
             button.tag = index
             button.isEnabled = model.isEnabled
-            button.keyEquivalent = model.keyEquivalent
+            button.keyEquivalent = chords[index].keyEquivalent
+            button.shortcut = chords[index].shortcut
             button.emphasis = !hasDestructiveAction && index == defaultIndex ? .primary : .secondary
             if model.hasDestructiveAction {
                 button.contentTintColor = Design.Status.negative
             }
             row.addArrangedSubview(button)
             buttonControls.append(button)
+        }
+        // Modern sheets keep the whole row trailing. A classic requester uses the same spare
+        // width as the source figure: its first action is leading and its cancellation gadget is
+        // trailing, with the empty rail between them.
+        if usesClassicRequester {
+            row.insertArrangedSubview(spacer, at: min(1, row.arrangedSubviews.count))
+        } else {
+            row.insertArrangedSubview(spacer, at: 0)
         }
         return row
     }
@@ -414,15 +553,77 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     }
 
     private func applyTheme() {
-        titleLabel.textColor = Design.Text.label
-        messageLabel.textColor = Design.Text.secondary
-        iconView.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: nil
-        )?.withSymbolConfiguration(Design.Symbol.configuration(Layout.iconSize, weight: .medium))
-        iconView.contentTintColor = symbolColor
+        if usesClassicRequester {
+            titleLabel.applyFont(.controlRegular)
+            messageLabel.applyFont(.controlRegular)
+            titleLabel.isHidden = true
+            iconView.isHidden = !usesIRIXRequester
+            titleLabel.textColor = Design.Text.label
+            messageLabel.textColor = Design.Text.label
+            if usesIRIXRequester {
+                iconView.image = Self.irixQuestionImage()
+                iconView.contentTintColor = nil
+            } else {
+                iconView.image = nil
+            }
+        } else {
+            titleLabel.applyFont(.heading)
+            messageLabel.applyFont(.body)
+            titleLabel.isHidden = false
+            iconView.isHidden = false
+            titleLabel.textColor = Design.Text.label
+            messageLabel.textColor = Design.Text.secondary
+            iconView.image = NSImage(
+                systemSymbolName: symbolName,
+                accessibilityDescription: nil
+            )?.withSymbolConfiguration(Design.Symbol.configuration(Layout.iconSize, weight: .medium))
+            iconView.contentTintColor = symbolColor
+        }
+        requesterTitleBand.isHidden = !usesClassicRequester
+        modernStackTopConstraint?.isActive = !usesClassicRequester
+        requesterStackTopConstraint?.isActive = usesClassicRequester
+        sectionStack?.spacing = usesClassicRequester ? Design.Spacing.small : Design.Spacing.large
         needsDisplay = true
         window?.invalidateShadow()
+    }
+
+    /// The source crop is a 30px square green field with a one-pixel black rule and a one-bit
+    /// question mark. It is made as an indexed-looking image here instead of borrowing a modern
+    /// SF Symbol, whose rounded outline and anti-aliased fill would erase the measured grammar.
+    private static func irixQuestionImage() -> NSImage {
+        let size = NSSize(width: 30, height: 30)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        NSGraphicsContext.current?.cgContext.setShouldAntialias(false)
+        NSGraphicsContext.current?.cgContext.setAllowsAntialiasing(false)
+
+        let face = NSRect(x: 1, y: 1, width: 28, height: 28)
+        // A measured stock-artwork pixel, not the theme's semantic positive role. Conflating
+        // them made the IRIX theme fail the same contrast contract authored themes must pass:
+        // #55D555 is almost indistinguishable from its gray application ground.
+        NSColor(hex: "#55D555")!.setFill()
+        face.fill()
+        Design.Surface.border.setStroke()
+        let border = NSBezierPath(rect: NSRect(x: 0.5, y: 0.5, width: 29, height: 29))
+        border.lineWidth = 1
+        border.stroke()
+
+        let font = Design.Typography.classicRequesterMark()
+        let mark = NSAttributedString(
+            string: "?",
+            attributes: [.font: font, .foregroundColor: Design.Text.label]
+        )
+        let measured = mark.size()
+        mark.draw(at: NSPoint(
+            x: floor(size.width / 2 - measured.width / 2),
+            y: floor(size.height / 2 - measured.height / 2) - 1
+        ))
+        return image
     }
 
     private var symbolName: String {
@@ -447,11 +648,169 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let material = AppThemePalette.current.material(for: effectiveAppearance)
+        let popover = material.popoverStyle
+        // Anchored Help Tags and modal alerts share the presentation model but not their
+        // semantic surface. Aqua's Help Tag is pale yellow; an Empty Trash sheet remains the
+        // authored floating gray/white sheet, so alerts always consume floatingSurface here.
+        let fill = AppThemePalette.color(.floatingSurface)
+        let edge: NSColor? = popover.edge == .none ? nil : Design.Surface.border
+        let bevel: SurfaceBevel = popover.edge == .material
+            ? .automatic
+            : .none
         ThemedSurface.draw(
             bounds,
-            fill: Design.Surface.elevated,
+            fill: fill,
+            border: edge,
+            radius: Design.Radius.panel,
+            bevel: bevel
+        )
+    }
+}
+
+/// The title strip on an indexed requester is part of the dialog, not the host window. Keeping it
+/// as a design component lets the alert carry the Workbench depth gadget and one-bit caption even
+/// when it is rendered into a borderless sheet panel.
+@MainActor
+private final class ThemedAlertRequesterTitleBandView: NSView, ThemedComponent {
+    private let title: String
+    private let depthButton = WindowChromeButton(role: .depth)
+    private let appEvents = AppEventObservations()
+
+    init(title: String) {
+        self.title = title
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        depthButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(depthButton)
+        NSLayoutConstraint.activate([
+            depthButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            depthButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            depthButton.widthAnchor.constraint(equalToConstant: 18),
+            depthButton.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(title)
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.needsDisplay = true
+            self?.depthButton.needsDisplay = true
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var wantsUpdateLayer: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let resolved = WindowChromeAppearance.resolve()
+        let gradient = resolved?.activeGradient
+        if let gradient,
+           gradient.colors.count >= 2,
+           !gradient.colors.dropFirst().allSatisfy({ $0 == gradient.colors[0] }),
+           let drawn = NSGradient(
+               colors: gradient.colors,
+               atLocations: gradient.locations,
+               colorSpace: .sRGB
+           ) {
+            drawn.draw(in: bounds, angle: 90 - gradient.angleDegrees)
+        } else {
+            (gradient?.colors.first ?? Design.Surface.controlResting).setFill()
+            bounds.fill()
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let context = NSGraphicsContext.current else { return }
+        context.shouldAntialias = false
+        context.cgContext.setShouldAntialias(false)
+        context.cgContext.setAllowsAntialiasing(false)
+        context.cgContext.setShouldSmoothFonts(false)
+        context.cgContext.setAllowsFontSmoothing(false)
+
+        let base = resolved?.glyphStyle == .irix
+            ? Design.Typography.detail(weight: .bold)
+            : Design.Typography.controlRegular()
+        let sized = resolved?.titleFontSize.flatMap {
+            NSFont(descriptor: base.fontDescriptor, size: $0)
+        } ?? base
+        let font = resolved?.titleFontStyle == .italic
+            ? NSFontManager.shared.convert(sized, toHaveTrait: .italicFontMask)
+            : sized
+        let ink = resolved?.ink ?? Design.Text.label
+        let attributed = NSAttributedString(
+            string: title,
+            attributes: [.font: font, .foregroundColor: ink]
+        )
+        let measured = attributed.size()
+        let origin = NSPoint(
+            x: 4,
+            y: floor(bounds.midY - measured.height / 2)
+        )
+        attributed.draw(at: origin)
+
+        Design.Surface.border.setFill()
+        NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: 1).fill()
+    }
+}
+
+/// The framed copy well inside a Workbench requester. It owns only the indexed field relief;
+/// the contained heading stack keeps AppKit's text/accessory semantics from the modern alert.
+@MainActor
+private final class ThemedAlertRequesterMessageWellView: NSView, ThemedComponent {
+    private let contentView: NSView
+    private lazy var topInset = contentView.topAnchor.constraint(equalTo: topAnchor, constant: 4)
+    private lazy var bottomInset = contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4)
+    private lazy var leadingInset = contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
+    private lazy var trailingInset = contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
+    private let appEvents = AppEventObservations()
+
+    private var usesClassicRequester: Bool {
+        AppThemePalette.current
+            .material(for: effectiveAppearance)
+            .popoverStyle
+            .glyphStyle == .classic
+    }
+
+    init(contentView: NSView) {
+        self.contentView = contentView
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentView)
+        NSLayoutConstraint.activate([topInset, bottomInset, leadingInset, trailingInset])
+        applyTheme()
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyTheme() }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var wantsUpdateLayer: Bool { false }
+
+    private func applyTheme() {
+        let inset: CGFloat = usesClassicRequester ? 4 : 0
+        topInset.constant = inset
+        bottomInset.constant = -inset
+        leadingInset.constant = inset
+        trailingInset.constant = -inset
+        needsDisplay = true
+        invalidateIntrinsicContentSize()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyTheme()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard usesClassicRequester else { return }
+        ThemedSurface.draw(
+            bounds,
+            fill: Design.Surface.field,
             border: Design.Surface.border,
-            radius: Design.Radius.panel
+            radius: 0,
+            bevel: .sunken
         )
     }
 }

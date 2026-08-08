@@ -134,7 +134,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
     override func draw(_ dirtyRect: NSRect) {
         drawSurface()
-        super.draw(dirtyRect)
+        withThemeRasterization { super.draw(dirtyRect) }
     }
 
     /// The leading edge the text begins at, so a subclass can put a glyph in front of it.
@@ -148,7 +148,13 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         // material reads sunken rather than raised.
         let shape = ThemedSurface.draw(
             bounds,
-            fill: Design.Surface.controlResting,
+            // Period fields are their own semantic surface. Windows 98's 98.css field is a
+            // white writable well against the button-face chrome (and its disabled field falls
+            // back to that chrome); using the generic control face here erased that distinction
+            // even though `fieldSurface` was already authored by every retro material. 98.css
+            // treats read-only inputs the same way as disabled ones, so a non-editable field is
+            // not allowed to keep advertising a writable white well either.
+            fill: isEnabled && isEditable ? Design.Surface.field : Design.Surface.controlResting,
             border: isEditing ? Design.Surface.accent : Design.Surface.border,
             bevel: .sunken
         )
@@ -162,6 +168,26 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         Design.Surface.accent.setStroke()
         ring.lineWidth = width
         ring.stroke()
+    }
+
+    /// Workbench Topaz and Win32's small UI strikes are bitmap faces. Buttons and menu rows
+    /// already suppress smoothing for the same material flag; fields must do it as well or the
+    /// text changes construction merely because it sits inside an editable well.
+    private func withThemeRasterization(_ draw: () -> Void) {
+        let material = AppThemePalette.current.material(for: effectiveAppearance)
+        guard !material.buttonStyle.antialiasesTitle,
+              let context = NSGraphicsContext.current else {
+            draw()
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        context.shouldAntialias = false
+        context.cgContext.setShouldAntialias(false)
+        context.cgContext.setAllowsAntialiasing(false)
+        context.cgContext.setShouldSmoothFonts(false)
+        context.cgContext.setAllowsFontSmoothing(false)
+        draw()
     }
 }
 

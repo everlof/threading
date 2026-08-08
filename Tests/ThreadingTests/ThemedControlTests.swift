@@ -81,6 +81,29 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertNotEqual(colorOnly, differentiated, "the on state remained colour-only")
     }
 
+    func testClassicPlayerToggleUsesAnImmediateExplicitOnOffLatch() throws {
+        AppThemePalette.set(AppThemeStyles.classicPlayer)
+        let toggle = ThemedToggle()
+        toggle.frame.size = toggle.intrinsicContentSize
+        XCTAssertEqual(
+            AppThemePalette.current.material.toggleStyle,
+            .onOffButton
+        )
+        XCTAssertEqual(
+            toggle.intrinsicContentSize.width - Design.Accessibility.focusRingWidth * 2
+                - ThemedToggle.Layout.focusGap * 2,
+            ThemedToggle.Layout.buttonWidth
+        )
+
+        toggle.state = .off
+        let off = try renderedPNG(of: toggle)
+        toggle.state = .on
+        let on = try renderedPNG(of: toggle)
+
+        XCTAssertNotEqual(off, on, "the ON and OFF latch states draw identically")
+        XCTAssertEqual(toggle.knobProgress, 1, "the hardware latch started a hidden slide")
+    }
+
     func testTheHelperBuildsAThemedToggleNotAnNSSwitch() {
         let spy = ActionSpy()
         let control: ThemedControl = SettingsUI.toggle(
@@ -641,6 +664,53 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// A menu presented fire-and-forget — the token `present` returns dropped on the floor —
+    /// must still be the user's to dismiss. The composer's clock did exactly that, and under a
+    /// caller-retained session the session deallocated the moment the menu opened: the overlay
+    /// stayed across the whole window with every dismissal callback dead, no click or Escape
+    /// reached anything under it, and the window read as hung. The session owns itself while it
+    /// is on screen, so nothing a call site forgets can strand the overlay.
+    func testAMenuWhoseTokenWasDroppedStillDismissesForTheUser() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        var dismissals = 0
+        // Deliberately unretained: the defect being pinned is a call site ignoring the token.
+        // The single disabled row is the clock's own refusal menu, where this was found.
+        ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Write the brief first.", isEnabled: false))],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: { dismissals += 1 }
+        )
+
+        XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+        let overlay = try XCTUnwrap(
+            window.firstResponder as? NSView,
+            "the open menu's overlay should hold the keyboard"
+        )
+
+        overlay.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+
+        XCTAssertEqual(dismissals, 1, "Escape never reached a live session")
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+    }
+
     /// Two *adjacent* filled rows keep a hairline of panel between them.
     ///
     /// A menu reaches that pair whenever the highlight and a press part company — the keyboard
@@ -731,7 +801,7 @@ final class ThemedControlTests: XCTestCase {
     ///
     /// The sidebar's arrangement menu is three toggles and a chosen order, so it came up with
     /// three of its five rows filled in the theme's `selection` — the ground behind selected
-    /// *text*, which Win98 holds at a near-opaque navy — before it had been touched. Whichever
+    /// *text*, which Win98 holds at a solid navy — before it had been touched. Whichever
     /// row the pointer was actually on then had nothing left to say.
     func testAThemedMenuChecksARowRatherThanFillingIt() throws {
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
@@ -807,6 +877,156 @@ final class ThemedControlTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(inked, 0, "the checked row drew neither a fill nor a check")
+    }
+
+    /// A row's title inks the **same band as the icon beside it** — one line, not a name
+    /// floating above a picture.
+    ///
+    /// Asserted against a theme whose face reserves more room than it lays out, because that is
+    /// the only place it can go wrong. `NSString.draw(in:)` sets its line down from the *top* of
+    /// whatever rect it is handed, so a rect sized from `boundingRectForFont` — the union of the
+    /// family's glyph extremes — spends the whole difference lifting the words. Under SF the two
+    /// heights coincide to a fraction of a point and this looked square; under Geneva, which is
+    /// what Platinum's Charcoal falls back to on a current macOS, the bounding rect is 24.4pt
+    /// around a 16pt line and every title sat 5pt above the checkmark and the icon in its own
+    /// row, both of which are placed against `midY`.
+    ///
+    /// The icon is a block of ink, so the image column states the row's centre exactly rather
+    /// than restating the arithmetic under test.
+    func testAMenuRowsTitleInksTheBandItsIconIsCentredOn() throws {
+        let fixtureFamily = "Geneva"
+        XCTAssertTrue(
+            Design.Typography.availableFamilies.contains(fixtureFamily),
+            "the fixture family is missing, so nothing here is being exercised"
+        )
+
+        // Six device pixels per point: the offset being guarded against is several points, but
+        // the residue a correct placement leaves is a fraction of one.
+        let scale: CGFloat = 6
+        let block = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            NSColor.black.setFill()
+            rect.fill()
+            return true
+        }
+
+        for (name, theme) in [
+            ("system", AppTheme.system),
+            (fixtureFamily, themeNaming(family: fixtureFamily, on: AppThemeStyles.newsprint))
+        ] {
+            AppThemePalette.set(theme)
+
+            let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+            root.appearance = appearance
+            let source = NSView(frame: NSRect(x: 24, y: 250, width: 240, height: 26))
+            root.addSubview(source)
+
+            let window = NSWindow(
+                contentRect: root.bounds,
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.appearance = appearance
+            window.contentView = root
+            defer { window.close() }
+
+            let token = try XCTUnwrap(ThemedMenuPresenter.present(
+                ThemedMenuPresentation(
+                    entries: [.item(ThemedMenuItem(title: "Finder", image: block))],
+                    minimumWidth: source.bounds.width
+                ),
+                from: source,
+                selectedEntryIndex: nil,
+                onChoose: { _, _ in },
+                onDismiss: {}
+            ))
+            defer { ThemedMenuPresenter.dismiss(token) }
+
+            markNeedingLayout(root)
+            root.layoutSubtreeIfNeeded()
+
+            let row = try XCTUnwrap(
+                descendants(in: root).first { $0.accessibilityRole() == .menuItem },
+                "\(name): the menu drew no row"
+            )
+
+            // Drawn into a transparent bitmap, so the alpha channel holds the row's ink and
+            // nothing else — an unhighlighted row paints no fill of its own.
+            let size = row.bounds.size
+            let rep = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(size.width * scale),
+                pixelsHigh: Int(size.height * scale),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ))
+            rep.size = size
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            row.draw(row.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+
+            /// The band of ink between two of the row's own column edges, in the row's
+            /// coordinates — the bitmap is addressed from its top-left corner and the row is
+            /// not flipped, so the flip is applied here.
+            func band(from minX: CGFloat, to maxX: CGFloat) -> ClosedRange<CGFloat>? {
+                var top: Int?
+                var bottom: Int?
+                for x in Int(minX * scale)..<min(Int(maxX * scale), rep.pixelsWide) {
+                    for y in 0..<rep.pixelsHigh
+                    where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.2 {
+                        top = min(top ?? y, y)
+                        bottom = max(bottom ?? y, y)
+                    }
+                }
+                guard let top, let bottom else { return nil }
+                return (size.height - CGFloat(bottom + 1) / scale)...(size.height - CGFloat(top) / scale)
+            }
+
+            let titleInset = ThemedMenuMetrics.titleInset(
+                hasImageColumn: true,
+                hasPreviewColumn: false
+            )
+            let icon = try XCTUnwrap(
+                band(
+                    from: ThemedMenuMetrics.imageInset,
+                    to: ThemedMenuMetrics.imageInset + ThemedMenuMetrics.imageSize
+                ),
+                "\(name): the row drew no icon"
+            )
+            let title = try XCTUnwrap(
+                band(from: titleInset, to: size.width),
+                "\(name): the row drew no title"
+            )
+
+            func centre(_ band: ClosedRange<CGFloat>) -> CGFloat {
+                (band.lowerBound + band.upperBound) / 2
+            }
+
+            // The icon fills its own rect, so its band is the row's centre restated by drawing.
+            XCTAssertEqual(
+                centre(icon),
+                row.bounds.midY,
+                accuracy: 1 / scale,
+                "\(name): the icon is not where the row centres it"
+            )
+            // One point: a line box centred on the row still leaves the words a little high,
+            // because a font's ascent runs past its caps. Five points is the defect.
+            XCTAssertEqual(
+                centre(title),
+                centre(icon),
+                accuracy: 1,
+                "\(name): the title does not share the icon's line"
+            )
+        }
     }
 
     func testThemedMenuSurfaceUsesTheSourceViewsLocalAppearance() throws {
@@ -1907,6 +2127,25 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertLessThan(cornerAlpha(under: .system), 0.5,
                           "a rounded theme filled the pop-up's corner")
     }
+
+    func testThePopUpUsesTheSameAuthoredPeriodHeightAsTheComposerChooser() {
+        let popUp = ThemedPopUp()
+        popUp.addItem(withTitle: "Choice")
+
+        for (theme, height) in [
+            (AppThemeStyles.platinum, CGFloat(16)),
+            (AppThemeStyles.beOS, CGFloat(18)),
+            (AppThemeStyles.irix, CGFloat(20)),
+            (AppThemeStyles.win98, CGFloat(21))
+        ] {
+            AppThemePalette.set(theme)
+            XCTAssertEqual(
+                popUp.intrinsicContentSize.height,
+                height,
+                "\(theme.name)'s form pop-up disagrees with its composer chooser"
+            )
+        }
+    }
     // MARK: - Button
 
     func testAButtonPaintsTheThemesActionCaseTrackingAndWeightWithoutRenamingIt() {
@@ -1932,6 +2171,26 @@ final class ThemedControlTests: XCTestCase {
             "Start",
             "a display convention leaked into the button's accessible name"
         )
+    }
+
+    func testClassicPlayerUsesARealFiveBySixCellAlphabetAndFallsBackForLocalizedCopy() {
+        AppThemePalette.set(AppThemeStyles.classicPlayer)
+        let empty = ThemedButton(title: "", target: nil, action: nil)
+        let button = ThemedButton(title: "New Session", target: nil, action: nil)
+        empty.isProminent = true
+        button.isProminent = true
+
+        XCTAssertEqual(
+            button.intrinsicContentSize.width - empty.intrinsicContentSize.width,
+            CGFloat("NEW SESSION".count) * ThemedButton.PixelTitleArtwork.cellWidth,
+            "Classic Player measured a scalable font instead of its fixed TEXT-style cells"
+        )
+        XCTAssertTrue(ThemedButton.PixelTitleArtwork.canDraw("NEW SESSION"))
+        XCTAssertFalse(
+            ThemedButton.PixelTitleArtwork.canDraw("NUEVA SESIÓN"),
+            "unsupported localized copy would be painted with missing pixel glyphs"
+        )
+        XCTAssertEqual(button.accessibilityTitle(), "New Session")
     }
 
     /// A symbol-only raised button has nothing it can truncate, so a narrow face keeps the mark
@@ -2018,6 +2277,13 @@ final class ThemedControlTests: XCTestCase {
     func testWindows98ControlsPaintNativeFieldsDropdownsAndDefaultButtons() throws {
         AppThemePalette.set(AppThemeStyles.win98)
 
+        let nativeButton = ThemedButton(title: "OK", target: nil, action: nil)
+        XCTAssertEqual(
+            nativeButton.intrinsicContentSize,
+            NSSize(width: 75, height: 23),
+            "the pinned 98.css pushbutton metrics did not reach the Swift control"
+        )
+
         let prompt = PromptView(frame: NSRect(x: 0, y: 0, width: 240, height: 80))
         let promptCG = try XCTUnwrap(prompt.layer?.backgroundColor)
         let promptFill = try XCTUnwrap(NSColor(cgColor: promptCG))
@@ -2053,6 +2319,204 @@ final class ThemedControlTests: XCTestCase {
             try colour(of: buttonRep, at: NSPoint(x: 0, y: 13), in: button),
             equals: NSColor(hex: "#000000")!,
             message: "the default action lost its classic outer frame"
+        )
+    }
+
+    func testWindows98DropdownCarriesClassicGrammarIntoItsMenu() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        XCTAssertTrue(ThemedMenuMetrics.usesClassicGrammar)
+        XCTAssertEqual(ThemedMenuLayout.gap, 0)
+        XCTAssertEqual(ThemedMenuLayout.submenuOverlap, 5)
+        XCTAssertEqual(ThemedMenuMetrics.outerInset, 2)
+        XCTAssertEqual(ThemedMenuMetrics.rowHeight, 21)
+        XCTAssertEqual(ThemedMenuMetrics.subtitleRowHeight, 31)
+        XCTAssertEqual(ThemedMenuMetrics.separatorHeight, 9)
+        XCTAssertEqual(ThemedMenuMetrics.contentInset, 5)
+        XCTAssertEqual(ThemedMenuMetrics.checkSize, 8)
+        XCTAssertEqual(ThemedMenuMetrics.imageInset, 5)
+        XCTAssertEqual(
+            ThemedMenuMetrics.titleInset(hasImageColumn: true, hasPreviewColumn: false),
+            24
+        )
+        XCTAssertEqual(ThemedMenuMetrics.submenuChevronSize, 6)
+        XCTAssertEqual(ThemedMenuMetrics.submenuTrailingInset, 4)
+        XCTAssertEqual(ThemedMenuMetrics.titleBaselineOffset, -1)
+        XCTAssertEqual(ThemedMenuMetrics.imageBaselineOffset, 1)
+        XCTAssertEqual(
+            ThemedMenuMetrics.titleFont.pointSize,
+            Design.Typography.controlRegular().pointSize * 10 / 9,
+            accuracy: 0.001,
+            "the 96-dpi Win32 menu raster scale drifted back to AppKit's 72-dpi point size"
+        )
+        let nativeEntry = ThemedMenuEntry.item(ThemedMenuItem(
+            title: "Native",
+            image: NSImage(size: NSSize(width: 16, height: 16)),
+            submenu: [.item(ThemedMenuItem(title: "Child"))]
+        ))
+        let nativeTextWidth = ceil(("Native" as NSString).size(
+            withAttributes: [.font: ThemedMenuMetrics.titleFont]
+        ).width)
+        XCTAssertEqual(
+            ThemedMenuMetrics.width(for: [nativeEntry], minimum: 0),
+            ThemedMenuMetrics.outerInset * 2
+                + ThemedMenuMetrics.contentInset * 2
+                + ThemedMenuMetrics.imageSlot
+                + nativeTextWidth
+                + ThemedMenuMetrics.submenuChevronSlot,
+            "Win32 must not allocate independent check and icon columns"
+        )
+        XCTAssertFalse(ThemedMenuMetrics.panelHasGlow)
+        assertRGB(
+            ThemedMenuMetrics.panelFill,
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "the classic menu inherited the modern elevated card fill"
+        )
+
+        AppThemePalette.set(.system)
+        XCTAssertFalse(ThemedMenuMetrics.usesClassicGrammar)
+        XCTAssertEqual(ThemedMenuLayout.gap, Design.Spacing.tight)
+        XCTAssertEqual(ThemedMenuMetrics.rowHeight, 28)
+        XCTAssertTrue(ThemedMenuMetrics.panelHasGlow)
+    }
+
+    func testHistoricalMenuKeyEquivalentsReserveOneAlignedTrailingColumn() {
+        AppThemePalette.set(AppThemeStyles.amiga)
+        let plain: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "Backdrop")),
+            .item(ThemedMenuItem(title: "Execute Command...")),
+        ]
+        let shortcuts: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "Backdrop", keyEquivalent: "B")),
+            .item(ThemedMenuItem(title: "Execute Command...", keyEquivalent: "E")),
+        ]
+
+        let column = ThemedMenuMetrics.shortcutColumnWidth(shortcuts)
+        XCTAssertGreaterThan(column, 13, "the column must contain the Amiga-key cap and key")
+        XCTAssertEqual(
+            ThemedMenuMetrics.width(for: shortcuts, minimum: 0)
+                - ThemedMenuMetrics.width(for: plain, minimum: 0),
+            ThemedMenuMetrics.shortcutGap + column,
+            accuracy: 0.5,
+            "a semantic shortcut column must not be simulated with spaces inside each title"
+        )
+    }
+
+    func testHardHistoricalCheckboxUsesARecessedFieldGadget() throws {
+        AppThemePalette.set(AppThemeStyles.amiga)
+        let checkbox = ThemedCheckbox(title: "", state: .off, changed: { _ in })
+        checkbox.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+
+        let rep = try XCTUnwrap(checkbox.bitmapImageRepForCachingDisplay(in: checkbox.bounds))
+        checkbox.cacheDisplay(in: checkbox.bounds, to: rep)
+        assertRGB(
+            try colour(of: rep, at: NSPoint(x: 10.5, y: 15.5), in: checkbox),
+            equals: NSColor(hex: "#000000")!,
+            message: "the visual top of the Intuition check gadget was not recessed black"
+        )
+        assertRGB(
+            try colour(of: rep, at: NSPoint(x: 10.5, y: 3.5), in: checkbox),
+            equals: NSColor(hex: "#FFFFFF")!,
+            message: "the visual bottom of the Intuition check gadget lost its white edge"
+        )
+        assertRGB(
+            try colour(of: rep, at: NSPoint(x: 10.5, y: 9.5), in: checkbox),
+            equals: NSColor(hex: "#AAAAAA")!,
+            message: "an empty Workbench checkbox must not retain a modern accent fill"
+        )
+    }
+
+    func testBeOSCheckboxUsesItsWhiteWellAndSystemColourCross() throws {
+        AppThemePalette.set(AppThemeStyles.beOS)
+
+        func rendered(_ state: NSControl.StateValue) throws -> (ThemedCheckbox, NSBitmapImageRep) {
+            let checkbox = ThemedCheckbox(title: "", state: state, changed: { _ in })
+            checkbox.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+            let rep = try XCTUnwrap(
+                checkbox.bitmapImageRepForCachingDisplay(in: checkbox.bounds)
+            )
+            checkbox.cacheDisplay(in: checkbox.bounds, to: rep)
+            return (checkbox, rep)
+        }
+
+        let (empty, emptyRep) = try rendered(.off)
+        assertRGB(
+            try colour(of: emptyRep, at: NSPoint(x: 10.5, y: 9.5), in: empty),
+            equals: NSColor.white,
+            message: "the BeOS check gadget inherited Workbench's gray field"
+        )
+
+        let (checked, checkedRep) = try rendered(.on)
+        assertRGB(
+            try colour(of: checkedRep, at: NSPoint(x: 10.5, y: 9.5), in: checked),
+            equals: NSColor(hex: "#005A9C")!,
+            message: "the BeOS X was replaced by a black Intuition tick"
+        )
+    }
+
+    func testWin98CheckboxTurnsItsWellGrayWhenDisabled() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        func rendered(enabled: Bool) throws -> (ThemedCheckbox, NSBitmapImageRep) {
+            let checkbox = ThemedCheckbox(title: "", state: .off, changed: { _ in })
+            checkbox.isEnabled = enabled
+            checkbox.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+            let rep = try XCTUnwrap(
+                checkbox.bitmapImageRepForCachingDisplay(in: checkbox.bounds)
+            )
+            checkbox.cacheDisplay(in: checkbox.bounds, to: rep)
+            return (checkbox, rep)
+        }
+
+        let (enabled, enabledRep) = try rendered(enabled: true)
+        assertRGB(
+            try colour(of: enabledRep, at: NSPoint(x: 10.5, y: 9.5), in: enabled),
+            equals: NSColor.white,
+            message: "the enabled Win98 checkbox lost its white field"
+        )
+        let (disabled, disabledRep) = try rendered(enabled: false)
+        assertRGB(
+            try colour(of: disabledRep, at: NSPoint(x: 10.5, y: 9.5), in: disabled),
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "98.css's disabled checkbox field should be button-face gray"
+        )
+    }
+
+    func testWin98TextFieldUsesWhiteWritableWellAndGrayDisabledWell() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        func rendered(
+            enabled: Bool,
+            editable: Bool = true
+        ) throws -> (ThemedTextField, NSBitmapImageRep) {
+            let field = ThemedTextField(string: "")
+            field.isEnabled = enabled
+            field.isEditable = editable
+            field.frame = NSRect(x: 0, y: 0, width: 96, height: Design.Size.fieldHeight)
+            let rep = try XCTUnwrap(field.bitmapImageRepForCachingDisplay(in: field.bounds))
+            field.cacheDisplay(in: field.bounds, to: rep)
+            return (field, rep)
+        }
+
+        let (enabled, enabledRep) = try rendered(enabled: true)
+        assertRGB(
+            try colour(of: enabledRep, at: NSPoint(x: 48, y: 13), in: enabled),
+            equals: NSColor.white,
+            message: "the enabled Win98 text field lost its white writable well"
+        )
+
+        let (disabled, disabledRep) = try rendered(enabled: false)
+        assertRGB(
+            try colour(of: disabledRep, at: NSPoint(x: 48, y: 13), in: disabled),
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "98.css's disabled text field should return to button-face gray"
+        )
+
+        let (readOnly, readOnlyRep) = try rendered(enabled: true, editable: false)
+        assertRGB(
+            try colour(of: readOnlyRep, at: NSPoint(x: 48, y: 13), in: readOnly),
+            equals: NSColor(hex: "#C0C0C0")!,
+            message: "98.css's read-only text field should return to button-face gray"
         )
     }
 
@@ -2596,7 +3060,7 @@ final class ThemedControlTests: XCTestCase {
     }
 
     /// A full-size-content window reports a zero-height safe area for one layout pass while its
-    /// toolbar is attaching. If both this equality and the header's 40pt floor are required,
+    /// toolbar is attaching. If this equality and the header's theme-sized band are both required,
     /// AppKit logs an unsatisfiable-constraints failure on every launch before settling on the
     /// exact same geometry. The equality must yield only during that transient pass.
     func testPaneHeaderSafeAreaConstraintYieldsDuringWindowAttachment() throws {
@@ -3149,6 +3613,46 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// The seam is a *sibling* fact no drag test sees. The divider is installed at setup and
+    /// every session surface is attached later, so a surface slotted in directly under the git
+    /// overlay lands above it — covering the one rule between a conversation and its shell and
+    /// swallowing the strip's hover, cursor and drags. That shipped, and the drag tests kept
+    /// passing, because they drive the divider's callbacks rather than the pointer.
+    @MainActor
+    func testAnAttachedConversationStaysUnderTheDrawersSeam() throws {
+        let fixture = try drawerSession()
+        defer { fixture.tearDown() }
+        let container = fixture.container
+
+        let conversation = ConversationViewController(
+            agentSession: fixture.session,
+            project: fixture.project
+        )
+        container.attachConversation(conversation)
+        container.view.layoutSubtreeIfNeeded()
+
+        let divider = try XCTUnwrap(
+            container.view.subviews.first { $0 is ShellDrawerDivider },
+            "an open drawer must have its divider installed"
+        )
+        XCTAssertFalse(divider.isHiddenOrHasHiddenAncestor, "an open drawer shows its seam")
+
+        let seam = NSPoint(x: divider.frame.midX, y: divider.frame.midY)
+        XCTAssertEqual(
+            container.view.hitTest(seam),
+            divider,
+            "a point inside the grab strip is the divider's; anything else covers the seam"
+        )
+
+        // And only its strip: one point above the band belongs to the conversation.
+        let aboveSeam = NSPoint(x: divider.frame.midX, y: divider.frame.maxY + 1)
+        let hitAbove = try XCTUnwrap(container.view.hitTest(aboveSeam))
+        XCTAssertTrue(
+            hitAbove.isDescendant(of: conversation.view),
+            "the point above the strip is the conversation's, not the divider's"
+        )
+    }
+
     /// The least the drawer can be — `TerminalContainerViewController.drawerFloor`, restated
     /// because the container keeps its own private.
     private var drawerFloor: CGFloat {
@@ -3157,6 +3661,8 @@ final class ThemedControlTests: XCTestCase {
 
     private struct DrawerFixture {
         let container: TerminalContainerViewController
+        let project: Project
+        let session: AgentSession
         let tearDown: () -> Void
     }
 
@@ -3190,7 +3696,7 @@ final class ThemedControlTests: XCTestCase {
         container.openShellDrawer()
         container.view.layoutSubtreeIfNeeded()
 
-        return DrawerFixture(container: container) {
+        return DrawerFixture(container: container, project: project, session: session) {
             container.closeShellDrawer(for: session.id)
             container.setCurrentSessionForTesting(nil)
             store.removeProject(id: project.id)
@@ -3728,6 +4234,46 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(target.count, 1)
     }
 
+    /// Win32's underlined dialog letters are behavior, not fixture decoration: holding Option
+    /// and typing the marked letter invokes the same command while unrelated chords pass on.
+    func testAButtonMnemonicAnswersOptionLetterCaseInsensitively() throws {
+        let target = ActionSpy()
+        let button = ThemedButton(
+            title: "Next",
+            target: target,
+            action: #selector(ActionSpy.fire)
+        )
+        button.mnemonicCharacter = "N"
+
+        func event(_ characters: String, modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: modifiers,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: 45
+            ))
+        }
+
+        XCTAssertTrue(button.performKeyEquivalent(with: try event("n", modifiers: .option)))
+        XCTAssertEqual(target.count, 1)
+        XCTAssertFalse(button.performKeyEquivalent(with: try event("n", modifiers: .command)))
+        XCTAssertFalse(
+            button.performKeyEquivalent(with: try event("n", modifiers: [.option, .shift])),
+            "a different chord triggered the mnemonic"
+        )
+        XCTAssertEqual(target.count, 1)
+
+        button.isEnabled = false
+        XCTAssertFalse(button.performKeyEquivalent(with: try event("N", modifiers: .option)))
+        XCTAssertEqual(target.count, 1)
+    }
+
     /// The three tiers are the two flags, named — and reading the name back has to survive
     /// either one being set directly, since most call sites still say the flags.
     func testEmphasisNamesTheThreeShapesTheButtonAlreadyHad() {
@@ -4018,8 +4564,38 @@ final class ThemedControlTests: XCTestCase {
             button.layer?.sublayers?.first { $0.name == "threading.controlGlow.primary" }
         )
         XCTAssertNotNil(shadow.shadowPath, "the companion has no face silhouette")
-        XCTAssertNil(shadow.contents, "the shadow companion copied the button artwork")
         XCTAssertNil(shadow.backgroundColor, "the shadow companion covers translucent faces")
+
+        // The companion draws its own halo rather than handing the path to Core Animation, which
+        // would composite the shadow's interior wash *above* the parent's fill — the bug that put
+        // a grey veil over Bauhaus's lime slabs. So it does own a canvas; what it must never own
+        // is the button's artwork. It punches its exact face back out after blurring, leaving the
+        // interior clear, and it casts no Core Animation shadow of its own on top of that.
+        XCTAssertEqual(shadow.shadowOpacity, 0, "the companion cast a second, unpunched shadow")
+        let width = max(1, Int(shadow.bounds.width))
+        let height = max(1, Int(shadow.bounds.height))
+        let canvas = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        shadow.render(in: canvas)
+        let pixels = try XCTUnwrap(canvas.data).bindMemory(
+            to: UInt8.self,
+            capacity: width * height * 4
+        )
+        let centre = ((height / 2) * width + width / 2) * 4
+        XCTAssertLessThanOrEqual(
+            Int(pixels[centre + 3]),
+            2,
+            "the shadow companion painted inside the face it is meant to sit behind"
+        )
 
         AppThemePalette.set(.system)
         button.needsDisplay = true
@@ -4660,7 +5236,8 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertFalse(ThemedTextView(frame: .zero, textContainer: nil).drawsBackground)
     }
 
-    func testThemedScrollViewInstallsScrollerBoundariesWithoutChangingPolicy() throws {
+    func testThemedScrollViewInstallsScrollerBoundariesWithoutChangingModernPolicy() throws {
+        AppThemePalette.set(.system)
         let scroll = ThemedScrollView()
         let vertical = try XCTUnwrap(scroll.verticalScroller as? ThemedScroller)
         let horizontal = try XCTUnwrap(scroll.horizontalScroller as? ThemedScroller)
@@ -4688,6 +5265,131 @@ final class ThemedControlTests: XCTestCase {
         scroll.scrollerStyle = scroll.scrollerStyle == .overlay ? .legacy : .overlay
         XCTAssertTrue(scroll.verticalScroller === vertical)
         XCTAssertTrue(scroll.horizontalScroller === horizontal)
+    }
+
+    func testPeriodScrollerAppearanceUsesLegacySpaceAndOwnsArrowGeometry() throws {
+        AppThemePalette.set(AppThemeStyles.aqua)
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 180, height: 240))
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 800))
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = false
+        scroll.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(scroll.scrollerStyle, .legacy)
+        let vertical = try XCTUnwrap(scroll.verticalScroller as? ThemedScroller)
+        vertical.knobProportion = 0.25
+        XCTAssertEqual(vertical.scrollerAppearance, .aqua)
+        XCTAssertFalse(vertical.rect(for: .decrementLine).isEmpty)
+        XCTAssertFalse(vertical.rect(for: .incrementLine).isEmpty)
+        XCTAssertEqual(vertical.rect(for: .decrementLine).minY, vertical.bounds.minY)
+        XCTAssertEqual(vertical.rect(for: .incrementLine).maxY, vertical.bounds.maxY)
+
+        AppThemePalette.set(AppThemeStyles.aquaTiger)
+        XCTAssertEqual(vertical.scrollerAppearance, .aquaTiger)
+        XCTAssertEqual(
+            vertical.rect(for: .decrementLine).maxY,
+            vertical.rect(for: .incrementLine).minY,
+            accuracy: 0.5,
+            "Tiger keeps its neutral up/down arrow plates together at the scrolling end"
+        )
+        XCTAssertTrue(vertical.isFlipped, "NSScrollView hosts vertical scrollers flipped")
+        XCTAssertEqual(vertical.rect(for: .incrementLine).maxY, vertical.bounds.maxY)
+        vertical.doubleValue = 0
+        let knobAtStart = vertical.rect(for: .knob)
+        vertical.doubleValue = 1
+        XCTAssertGreaterThan(vertical.rect(for: .knob).minY, knobAtStart.minY)
+        let increment = vertical.rect(for: .incrementLine)
+        XCTAssertEqual(
+            vertical.testPart(NSPoint(x: increment.midX, y: increment.midY)),
+            .incrementLine
+        )
+
+        AppThemePalette.set(AppThemeStyles.platinum)
+        XCTAssertEqual(
+            vertical.rect(for: .decrementLine).maxY,
+            vertical.rect(for: .incrementLine).minY,
+            accuracy: 0.5,
+            "classic Mac OS groups its up/down arrows together at the scrolling end"
+        )
+        XCTAssertEqual(vertical.rect(for: .incrementLine).maxY, vertical.bounds.maxY)
+
+        AppThemePalette.set(AppThemeStyles.openStep)
+        XCTAssertEqual(
+            vertical.rect(for: .decrementLine).maxY,
+            vertical.rect(for: .incrementLine).minY,
+            accuracy: 0.5,
+            "OPENSTEP keeps its up/down arrow plates together at the scrolling end"
+        )
+        XCTAssertEqual(vertical.rect(for: .incrementLine).maxY, vertical.bounds.maxY)
+
+        AppThemePalette.set(AppThemeStyles.beOS)
+        let thickness = min(vertical.bounds.width, vertical.bounds.height)
+        let beOSButtonLength = thickness + 3
+        let beOSSlot = vertical.rect(for: .knobSlot)
+        XCTAssertEqual(beOSSlot.minY, vertical.bounds.minY + 2 * beOSButtonLength)
+        XCTAssertEqual(beOSSlot.maxY, vertical.bounds.maxY - 2 * beOSButtonLength)
+        XCTAssertEqual(
+            vertical.testPart(NSPoint(
+                x: vertical.bounds.midX,
+                y: vertical.bounds.maxY - 1.5 * beOSButtonLength
+            )),
+            .decrementLine,
+            "the repeated trailing BeOS up arrow invokes the same line action as the first"
+        )
+        XCTAssertEqual(
+            vertical.testPart(NSPoint(
+                x: vertical.bounds.midX,
+                y: vertical.bounds.maxY - 0.5 * beOSButtonLength
+            )),
+            .incrementLine,
+            "the repeated trailing BeOS down arrow invokes the same line action as the first"
+        )
+
+        AppThemePalette.set(AppThemeStyles.irix)
+        XCTAssertEqual(
+            vertical.rect(for: .decrementLine).height,
+            min(vertical.bounds.width, vertical.bounds.height) + 1,
+            "the Indigo Magic line plate is only one pixel longer than its narrow shaft"
+        )
+
+        AppThemePalette.set(AppThemeStyles.win98)
+        vertical.knobProportion = 0
+        XCTAssertTrue(
+            vertical.rect(for: .knob).isEmpty,
+            "a Win32 scrollbar with no scrollable range has no minimum synthetic thumb"
+        )
+        XCTAssertEqual(vertical.rect(for: .incrementPage), vertical.rect(for: .knobSlot))
+    }
+
+    func testAmigaScrollerThumbUsesTheActiveTitleBlue() throws {
+        AppThemePalette.set(AppThemeStyles.amiga)
+
+        let canvas = NSView(frame: NSRect(x: 0, y: 0, width: 16, height: 180))
+        let scroller = ThemedScroller(frame: canvas.bounds)
+        scroller.scrollerStyle = .legacy
+        canvas.addSubview(scroller)
+        canvas.layoutSubtreeIfNeeded()
+        scroller.isEnabled = true
+        scroller.doubleValue = 0.32
+        scroller.knobProportion = 0.34
+        scroller.needsDisplay = true
+
+        let knob = scroller.rect(for: .knob)
+        XCTAssertFalse(knob.isEmpty)
+        let rep = try XCTUnwrap(canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds))
+        canvas.cacheDisplay(in: canvas.bounds, to: rep)
+        let samplePoint = canvas.convert(
+            // Stay inside the flat face, away from both the two-pixel bevel and the
+            // three horizontal grip strokes.
+            NSPoint(x: knob.minX + 3, y: knob.midY + 5),
+            from: scroller
+        )
+        assertRGB(
+            try colour(of: rep, at: samplePoint, in: canvas),
+            equals: NSColor(hex: "#6688BB")!,
+            message: "the Workbench proportional gadget must share the active title blue"
+        )
     }
 
     func testScrollerKeepsSystemRenderingAndDistinguishesAuthoredThemes() throws {
@@ -4767,7 +5469,7 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
-    func testOpenStepOverlayScrollerFloatsOnTheLeftWithoutMovingContent() throws {
+    func testOpenStepAppearanceTurnsAnOverlayRequestIntoALeadingLegacyControl() throws {
         let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 180))
         scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 720))
         scroll.scrollerStyle = .overlay
@@ -4781,8 +5483,26 @@ final class ThemedControlTests: XCTestCase {
         AppThemeLibrary.apply(AppThemeStyles.openStep)
         scroll.layoutSubtreeIfNeeded()
         let scroller = try XCTUnwrap(scroll.verticalScroller)
+        XCTAssertEqual(scroll.scrollerStyle, .legacy)
         XCTAssertLessThan(scroller.frame.midX, scroll.bounds.midX)
-        XCTAssertEqual(scroll.contentView.frame, nativeContent)
+        // A legacy scroller owns layout space — that is the whole difference between the two
+        // styles — so an overlay request granted as a legacy control costs the document exactly
+        // one scroller's width. What the period appearance changes is which edge pays: the
+        // reservation moves to the leading side with the control, rather than the content keeping
+        // its full width and the scroller floating over the first 17 points of every line.
+        XCTAssertEqual(
+            scroll.contentView.frame.width,
+            nativeContent.width - scroller.frame.width,
+            accuracy: 0.5
+        )
+        XCTAssertGreaterThanOrEqual(scroll.contentView.frame.minX, scroller.frame.maxX)
+
+        // And the request is given back on the way out: an overlay scroller floats again, with
+        // the full width it was asked for.
+        AppThemeLibrary.apply(.system)
+        scroll.layoutSubtreeIfNeeded()
+        XCTAssertEqual(scroll.scrollerStyle, .overlay)
+        XCTAssertEqual(scroll.contentView.frame.width, nativeContent.width, accuracy: 0.5)
     }
 
     func testScrollerRedrawsWhenItsInkSourceChanges() {
@@ -5000,6 +5720,104 @@ final class ThemedControlTests: XCTestCase {
         ), "a new horizontal gesture inherited the previous vertical lock")
     }
 
+    /// **A one-column list's cells are as wide as the list**, whenever the list is installed —
+    /// which is the case AppKit gets wrong and `SoleColumnFit` exists for.
+    ///
+    /// The ordering matters and is the whole test: a table handed to a scroll view that *already*
+    /// has its final size sees no frame change for `columnAutoresizingStyle` to divide up, so its
+    /// column keeps `NSTableColumn`'s 100pt default. `frameOfCell(atColumn:row:)` measures the
+    /// column, so every cell is then built 100pt wide inside a 900pt list, with no broken
+    /// constraint and no warning to say so. Git Review shipped exactly this — its diff arrives
+    /// from a background git read, long after the pane was laid out.
+    func testASoleColumnFillsAListInstalledAfterItsScrollViewWasSized() throws {
+        let table = ThemedTableView()
+        table.addTableColumn(NSTableColumn(identifier: .init("Content")))
+        table.headerView = nil
+        table.rowHeight = 24
+        // The edge-to-edge arrangement the panes use, so "as wide as the list" is exact: under
+        // `.inset` — what `.automatic` resolves to — AppKit keeps 16pt of its own at each side.
+        table.style = .plain
+        table.intercellSpacing = .zero
+        let source = FixedRowCountSource(rows: 3)
+        table.dataSource = source
+        table.delegate = source
+
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 400),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let content = try XCTUnwrap(window.contentView)
+        content.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: content.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+        ])
+        window.layoutIfNeeded()
+
+        // The document view arrives afterwards, the way a pane's content arrives from a
+        // background read.
+        scroll.documentView = table
+        table.autoresizingMask = [.width]
+        table.reloadData()
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(
+            table.tableColumns[0].width, table.bounds.width, accuracy: 0.5,
+            "a sole column stayed at its default width inside a list that is \(table.bounds.width)pt wide"
+        )
+        let cell = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        XCTAssertEqual(
+            cell.bounds.width, table.bounds.width, accuracy: 0.5,
+            "cells were laid out to the column rather than to the list"
+        )
+    }
+
+    /// The other half of the same rule: with two columns, which one absorbs the slack is the
+    /// list's decision, so nothing may quietly hand it all to the last.
+    func testATwoColumnListKeepsTheWidthsItWasGiven() throws {
+        let table = ThemedTableView(frame: NSRect(x: 0, y: 0, width: 900, height: 200))
+        for name in ["Left", "Right"] {
+            let column = NSTableColumn(identifier: .init(name))
+            column.width = 120
+            table.addTableColumn(column)
+        }
+        table.headerView = nil
+        let source = FixedRowCountSource(rows: 2)
+        table.dataSource = source
+        table.delegate = source
+        table.reloadData()
+        table.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(table.tableColumns[0].width, 120, accuracy: 0.5)
+        XCTAssertEqual(table.tableColumns[1].width, 120, accuracy: 0.5)
+    }
+
+    /// Rows for a table that only needs to exist, not to say anything.
+    private final class FixedRowCountSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        private let rows: Int
+
+        init(rows: Int) {
+            self.rows = rows
+        }
+
+        func numberOfRows(in tableView: NSTableView) -> Int { rows }
+
+        func tableView(
+            _ tableView: NSTableView,
+            viewFor tableColumn: NSTableColumn?,
+            row: Int
+        ) -> NSView? {
+            NSView()
+        }
+    }
+
     /// A wrapper that only changes its type name is not a themed component. The process-tree
     /// header used to be such a seam; pin that it now paints a role from the active theme.
     func testThemedTableHeaderPaintsTheActiveTheme() {
@@ -5173,6 +5991,8 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(
             ComponentGalleryViewController.componentNames,
             [
+                "AgentActivityBeamView",
+                "AgentWorkSummaryView",
                 "BackdropOverlay",
                 "BackdropThemedControl",
                 "BrowserAnnotationOverlay",
@@ -5183,7 +6003,13 @@ final class ThemedControlTests: XCTestCase {
                 "ChipView",
                 "ConversationContextRailView",
                 "ConversationHandoffView",
+                "ConversationOutboxRailView",
+                "ConversationOutboxRowView",
+                "ScheduledMessageStripView",
+                "ScheduledMessageRowView",
                 "CompareInspectorView",
+                "CodeContextPreviewView",
+                "ControlRowView",
                 "ExecutionAuditEventView",
                 "FileActivityMapView",
                 "GlyphView",
@@ -5197,6 +6023,7 @@ final class ThemedControlTests: XCTestCase {
                 "NavigatorGridItemView",
                 "PaneFooterView",
                 "PaneHeaderView",
+                "PaneNoticeView",
                 "PromptCompletionPresenter",
                 "PromptView",
                 "SearchMatchLabel",
@@ -5214,11 +6041,13 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedAlert",
                 "ThemedButton",
                 "ThemedCheckbox",
+                "ThemedRadioButton",
                 "ThemedClipView",
                 "ThemedControl",
                 "ThemedDisclosureRow",
                 "ThemedFileIconView",
                 "ThemedFloatingGlyphView",
+                "ThemedGroupedTableView",
                 "ThemedOutlineView",
                 "ThemedPopUp",
                 "ThemedPopover",
@@ -5240,6 +6069,8 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedSecureField",
                 "ThemedTextView",
                 "ThemedToggle",
+                "ThemedVirtualTableCell",
+                "ThemedWarningMark",
                 "ThemedSurface",
                 "ThemedSurfaceView",
                 "ThemeRedraw",
@@ -5331,6 +6162,82 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(
             document.visibleRect.intersects(firstStoryFrame),
             "the gallery opened away from its first component"
+        )
+    }
+
+    /// The gallery is fixed developer content, but it is deliberately the richest design-system
+    /// surface in the app.  Keeping a repeatable scroll workload here catches a component that
+    /// invalidates or lays out its entire retained catalogue on every clip-view movement.  It is
+    /// opt-in because forced bitmap drawing is a profiler fixture, not a correctness test.
+    func testComponentGalleryScrollStress() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_COMPONENT_GALLERY_STRESS"] == "1"
+        else {
+            throw XCTSkip("Set THREADING_COMPONENT_GALLERY_STRESS=1 to profile the gallery")
+        }
+
+        let buildStart = DispatchTime.now().uptimeNanoseconds
+        let controller = ComponentGalleryViewController()
+        controller.loadView()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 1_020, height: 780)
+        let buildEnd = DispatchTime.now().uptimeNanoseconds
+
+        let layoutStart = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+        let layoutEnd = DispatchTime.now().uptimeNanoseconds
+
+        let scroll = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.catalogue", in: controller.view) as? NSScrollView
+        )
+        let document = try XCTUnwrap(scroll.documentView)
+        let maximumY = max(0, document.bounds.height - scroll.contentView.bounds.height)
+        let positions = (0..<48).map { index in
+            maximumY * CGFloat(index) / 47
+        }
+        let rep = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: scroll.bounds))
+
+        var scrollDurations: [UInt64] = []
+        var layoutDurations: [UInt64] = []
+        var paintDurations: [UInt64] = []
+        for y in positions + positions.reversed() {
+            let scrollStart = DispatchTime.now().uptimeNanoseconds
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            scrollDurations.append(DispatchTime.now().uptimeNanoseconds - scrollStart)
+
+            let layoutStart = DispatchTime.now().uptimeNanoseconds
+            controller.view.layoutSubtreeIfNeeded()
+            layoutDurations.append(DispatchTime.now().uptimeNanoseconds - layoutStart)
+
+            let paintStart = DispatchTime.now().uptimeNanoseconds
+            scroll.cacheDisplay(in: scroll.bounds, to: rep)
+            paintDurations.append(DispatchTime.now().uptimeNanoseconds - paintStart)
+        }
+
+        let orderedScroll = scrollDurations.sorted()
+        let orderedLayout = layoutDurations.sorted()
+        let orderedPaint = paintDurations.sorted()
+        func milliseconds(_ nanoseconds: UInt64) -> String {
+            String(format: "%.2f", Double(nanoseconds) / 1_000_000)
+        }
+        func percentile(_ fraction: Double, in ordered: [UInt64]) -> UInt64 {
+            ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * fraction))]
+        }
+
+        print(
+            "THREADING_PERF component-gallery "
+                + "build_ms=\(milliseconds(buildEnd - buildStart)) "
+                + "layout_ms=\(milliseconds(layoutEnd - layoutStart)) "
+                + "scroll_p50_ms=\(milliseconds(percentile(0.50, in: orderedScroll))) "
+                + "scroll_p95_ms=\(milliseconds(percentile(0.95, in: orderedScroll))) "
+                + "scroll_max_ms=\(milliseconds(orderedScroll.last ?? 0)) "
+                + "post_scroll_layout_p50_ms=\(milliseconds(percentile(0.50, in: orderedLayout))) "
+                + "post_scroll_layout_p95_ms=\(milliseconds(percentile(0.95, in: orderedLayout))) "
+                + "post_scroll_layout_max_ms=\(milliseconds(orderedLayout.last ?? 0)) "
+                + "forced_paint_p50_ms=\(milliseconds(percentile(0.50, in: orderedPaint))) "
+                + "forced_paint_p95_ms=\(milliseconds(percentile(0.95, in: orderedPaint))) "
+                + "forced_paint_max_ms=\(milliseconds(orderedPaint.last ?? 0)) "
+                + "document_height=\(Int(document.bounds.height)) "
+                + "descendants=\(descendants(in: document).count)"
         )
     }
 
@@ -5435,6 +6342,47 @@ final class ThemedControlTests: XCTestCase {
         }
     }
 
+    /// Reference-adjusted controls get a compact fixture of their button/chooser faces and open
+    /// menu. The complete stock-gallery sweep remains below; this one is cheap enough to run
+    /// while tuning Clay depth or the six different native chooser anatomies.
+    func testComponentGalleryRendersReferenceAdjustedControls() throws {
+        let restoreTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(restoreTheme) }
+
+        let owner = ComponentGalleryWindowController()
+        let window = try XCTUnwrap(owner.window)
+        let controller = try XCTUnwrap(
+            window.contentViewController as? ComponentGalleryViewController
+        )
+        window.setContentSize(NSSize(width: 1_020, height: 780))
+        let chip = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.menu.chip", in: controller.view) as? ChipView
+        )
+
+        let themes = [
+            AppThemeStyles.claymorphism,
+            AppThemeStyles.aquaTiger,
+            AppThemeStyles.platinum,
+            AppThemeStyles.beOS,
+            AppThemeStyles.openStep,
+            AppThemeStyles.irix,
+            AppThemeStyles.win98,
+            AppThemeStyles.amiga
+        ]
+        for theme in themes {
+            controller.setTheme(theme)
+            controller.setAppearance(.light)
+
+            let stem = "component-gallery-\(theme.id.rawValue)-reference"
+            try captureGalleryFixture(window, named: stem)
+
+            XCTAssertTrue(chip.accessibilityPerformShowMenu())
+            try captureGalleryFixture(window, named: "\(stem)-menu")
+            let responder = try XCTUnwrap(window.firstResponder)
+            responder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+        }
+    }
+
     private func captureGalleryFixture(_ window: NSWindow, named name: String) throws {
         let rep = try captureAppOwnedWindowContent(window)
         let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
@@ -5496,6 +6444,28 @@ final class ThemedControlTests: XCTestCase {
 
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    /// A copy of a stock theme that names a different family — the one thing a text-placement
+    /// test needs from a theme, without depending on which face a shipped style happens to name.
+    private func themeNaming(family: String, on theme: AppTheme) -> AppTheme {
+        var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
+        for (kind, variant) in theme.variants {
+            var material = variant.material
+            material.fontFamily = family
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: material
+            )
+        }
+        return AppTheme(
+            id: AppThemeID("\(theme.id.rawValue)-\(family)"),
+            name: theme.name,
+            mode: theme.mode,
+            summary: theme.summary,
+            variants: variants
+        )
     }
 
     private func markNeedingLayout(_ view: NSView) {

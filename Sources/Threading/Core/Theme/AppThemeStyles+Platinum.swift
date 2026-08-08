@@ -140,6 +140,10 @@ extension AppThemeStyles {
                 .fieldSurface: hex("#FFFFFF"),
                 .elevated: hex("#FAFAFA"),
                 .floatingSurface: hex("#EEEEEE"),
+                // Help Tags are the exception to Aqua's white/gray sheets: the HIG's period
+                // plate is a pale yellow information ground. This is source-shaped for Cheetah
+                // because its only surviving figure postdates 10.0.x.
+                .tooltipSurface: hex("#FFF8B0"),
                 .border: hex("#777777"),
                 .divider: hex("#B4B4B4"),
                 .label: hex("#111111"),
@@ -188,6 +192,7 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.92,
                 choiceHeight: 22,
+                popoverStyle: aquaHelpTagPopoverStyle,
                 buttonStyle: AppTheme.Material.ButtonStyle(
                     fontWeight: .regular,
                     primaryTreatment: .raised,

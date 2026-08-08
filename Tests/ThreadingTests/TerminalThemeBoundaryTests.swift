@@ -209,7 +209,7 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         view.feed(text: "\u{1b}[?1003h\u{1b}[?1006h")
 
         var forwardedCount = 0
-        view.onWheelForwarded = { forwardedCount += 1 }
+        view.onMouseReportForwarded = { forwardedCount += 1 }
         let bottomPosition = view.getTerminal().buffer.yDisp
 
         view.scrollWheel(with: try XCTUnwrap(makeWheelEvent(modifiers: [])))
@@ -219,6 +219,79 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         view.scrollWheel(with: try XCTUnwrap(makeWheelEvent(modifiers: [.option])))
         XCTAssertEqual(forwardedCount, 1)
         XCTAssertLessThan(view.getTerminal().buffer.yDisp, bottomPosition)
+    }
+
+    /// The bug this exists for: under any-event tracking every pointer move is written to the
+    /// process, the CLI redraws the row under the pointer, and that repaint used to read as the
+    /// agent working — a spinner started by moving the mouse over a finished turn.
+    func testPointerMotionUnderAnyEventTrackingIsReportedAsProvokedOutput() throws {
+        let view = terminal()
+        var forwardedCount = 0
+        view.onMouseReportForwarded = { forwardedCount += 1 }
+
+        view.mouseMoved(with: try XCTUnwrap(makeMouseMovedEvent()))
+        XCTAssertEqual(forwardedCount, 0, "a program not tracking the mouse is sent nothing")
+
+        view.feed(text: "\u{1b}[?1003h\u{1b}[?1006h")
+        view.mouseMoved(with: try XCTUnwrap(makeMouseMovedEvent()))
+        XCTAssertEqual(forwardedCount, 1)
+
+        // Button tracking (1002) reports motion only while a button is down, so a bare move
+        // reaches nobody and provokes no repaint.
+        view.feed(text: "\u{1b}[?1003l\u{1b}[?1002h")
+        view.mouseMoved(with: try XCTUnwrap(makeMouseMovedEvent()))
+        XCTAssertEqual(forwardedCount, 1)
+    }
+
+    /// The same thing through the whole chain a session actually uses — terminal view, session
+    /// delegate, activity tracker — because each half of this fix passes its own test while the
+    /// wiring between them is what decides whether the spinner starts.
+    ///
+    /// Output is delivered through `dataReceived`, which is the PTY's own entry point, so the
+    /// burst counts exactly as the CLI's repaint does.
+    func testMovingThePointerOverATrackingAgentDoesNotStartItsSpinner() throws {
+        let controller = AgentSessionViewController(
+            agentSession: AgentSession(kind: .claude, title: "Pointer")
+        )
+        let view = controller.session.terminalView
+        controller.activityTracker.markRunning()
+        controller.isVisible = true
+        view.feed(text: "\u{1b}[?1003h\u{1b}[?1006h")
+
+        let repaint = ArraySlice(
+            [UInt8](repeating: 0x20, count: ActivityDefaults.workingByteThreshold * 4)
+        )
+
+        // The control: the same burst with nobody touching the mouse is the agent working, and
+        // has to stay that way — this suppression must not blind the inference it guards.
+        view.dataReceived(slice: repaint)
+        XCTAssertEqual(controller.activity, .working)
+
+        controller.activityTracker.markRunning()
+        XCTAssertEqual(controller.activity, .idle)
+
+        view.mouseMoved(with: try XCTUnwrap(makeMouseMovedEvent()))
+        view.dataReceived(slice: repaint)
+
+        XCTAssertEqual(
+            controller.activity,
+            .idle,
+            "a hover highlight the pointer provoked is not the agent working"
+        )
+    }
+
+    private func makeMouseMovedEvent() -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: NSPoint(x: 40, y: 40),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        )
     }
 
     private func makeWheelEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent? {

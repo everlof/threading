@@ -145,3 +145,9 @@ default.profraw
 __pycache__/
 *.py[cod]
 *.probe
+
+# Historical chrome reference sources are fetched from their recorded origin. Their metadata,
+# checksums and crop recipes are versioned; third-party pixels and generated extractions are not.
+/docs/references/chrome/.cache/
+/docs/references/chrome/.generated/
+tmp

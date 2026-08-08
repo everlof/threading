@@ -175,7 +175,10 @@ Nothing may pin to `view.topAnchor` in either pane, or it lands under the toolba
 project has already had once, where it hid the terminal's first rows. The sidebar pins to
 `safeAreaLayoutGuide`; everything in the content pane pins to
 `TerminalContainerViewController.contentTopAnchor`, which is the header's bottom, so the header
-is the only place that knows how tall it is.
+is the only place that knows how tall it is. That height includes the active theme's pane-rule
+weight *after* the tab's equal top and bottom margins; the row centres in the area above the rule,
+and the component remeasures a live theme switch. A heavy rule is a boundary, not four points
+taken from the lower margin.
 
 **A surface that covers the window has the same rule, and learned it the same way.** The media
 inspector and the expanded comparison pinned themselves to `contentView`'s own top, which under
@@ -406,7 +409,10 @@ band (`PaneHeaderView`, pinned to the safe area under the transparent titlebar) 
 per launch, beside the app's name in a `MorphingTitleLabel`, or whatever the current theme's
 `SidebarStyle.Brand` states instead (see [`themes.md`](themes.md)) — and the list's two
 controls at its trailing edge: the `+` that adds a project (its two-way menu on the press,
-the platform's menu gesture) and the arrangement control. The band long held *no* app-name
+the platform's menu gesture) and the arrangement control. The column is shut from the
+toolbar's toggle or ⌃⌘S rather than from a close of its own; the panel at the other edge of
+the window carries one, and why the two differ is in
+[`mcp-and-display.md`](mcp-and-display.md). The band long held *no* app-name
 label on the argument that it should carry only controls that act on the list; the brand
 earned the slot when the sidebar's top-left became a themed surface — it is the one thing a
 chrome can sign. Adding a project moved up from the footer with it, into the slot every
@@ -459,12 +465,11 @@ follows its window*.
 
 A session row carries a filled pin after its title when the session is pinned, so a durable state
 that already outranks every sidebar sort is not communicated only by position. The mark remains
-outside extension-replaceable content and re-inks against an emphasized selection.
-
-A session row's trailing edge is one fixed-size slot holding the status indicator and the
-`⋯` actions button overlaid, crossfaded on hover via `alphaValue` rather than `isHidden` —
-a stack view detaches hidden arranged views, so toggling visibility would re-lay out the row
-under the pointer.
+outside extension-replaceable content and re-inks against an emphasized selection. Its trailing
+edge overlays the status indicator and hover actions in one slot, crossfading via `alphaValue`;
+the slot expands before the two actions appear and contracts after they leave, so invisible
+controls do not permanently tax every title while visible targets never overhang their hit-tested
+parent.
 
 ### The compact tree
 
@@ -640,8 +645,9 @@ app-owned surface.
 traffic lights, no toolbar — so `windowControlsTrailingEdge()` answers 0, the header inset is
 the plain `PaneHeaderDefaults.inset` in both sidebar states, and the sidebar's floor falls back
 to `SidebarDefaults.minWidth`. The zero safe area becomes steady state: the content header's
-999-priority constraint and its 40pt floor (written as a launch transient) now size the strip
-permanently, and `WindowChromeTakeoverTests` states it so it stops being luck. The window's own
+999-priority constraint and its component-owned, theme-dependent floor (written as a launch
+transient) now size the strip permanently, and `WindowChromeTakeoverTests` states it so it stops
+being luck. The window's own
 controls (sidebar toggle, history pair) rehome into `WindowCommandBandView`, a button-face row
 below the title bar, as fresh `ThemedIconButton`s inked from `InkSource.chrome`. The title band
 therefore carries only app icon/title and caption buttons, matching the structural distinction
@@ -668,6 +674,11 @@ honest test of the claim this file has been making since the takeover shipped: t
 vocabulary is the feature and the period themes are worked examples. It cost **two** new
 values and no new branch.
 
+The caption is a status line, not an empty title bar: a leading `≡` cell opens the semantic
+window-operations menu, the immediate minimize/zoom/close cells finish the opposite edge, and
+the title and figures take the palette's one accent while the enclosing rule stays structural.
+When the window resigns key, both the caption ink and its seam dim together.
+
 - **`Texture.Kind.rule`** draws one point along the band's *bottom* edge and ignores `spacing`.
   It is the odd one out of the texture family — the other four fill the band, and this one
   ends it — but it belongs there rather than in `Shape`, because it is ink over the fill and it
@@ -679,7 +690,9 @@ values and no new branch.
   the one plate that decides its own *figure* colour: `GlyphInk` names a colour to paint with,
   and an inverted cell's figure is the band's ground coming through the ink, which is not a
   colour anyone can name in advance. So `WindowChromeButton` reads it off the plate after the
-  ink switch rather than adding a `GlyphInk` case that only one plate could ever use.
+  ink switch rather than adding a `GlyphInk` case that only one plate could ever use. Press
+  keeps those two exact inks and seats the filled face one pixel inward; alpha would make a
+  keyed terminal cell look disabled rather than depressed.
 
 The caption alphabet is hairline throughout, and that is the whole visual difference from the
 desktop-era families above it. Those drew their marks with a two-pixel pen because the figures
@@ -759,3 +772,33 @@ bitmaps over the same legend instead of borrowing a shipped alphabet. The scroll
 anatomies deserve the same table treatment (`ThemedScroller` still switches per period in
 several places); that work is in flight separately and should take this file's shape when it
 lands.
+
+## A classic skin is artwork, never behaviour
+
+`classic_player` is another row in `WindowChromeCaptionAnatomy`, not a Winamp-shaped window
+controller. Its stock bitmap alphabet is clean-room. When `WindowChromeAppearance` resolves a
+custom theme carrying `titleBar.classicSkin`, the same band and button components swap in the
+normalized local sheet; a dangling asset resolves to nil and the stock drawing remains usable.
+
+The stock band now states `caption_rails`, the raised three-row furniture on either side of its
+centred title. The texture interpreter derives both rail endpoints from the live caption-button
+stacks and title frame; it is not keyed to Classic Player and remains available to authored
+themes. The clean-room palette supplies its pale face over violet gunmetal. A resolved imported
+skin bypasses the stock gradient and texture together, so source artwork never acquires an extra
+set of rails drawn over its baked title bar.
+
+Classic `TITLEBAR.BMP` source coordinates are top-left and the AppKit source rectangles are
+bottom-left, so both the band and caption component perform one explicit Y conversion. The
+275×14 active band begins at `(27, 0)`, the inactive band at `(27, 15)`, and the four 9×9 button
+state pairs occupy the format's fixed cells. The renderer preserves 238 pixels at the leading
+edge and 37 at the trailing edge, then stretches a two-pixel groove sample between them. That
+keeps the window operations pinned to the source hardware while letting the content window keep
+its ordinary resize contract.
+
+The archive reader never extracts paths. It bounds archive size, entry count, each expanded
+entry, and total declared expansion before allocation; rejects encryption, Zip64, and unknown
+compression; reads only the last case-insensitive `TITLEBAR.BMP`/PNG basename; inflates in
+memory; checks the central-directory CRC; and validates dimensions with ImageIO before decoding
+and normalizing the result. `PLEDIT`, transport, equalizer, playlist, cursor, and executable
+content are ignored. This is why drag-and-drop can share exactly the same importer as the open
+panel without becoming a second security path.

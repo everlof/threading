@@ -143,7 +143,10 @@ extension AppThemeStyles {
                         .init(color: hex("#101419"), position: 0),
                         .init(color: hex("#101419"), position: 1)
                     ]),
-                    ink: hex("#C8D2DE"),
+                    // Spend the single accent on the active caption line: its title and
+                    // operations are the window's status, while the rule and frame stay
+                    // quiet enough to remain structure rather than decoration.
+                    ink: hex("#5FBFA8"),
                     inactiveInk: hex("#6C7683"),
                     titleAlignment: .leading,
                     titleFontStyle: .upright,
@@ -153,7 +156,10 @@ extension AppThemeStyles {
                     // middle of a band twice the height of the row it names.
                     height: 26,
                     buttonGlyphStyle: .tui,
-                    buttonPlacement: .trailing,
+                    // A real window-menu cell opens the line, while the three immediate
+                    // operations close it. That bookending makes the sparse header read as
+                    // a deliberate status row instead of three marks stranded at the edge.
+                    buttonPlacement: .bookends,
                     // No icon. A text-mode header carries a name and its operations; the
                     // application's mark belongs to the sidebar's brand row, where it already
                     // is, and a 14pt colour raster is the one thing in this window that could
@@ -164,7 +170,7 @@ extension AppThemeStyles {
                     // to drain of colour.
                     activeTexture: .init(kind: .rule, color: hex("#3A4757")),
                     inactiveTexture: .init(kind: .rule, color: hex("#252E39")),
-                    visibleButtons: [.minimize, .zoom, .close]
+                    visibleButtons: [.windowMenu, .minimize, .zoom, .close]
                 ),
                 // One point, and a small curve. The rule character is one cell wide however
                 // wide the cell is, and the curve is the single concession to the platform:

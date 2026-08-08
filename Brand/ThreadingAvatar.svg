@@ -1,0 +1,54 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 128 128"
+  role="img"
+  aria-labelledby="threading-avatar-title"
+>
+  <title id="threading-avatar-title">Threading</title>
+  <desc>The mono Threading mark on the navy ground, inset for a circular crop.</desc>
+  <defs>
+    <path
+      id="avatar-thread"
+      d="M 64 12 C 66 29 67 43 58.5 58.5"
+    />
+  </defs>
+
+  <rect width="128" height="128" fill="#07172B" />
+
+  <!--
+    `ThreadingMarkMono.svg`, not the display mark: a social avatar spends most of
+    its life at 48px in a timeline, which is the small-mark case the single
+    orange exists for — the display mark's #C95726 rim is the part that goes dim
+    against navy at that size.
+
+    Held to 68% of the frame. The mark spans 115 of its 128 units, so drawn full
+    size it would reach the circular crop every social network applies; 0.757
+    leaves the corners a margin the crop cannot take.
+  -->
+  <g transform="translate(64 64) scale(0.757) translate(-64 -64)">
+    <g
+      fill="none"
+      stroke="#F28A36"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path
+        d="M 64 10 Q 85.39 26.96 110.77 37 Q 106.77 64 110.77 91 Q 85.39 101.04 64 118 Q 42.61 101.04 17.23 91 Q 21.23 64 17.23 37 Q 42.61 26.96 64 10 Z"
+        stroke-width="7"
+      />
+
+      <g stroke-width="7.5">
+        <use href="#avatar-thread" />
+        <use href="#avatar-thread" transform="rotate(60 64 64)" />
+        <use href="#avatar-thread" transform="rotate(120 64 64)" />
+        <use href="#avatar-thread" transform="rotate(180 64 64)" />
+        <use href="#avatar-thread" transform="rotate(240 64 64)" />
+        <use href="#avatar-thread" transform="rotate(300 64 64)" />
+      </g>
+    </g>
+    <path
+      d="M 64 56.5 L 70.5 60.25 L 70.5 67.75 L 64 71.5 L 57.5 67.75 L 57.5 60.25 Z"
+      fill="#F28A36"
+    />
+  </g>
+</svg>

@@ -80,6 +80,11 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     }
 
     private func setup() {
+        // This wrapper is a design-system control, so its hosts constrain it just as they do an
+        // NSTextField. Leaving the autoresizing mask on minted a zero-height, leading-edge pair
+        // of constraints when sidebar rows installed it, fighting the row's explicit centre and
+        // trailing constraints on every layout pass.
+        translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.masksToBounds = true
 

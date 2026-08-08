@@ -74,7 +74,8 @@ extension SelectionSurface {
     ///
     /// For a surface whose contents ink themselves and cannot be told. A theme that authored a
     /// selection its labels already read on is returned unchanged and never second-guessed, which
-    /// is every stock theme but two: only Windows 98 (0.9) and Platinum (0.88) are held back, and
+    /// is every stock theme but two: only Windows 98's solid navy and Platinum (0.88) are held
+    /// back, and
     /// only far enough to clear `Defaults.minimumLabelRatio`.
     ///
     /// Held back **toward the ground** rather than moved along its own lightness the way

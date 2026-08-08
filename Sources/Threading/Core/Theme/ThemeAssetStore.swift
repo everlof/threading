@@ -47,13 +47,45 @@ enum ThemeAssetStore {
         slot: SidebarAssetSlot,
         variant: AppTheme.VariantKind
     ) -> String? {
-        guard imageData.count <= SidebarStyleLimits.maximumImageBytes,
+        let fileName = slot.fileName(for: variant)
+        return store(
+            imageData: imageData,
+            for: themeID,
+            fileName: fileName,
+            maximumBytes: SidebarStyleLimits.maximumImageBytes,
+            maximumPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
+        )
+    }
+
+    /// Stores the sprite sheet extracted from a user-selected classic `.wsz` archive.
+    /// The original archive is not retained. ImageIO both validates the input and converts
+    /// BMP/PNG to one bounded PNG while preserving native-sized sheets without upscaling.
+    static func storeClassicSkinTitleBar(
+        imageData: Data,
+        for themeID: AppThemeID
+    ) -> String? {
+        store(
+            imageData: imageData,
+            for: themeID,
+            fileName: ThemeAssetDefaults.classicSkinTitleBarFileName,
+            maximumBytes: ClassicSkinLimits.maximumImageBytes,
+            maximumPixelSize: ClassicSkinLimits.maximumImagePixelSize
+        )
+    }
+
+    private static func store(
+        imageData: Data,
+        for themeID: AppThemeID,
+        fileName: String,
+        maximumBytes: Int,
+        maximumPixelSize: Int
+    ) -> String? {
+        guard imageData.count <= maximumBytes,
               let png = ProjectIconStore.normalizedPNGData(
                   from: imageData,
-                  maxPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
+                  maxPixelSize: maximumPixelSize
               ) else { return nil }
 
-        let fileName = slot.fileName(for: variant)
         let fileManager = FileManager.default
 
         do {
@@ -121,6 +153,10 @@ enum ThemeAssetStore {
                 cache.removeObject(forKey: cacheKey(themeID, slot.fileName(for: kind)))
             }
         }
+        cache.removeObject(forKey: cacheKey(
+            themeID,
+            ThemeAssetDefaults.classicSkinTitleBarFileName
+        ))
         try? FileManager.default.removeItem(at: folder(for: themeID))
     }
 
@@ -147,6 +183,7 @@ enum ThemeAssetStore {
 
 enum ThemeAssetDefaults {
     static let assetDirectoryName = "ThemeAssets"
+    static let classicSkinTitleBarFileName = "classic-titlebar.png"
 
     /// A background is stored at 2× the sidebar's widest column; a logo at 4× its slot —
     /// enough that Retina rendering never upsamples, small enough that a theme cannot smuggle

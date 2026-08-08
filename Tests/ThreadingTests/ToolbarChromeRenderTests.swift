@@ -51,6 +51,97 @@ final class ToolbarChromeRenderTests: XCTestCase {
         print("Rendered toolbar chrome storybook to \(Render.directory.path)")
     }
 
+    /// The storybook's seam strip draws the divider alone, and that is exactly how its covering
+    /// shipped: in the real pane every session surface is attached *after* the divider, so only
+    /// a render of the container itself shows the rule landing between a conversation and the
+    /// shell strip below it — or failing to. Built unwindowed, because a window is what spawns
+    /// the drawer's real shell.
+    func testRendersTheDrawerSeamInsideTheSessionPane() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let paneSize = NSSize(width: 520, height: 460)
+        let previousHeight = ShellDrawerHeight.stored
+        ShellDrawerHeight.stored = ShellDrawerDefaults.defaultHeight
+
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("threading-drawer-seam-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = ProjectStore.shared
+        let project = store.addProject(folderURL: folder)
+        let session = try XCTUnwrap(
+            store.addSession(to: project.id, kind: .claude, usesNativeUI: true, title: "Seam")
+        )
+        defer {
+            store.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: folder)
+            ShellDrawerHeight.stored = previousHeight
+        }
+
+        let originalBackdrop = WindowBackdrop.ground
+        defer { WindowBackdrop.set(originalBackdrop) }
+
+        var written = 0
+        for backdrop in Render.backdrops {
+            let appearance = try XCTUnwrap(NSAppearance(named: backdrop.appearance))
+            WindowBackdrop.set(.terminal(backdrop.colour))
+
+            // Construction and layout run as the stated appearance: surfaces bake resolved
+            // colours into layers as they are built — see `ConversationRenderTests.livePane`.
+            var built: TerminalContainerViewController?
+            appearance.performAsCurrentDrawingAppearance {
+                let container = TerminalContainerViewController()
+                container.view.appearance = appearance
+                container.view.frame = NSRect(origin: .zero, size: paneSize)
+                NSLayoutConstraint.activate([
+                    container.view.widthAnchor.constraint(equalToConstant: paneSize.width),
+                    container.view.heightAnchor.constraint(equalToConstant: paneSize.height)
+                ])
+                container.setCurrentSessionForTesting(session.id)
+                container.attachConversation(
+                    ConversationViewController(agentSession: session, project: project)
+                )
+                container.openShellDrawer()
+                container.view.layoutSubtreeIfNeeded()
+                // A line of output without a process: the shell only spawns on reveal, and the
+                // story needs glyphs against the strip to show the terminal's inset margin.
+                if let terminal = Self.firstTerminalView(in: container.view) {
+                    terminal.feed(text: "$ scripts/test.sh fast\r\nExecuted 3625 tests\r\n$ ")
+                }
+                container.view.layoutSubtreeIfNeeded()
+                built = container
+            }
+            let container = try XCTUnwrap(built)
+            defer {
+                container.closeShellDrawer(for: session.id)
+                container.setCurrentSessionForTesting(nil)
+            }
+
+            let rep = try XCTUnwrap(
+                container.view.bitmapImageRepForCachingDisplay(in: container.view.bounds)
+            )
+            appearance.performAsCurrentDrawingAppearance {
+                container.view.cacheDisplay(in: container.view.bounds, to: rep)
+            }
+            let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+            try data.write(
+                to: directory.appendingPathComponent("03b-drawer-seam-in-pane-\(backdrop.name).png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, 2, "The in-pane seam should render on both backdrops")
+        print("Rendered the in-pane drawer seam to \(Render.directory.path)")
+    }
+
+    private static func firstTerminalView(in view: NSView) -> EmojiFixedTerminalView? {
+        if let terminal = view as? EmojiFixedTerminalView { return terminal }
+        for subview in view.subviews {
+            if let found = firstTerminalView(in: subview) { return found }
+        }
+        return nil
+    }
+
     /// The live browser's actual chrome component at the widths and states that previously made
     /// it fail: the 260pt pane minimum, a private tab, a pop-up, loading, and every agent testing
     /// condition active. System gets both appearances; the two most geometrically opinionated

@@ -22,6 +22,9 @@ extension AppThemeStyles {
                 .fieldSurface: hex("#FFFFFF"),
                 .elevated: hex("#F8F8F8"),
                 .floatingSurface: hex("#EEEEEE"),
+                // Apple's Tiger HIG measures the Help Tag as a pale-yellow plate, separate
+                // from the gray/white surfaces used by alerts and sheets.
+                .tooltipSurface: hex("#FFF7B2"),
                 .border: hex("#7A7A7A"),
                 .divider: hex("#A9A9A9"),
                 .label: hex("#111111"),
@@ -70,6 +73,7 @@ extension AppThemeStyles {
                 borderWidth: 1,
                 textScale: 0.90,
                 choiceHeight: 22,
+                popoverStyle: aquaHelpTagPopoverStyle,
                 buttonStyle: AppTheme.Material.ButtonStyle(
                     fontWeight: .regular,
                     primaryTreatment: .raised,

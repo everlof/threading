@@ -30,6 +30,11 @@ final class ThemedToggle: ThemedControl {
         static let width: CGFloat = 38
         static let height: CGFloat = 22
         static let knobInset: CGFloat = 2
+        /// The period latch is shorter but wider than the sliding switch: its state is a word
+        /// and a lamp rather than a travelling disc.
+        static let buttonWidth: CGFloat = 46
+        static let buttonHeight: CGFloat = 18
+        static let lampSize: CGFloat = 4
         /// The track's corner when the theme's corners are square (Swiss, Neo Brutalism), so the
         /// switch picks up the same silhouette as everything else. The knob's corner is derived
         /// from it rather than stated — see `knobRadius(trackRadius:grownBy:)`.
@@ -109,6 +114,19 @@ final class ThemedToggle: ThemedControl {
 
     private var isOn: Bool { state == .on }
 
+    private var toggleStyle: AppTheme.Material.ToggleStyle {
+        AppThemePalette.current.material(for: effectiveAppearance).toggleStyle
+    }
+
+    private var bodySize: NSSize {
+        switch toggleStyle {
+        case .automatic:
+            NSSize(width: Layout.width, height: Layout.height)
+        case .onOffButton:
+            NSSize(width: Layout.buttonWidth, height: Layout.buttonHeight)
+        }
+    }
+
     /// Where the knob is drawn, 0 off → 1 on — briefly outside that range while the settle
     /// carries it past its end. Follows `state` immediately on assignment, eased behind an
     /// interaction.
@@ -141,9 +159,10 @@ final class ThemedToggle: ThemedControl {
     /// The track plus the margin its focus ring needs. Drawing is clipped to `bounds`, so a ring
     /// outside the track only exists if the control asked to be that much bigger than it looks.
     override var intrinsicContentSize: NSSize {
-        NSSize(
-            width: Layout.width + focusMargin * 2,
-            height: Layout.height + focusMargin * 2
+        let bodySize = bodySize
+        return NSSize(
+            width: bodySize.width + focusMargin * 2,
+            height: bodySize.height + focusMargin * 2
         )
     }
 
@@ -177,7 +196,8 @@ final class ThemedToggle: ThemedControl {
     private func moveKnob(to target: CGFloat, animated: Bool) {
         stopDriver()
         let duration = Design.Motion.standard
-        guard animated, duration > 0, window != nil, knobProgress != target else {
+        guard toggleStyle == .automatic,
+              animated, duration > 0, window != nil, knobProgress != target else {
             knobProgress = target
             animationPhase = 1
             return
@@ -251,13 +271,25 @@ final class ThemedToggle: ThemedControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        let bodySize = bodySize
         let rect = NSRect(
-            x: (bounds.width - Layout.width) / 2,
-            y: (bounds.height - Layout.height) / 2,
-            width: Layout.width,
-            height: Layout.height
+            x: floor((bounds.width - bodySize.width) / 2),
+            y: floor((bounds.height - bodySize.height) / 2),
+            width: bodySize.width,
+            height: bodySize.height
         )
 
+        switch toggleStyle {
+        case .automatic:
+            drawAutomaticSwitch(in: rect)
+        case .onOffButton:
+            drawOnOffButton(in: rect)
+        }
+
+        alphaValue = isEnabled ? 1 : 0.5
+    }
+
+    private func drawAutomaticSwitch(in rect: NSRect) {
         let square = AppThemePalette.current.material.panelRadius == 0
         let trackRadius = Layout.trackRadius(square: square)
 
@@ -329,7 +361,85 @@ final class ThemedToggle: ThemedControl {
             mark.stroke()
         }
 
-        alphaValue = isEnabled ? 1 : 0.5
+    }
+
+    /// A latched control reads as physical hardware: OFF is a raised face; ON seats that face
+    /// into the black field and lights its lamp. One-bit words remain explicit under
+    /// Differentiate Without Color and keep the tiny control from depending on hue alone.
+    private func drawOnOffButton(in rect: NSRect) {
+        let shape = ThemedSurface.draw(
+            rect,
+            fill: isOn
+                ? Design.Surface.field
+                : (isHovered ? Design.Surface.controlHover : Design.Surface.controlResting),
+            border: Design.Surface.border,
+            radius: 0,
+            bevel: isOn ? .sunken : .automatic
+        )
+        drawKeyboardFocus(around: shape, outsideBy: Layout.focusGap)
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = false
+        NSGraphicsContext.current?.cgContext.setShouldAntialias(false)
+
+        let lamp = NSRect(
+            x: rect.minX + Design.Spacing.small,
+            y: floor(rect.midY - Layout.lampSize / 2),
+            width: Layout.lampSize,
+            height: Layout.lampSize
+        )
+        Design.Surface.bevelShadow.setFill()
+        lamp.fill()
+        (isOn ? Design.Surface.accent : Design.Surface.divider).setFill()
+        lamp.insetBy(dx: 1, dy: 1).fill()
+
+        let artwork = isOn ? StateArtwork.on : StateArtwork.off
+        let artworkWidth = CGFloat(artwork.first?.count ?? 0)
+        let labelStart = lamp.maxX + Design.Spacing.tight
+        let labelEnd = rect.maxX - Design.Spacing.tight
+        let origin = NSPoint(
+            x: floor((labelStart + labelEnd - artworkWidth) / 2),
+            y: floor(rect.midY - CGFloat(artwork.count) / 2)
+        )
+        draw(artwork, at: origin, ink: isOn ? Design.Surface.accent : Design.Text.label)
+    }
+
+    /// Three-to-four-column glyphs keep the labels legible at the control's native 18-point
+    /// height without asking font rendering to invent half-pixel stems.
+    private enum StateArtwork {
+        static let on = [
+            "###.#..#",
+            "#.#.##.#",
+            "#.#.#.##",
+            "#.#.#..#",
+            "###.#..#"
+        ]
+        static let off = [
+            "###.###.###",
+            "#.#.#...#..",
+            "#.#.##..##.",
+            "#.#.#...#..",
+            "###.#...#.."
+        ]
+    }
+
+    private func draw(_ artwork: [String], at origin: NSPoint, ink: NSColor) {
+        let isFlipped = NSGraphicsContext.current?.isFlipped ?? false
+        ink.setFill()
+        for (row, line) in artwork.enumerated() {
+            let y = isFlipped
+                ? origin.y + CGFloat(row)
+                : origin.y + CGFloat(artwork.count - row - 1)
+            for (column, cell) in line.enumerated() where cell == "#" {
+                NSRect(
+                    x: origin.x + CGFloat(column),
+                    y: y,
+                    width: 1,
+                    height: 1
+                ).fill()
+            }
+        }
     }
 
     // MARK: - Colour

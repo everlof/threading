@@ -89,6 +89,39 @@ final class ChipViewTests: XCTestCase {
                           "a missing icon still reserved its slot")
     }
 
+    /// Classic chooser grammar includes its native measure and face, rather than drawing a
+    /// Windows combo box at the modern chip height under every period theme.
+    func testAClassicChooserFollowsEachMaterialsHeightAndFace() throws {
+        let chip = ChipView()
+        chip.configure(symbolName: "gear", title: "Choice")
+
+        AppThemePalette.set(AppThemeStyles.platinum)
+        chip.needsDisplay = true
+        chip.layoutSubtreeIfNeeded()
+        XCTAssertEqual(chip.intrinsicContentSize.height, 16)
+        XCTAssertEqual(
+            try fill(of: chip).hexString,
+            AppThemeStyles.platinum.resolved(.controlResting).hexString,
+            "Platinum inherited the Win32 sunken value well"
+        )
+
+        AppThemePalette.set(AppThemeStyles.win98)
+        chip.needsDisplay = true
+        chip.layoutSubtreeIfNeeded()
+        XCTAssertEqual(chip.intrinsicContentSize.height, 21)
+        XCTAssertEqual(
+            try fill(of: chip).hexString,
+            AppThemeStyles.win98.resolved(.fieldSurface).hexString,
+            "Win98 lost its white sunken value well"
+        )
+
+        AppThemePalette.set(AppThemeStyles.beOS)
+        chip.needsDisplay = true
+        chip.layoutSubtreeIfNeeded()
+        XCTAssertEqual(chip.intrinsicContentSize.height, 18)
+        XCTAssertEqual(chip.fittingSize.height, 18, "the fixed chooser constraint kept an old theme's height")
+    }
+
     /// An unknown SF Symbol name resolves to no image, and must be treated as the iconless
     /// case rather than drawing an empty slot — symbol names are string literals and a
     /// renamed one should degrade quietly.

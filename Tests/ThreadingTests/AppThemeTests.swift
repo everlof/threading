@@ -578,6 +578,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.popoverStyle, .system)
         XCTAssertEqual(material.menuAppearance, .automatic)
         XCTAssertEqual(material.checkboxStyle, .automatic)
+        XCTAssertEqual(material.toggleStyle, .automatic)
 
         let named = AppTheme.Material(
             textScale: 0.8,
@@ -678,6 +679,7 @@ final class AppThemeTests: XCTestCase {
         ])
         XCTAssertEqual(amiga.choiceStyle, .cycle)
         XCTAssertEqual(amiga.menuAppearance, .amiga)
+        XCTAssertEqual(amiga.progressStyle, .amiga)
         XCTAssertEqual(amiga.choiceHeight, 18)
         XCTAssertEqual(amiga.checkboxStyle, .recessedTick)
         XCTAssertEqual(
@@ -693,7 +695,17 @@ final class AppThemeTests: XCTestCase {
         let irix = try XCTUnwrap(AppThemeStyles.irix.variant(.light)?.material)
         XCTAssertEqual(irix.choiceStyle, .popup)
         XCTAssertEqual(irix.menuAppearance, .irix)
+        XCTAssertEqual(irix.progressStyle, .irix)
         XCTAssertEqual(irix.choiceHeight, 20)
+        XCTAssertEqual(AppThemeStyles.irix.resolved(.statusPositive).hexString, "#2F8A4F")
+
+        let classicPlayer = try XCTUnwrap(
+            AppThemeStyles.classicPlayer.variant(.dark)?.material
+        )
+        XCTAssertEqual(classicPlayer.toggleStyle, .onOffButton)
+        XCTAssertEqual(classicPlayer.buttonStyle.textTransform, .uppercase)
+        XCTAssertEqual(classicPlayer.buttonStyle.titleRendering, .pixel5x6)
+        XCTAssertTrue(classicPlayer.buttonStyle.antialiasesTitle)
 
         for material in [platinum, beOS, openStep, irix, amiga] {
             XCTAssertEqual(material.buttonStyle.primaryTreatment, .raised)
@@ -736,7 +748,8 @@ final class AppThemeTests: XCTestCase {
                 edge: .material,
                 shadow: .none,
                 density: .compact,
-                glyphStyle: .classic
+                glyphStyle: .classic,
+                cornerRadius: 1
             )
         )
         XCTAssertEqual(
@@ -757,6 +770,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(sparse.popoverStyle.shadow, .automatic)
         XCTAssertEqual(sparse.popoverStyle.density, .regular)
         XCTAssertEqual(sparse.popoverStyle.glyphStyle, .system)
+        XCTAssertNil(sparse.popoverStyle.cornerRadius)
     }
 
     func testPeriodAndConstructedMaterialsStateTheirPopoverLanguage() {
@@ -776,6 +790,10 @@ final class AppThemeTests: XCTestCase {
         ] {
             XCTAssertEqual(theme.material.popoverStyle, AppThemeStyles.periodPopoverStyle)
         }
+        XCTAssertEqual(AppThemeStyles.aqua.material.popoverStyle, AppThemeStyles.aquaHelpTagPopoverStyle)
+        XCTAssertEqual(AppThemeStyles.aquaTiger.material.popoverStyle, AppThemeStyles.aquaHelpTagPopoverStyle)
+        XCTAssertEqual(AppThemeStyles.aqua.resolved(.tooltipSurface).hexString, "#FFF8B0")
+        XCTAssertEqual(AppThemeStyles.aquaTiger.resolved(.tooltipSurface).hexString, "#FFF7B2")
         for theme in [AppThemeStyles.neoBrutalism, AppThemeStyles.claymorphism] {
             XCTAssertEqual(theme.material.popoverStyle.arrow, .none)
             XCTAssertEqual(theme.material.popoverStyle.edge, .material)
@@ -873,6 +891,7 @@ final class AppThemeTests: XCTestCase {
         let authored = AppTheme.Material(
             buttonStyle: AppTheme.Material.ButtonStyle(
                 textTransform: .uppercase,
+                titleRendering: .pixel5x6,
                 fontWeight: .bold,
                 typeface: .serif,
                 fontFamily: "Baskerville",
@@ -901,6 +920,7 @@ final class AppThemeTests: XCTestCase {
         let sparse = Data(#"{"buttonStyle":{"textTransform":"uppercase"}}"#.utf8)
         let decoded = try JSONDecoder().decode(AppTheme.Material.self, from: sparse)
         XCTAssertEqual(decoded.buttonStyle.textTransform, .uppercase)
+        XCTAssertEqual(decoded.buttonStyle.titleRendering, .font)
         XCTAssertEqual(decoded.buttonStyle.fontWeight, .medium)
         XCTAssertNil(decoded.buttonStyle.typeface)
         XCTAssertNil(decoded.buttonStyle.fontFamily)
@@ -1046,6 +1066,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.progressStyle, .continuous)
         XCTAssertEqual(material.choiceStyle, .chip)
         XCTAssertEqual(material.checkboxStyle, .automatic)
+        XCTAssertEqual(material.toggleStyle, .automatic)
         XCTAssertEqual(material.choiceHeight, 26)
 
         let sparse = Data(#"{}"#.utf8)
@@ -1067,6 +1088,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(round.progressStyle, .continuous)
         XCTAssertEqual(round.choiceStyle, .chip)
         XCTAssertEqual(round.checkboxStyle, .automatic)
+        XCTAssertEqual(round.toggleStyle, .automatic)
     }
 
     func testScrollerMaterialRoundTrips() throws {
@@ -1076,7 +1098,8 @@ final class AppThemeTests: XCTestCase {
             scrollerAppearance: .openStep,
             menuAppearance: .openStep,
             progressStyle: .segmented,
-            checkboxStyle: .beOSCross
+            checkboxStyle: .beOSCross,
+            toggleStyle: .onOffButton
         )
         let roundTrip = try JSONDecoder().decode(
             AppTheme.Material.self,
@@ -1089,6 +1112,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(roundTrip.menuAppearance, .openStep)
         XCTAssertEqual(roundTrip.progressStyle, .segmented)
         XCTAssertEqual(roundTrip.checkboxStyle, .beOSCross)
+        XCTAssertEqual(roundTrip.toggleStyle, .onOffButton)
     }
 
     /// The paired terminal's cursor is the palette's own ink, never its accent.
@@ -1952,10 +1976,10 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        // 22 = System + eleven design movements + Christmas + the nine takeover chromes
+        // 23 = System + eleven design movements + Christmas + the ten takeover chromes
         // (the Aqua lineage brought Cheetah and Tiger; TUI is the first takeover that
         // reproduces no system, acknowledged here).
-        XCTAssertEqual(ids.count, 22, "the curated stock catalogue unexpectedly changed size")
+        XCTAssertEqual(ids.count, 23, "the curated stock catalogue unexpectedly changed size")
     }
 
     /// A takeover chrome is not complete merely because its Swift document exists. Every stock

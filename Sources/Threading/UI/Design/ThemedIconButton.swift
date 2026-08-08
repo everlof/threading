@@ -23,7 +23,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// A top-level action in the window's chrome.
         case toolbar
 
-        /// Nested inside another control — a tab's close, a row's actions.
+        /// Nested inside another control — a tab's close, a row's `⋯`.
+        ///
+        /// *Nested*, literally. A button standing **beside** a chip rather than inside anything
+        /// is that chip's peer and takes its size from the `ControlRowView` they share: put it
+        /// in the row and it is sized for you. This case answering both questions is what made
+        /// the Compare tab's actions six points shorter than the chip they sat with.
         case inline
 
         /// The chevron half of a split control, welded to the press it belongs to — see
@@ -31,6 +36,25 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// halves of a split control are not equals: the press is the point and the chevron is
         /// the exception, and equal halves would offer them as the same choice twice.
         case splitMenu
+
+        /// The narrow chevron beside a prompt's compact send glyph. Like `splitMenu`, it is the
+        /// exceptional half of one decision; unlike the toolbar version it belongs inside the
+        /// prompt's 18-point footer control group. Naming the role here keeps its 12×18 geometry
+        /// out of the call site and prevents it from fighting `.inline`'s owned 20×20 constraints.
+        case compactSplitMenu
+
+        /// Standing beside a `ThemedButton`, offering the other way to take the same decision —
+        /// the composer's clock next to Start Session: send it now, send it later.
+        ///
+        /// A peer of a *button*, not something nested in one, so `.inline`'s 20 was the wrong
+        /// answer for the same reason it was wrong beside a chip (see `adopt`): the clock's
+        /// hover raised a plate six points shorter than the primary it sits opposite, which
+        /// reads as two rows pretending to be one — invisible under the System theme's soft
+        /// corners, and unmissable under a square-cornered material like Bauhaus, where it drew
+        /// as a hard plate that had missed its size. The measure is the button's own base
+        /// height, and the glyph grows with it exactly as a `ControlRowView` promotion grows a
+        /// member's — the same mark in a larger box would be more padding, not more button.
+        case besidePrimary
 
         var size: NSSize {
             switch self {
@@ -49,6 +73,13 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
                     width: Design.Size.splitMenuWidth,
                     height: Design.Size.toolbarButtonHeight
                 )
+            case .compactSplitMenu:
+                NSSize(
+                    width: Design.Size.compactSplitMenuWidth,
+                    height: Design.Size.compactSubmitHeight
+                )
+            case .besidePrimary:
+                NSSize(width: Design.Size.chipHeight, height: Design.Size.chipHeight)
             }
         }
 
@@ -56,7 +87,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         var glyph: CGFloat {
             switch self {
             case .toolbar, .splitMenu: Design.Size.tabIconSlot
+            case .compactSplitMenu: 8
             case .inline: Design.Size.inlineButtonGlyph
+            case .besidePrimary: Design.Symbol.slot(inControlOfHeight: Design.Size.chipHeight)
             }
         }
 
@@ -72,7 +105,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         var glyphPointSize: CGFloat {
             switch self {
             case .toolbar, .splitMenu: Design.Symbol.toolbar
+            case .compactSplitMenu: Design.Symbol.control
             case .inline: Design.Symbol.control
+            case .besidePrimary: Design.Symbol.pointSize(forSlot: glyph)
             }
         }
 
@@ -86,9 +121,10 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         var hoverFill: KeyPath<Design.Ink, NSColor> {
             switch self {
             case .toolbar: \.surface
-            // Both sit on a surface something else already drew — another control's fill, or
-            // the plate a split control shares — so the resting lift is invisible there.
-            case .inline, .splitMenu: \.surfaceHover
+            // The rest sit on a surface something else already drew — another control's fill,
+            // the plate a split control shares, or the pane a primary already lifted from —
+            // so the resting lift is invisible there.
+            case .inline, .splitMenu, .compactSplitMenu, .besidePrimary: \.surfaceHover
             }
         }
     }
@@ -161,6 +197,26 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     private var accessibilityName: String
     private let isEmphasized: Bool
     private let actionTarget: Target
+
+    /// What the button is currently drawn at: the role's own measurements, until a control row
+    /// it stands in states the row's.
+    ///
+    /// The role stays the button's identity — it still decides the hover fill and what the
+    /// button is *for* — but the size is no longer a constant of it, because a peer of a
+    /// theme-sized chip cannot be a constant. Nothing outside `ControlRowView` can write these:
+    /// `adopt` takes a `ControlRowMetrics`, which only a row can make.
+    private var drawnSize: NSSize
+    private var drawnGlyph: CGFloat
+    private var drawnGlyphPointSize: CGFloat
+
+    /// What the slot holds, kept so it can be re-rendered when the slot changes size. A symbol
+    /// has to be *configured* at the new size rather than scaled to it (see `Design.Symbol`),
+    /// and that needs its name back.
+    private var symbolName: String?
+    private var customImage: NSImage?
+
+    private var widthConstraint: NSLayoutConstraint?
+    private var heightConstraint: NSLayoutConstraint?
     private(set) var isPressed = false {
         didSet {
             guard isPressed != oldValue else { return }
@@ -209,6 +265,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         self.accessibilityName = accessibility
         self.isEmphasized = isEmphasized
         self.actionTarget = target
+        drawnSize = target.size
+        drawnGlyph = target.glyph
+        drawnGlyphPointSize = target.glyphPointSize
         super.init(frame: .zero, inkSource: inkSource)
         setup(symbolName: symbolName)
     }
@@ -221,32 +280,51 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     private func setup(symbolName: String) {
         translatesAutoresizingMaskIntoConstraints = false
 
-        iconView.image = Design.Symbol.image(
-            symbolName,
-            slot: actionTarget.glyph,
-            pointSize: actionTarget.glyphPointSize
-        )
+        self.symbolName = symbolName
         addSubview(iconView)
 
-        // The glyph is centred and the target states its own size, so the padding is whatever is
-        // left over — equal on all four sides, by construction rather than by a caller's
-        // arithmetic. Nothing here takes a size from outside. The glyph carries no size
-        // constraints of its own: it is configured to fit the slot (see `glyphPointSize`), and
-        // pinning it to the slot was exactly the shrink-after-render this replaced.
+        // The glyph is centred and the size states itself, so the padding is whatever is left
+        // over — equal on all four sides, by construction rather than by a caller's arithmetic.
+        // Nothing here takes a size from a call site: it is the role's, or the row's. The glyph
+        // carries no size constraints of its own: it is configured to fit the slot (see
+        // `glyphPointSize`), and pinning it to the slot was exactly the shrink-after-render this
+        // replaced.
+        let width = widthAnchor.constraint(equalToConstant: drawnSize.width)
+        let height = heightAnchor.constraint(equalToConstant: drawnSize.height)
+        widthConstraint = width
+        heightConstraint = height
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: actionTarget.size.width),
-            heightAnchor.constraint(equalToConstant: actionTarget.size.height),
+            width,
+            height,
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+        renderSlot()
     }
 
-    override var intrinsicContentSize: NSSize { actionTarget.size }
+    override var intrinsicContentSize: NSSize { drawnSize }
 
-    /// The padding the role holds around its glyph — `(target − glyph) / 2`, stated by the
-    /// role by construction. What `PaneFooterView` subtracts to put the ink on a margin.
+    /// The padding held around the glyph — `(target − glyph) / 2`, by construction. What
+    /// `PaneFooterView` and `ControlRowView` subtract to put the *ink* on a stated margin.
     var opticalHorizontalInset: CGFloat {
-        (actionTarget.size.width - actionTarget.glyph) / 2
+        (drawnSize.width - drawnGlyph) / 2
+    }
+
+    /// Draws whatever the slot holds at the size the slot currently is.
+    private func renderSlot() {
+        if let customImage {
+            // The slot cap is what keeps foreign artwork honest: an installed app's icon
+            // arrives at whatever size LaunchServices holds, and a symbol's fitted
+            // configuration cannot speak for it. Capped to the slot it draws exactly where a
+            // symbol would.
+            iconView.slot = NSSize(width: drawnGlyph, height: drawnGlyph)
+            iconView.image = customImage
+            return
+        }
+        iconView.slot = nil
+        iconView.image = symbolName.flatMap {
+            Design.Symbol.image($0, slot: drawnGlyph, pointSize: drawnGlyphPointSize)
+        }
     }
 
     /// Re-points the button at a different action, keeping its size and padding.
@@ -254,15 +332,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// One slot, two roles: a project row's `⋯` and a branch heading's gear are the same control
     /// in the same place, and swapping the glyph is the whole difference between them.
     func setSymbol(_ symbolName: String, accessibility: String) {
-        // The slot cap is cleared, because `setImage` sets it: a slot that has held an app's
-        // icon must draw the next symbol at the same size every other glyph in the app has —
-        // configured to fit, never squeezed to.
-        iconView.slot = nil
-        iconView.image = Design.Symbol.image(
-            symbolName,
-            slot: actionTarget.glyph,
-            pointSize: actionTarget.glyphPointSize
-        )
+        // The custom image is cleared along with it, because `renderSlot` prefers one: a slot
+        // that has held an app's icon must draw the next symbol at the size every other glyph
+        // in the app has — configured to fit, never squeezed to.
+        self.symbolName = symbolName
+        customImage = nil
+        renderSlot()
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
@@ -277,11 +352,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// surface, the hover lift, the focus ring — stays ours. Passing nil empties the slot rather
     /// than leaving the previous app's mark behind.
     func setImage(_ image: NSImage?, accessibility: String) {
-        // The slot cap is what keeps foreign artwork honest: an installed app's icon arrives
-        // at whatever size LaunchServices holds, and a symbol's fitted configuration cannot
-        // speak for it. Capped to the role's slot it draws exactly where the symbol would.
-        iconView.slot = NSSize(width: actionTarget.glyph, height: actionTarget.glyph)
-        iconView.image = image
+        customImage = image
+        symbolName = nil
+        renderSlot()
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
@@ -493,5 +566,35 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         guard isEnabled else { return false }
         onPress?()
         return true
+    }
+}
+
+// MARK: - ControlRowMember
+
+extension ThemedIconButton: ControlRowMember {
+
+    /// Stands at the row's height rather than the role's.
+    ///
+    /// **Square, at the row's height** — an action beside a chip is a peer of it, and the role's
+    /// own size answers a different question: `.inline` means *nested inside another control*,
+    /// which is what a tab's × is and what an action sharing a margin with a chip never was.
+    /// The Compare tab's export and expand buttons were `.inline` for want of anywhere else to
+    /// be, and so stood six points shorter than the chip they were meant to sit level with.
+    ///
+    /// The glyph grows with the button. A promoted 26pt button keeping its 12pt slot would be
+    /// the same mark in a larger box — more padding, not more button — which reads as a target
+    /// that missed rather than one that was sized.
+    func adopt(_ metrics: ControlRowMetrics) {
+        let size = NSSize(width: metrics.height, height: metrics.height)
+        guard size != drawnSize || metrics.glyphSlot != drawnGlyph else { return }
+
+        drawnSize = size
+        drawnGlyph = metrics.glyphSlot
+        drawnGlyphPointSize = metrics.glyphPointSize
+        widthConstraint?.constant = size.width
+        heightConstraint?.constant = size.height
+        renderSlot()
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 }

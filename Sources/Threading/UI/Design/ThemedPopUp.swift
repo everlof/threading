@@ -16,7 +16,6 @@ final class ThemedPopUp: ThemedControl {
     // MARK: - Geometry
 
     private enum Layout {
-        static let height: CGFloat = Design.Size.chipHeight
         static let inset: CGFloat = Design.Spacing.medium
         static let chevronWidth: CGFloat = 9
         static let chevronHeight: CGFloat = 5
@@ -24,6 +23,22 @@ final class ThemedPopUp: ThemedControl {
         static let imageSize: CGFloat = 14
         static let gap: CGFloat = Design.Spacing.small
         static let disabledAlpha: CGFloat = 0.5
+    }
+
+    private var choiceMaterial: AppTheme.Material {
+        AppThemePalette.current.material(for: effectiveAppearance)
+    }
+
+    private var choiceStyle: AppTheme.Material.ChoiceStyle { choiceMaterial.choiceStyle }
+
+    private var contentInset: CGFloat {
+        choiceStyle.isClassic ? ClassicChoiceDrawing.textInset : Layout.inset
+    }
+
+    private var imageSize: CGFloat {
+        choiceStyle.isClassic
+            ? min(Layout.imageSize, max(0, choiceMaterial.choiceHeight - 4))
+            : Layout.imageSize
     }
 
     // MARK: - Configuration
@@ -134,17 +149,22 @@ final class ThemedPopUp: ThemedControl {
     // MARK: - Layout
 
     override var intrinsicContentSize: NSSize {
-        var width = Layout.inset * 2
+        var width = contentInset * 2
         if let image = displayedItem?.image, !image.size.equalTo(.zero) {
-            width += Layout.imageSize + Layout.gap
+            width += imageSize + Layout.gap
         }
         if let title = displayedItem?.title, !title.isEmpty {
-            width += ceil(title.size(withAttributes: [.font: Design.Typography.control()]).width)
+            let font = choiceStyle.isClassic
+                ? Design.Typography.controlRegular()
+                : Design.Typography.control()
+            width += ceil(title.size(withAttributes: [.font: font]).width)
         }
         if isBordered {
-            width += Layout.gap + Layout.chevronWidth
+            width += choiceStyle.isClassic
+                ? ClassicChoiceDrawing.arrowWidth
+                : Layout.gap + Layout.chevronWidth
         }
-        return NSSize(width: width, height: Layout.height)
+        return NSSize(width: width, height: choiceMaterial.choiceHeight)
     }
 
     // MARK: - Interaction
@@ -242,43 +262,92 @@ final class ThemedPopUp: ThemedControl {
     override func draw(_ dirtyRect: NSRect) {
         alphaValue = isEnabled ? 1 : Layout.disabledAlpha
 
-        var content = bounds.insetBy(dx: Layout.inset, dy: 0)
+        var content = bounds.insetBy(dx: contentInset, dy: 0)
 
         if isBordered {
             drawSurface()
-            let chevron = NSRect(
-                x: content.maxX - Layout.chevronWidth,
-                y: content.midY - Layout.chevronHeight / 2,
-                width: Layout.chevronWidth,
-                height: Layout.chevronHeight
-            )
-            drawChevron(in: chevron)
-            content.size.width -= Layout.chevronWidth + Layout.gap
+            if choiceStyle.isClassic {
+                let arrow = ClassicChoiceDrawing.arrowRect(in: bounds, style: choiceStyle)
+                if choiceStyle == .dropdown {
+                    _ = ThemedSurface.draw(
+                        arrow,
+                        fill: Design.Surface.controlResting,
+                        radius: 0,
+                        bevel: isPresentingMenu ? .sunken : .automatic
+                    )
+                } else if choiceStyle == .aquaPopup {
+                    ClassicChoiceDrawing.drawAquaArrowWell(
+                        in: arrow,
+                        pressed: isPresentingMenu
+                    )
+                } else {
+                    ClassicChoiceDrawing.drawIntegratedSeparator(at: arrow.minX, in: bounds)
+                }
+                ClassicChoiceDrawing.drawIndicator(
+                    choiceStyle,
+                    in: arrow,
+                    color: Design.Text.label
+                )
+                content.size.width = max(0, arrow.minX - content.minX - contentInset)
+            } else {
+                let chevron = NSRect(
+                    x: content.maxX - Layout.chevronWidth,
+                    y: content.midY - Layout.chevronHeight / 2,
+                    width: Layout.chevronWidth,
+                    height: Layout.chevronHeight
+                )
+                drawChevron(in: chevron)
+                content.size.width -= Layout.chevronWidth + Layout.gap
+            }
         }
 
         if let image = displayedItem?.image {
             let imageRect = NSRect(
                 x: content.minX,
-                y: content.midY - Layout.imageSize / 2,
-                width: Layout.imageSize,
-                height: Layout.imageSize
+                y: content.midY - imageSize / 2,
+                width: imageSize,
+                height: imageSize
             )
             drawItemImage(image, in: imageRect)
-            content.origin.x += Layout.imageSize + Layout.gap
-            content.size.width -= Layout.imageSize + Layout.gap
+            content.origin.x += imageSize + Layout.gap
+            content.size.width -= imageSize + Layout.gap
         }
 
         drawTitle(in: content)
     }
 
     private func drawSurface() {
-        let shape = ThemedSurface.draw(
-            bounds,
-            fill: (isHovered || isPresentingMenu) && isEnabled
-                ? Design.Surface.controlHover
-                : Design.Surface.controlResting,
-            border: Design.Surface.border
-        )
+        let shape: ThemedSurface.Shape
+        if choiceStyle == .dropdown {
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: Design.Surface.field,
+                radius: 0,
+                bevel: .sunken
+            )
+        } else if choiceStyle == .aquaPopup {
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: Design.Surface.controlResting,
+                border: Design.Surface.border,
+                radius: 5
+            )
+        } else if choiceStyle.isClassic {
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: Design.Surface.controlResting,
+                radius: 0,
+                bevel: isPresentingMenu ? .sunken : .automatic
+            )
+        } else {
+            shape = ThemedSurface.draw(
+                bounds,
+                fill: (isHovered || isPresentingMenu) && isEnabled
+                    ? Design.Surface.controlHover
+                    : Design.Surface.controlResting,
+                border: Design.Surface.border
+            )
+        }
         drawKeyboardFocus(around: shape)
     }
 
@@ -308,13 +377,20 @@ final class ThemedPopUp: ThemedControl {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
 
+        let font = choiceStyle.isClassic
+            ? Design.Typography.controlRegular()
+            : Design.Typography.control()
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: Design.Typography.control(),
+            .font: font,
             .foregroundColor: Design.Text.label,
             .paragraphStyle: paragraph
         ]
 
-        let height = ceil(Design.Typography.control().boundingRectForFont.height)
+        // The line box, so the selection reads on the same line as the image and the arrow
+        // beside it — both centred on `midY`. `boundingRectForFont` is the family's glyph
+        // extremes, which `draw(in:)` turns into dead air above the words: a point under SF,
+        // four under a theme whose face reserves more (Platinum's Geneva fallback).
+        let height = Design.Typography.lineHeight(of: font)
         let textRect = NSRect(
             x: rect.minX,
             y: rect.midY - height / 2,

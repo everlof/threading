@@ -709,7 +709,7 @@ final class ThemeToolTests: XCTestCase {
                         "height": 30,
                         "button_glyph_style": "squares"
                       },
-                      "frame": {"width": 4}
+                      "frame": {"width": 4, "corner_radius": 6}
                     }
                   }
                 }
@@ -728,6 +728,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(chrome.titleBar?.height, 30)
         XCTAssertEqual(chrome.titleBar?.buttonGlyphStyle, "squares")
         XCTAssertEqual(chrome.frame?.width, 4)
+        XCTAssertEqual(chrome.frame?.cornerRadius, 6)
         XCTAssertEqual(variant.material?.bevel?.width, 2)
         XCTAssertEqual(variant.material?.bevel?.style, "soft")
     }
@@ -756,7 +757,7 @@ final class ThemeToolTests: XCTestCase {
                 height: 30,
                 buttonGlyphStyle: "squares"
             ),
-            frame: AppThemeChromeFrameArguments(width: 4),
+            frame: AppThemeChromeFrameArguments(width: 4, cornerRadius: 6),
             removeFrame: nil,
             remove: nil
         )
@@ -798,6 +799,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(titleBar["button_glyph_style"] as? String, "squares")
         let frame = try XCTUnwrap(chromeDocument["frame"] as? [String: Any])
         XCTAssertEqual(frame["width"] as? Double, 4)
+        XCTAssertEqual(frame["corner_radius"] as? Double, 6)
 
         // An unrelated patch says nothing about chrome, so the frame stays taken over —
         // the inherit rule the ChromeChange type exists for.
@@ -1438,7 +1440,9 @@ final class ThemeToolTests: XCTestCase {
         let popoverProperties = try XCTUnwrap(
             popoverStyle["properties"] as? [String: Any]
         )
-        for field in ["arrow", "surface_role", "edge", "shadow", "density", "glyph_style"] {
+        for field in [
+            "arrow", "surface_role", "edge", "shadow", "density", "glyph_style", "corner_radius"
+        ] {
             XCTAssertNotNil(popoverProperties[field], "popover_style lost \(field)")
         }
         XCTAssertNotNil(materialProperties["remove_popover_style"])
@@ -1466,13 +1470,27 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNotNil(materialProperties["remove_font_fallbacks"])
         XCTAssertNotNil(materialProperties["scroller_placement"])
         XCTAssertNotNil(materialProperties["scroller_track_style"])
+        XCTAssertNotNil(materialProperties["scroller_appearance"])
+        XCTAssertNotNil(materialProperties["menu_appearance"])
         XCTAssertNotNil(materialProperties["progress_style"])
+        XCTAssertEqual(
+            (materialProperties["progress_style"] as? [String: Any])?["description"] as? String,
+            "Determinate progress treatment: \"continuous\" (the default), \"segmented\" for "
+                + "the classic Win32 recessed block control, \"irix\" for Indigo Magic's "
+                + "measured slanted-edge scale, or \"amiga\" for Workbench's source-inferred "
+                + "hard horizontal gauge filled from active title blue."
+        )
         XCTAssertNotNil(materialProperties["choice_style"])
+        XCTAssertNotNil(materialProperties["checkbox_style"])
+        XCTAssertNotNil(materialProperties["toggle_style"])
         let buttonStyle = try XCTUnwrap(materialProperties["button_style"] as? [String: Any])
         let buttonProperties = try XCTUnwrap(buttonStyle["properties"] as? [String: Any])
         for field in [
-            "text_transform", "font_weight", "typeface", "font_family", "tracking",
-            "primary_treatment", "primary_role", "primary_border_role", "remove_primary_border",
+            "text_transform", "title_rendering", "font_weight", "typeface", "font_family",
+            "tracking",
+            "primary_treatment", "primary_role", "secondary_role", "secondary_hover_role",
+            "secondary_shadow",
+            "primary_border_role", "remove_primary_border",
             "hover_offset_x", "hover_offset_y", "pressed_offset_x", "pressed_offset_y",
             "collapse_shadow_on_hover"
         ] {
@@ -1541,12 +1559,16 @@ final class ThemeToolTests: XCTestCase {
                     },
                     "button_style": {
                       "text_transform": "uppercase",
+                      "title_rendering": "pixel_5x6",
                       "font_weight": "bold",
                       "typeface": "serif",
                       "font_family": "Baskerville",
                       "tracking": 0.75,
                       "primary_treatment": "outlined",
                       "primary_role": "syntax_type",
+                      "secondary_role": "elevated",
+                      "secondary_hover_role": "panel",
+                      "secondary_shadow": "panel",
                       "primary_border_role": "label",
                       "hover_offset_x": 4,
                       "hover_offset_y": 4,
@@ -1589,12 +1611,16 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(pattern.lineWidth, 1)
         let button = try XCTUnwrap(material.buttonStyle)
         XCTAssertEqual(button.textTransform, "uppercase")
+        XCTAssertEqual(button.titleRendering, "pixel_5x6")
         XCTAssertEqual(button.fontWeight, "bold")
         XCTAssertEqual(button.typeface, "serif")
         XCTAssertEqual(button.fontFamily, "Baskerville")
         XCTAssertEqual(button.tracking, 0.75)
         XCTAssertEqual(button.primaryTreatment, "outlined")
         XCTAssertEqual(button.primaryRole, "syntax_type")
+        XCTAssertEqual(button.secondaryRole, "elevated")
+        XCTAssertEqual(button.secondaryHoverRole, "panel")
+        XCTAssertEqual(button.secondaryShadow, "panel")
         XCTAssertEqual(button.primaryBorderRole, "label")
         XCTAssertEqual(button.hoverOffsetX, 4)
         XCTAssertEqual(button.hoverOffsetY, 4)
@@ -1681,7 +1707,8 @@ final class ThemeToolTests: XCTestCase {
                   "edge": "flat",
                   "shadow": "none",
                   "density": "compact",
-                  "glyph_style": "classic"
+                  "glyph_style": "classic",
+                  "corner_radius": 1
                 }}}},
                 "apply": false
               }
@@ -1702,6 +1729,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(style.shadow, .none)
         XCTAssertEqual(style.density, .compact)
         XCTAssertEqual(style.glyphStyle, .classic)
+        XCTAssertEqual(style.cornerRadius, 1)
 
         let get = coordinator().getAppTheme(
             AppThemeReferenceArguments(themeID: theme.id.rawValue)
@@ -1716,6 +1744,7 @@ final class ThemeToolTests: XCTestCase {
         let popover = try XCTUnwrap(material["popover_style"] as? [String: Any])
         XCTAssertEqual(popover["surface_role"] as? String, "panel")
         XCTAssertEqual(popover["glyph_style"] as? String, "classic")
+        XCTAssertEqual(popover["corner_radius"] as? Double, 1)
     }
 
     func testAgentCanAuthorAnUnavailableHistoricalFaceWithAnInstalledFallback() throws {
@@ -1772,12 +1801,21 @@ final class ThemeToolTests: XCTestCase {
                     },
                     "button_style": {
                       "text_transform": "uppercase",
+                      "title_rendering": "pixel_5x6",
                       "font_weight": "bold",
                       "typeface": "serif",
                       "font_family": "Baskerville",
                       "tracking": 0.8,
+                      "font_scale": 1.1,
+                      "minimum_width": 75,
+                      "minimum_height": 23,
+                      "embosses_disabled_title": true,
+                      "antialiases_title": false,
                       "primary_treatment": "outlined",
                       "primary_role": "syntax_type",
+                      "secondary_role": "elevated",
+                      "secondary_hover_role": "panel",
+                      "secondary_shadow": "panel",
                       "primary_border_role": "label",
                       "hover_offset_x": 3,
                       "hover_offset_y": 3,
@@ -1821,12 +1859,21 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(storedPattern.spacing, 36)
         XCTAssertEqual(storedPattern.lineWidth, 1)
         XCTAssertEqual(stored.textTransform, .uppercase)
+        XCTAssertEqual(stored.titleRendering, .pixel5x6)
         XCTAssertEqual(stored.fontWeight, .bold)
         XCTAssertEqual(stored.typeface, .serif)
         XCTAssertEqual(stored.fontFamily, "Baskerville")
         XCTAssertEqual(stored.tracking, 0.8)
+        XCTAssertEqual(stored.fontScale, 1.1)
+        XCTAssertEqual(stored.minimumWidth, 75)
+        XCTAssertEqual(stored.minimumHeight, 23)
+        XCTAssertTrue(stored.embossesDisabledTitle)
+        XCTAssertFalse(stored.antialiasesTitle)
         XCTAssertEqual(stored.primaryTreatment, .outlined)
         XCTAssertEqual(stored.primaryRole, .syntaxType)
+        XCTAssertEqual(stored.secondaryRole, .elevated)
+        XCTAssertEqual(stored.secondaryHoverRole, .panel)
+        XCTAssertEqual(stored.secondaryShadow, .panel)
         XCTAssertEqual(stored.primaryBorderRole, .label)
         XCTAssertEqual(stored.hoverOffsetX, 3)
         XCTAssertEqual(stored.hoverOffsetY, 3)
@@ -1860,10 +1907,18 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(pattern["line_width"] as? Double, 1)
         let button = try XCTUnwrap(material["button_style"] as? [String: Any])
         XCTAssertEqual(button["text_transform"] as? String, "uppercase")
+        XCTAssertEqual(button["title_rendering"] as? String, "pixel_5x6")
         XCTAssertEqual(button["typeface"] as? String, "serif")
         XCTAssertEqual(button["font_family"] as? String, "Baskerville")
+        XCTAssertEqual(button["font_scale"] as? Double, 1.1)
+        XCTAssertEqual(button["minimum_width"] as? Double, 75)
+        XCTAssertEqual(button["minimum_height"] as? Double, 23)
+        XCTAssertEqual(button["embosses_disabled_title"] as? Bool, true)
         XCTAssertEqual(button["primary_treatment"] as? String, "outlined")
         XCTAssertEqual(button["primary_role"] as? String, "syntax_type")
+        XCTAssertEqual(button["secondary_role"] as? String, "elevated")
+        XCTAssertEqual(button["secondary_hover_role"] as? String, "panel")
+        XCTAssertEqual(button["secondary_shadow"] as? String, "panel")
         XCTAssertEqual(button["primary_border_role"] as? String, "label")
         XCTAssertEqual(button["pressed_offset_y"] as? Double, 2)
         XCTAssertEqual(button["collapse_shadow_on_hover"] as? Bool, true)
@@ -1888,8 +1943,13 @@ final class ThemeToolTests: XCTestCase {
                     "material": {
                       "scroller_placement": "leading",
                       "scroller_track_style": "stippled",
+                      "scroller_appearance": "openstep",
+                      "menu_appearance": "openstep",
                       "progress_style": "segmented",
-                      "choice_style": "dropdown"
+                      "choice_style": "double_arrow_popup",
+                      "checkbox_style": "beos_cross",
+                      "toggle_style": "on_off_button",
+                      "choice_height": 16
                     },
                     "chrome": {
                       "title_bar": {
@@ -1917,8 +1977,13 @@ final class ThemeToolTests: XCTestCase {
         let materialPatch = try XCTUnwrap(create.variants?["light"]?.material)
         XCTAssertEqual(materialPatch.scrollerPlacement, "leading")
         XCTAssertEqual(materialPatch.scrollerTrackStyle, "stippled")
+        XCTAssertEqual(materialPatch.scrollerAppearance, "openstep")
+        XCTAssertEqual(materialPatch.menuAppearance, "openstep")
         XCTAssertEqual(materialPatch.progressStyle, "segmented")
-        XCTAssertEqual(materialPatch.choiceStyle, "dropdown")
+        XCTAssertEqual(materialPatch.choiceStyle, "double_arrow_popup")
+        XCTAssertEqual(materialPatch.checkboxStyle, "beos_cross")
+        XCTAssertEqual(materialPatch.toggleStyle, "on_off_button")
+        XCTAssertEqual(materialPatch.choiceHeight, 16)
 
         let result = coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
@@ -1932,8 +1997,13 @@ final class ThemeToolTests: XCTestCase {
         let stored = try XCTUnwrap(theme.variant(.light))
         XCTAssertEqual(stored.material.scrollerPlacement, .leading)
         XCTAssertEqual(stored.material.scrollerTrackStyle, .stippled)
+        XCTAssertEqual(stored.material.scrollerAppearance, .openStep)
+        XCTAssertEqual(stored.material.menuAppearance, .openStep)
         XCTAssertEqual(stored.material.progressStyle, .segmented)
-        XCTAssertEqual(stored.material.choiceStyle, .dropdown)
+        XCTAssertEqual(stored.material.choiceStyle, .doubleArrowPopup)
+        XCTAssertEqual(stored.material.checkboxStyle, .beOSCross)
+        XCTAssertEqual(stored.material.toggleStyle, .onOffButton)
+        XCTAssertEqual(stored.material.choiceHeight, 16)
         XCTAssertEqual(stored.chrome?.titleBar.buttonGlyphStyle, .openStep)
         XCTAssertEqual(stored.chrome?.titleBar.buttonPlacement, .bookends)
         XCTAssertEqual(stored.chrome?.titleBar.visibleButtons, [.minimize, .close])
@@ -1950,8 +2020,13 @@ final class ThemeToolTests: XCTestCase {
         let material = try XCTUnwrap(light["material"] as? [String: Any])
         XCTAssertEqual(material["scroller_placement"] as? String, "leading")
         XCTAssertEqual(material["scroller_track_style"] as? String, "stippled")
+        XCTAssertEqual(material["scroller_appearance"] as? String, "openstep")
+        XCTAssertEqual(material["menu_appearance"] as? String, "openstep")
         XCTAssertEqual(material["progress_style"] as? String, "segmented")
-        XCTAssertEqual(material["choice_style"] as? String, "dropdown")
+        XCTAssertEqual(material["choice_style"] as? String, "double_arrow_popup")
+        XCTAssertEqual(material["checkbox_style"] as? String, "beos_cross")
+        XCTAssertEqual(material["toggle_style"] as? String, "on_off_button")
+        XCTAssertEqual(material["choice_height"] as? Double, 16)
         let chrome = try XCTUnwrap(light["chrome"] as? [String: Any])
         let title = try XCTUnwrap(chrome["title_bar"] as? [String: Any])
         XCTAssertEqual(title["button_glyph_style"] as? String, "openstep")

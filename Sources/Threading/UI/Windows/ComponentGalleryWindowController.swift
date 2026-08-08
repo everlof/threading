@@ -79,6 +79,8 @@ final class ComponentGalleryViewController: NSViewController {
     /// Keeping this explicit makes additions reviewable and gives the tests one place to detect
     /// a story silently disappearing during a refactor.
     static let componentNames: Set<String> = [
+        "AgentActivityBeamView",
+        "AgentWorkSummaryView",
         "BackdropOverlay",
         "BackdropThemedControl",
         "BrowserAnnotationOverlay",
@@ -89,7 +91,13 @@ final class ComponentGalleryViewController: NSViewController {
         "ChipView",
         "ConversationContextRailView",
         "ConversationHandoffView",
+        "ConversationOutboxRailView",
+        "ConversationOutboxRowView",
+        "ScheduledMessageStripView",
+        "ScheduledMessageRowView",
         "CompareInspectorView",
+        "CodeContextPreviewView",
+        "ControlRowView",
         "ExecutionAuditEventView",
         "FileActivityMapView",
         "GlyphView",
@@ -103,6 +111,7 @@ final class ComponentGalleryViewController: NSViewController {
         "NavigatorGridItemView",
         "PaneFooterView",
         "PaneHeaderView",
+        "PaneNoticeView",
         "PromptCompletionPresenter",
         "PromptView",
         "SearchMatchLabel",
@@ -120,11 +129,13 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedButton",
         "ThemedAlert",
         "ThemedCheckbox",
+        "ThemedRadioButton",
         "ThemedClipView",
         "ThemedControl",
         "ThemedDisclosureRow",
         "ThemedFileIconView",
         "ThemedFloatingGlyphView",
+        "ThemedGroupedTableView",
         "ThemedOutlineView",
         "ThemedPopUp",
         "ThemedPopover",
@@ -146,6 +157,8 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSecureField",
         "ThemedTextView",
         "ThemedToggle",
+        "ThemedVirtualTableCell",
+        "ThemedWarningMark",
         "ThemedSurface",
         "ThemedSurfaceView",
         "ThemeRedraw",
@@ -165,6 +178,15 @@ final class ComponentGalleryViewController: NSViewController {
     /// The toast story's presenter, retained so the button beside the pane can send a band into
     /// it more than once.
     private var toastPresenter: ToastPresenter?
+
+    /// The notice story's pane, kept so the band can be put up and taken down after the pass
+    /// that built it — the push it performs is the component, and a still one shows none of it.
+    private var paneNoticeHost: NSView?
+    private var paneNoticeHeaderBottom: NSLayoutYAxisAnchor?
+    private var paneNoticeContent: NSView?
+    private var paneNoticeContentTop: NSLayoutConstraint?
+    private weak var galleryNotice: PaneNoticeView?
+
     private var galleryPopover: ThemedPopover?
     private let galleryCompletionPresenter = PromptCompletionPresenter()
 
@@ -207,8 +229,10 @@ final class ComponentGalleryViewController: NSViewController {
     ]
     private var stripActiveTabID: UUID?
     private let activityMapView = FileActivityMapView()
+    private let galleryActivityBeam = AgentActivityBeamView()
     private var activityDemoFiles: [String] = []
     private var activityDemoCursor = 0
+    private var activityBeamDemoCursor = 2
     private let progressBar = ThemedProgressBar()
     private let progressLabel = NSTextField(labelWithString: "42%")
     private let themeImageView = NSImageView()
@@ -485,6 +509,20 @@ final class ComponentGalleryViewController: NSViewController {
         disabledCheckbox.isEnabled = false
         let checkboxRow = row([checkbox, mixedCheckbox, disabledCheckbox])
 
+        let selectedRadio = ThemedRadioButton(
+            title: L10n.string("On"),
+            state: .on
+        ) { [weak self] _ in
+            self?.showReceipt(L10n.string("On"))
+        }
+        let emptyRadio = ThemedRadioButton(title: L10n.string("Off")) { _ in }
+        let disabledRadio = ThemedRadioButton(
+            title: L10n.string("Unavailable"),
+            state: .on
+        ) { _ in }
+        disabledRadio.isEnabled = false
+        let radioRow = row([selectedRadio, emptyRadio, disabledRadio])
+
         let disclosureTitle = NSTextField(labelWithString: L10n.string("Advanced details"))
         disclosureTitle.applyFont(.control)
         disclosureTitle.textColor = Design.Text.label
@@ -683,6 +721,11 @@ final class ComponentGalleryViewController: NSViewController {
                     checkboxRow
                 ),
                 story(
+                    "ThemedRadioButton",
+                    "Selected, empty, disabled, and radio-group accessibility.",
+                    radioRow
+                ),
+                story(
                     "ThemedDisclosureRow",
                     "A full-width collapsible header with hover, focus, keyboard, and accessibility states.",
                     disclosureStory
@@ -723,6 +766,13 @@ final class ComponentGalleryViewController: NSViewController {
                     groupedActions
                 ),
                 story(
+                    "ControlRowView",
+                    "One height across every control in the row, the two runs held at opposite "
+                        + "edges, and the outer two aligned by ink. The height is the theme's: "
+                        + "switch the style above and every member follows the chooser.",
+                    makeControlRowStory()
+                ),
+                story(
                     "SplitIconButtonView",
                     "One plate, two halves: hover each in turn — the raise stays inside the shared silhouette.",
                     makeSplitButtonStory()
@@ -739,6 +789,20 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    /// The control row story's own width, for the reason the audit row states below: both of the
+    /// row's edges are what it demonstrates, and a row sized to its contents has no gap to hold.
+    private enum ControlRowStory {
+        static let width: CGFloat = 460
+    }
+
+    /// The notice story's pane. Wider than the sidebar's stories because the band it holds is a
+    /// *content* pane's, and at the sidebar's width the sentence would truncate on every theme —
+    /// which is the one state this story is not about.
+    private enum GalleryNotice {
+        static let paneWidth: CGFloat = 560
+        @MainActor static var paneHeight: CGFloat { PaneHeaderView.bandHeight * 3 }
     }
 
     /// The audit story's own measurements. The row is given a width because the ledger's grid is
@@ -901,10 +965,7 @@ final class ComponentGalleryViewController: NSViewController {
 
         renderTabStripStory()
         NSLayoutConstraint.activate([
-            tabStrip.widthAnchor.constraint(equalToConstant: 420),
-            tabStrip.heightAnchor.constraint(
-                equalToConstant: ThemedTabStripView.bandHeight
-            )
+            tabStrip.widthAnchor.constraint(equalToConstant: 420)
         ])
         return tabStrip
     }
@@ -962,6 +1023,68 @@ final class ComponentGalleryViewController: NSViewController {
         }
 
         return row([SplitIconButtonView(action: open, chevron: choose)])
+    }
+
+    /// The compare header's own shape, since that is the row this component was written for: a
+    /// mode chooser, a caption that doubles as the run's compressible member, and the actions at
+    /// the far edge. Given a width because both edges are the point — at the story stack's
+    /// natural width there would be no gap for the runs to hold apart.
+    private func makeControlRowStory() -> NSView {
+        let mode = ChipView()
+        mode.configure(symbolName: "rectangle.split.2x1", title: L10n.string("Wipe ↔"))
+        mode.itemsProvider = {
+            ImageCompareMode.allCases.map { candidate in
+                .item(ThemedMenuItem(
+                    title: ImageCompareView.name(for: candidate),
+                    representedValue: candidate,
+                    isSelected: candidate == .wipeHorizontal
+                ))
+            }
+        }
+        mode.onSelect = { [weak self] item in
+            self?.showReceipt(L10n.format("Pressed %@.", item.title))
+        }
+
+        // localization-ignore: A fixture's two file names, which are data rather than copy.
+        let caption = NSTextField(labelWithString: "one.png → two.png")
+        caption.applyFont(.caption)
+        caption.textColor = Design.Text.secondary
+        caption.lineBreakMode = .byTruncatingMiddle
+        caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        caption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let accept = ThemedButton(
+            title: L10n.string("Accept"),
+            target: self,
+            action: #selector(buttonPressed)
+        )
+        let export = ThemedIconButton(
+            symbolName: "square.and.arrow.up",
+            accessibility: L10n.string("Export comparison"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        export.onPress = { [weak self] in
+            self?.showReceipt(L10n.format("Pressed %@.", L10n.string("Export comparison")))
+        }
+        let expand = ThemedIconButton(
+            symbolName: "arrow.up.left.and.arrow.down.right",
+            accessibility: L10n.string("Open comparison"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        expand.onPress = { [weak self] in
+            self?.showReceipt(L10n.format("Pressed %@.", L10n.string("Open comparison")))
+        }
+
+        let controlRow = ControlRowView(
+            leading: [mode, caption],
+            trailing: [accept, export, expand]
+        )
+        controlRow.widthAnchor.constraint(
+            equalToConstant: ControlRowStory.width
+        ).isActive = true
+        return row([controlRow])
     }
 
     private func galleryToolbarButton(symbol: String, label: String) -> ThemedIconButton {
@@ -1110,6 +1233,75 @@ final class ComponentGalleryViewController: NSViewController {
             self?.showReceipt(L10n.format("Removed %@ from the prompt.", attachment.title))
         }
 
+        // Three states at once, because the difference between them is the whole component: two
+        // waiting rows the user can still reorder and edit, and one already handed to the agent
+        // that they cannot.
+        // Three states at once again, and the third is the point: a row simply waiting for
+        // its moment, one whose session stayed busy, and one the clock passed while the app was
+        // closed. Only the last two offer Send now — a schedule doing what it was asked to needs
+        // no rescue.
+        let scheduledStrip = ScheduledMessageStripView()
+        var scheduledRows: [ScheduledMessageStripView.Row] = [
+            ScheduledMessageStripView.Row(
+                id: ScheduledMessageID(),
+                summary: "Pick the importer back up where we left it.",
+                timing: "tomorrow 09:00 · in 16h",
+                problem: nil
+            ),
+            ScheduledMessageStripView.Row(
+                id: ScheduledMessageID(),
+                summary: "Run the full suite before you write the note.",
+                timing: "13:20 · in 2h",
+                problem: "Waiting for the session to be free"
+            ),
+            ScheduledMessageStripView.Row(
+                id: ScheduledMessageID(),
+                summary: "Draft the release note for the scheduling work.",
+                timing: "09:00 · in 1d",
+                problem: "Missed while Threading was closed"
+            )
+        ]
+        scheduledStrip.setRows(scheduledRows)
+        scheduledStrip.onRemove = { id in
+            scheduledRows.removeAll { $0.id == id }
+            scheduledStrip.setRows(scheduledRows)
+        }
+
+        let outboxRail = ConversationOutboxRailView()
+        var outboxRows: [ConversationOutboxRailView.Row] = [
+            ConversationOutboxRailView.Row(
+                id: ConversationMessageID(),
+                summary: "Then run the tests and fix whatever fails.",
+                state: .started
+            ),
+            ConversationOutboxRailView.Row(
+                id: ConversationMessageID(),
+                summary: "Add a rendered-state test for the new rail.",
+                state: .queued
+            ),
+            ConversationOutboxRailView.Row(
+                id: ConversationMessageID(),
+                summary: "Update the architecture note when it settles.",
+                state: .queued
+            )
+        ]
+        outboxRail.setRows(outboxRows)
+        outboxRail.onMove = { [weak self] from, to in
+            let pending = outboxRows.indices.filter { outboxRows[$0].state.isPending }
+            guard pending.indices.contains(from), pending.indices.contains(to) else { return }
+            outboxRows.swapAt(pending[from], pending[to])
+            outboxRail.setRows(outboxRows)
+            self?.showReceipt(L10n.string("Reordered the queue."))
+        }
+        outboxRail.onRemove = { [weak self] id in
+            outboxRows.removeAll { $0.id == id }
+            outboxRail.setRows(outboxRows)
+            self?.showReceipt(L10n.string("Removed a queued message."))
+        }
+        outboxRail.onEdit = { [weak self] _ in
+            self?.showReceipt(L10n.string("Opened a queued message for editing."))
+        }
+
         // Armed, it swallows key equivalents, so a chord that is already a menu shortcut can be
         // pressed here and captured rather than firing its command — which is the behaviour worth
         // being able to try by hand.
@@ -1181,6 +1373,21 @@ final class ComponentGalleryViewController: NSViewController {
                     "ConversationContextRailView",
                     "Reference and comment receipts. Open either chip to comment or remove it.",
                     contextRail
+                ),
+                story(
+                    "ConversationOutboxRailView",
+                    "Messages waiting to be sent. Drag a waiting row to reorder it, click one to "
+                        + "edit it, ⌘↑/⌘↓ from the keyboard. The row already handed to the agent "
+                        + "offers neither, because it is no longer ours to withdraw.",
+                    outboxRail
+                ),
+                story(
+                    "ScheduledMessageStripView",
+                    "Messages waiting for a later moment, above the queue waiting only for this "
+                        + "turn. Ordered by the clock rather than by hand, so no row drags — "
+                        + "click one to open it, ✕ to unschedule it, and Send now where the "
+                        + "clock has stopped being the thing to say.",
+                    scheduledStrip
                 )
             ]
         )
@@ -1273,9 +1480,29 @@ final class ComponentGalleryViewController: NSViewController {
                     row([activityMapView, activityButtons])
                 ),
                 story(
+                    "AgentWorkSummaryView",
+                    "The detailed, bounded project aggregate behind a sidebar workprint: the "
+                        + "repository atlas, action ribbon, counts, and recent agents share one "
+                        + "stable file axis even when the checkout has thousands of files.",
+                    makeAgentWorkSummarySample()
+                ),
+                story(
+                    "AgentActivityBeamView",
+                    "The System-theme activity ring around a live surface. Cycle idle, one agent, "
+                        + "and three agents at top effort; styled themes intentionally decline it.",
+                    makeAgentActivityBeamSample()
+                ),
+                story(
                     "SeparatorView",
                     "Horizontal and vertical orientations use the theme’s divider and border weight.",
                     row([horizontal, vertical])
+                ),
+                story(
+                    "ThemedWarningMark",
+                    "A stop nobody typed — the mark a session wears when its account’s usage "
+                        + "limit is spent. Negative and warning roles, and corners taken from "
+                        + "the theme: square a style’s panels and this squares with them.",
+                    row(warningMarkSamples())
                 ),
                 story(
                     "GlyphView",
@@ -1330,6 +1557,25 @@ final class ComponentGalleryViewController: NSViewController {
 
     /// One glyph per role, plus foreign artwork under the slot cap — the three ways the view
     /// is used in the app's own chrome.
+    /// Both roles, each beside the session mark it is ranked against, since the whole argument
+    /// for a triangle is that it does not read as a third dot.
+    private func warningMarkSamples() -> [NSView] {
+        let negative = ThemedWarningMark()
+        negative.setAccessibilityLabel(L10n.string("Session stopped at its usage limit"))
+
+        let warning = ThemedWarningMark()
+        warning.severity = .warning
+        warning.setAccessibilityLabel(L10n.string("Session needs attention"))
+
+        let blocked = SessionStatusIndicator()
+        blocked.update(for: .awaitingUser)
+
+        let unread = SessionStatusIndicator()
+        unread.update(for: .needsAttention)
+
+        return [negative, warning, blocked, unread]
+    }
+
     private func glyphSamples() -> [NSView] {
         let inline = GlyphView()
         inline.image = Design.Symbol.image(
@@ -1365,7 +1611,8 @@ final class ComponentGalleryViewController: NSViewController {
             ("circle.fill", .status),
             ("plusminus", .changes),
             ("cpu", .model),
-            ("list.bullet.rectangle", .plan)
+            ("list.bullet.rectangle", .plan),
+            ("bolt.fill", .speed)
         ]
         return marks.map { symbolName, classicGlyph in
             let mark = ThemedFloatingGlyphView(
@@ -1488,6 +1735,28 @@ final class ComponentGalleryViewController: NSViewController {
         outline.reloadData()
         outline.expandItem(nil, expandChildren: true)
 
+        let groupedTable = ThemedGroupedTableView()
+        let groupedColumn = column("virtual", title: "Virtual rows", width: 420)
+        groupedColumn.resizingMask = .autoresizingMask
+        groupedTable.addTableColumn(groupedColumn)
+        groupedTable.headerView = nil
+        groupedTable.style = .plain
+        groupedTable.selectionHighlightStyle = .none
+        groupedTable.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        groupedTable.intercellSpacing = .zero
+        groupedTable.rowHeight = 48
+        groupedTable.usesAutomaticRowHeights = true
+        groupedTable.delegate = tableModel
+        groupedTable.dataSource = tableModel
+        groupedTable.cardDecorations = [ThemedTableCardDecoration(rows: 0...3)]
+
+        let groupedScroll = ThemedScrollView()
+        groupedScroll.documentView = groupedTable
+        groupedScroll.hasVerticalScroller = true
+        groupedScroll.translatesAutoresizingMaskIntoConstraints = false
+        groupedScroll.heightAnchor.constraint(equalToConstant: 156).isActive = true
+        groupedTable.reloadData()
+
         return section(
             "Data containers",
             note: "The table, outline, header, scroll, and clip boundaries are real AppKit views.",
@@ -1529,6 +1798,20 @@ final class ComponentGalleryViewController: NSViewController {
                     tableScroll
                 ),
                 story(
+                    "ThemedGroupedTableView & ThemedVirtualTableCell",
+                    "One continuous themed card whose repeating rows are recycled at the "
+                        + "viewport boundary. Scroll it to exercise real cell reuse rather than "
+                        + "a retained stack disguised as a list.",
+                    groupedScroll
+                ),
+                story(
+                    "CodeContextPreviewView",
+                    "A bounded diff-shaped slice for a code comment: target rows keep their "
+                        + "marker, additions and removals keep theirs, and a large source never "
+                        + "turns into a large sheet.",
+                    makeCodeContextPreviewSample()
+                ),
+                story(
                     "ThemedOutlineView",
                     "Expand, collapse, select, and scroll a hierarchy — selected rows themed by "
                         + "the same row view the table above uses.",
@@ -1557,7 +1840,8 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThreadingMarkView",
                     "The Threading mark drawn live: brand threads under System, the theme's "
                         + "accent under a style. Rest, then Weave, Breathe and Orbit from left "
-                        + "to right; preview the hover motion or replay the launch stitch.",
+                        + "to right; Preview holds Weave through its box turn, while Replay "
+                        + "shows the launch stitch.",
                     makeThreadingMarkSample()
                 ),
                 story(
@@ -1583,6 +1867,15 @@ final class ComponentGalleryViewController: NSViewController {
                     makePaneHeaderSample()
                 ),
                 story(
+                    "PaneNoticeView",
+                    "The pane's third band: a standing condition it found on its own, with the "
+                        + "ways to answer it and the way out on the same line. Press Show to put "
+                        + "one up — the content below moves down by the band's height rather "
+                        + "than disappearing under it. Restore and ✕ both take it away; a notice "
+                        + "waits as long as it takes to be read, since nobody clicked for it.",
+                    makePaneNoticeSample()
+                ),
+                story(
                     "ToastView",
                     "A receipt for something already done, with the way back on it. Press Show "
                         + "to send one into the pane below: it slides in above the footer, holds "
@@ -1595,6 +1888,133 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    private func makeAgentWorkSummarySample() -> NSView {
+        let now = Date()
+        let files = (0..<2_400).map { index in
+            "Sources/Feature\(index / 120)/Area\(index / 24)/file-\(index).swift"
+        }
+        let atlas = RepositoryFileAtlas(files: files)
+        let firstID = SessionID()
+        let secondID = SessionID()
+        var first = AgentSessionWorkTrace()
+        first.sessionTitle = L10n.string("Refactor sidebar")
+        first.agentLabel = "Codex"
+        var second = AgentSessionWorkTrace()
+        second.sessionTitle = L10n.string("Harden tests")
+        second.agentLabel = "Claude"
+
+        for index in stride(from: 90, through: 1_080, by: 19) {
+            _ = first.recordFile(
+                .read,
+                path: files[index],
+                root: nil,
+                at: now.addingTimeInterval(-TimeInterval(index % 70))
+            )
+            if index.isMultiple(of: 3) {
+                _ = first.recordFile(
+                    .edit,
+                    path: files[index],
+                    root: nil,
+                    at: now.addingTimeInterval(-TimeInterval(index % 35))
+                )
+            }
+        }
+        for index in stride(from: 720, through: 1_900, by: 29) {
+            _ = second.recordFile(
+                .edit,
+                path: files[index],
+                root: nil,
+                at: now.addingTimeInterval(-TimeInterval(index % 60))
+            )
+        }
+        for index in 0..<12 {
+            first.recordAction(
+                category: index.isMultiple(of: 3) ? .shell : .filesystem,
+                operation: index.isMultiple(of: 3) ? "exec" : "Read",
+                at: now.addingTimeInterval(-TimeInterval(index * 3)),
+                sessionID: firstID
+            )
+            second.recordAction(
+                category: index.isMultiple(of: 4) ? .subagent : .network,
+                operation: index.isMultiple(of: 4) ? "Agent" : "WebSearch",
+                at: now.addingTimeInterval(-TimeInterval(index * 4 + 1)),
+                sessionID: secondID
+            )
+        }
+
+        let traces = [firstID: first, secondID: second]
+        let presentation = AgentWorkPresentation.project(
+            AgentProjectWorkAggregate(traces: traces),
+            traces: traces,
+            projectID: ProjectID(),
+            atlas: atlas,
+            detailed: true
+        )
+        let summary = AgentWorkSummaryView()
+        summary.setClock { now }
+        summary.setPresentation(presentation)
+        return summary
+    }
+
+    private func makeAgentActivityBeamSample() -> NSView {
+        let surface = ThemedSurfaceView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        surface.applySurface(
+            fill: Design.Surface.panel,
+            radius: .panel,
+            border: Design.Surface.border
+        )
+        surface.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        surface.heightAnchor.constraint(equalToConstant: 72).isActive = true
+
+        let label = NSTextField(labelWithString: L10n.string("Three agents are working"))
+        label.applyFont(.emphasizedBody)
+        label.textColor = Design.Text.label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(label)
+        surface.addSubview(galleryActivityBeam)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: surface.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: surface.centerYAnchor),
+            galleryActivityBeam.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            galleryActivityBeam.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            galleryActivityBeam.topAnchor.constraint(equalTo: surface.topAnchor),
+            galleryActivityBeam.bottomAnchor.constraint(equalTo: surface.bottomAnchor)
+        ])
+        galleryActivityBeam.update(
+            workload: AgentWorkload(workingCount: 3, anyAtTopEffort: true)
+        )
+        let cycle = button("Cycle workload", action: #selector(cycleActivityBeam))
+        return row([surface, cycle])
+    }
+
+    private func makeCodeContextPreviewSample() -> NSView {
+        let lines = [
+            "func render(_ project: Project) {",
+            "    let agents = project.activeAgents",
+            "    sidebar.show(work: agents)",
+            "    sidebar.refreshSelection()",
+            "    metrics.record(agents.count)",
+            "}"
+        ]
+        let preview = CodeContextPreview.make(
+            totalLineCount: lines.count,
+            target: 2...3
+        ) { index in
+            let change: CodeContextPreview.Change = index == 2
+                ? .added
+                : (index == 4 ? .removed : .context)
+            return CodeContextPreview.SourceLine(
+                number: index + 1,
+                change: change,
+                text: lines[index]
+            )
+        }!
+        let view = CodeContextPreviewView(preview: preview)
+        view.widthAnchor.constraint(equalToConstant: 560).isActive = true
+        return view
     }
 
     /// The toast in the pane it is used in rather than on its own, because both things this
@@ -1861,6 +2281,107 @@ final class ComponentGalleryViewController: NSViewController {
         return pane
     }
 
+    /// The notice in the position it ships in rather than on its own, because the thing it has to
+    /// get right is a relationship: it is stacked between a pane's header and the pane's content,
+    /// and it **pushes** that content down instead of covering it. Driven rather than looked at —
+    /// a still picture of a band cannot say whether what was underneath moved.
+    private func makePaneNoticeSample() -> NSView {
+        let title = NSTextField(labelWithString: L10n.string("Session"))
+        title.applyFont(.control)
+        let header = PaneHeaderView(leading: [title])
+
+        let content = NSTextField(labelWithString: L10n.string("The pane's content."))
+        content.applyFont(.control)
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(header)
+        pane.addSubview(content)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: GalleryNotice.paneWidth),
+            pane.heightAnchor.constraint(equalToConstant: GalleryNotice.paneHeight),
+            header.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            header.topAnchor.constraint(equalTo: pane.topAnchor),
+            content.leadingAnchor.constraint(
+                equalTo: pane.leadingAnchor,
+                constant: Design.Spacing.medium
+            )
+        ])
+
+        paneNoticeHost = pane
+        paneNoticeHeaderBottom = header.bottomAnchor
+        paneNoticeContent = content
+        pinPaneNoticeContent(to: header.bottomAnchor)
+
+        let show = ThemedButton()
+        show.title = L10n.string("Show")
+        show.applyFont(.controlRegular)
+        show.target = self
+        show.action = #selector(showGalleryNotice(_:))
+
+        let row = NSStackView(views: [pane, show])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = Design.Spacing.inset
+        return row
+    }
+
+    /// The band the launch after a crash puts up, built with the copy that ships rather than a
+    /// second version of it that could drift.
+    @objc private func showGalleryNotice(_ sender: NSControl) {
+        guard let host = paneNoticeHost, let anchor = paneNoticeHeaderBottom else { return }
+        dismissGalleryNotice()
+
+        let notice = PaneNoticeView(
+            tone: .attention,
+            message: L10n.string(
+                "Threading quit unexpectedly last time. Its open session and browser windows were not reopened."
+            ),
+            actions: [
+                PaneNoticeAction(title: L10n.string("Restore")) { [weak self] in
+                    self?.dismissGalleryNotice()
+                },
+                PaneNoticeAction(title: L10n.string("Show Crash Report"), emphasis: .tertiary) {
+                    [weak self] in self?.showReceipt(L10n.string("Show Crash Report"))
+                }
+            ],
+            onDismiss: { [weak self] in self?.dismissGalleryNotice() }
+        )
+
+        host.addSubview(notice)
+        NSLayoutConstraint.activate([
+            notice.topAnchor.constraint(equalTo: anchor),
+            notice.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            notice.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        galleryNotice = notice
+        pinPaneNoticeContent(to: notice.bottomAnchor)
+    }
+
+    private func dismissGalleryNotice() {
+        guard let galleryNotice, let anchor = paneNoticeHeaderBottom else { return }
+        galleryNotice.removeFromSuperview()
+        self.galleryNotice = nil
+        pinPaneNoticeContent(to: anchor)
+    }
+
+    /// The pane's content hangs off whichever band is currently its top edge, which is the whole
+    /// of "pushes rather than covers" — the same single re-pinned constraint the real pane uses.
+    private func pinPaneNoticeContent(to anchor: NSLayoutYAxisAnchor) {
+        guard let paneNoticeContent else { return }
+        paneNoticeContentTop?.isActive = false
+        let constraint = paneNoticeContent.topAnchor.constraint(
+            equalTo: anchor,
+            constant: Design.Spacing.medium
+        )
+        constraint.isActive = true
+        paneNoticeContentTop = constraint
+    }
+
     /// The sidebar's own ground, at gallery scale — and beside it the plain view it replaced, so
     /// the appearance toggle above shows the difference rather than describing it.
     /// The sidebar footer's shape at the sidebar's width: the titled Settings button alone at
@@ -1911,7 +2432,9 @@ final class ComponentGalleryViewController: NSViewController {
     /// inspection size here; the real sidebar exercises Weave at 24pt.
     private func makeThreadingMarkSample() -> NSView {
         let small = ThreadingMarkView()
-        let particleMarks = ThreadingMarkParticleMotion.allCases.map(ThreadingMarkView.init)
+        let particleMarks = ThreadingMarkParticleMotion.allCases.map {
+            ThreadingMarkView(particleMotion: $0)
+        }
 
         var constraints = [
             small.widthAnchor.constraint(equalToConstant: 20),
@@ -2483,6 +3006,25 @@ final class ComponentGalleryViewController: NSViewController {
         showReceipt(L10n.format("%@ pressed · %lld total.", name, Int64(clickCount)))
     }
 
+    @objc private func cycleActivityBeam() {
+        activityBeamDemoCursor = (activityBeamDemoCursor + 1) % 3
+        let workload: AgentWorkload
+        let sentence: String
+        switch activityBeamDemoCursor {
+        case 0:
+            workload = .none
+            sentence = L10n.string("Activity beam is idle.")
+        case 1:
+            workload = AgentWorkload(workingCount: 1, anyAtTopEffort: false)
+            sentence = L10n.string("Activity beam shows one working agent.")
+        default:
+            workload = AgentWorkload(workingCount: 3, anyAtTopEffort: true)
+            sentence = L10n.string("Activity beam shows three agents, including top effort.")
+        }
+        galleryActivityBeam.update(workload: workload)
+        showReceipt(sentence)
+    }
+
     @objc private func showGalleryAlert(_ sender: ThemedButton) {
         let alert = ThemedAlert()
         alert.messageText = L10n.string("Presentation chrome")
@@ -2965,60 +3507,24 @@ final class ComponentGalleryViewController: NSViewController {
             band.heightAnchor.constraint(equalToConstant: squares.bandHeight)
         ])
 
-        let platinumChrome = AppThemeStyles.platinum.variant(.light)?.chrome
-        precondition(platinumChrome != nil, "the stock Platinum theme must state window chrome")
-        let platinum = WindowChromeAppearance.resolved(from: platinumChrome!)
-        let platinumBand = WindowTitleBandView()
-        platinumBand.fixtureStyle = platinum
-        platinumBand.setTitle(AppInfo.name)
-        NSLayoutConstraint.activate([
-            platinumBand.widthAnchor.constraint(equalToConstant: 420),
-            platinumBand.heightAnchor.constraint(equalToConstant: platinum.bandHeight)
-        ])
-
-        let beOSChrome = AppThemeStyles.beOS.variant(.light)?.chrome
-        precondition(beOSChrome != nil, "the stock BeOS theme must state window chrome")
-        let beOS = WindowChromeAppearance.resolved(from: beOSChrome!)
-        let beOSBand = WindowTitleBandView()
-        beOSBand.fixtureStyle = beOS
-        beOSBand.setTitle(AppInfo.name)
-        NSLayoutConstraint.activate([
-            beOSBand.widthAnchor.constraint(equalToConstant: 420),
-            beOSBand.heightAnchor.constraint(equalToConstant: beOS.bandHeight)
-        ])
-
-        let openStepChrome = AppThemeStyles.openStep.variant(.light)?.chrome
-        precondition(openStepChrome != nil, "the stock OPENSTEP theme must state window chrome")
-        let openStep = WindowChromeAppearance.resolved(from: openStepChrome!)
-        let openStepBand = WindowTitleBandView()
-        openStepBand.fixtureStyle = openStep
-        openStepBand.setTitle(AppInfo.name)
-        NSLayoutConstraint.activate([
-            openStepBand.widthAnchor.constraint(equalToConstant: 420),
-            openStepBand.heightAnchor.constraint(equalToConstant: openStep.bandHeight)
-        ])
-
-        let irixChrome = AppThemeStyles.irix.variant(.light)?.chrome
-        precondition(irixChrome != nil, "the stock IRIX theme must state window chrome")
-        let irix = WindowChromeAppearance.resolved(from: irixChrome!)
-        let irixBand = WindowTitleBandView()
-        irixBand.fixtureStyle = irix
-        irixBand.setTitle(AppInfo.name)
-        NSLayoutConstraint.activate([
-            irixBand.widthAnchor.constraint(equalToConstant: 420),
-            irixBand.heightAnchor.constraint(equalToConstant: irix.bandHeight)
-        ])
-
-        let amigaChrome = AppThemeStyles.amiga.variant(.light)?.chrome
-        precondition(amigaChrome != nil, "the stock Amiga theme must state window chrome")
-        let amiga = WindowChromeAppearance.resolved(from: amigaChrome!)
-        let amigaBand = WindowTitleBandView()
-        amigaBand.fixtureStyle = amiga
-        amigaBand.setTitle("hd02  50% full, 2,047M free, 2,048M in use")
-        NSLayoutConstraint.activate([
-            amigaBand.widthAnchor.constraint(equalToConstant: 420),
-            amigaBand.heightAnchor.constraint(equalToConstant: amiga.bandHeight)
-        ])
+        // Every stock takeover theme's real band, driven by the model's own list rather
+        // than restated by hand — this section had already drifted once (Aqua and Tiger
+        // were absent) while it named each theme itself. A new takeover theme appears
+        // here by existing.
+        let takeoverBands: [NSView] = AppThemeStyles.takeovers.map { theme in
+            let chrome = theme.variant(.light)?.chrome
+                ?? theme.variants.values.compactMap(\.chrome).first
+            precondition(chrome != nil, "a takeover theme must state window chrome")
+            let resolved = WindowChromeAppearance.resolved(from: chrome!)
+            let themeBand = WindowTitleBandView()
+            themeBand.fixtureStyle = resolved
+            themeBand.setTitle(Self.chromeStoryTitle(for: theme))
+            NSLayoutConstraint.activate([
+                themeBand.widthAnchor.constraint(equalToConstant: 420),
+                themeBand.heightAnchor.constraint(equalToConstant: resolved.bandHeight)
+            ])
+            return themeBand
+        }
 
         let plain = style(.plain)
         let plainButtons = NSStackView(views: [
@@ -3054,7 +3560,7 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         let bandRow = NSStackView(
-            views: [band, platinumBand, beOSBand, openStepBand, irixBand, amigaBand, backplate]
+            views: [band] + takeoverBands + [backplate]
         )
         bandRow.orientation = .vertical
         bandRow.alignment = .leading
@@ -3099,6 +3605,15 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    /// Demo titles are presentation, not vocabulary. Workbench titled its windows with disk
+    /// gauges, and generalising the band list must not flatten that into the app's name —
+    /// the gallery should stay as characterful as the systems it reproduces.
+    private static func chromeStoryTitle(for theme: AppTheme) -> String {
+        theme.id == AppThemeStyles.amiga.id
+            ? "hd02  50% full, 2,047M free, 2,048M in use"
+            : AppInfo.name
     }
 
     private func section(_ title: String, note: String, rows: [NSView]) -> NSView {
@@ -3283,10 +3798,46 @@ private final class ComponentGalleryTableModel: NSObject,
         row: Int
     ) -> NSView? {
         guard let tableColumn, rows.indices.contains(row) else { return nil }
+        if tableView is ThemedGroupedTableView {
+            let identifier = NSUserInterfaceItemIdentifier("GalleryVirtualRow")
+            let host = tableView.makeView(
+                withIdentifier: identifier,
+                owner: self
+            ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+            host.identifier = identifier
+            host.install(
+                groupedContent(for: rows[row]),
+                columnWidth: tableColumn.width,
+                horizontalInset: Design.Size.glowGutter,
+                topInset: row == 0 ? Design.Spacing.small : 0,
+                bottomInset: row == rows.count - 1 ? Design.Spacing.small : 0
+            )
+            return host
+        }
         let value = tableColumn.identifier.rawValue == "component"
             ? rows[row].component
             : rows[row].state
         return cell(value)
+    }
+
+    private func groupedContent(for row: TableRow) -> NSView {
+        let title = NSTextField(labelWithString: row.component)
+        title.applyFont(.emphasizedBody)
+        title.textColor = Design.Text.label
+        let detail = NSTextField(labelWithString: row.state)
+        detail.applyFont(.subheading)
+        detail.textColor = Design.Text.secondary
+        let stack = NSStackView(views: [title, detail])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.tight
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.inset
+        )
+        return stack
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {

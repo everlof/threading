@@ -31,7 +31,8 @@ final class PaneHeaderRenderTests: XCTestCase {
         static let themes: [(name: String, theme: AppTheme)] = [
             ("system", .system),
             ("cyberpunk", AppThemeStyles.cyberpunk),
-            ("swiss", AppThemeStyles.swissMinimalist)
+            ("swiss", AppThemeStyles.swissMinimalist),
+            ("bauhaus", AppThemeStyles.bauhaus)
         ]
     }
 
@@ -66,8 +67,8 @@ final class PaneHeaderRenderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// The sidebar header's exact shape: the brand row at the leading edge, the add and
-    /// arrangement controls at the trailing one.
+    /// The sidebar header's exact shape: the brand row at the leading edge, the list's add
+    /// and arrangement controls at the trailing one.
     private func headerImage(appearance name: NSAppearance.Name) -> Data? {
         let appearance = NSAppearance(named: name)
 

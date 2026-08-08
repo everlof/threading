@@ -106,6 +106,7 @@ extension AppThemeStyles {
                 scrollerTrackStyle: .stippled,
                 scrollerAppearance: .amiga,
                 menuAppearance: .amiga,
+                progressStyle: .amiga,
                 choiceStyle: .cycle,
                 checkboxStyle: .recessedTick
             ),

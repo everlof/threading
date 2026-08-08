@@ -136,11 +136,25 @@ final class ToastTests: XCTestCase {
     }
 
     /// A toast with nothing to offer is a receipt, and must not grow an empty control row.
-    func testAToastWithoutAnActionDrawsNoButton() {
+    ///
+    /// It still has a way out, and the band is still tall enough to hold it: one short line of
+    /// text is shorter than the ✕ beside it, so without a floor the corner control would hang out
+    /// of the card it belongs to.
+    func testAToastWithoutAnActionDrawsNoButton() throws {
         let toast = ToastView(request: ToastRequest(message: "Archived “Parser”"))
 
         XCTAssertTrue(buttons(in: toast).isEmpty)
         XCTAssertFalse(toast.request.hasAction)
+
+        toast.frame = NSRect(x: 0, y: 0, width: 220, height: 0)
+        toast.frame.size.height = toast.fittingSize.height
+        toast.layoutSubtreeIfNeeded()
+
+        let close = try XCTUnwrap(iconButtons(in: toast).first)
+        XCTAssertTrue(
+            toast.bounds.contains(close.frame),
+            "the way out hangs off a band with only one line on it"
+        )
     }
 
     /// The band takes no focus and leaves by itself, so its accessible name is the only thing
@@ -659,7 +673,456 @@ final class ToastTests: XCTestCase {
         XCTAssertEqual(host.subviews.count, 1, "an edge was left standing behind nothing")
     }
 
+    // MARK: - The way out
+
+    /// The ✕ is a real control, for the reason the way back is one: it is what gives the way out
+    /// a keyboard route and an accessible name without this view stating either.
+    ///
+    /// It is also **not** hidden until the pointer arrives, which is a tab's grammar and the wrong
+    /// one here — hovering this band stops its clock, so a ✕ that had to be discovered by hovering
+    /// would answer "make this go away" by making it stay.
+    func testTheBandCarriesAWayOutBesideTheWayBack() throws {
+        let toast = ToastView(request: archiveRequest())
+        let close = try XCTUnwrap(iconButtons(in: toast).first)
+
+        XCTAssertFalse(close.isHidden, "the way out has to be found before it can be pressed")
+        XCTAssertTrue(close.isAccessibilityElement())
+        XCTAssertTrue(close.canBecomeKeyView || close.acceptsFirstResponder)
+        XCTAssertEqual(close.accessibilityIdentifier(), "sidebar.toast.archive.dismiss")
+        XCTAssertEqual(
+            close.accessibilityTitle(),
+            L10n.string("Dismiss"),
+            "VoiceOver is told what the mark in the corner does"
+        )
+    }
+
+    /// **Pressing the ✕ takes the band and nothing else.** The receipt's own action is the one
+    /// thing on it that changes the world back, and a way out that ran it would archive-and-undo
+    /// on a gesture that means neither.
+    func testTheWayOutTakesTheBandWithoutRunningItsAction() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        var undone = 0
+        presenter.present(archiveRequest(undo: { undone += 1 }))
+        let toast = try XCTUnwrap(presenter.current)
+        try XCTUnwrap(iconButtons(in: toast).first).onPress?()
+
+        XCTAssertEqual(undone, 0, "the way out took the way back with it")
+        XCTAssertNil(presenter.current)
+        XCTAssertFalse(host.subviews.contains { $0 is ToastView })
+        presenter.invalidate()
+    }
+
+    /// The message stops short of the ✕ and the fine print runs underneath it, rather than the
+    /// whole text block being held to the narrower column: only the first line is beside the mark,
+    /// and 26 points off every line of a 240-point receipt is a paragraph reflowed for a corner.
+    func testTheWordsClearTheWayOutAndTheDetailRunsUnderIt() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        let close = try XCTUnwrap(iconButtons(in: toast).first)
+        let labels = descendants(of: toast).compactMap { $0 as? NSTextField }
+        let message = try XCTUnwrap(labels.first { $0.stringValue.contains("Refactor") })
+        let detail = try XCTUnwrap(labels.first { $0.stringValue.contains("Settings") })
+
+        XCTAssertLessThanOrEqual(
+            message.frame.maxX,
+            close.frame.minX,
+            "the message runs under the mark in the corner"
+        )
+        XCTAssertGreaterThan(
+            detail.frame.maxX,
+            message.frame.maxX,
+            "the fine print was reflowed to clear a button it passes below"
+        )
+        // The band is not flipped, so "under the ✕" is a smaller y: the detail's top edge stands
+        // at or below the button's bottom one.
+        XCTAssertLessThanOrEqual(
+            detail.frame.maxY,
+            close.frame.minY,
+            "the detail starts beside the ✕ instead of under it"
+        )
+        presenter.invalidate()
+    }
+
+    /// **Each line is wrapped against the width it actually has.** A receipt names a session, and
+    /// a session's name is as long as the user made it — so the band wraps. One wrap width derived
+    /// from the band's own bounds stopped being right the moment the ✕ took 26 points off the
+    /// message and none off the detail: the message believed it had room it did not have, laid
+    /// itself out as a single line, and the band clipped the rest. It read “Archived “Refactor”,
+    /// with the session's name simply missing and nothing in any assertion to say so.
+    func testEachLineIsWrappedAgainstTheWidthItActuallyHas() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “Refactor the parser front to back”"))
+        let toast = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        let labels = descendants(of: toast).compactMap { $0 as? NSTextField }
+        let message = try XCTUnwrap(labels.first { $0.stringValue.contains("Refactor") })
+        let detail = try XCTUnwrap(labels.first { $0.stringValue.contains("Settings") })
+
+        for label in [message, detail] {
+            XCTAssertEqual(
+                label.preferredMaxLayoutWidth,
+                label.frame.width,
+                accuracy: 0.5,
+                "measured against a width the band never gave it, so it clips instead of wrapping"
+            )
+        }
+
+        let line = try XCTUnwrap(message.font).boundingRectForFont.height
+        XCTAssertGreaterThan(
+            message.frame.height,
+            line * 1.5,
+            "a message too long for the column was laid out on one line and cut off"
+        )
+        presenter.invalidate()
+    }
+
+    /// **The band is as tall as the text it draws, in every face a theme can put on it.** The bug
+    /// this pins was a font rather than a layout: `intrinsicContentSize` and the cell that actually
+    /// typesets a label can disagree about whether a string wraps, and at a width it very nearly
+    /// fits they do. Under Claymorphism's rounded face the same receipt reported 175 points on one
+    /// line — inside the 178 it had — while the cell broke it in two at exactly 178. The band was
+    /// built one line tall and clipped the rest, and every assertion about widths and insets
+    /// passed while the session's name was missing from the picture.
+    func testTheBandIsAsTallAsTheTextItDrawsUnderEveryStockTheme() throws {
+        let themes: [(name: String, theme: AppTheme)] = [
+            ("system", .system),
+            ("cyberpunk", AppThemeStyles.cyberpunk),
+            ("swiss", AppThemeStyles.swissMinimalist),
+            ("claymorphism", AppThemeStyles.claymorphism),
+            ("win98", AppThemeStyles.win98)
+        ]
+        defer { AppThemePalette.set(.system) }
+
+        for (name, theme) in themes {
+            AppThemePalette.set(theme)
+            let (host, bottom, _) = pane()
+            let presenter = ToastPresenter(host: host, above: bottom)
+            presenter.dwell = 30
+
+            presenter.present(archiveRequest())
+            let toast = try XCTUnwrap(presenter.current)
+            host.layoutSubtreeIfNeeded()
+
+            for label in descendants(of: toast).compactMap({ $0 as? NSTextField }) {
+                let drawn = try XCTUnwrap(label.cell).cellSize(
+                    forBounds: NSRect(
+                        x: 0,
+                        y: 0,
+                        width: label.frame.width,
+                        height: .greatestFiniteMagnitude
+                    )
+                ).height
+                XCTAssertGreaterThanOrEqual(
+                    label.frame.height,
+                    drawn - 0.5,
+                    "\(name) draws “\(label.stringValue)” taller than the room it was given"
+                )
+            }
+            presenter.invalidate()
+        }
+    }
+
+    // MARK: - The throw
+
+    /// A push that stops short of the commit point is not a throw: the band goes back exactly
+    /// where the presenter put it, because a receipt nudged by a hand on its way past must not be
+    /// left sitting an inch out of the corner it belongs in.
+    func testAShortPushSpringsTheBandBackWhereItWas() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+
+        toast.carryBegan()
+        toast.carryChanged(to: 20, at: 0)
+        toast.carryChanged(to: 30, at: 1)
+        toast.carryEnded()
+
+        XCTAssertEqual(presenter.current, toast, "a nudge threw the band away")
+        XCTAssertEqual(toast.carryOffset, 0, "the band was left standing where it was pushed to")
+        presenter.invalidate()
+    }
+
+    /// Carried far enough, letting go throws it out — and it leaves the way it was going rather
+    /// than dropping back down the way it arrived.
+    func testCarryingTheBandPastItsCommitPointThrowsItOut() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        var departure: ToastDeparture?
+        let onDismiss = try XCTUnwrap(toast.onDismiss)
+        toast.onDismiss = { sent in
+            departure = sent
+            onDismiss(sent)
+        }
+
+        toast.carryBegan()
+        toast.carryChanged(to: toast.bounds.width, at: 0)
+        toast.carryEnded()
+
+        XCTAssertEqual(departure, .thrown(direction: 1))
+        XCTAssertNil(presenter.current)
+        XCTAssertFalse(host.subviews.contains { $0 is ToastView })
+        presenter.invalidate()
+    }
+
+    /// **A flick throws it from wherever it got to.** The gesture somebody makes at a band they
+    /// want gone is short and fast and lets go early, so distance alone would refuse exactly the
+    /// throws that were meant — and accept only the slow deliberate shove nobody performs.
+    func testAFlickThrowsTheBandWithoutCarryingItAllTheWay() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        let short = -toast.bounds.width / 8
+        toast.carryBegan()
+        toast.carryChanged(to: short / 2, at: 0)
+        toast.carryChanged(to: short, at: 0.02)
+        XCTAssertLessThan(abs(short), toast.bounds.width * ToastDefaults.throwCommitFraction)
+
+        toast.carryEnded()
+        XCTAssertNil(presenter.current, "a flick left the band sitting there")
+        presenter.invalidate()
+    }
+
+    /// Speed counts only in the direction the band is already going. A hand that pushes the band
+    /// out and pulls it back has changed its mind, and throwing on that would send the receipt out
+    /// of the side it was just rescued from.
+    func testAFlickBackTowardsTheRestPositionIsNotAThrow() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        let short = toast.bounds.width * ToastDefaults.throwCommitFraction - 1
+        toast.carryBegan()
+        toast.carryChanged(to: short, at: 0)
+        toast.carryChanged(to: short / 4, at: 0.02)
+        toast.carryEnded()
+
+        XCTAssertEqual(presenter.current, toast, "pulling the band back threw it away")
+        XCTAssertEqual(toast.carryOffset, 0)
+        presenter.invalidate()
+    }
+
+    /// A carry holds the clock exactly as the pointer does, and for a stronger version of the same
+    /// reason: a band that expired halfway through the gesture aimed at it would be dismissed by
+    /// its own dwell while somebody was still deciding.
+    func testCarryingTheBandStopsItsClockAndPuttingItBackStartsItAgain() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        XCTAssertFalse(presenter.isHeldOpen)
+
+        toast.carryBegan()
+        XCTAssertTrue(presenter.isHeldOpen, "the band kept counting down under the hand on it")
+        XCTAssertTrue(toast.isCarried)
+
+        toast.carryChanged(to: 10, at: 0)
+        toast.carryEnded()
+        XCTAssertFalse(presenter.isHeldOpen, "the clock never restarted, so the band is forever")
+        presenter.invalidate()
+    }
+
+    /// A pointer resting on a band its own carry already holds is not a second hold. The presenter
+    /// keeps what is *left* of a paused clock, and being handed the pause twice would spend the
+    /// remainder against itself.
+    func testAPointerOnACarriedBandDoesNotHoldItTwice() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+
+        toast.mouseEntered(with: NSEvent())
+        toast.carryBegan()
+        toast.carryChanged(to: 10, at: 0)
+        toast.carryEnded()
+
+        XCTAssertTrue(presenter.isHeldOpen, "the pointer is still on the band and lost its hold")
+        toast.mouseExited(with: NSEvent())
+        XCTAssertFalse(presenter.isHeldOpen)
+        presenter.invalidate()
+    }
+
+    /// Throwing one hands the pane to whatever was waiting, exactly as running out of time does:
+    /// the queue is about what is owed to the user, not about how the band in front of it went.
+    func testThrowingABandHandsThePaneToWhateverWasWaiting() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “First”"))
+        presenter.present(archiveRequest(message: "Archived “Second”"))
+        let first = try XCTUnwrap(presenter.current)
+        host.layoutSubtreeIfNeeded()
+
+        first.carryBegan()
+        first.carryChanged(to: first.bounds.width, at: 0)
+        first.carryEnded()
+
+        let second = try XCTUnwrap(presenter.current)
+        XCTAssertNotEqual(second, first)
+        XCTAssertTrue(second.request.message.contains("Second"))
+        XCTAssertTrue(presenter.queued.isEmpty)
+        presenter.invalidate()
+    }
+
+    /// The band takes the press rather than passing it up. An unhandled `mouseDown` walks the
+    /// responder chain, and the pane a receipt floats in is the list the receipt is *about* — a
+    /// press falling through it would reach the sidebar that just lost the row being reported on.
+    func testAPressOnTheBandDoesNotReachThePaneUnderneath() throws {
+        let pane = PressCountingView()
+        let toast = ToastView(request: archiveRequest())
+        pane.addSubview(toast)
+
+        toast.mouseDown(with: try XCTUnwrap(press(at: NSPoint(x: 20, y: 20), at: 0)))
+        toast.mouseUp(with: try XCTUnwrap(press(at: NSPoint(x: 20, y: 20), at: 0.1)))
+
+        XCTAssertEqual(pane.presses, 0)
+    }
+
+    /// And it takes the pointer the same way it takes the press.
+    ///
+    /// `NSTrackingArea` reports crossings of a *rectangle* and knows nothing about what is drawn
+    /// over it, so the row under the band was sent `mouseEntered` as though the band were not
+    /// there — and a hovered sidebar row draws a wash. Because the row's highlight and the band
+    /// are both inset from the column by `Design.Spacing.medium`, that wash lined up exactly with
+    /// the band's sides and stood 6 points proud of its top edge: it read as a backplate the band
+    /// owned, rounded to a corner that was not the band's.
+    func testAPointerOnTheBandDoesNotHoverTheRowUnderneath() throws {
+        let list = try list()
+
+        let covered = list.host.convert(
+            NSPoint(x: list.toast.frame.midX, y: list.toast.frame.midY),
+            to: nil
+        )
+        list.row.mouseEntered(with: try XCTUnwrap(enterEvent(at: covered)))
+
+        XCTAssertFalse(
+            list.row.isMouseInside,
+            "A row under the band is not the thing the pointer is on"
+        )
+        list.presenter.invalidate()
+    }
+
+    /// The other half, so the fix cannot be "the sidebar stopped hovering": the same row, the same
+    /// band, a point the band does not reach.
+    func testARowStillHoversWhereTheBandDoesNotCoverIt() throws {
+        let list = try list()
+
+        let clear = list.host.convert(
+            NSPoint(x: list.toast.frame.midX, y: list.toast.frame.maxY + Design.Spacing.large),
+            to: nil
+        )
+        list.row.mouseEntered(with: try XCTUnwrap(enterEvent(at: clear)))
+
+        XCTAssertTrue(list.row.isMouseInside, "The row is still hovered where nothing covers it")
+        list.presenter.invalidate()
+    }
+
     // MARK: - Helpers
+
+    /// A pane with a sidebar row across it and a receipt floating over the row's lower half —
+    /// the arrangement the band is actually used in, since the presenter is what places the band
+    /// and the row's own highlight inset is what made the overlap visible.
+    private func list() throws -> (
+        row: SidebarHoverRowView,
+        toast: ToastView,
+        host: NSView,
+        presenter: ToastPresenter
+    ) {
+        let pane = pane()
+        let row = SidebarHoverRowView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        pane.host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: pane.host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: pane.host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: pane.host.topAnchor),
+            row.bottomAnchor.constraint(equalTo: pane.bottom)
+        ])
+
+        let presenter = ToastPresenter(host: pane.host, above: pane.bottom)
+        presenter.present(archiveRequest())
+        pane.host.layoutSubtreeIfNeeded()
+
+        return (row, try XCTUnwrap(presenter.current), pane.host, presenter)
+    }
+
+    /// A crossing with a stated location. The rows read the location off the event rather than off
+    /// the window, so a fixture can put the pointer somewhere without owning the real one.
+    private func enterEvent(at location: NSPoint) -> NSEvent? {
+        NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: location,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )
+    }
+
+    /// Stands behind the band and counts anything the responder chain hands it.
+    private final class PressCountingView: NSView {
+        var presses = 0
+        override func mouseDown(with event: NSEvent) { presses += 1 }
+    }
+
+    /// A press with its own stated modifiers and clock. `NSEvent()` carries neither a location nor
+    /// a timestamp, and a `CGEvent` built here would read the keyboard the developer's hands are
+    /// on — a held Shift is not something a test gets to be surprised by.
+    private func press(at location: NSPoint, at timestamp: TimeInterval) -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: timestamp,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )
+    }
+
+    private func iconButtons(in view: NSView) -> [ThemedIconButton] {
+        descendants(of: view).compactMap { $0 as? ThemedIconButton }
+    }
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }

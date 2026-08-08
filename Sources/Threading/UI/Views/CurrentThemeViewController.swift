@@ -350,12 +350,10 @@ final class CurrentThemeViewController: NSViewController {
         roles[role] = color.usingColorSpace(.sRGB) ?? color
 
         var variants = theme.variants
-        variants[selectedVariantKind] = AppTheme.Variant(
-            roles: roles,
-            terminalPalette: source.terminalPalette,
-            material: source.material,
-            sidebar: source.sidebar
-        )
+        // `replacing`, never a fresh `Variant(...)`: this exact site once rebuilt the
+        // variant by hand and left `chrome:` off the call, so changing one colour on a
+        // custom takeover theme silently handed the window frame back to AppKit.
+        variants[selectedVariantKind] = source.replacing(roles: roles)
 
         do {
             let updated = try AppThemeEditing.assemble(

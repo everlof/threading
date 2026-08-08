@@ -382,7 +382,8 @@ final class WindowChromeComponentTests: XCTestCase {
             ("beos", Artwork.beOS),
             ("openstep", Artwork.openStep),
             ("irix", Artwork.irix),
-            ("amiga", Artwork.amiga)
+            ("amiga", Artwork.amiga),
+            ("tui", Artwork.tui)
         ]
         let legend = Set("#o+.")
         for (family, artwork) in families {
@@ -580,6 +581,25 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(style.frameWidth, 4)
         XCTAssertEqual(style.bandHeight, 32)
         XCTAssertEqual(band.menuButton.intrinsicContentSize, NSSize(width: 24, height: 22))
+    }
+
+    func testTUIBookendsTheWindowMenuAndItsThreeOperations() throws {
+        XCTAssertNoThrow(
+            try AppThemeEditing.validate(AppThemeStyles.tui),
+            "TUI must satisfy the same public contract as an agent-authored theme"
+        )
+        let band = WindowTitleBandView()
+        let style = WindowChromeAppearance.resolved(
+            from: try XCTUnwrap(AppThemeStyles.tui.variant(.dark)?.chrome)
+        )
+        band.fixtureStyle = style
+
+        XCTAssertEqual(band.leadingWindowButtonRoles, [.windowMenu])
+        XCTAssertEqual(band.trailingWindowButtonRoles, [.minimize, .zoom, .close])
+        XCTAssertFalse(band.showsApplicationIcon)
+        XCTAssertEqual(style.bandHeight, 26)
+        XCTAssertEqual(style.ink.hexString, "#5FBFA8")
+        XCTAssertEqual(band.menuButton.intrinsicContentSize, NSSize(width: 15, height: 15))
     }
 
     func testAmigaSplitsCloseFromZoomAndTheRealDepthGadget() throws {
@@ -855,6 +875,37 @@ final class WindowChromeComponentTests: XCTestCase {
         let rep = try XCTUnwrap(NSBitmapImageRep(data: hovered))
         let corner = try XCTUnwrap(rep.colorAt(x: 0, y: 0))
         assertSameInk(corner, style.ink, "the inverted cell is not filled with the band's ink")
+    }
+
+    func testTheTextModePressedCellSeatsFullInkInsideItsHoverFace() throws {
+        AppThemePalette.set(AppThemeStyles.tui)
+        defer { AppThemePalette.set(.system) }
+        let chrome = try XCTUnwrap(takeoverChrome(of: AppThemeStyles.tui))
+        let style = WindowChromeAppearance.resolved(from: chrome)
+
+        let button = WindowChromeButton(role: .close)
+        button.fixtureStyle = style
+        button.fixtureIsKey = true
+        button.mouseDown(with: NSEvent())
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try renderedPixels(
+            of: button,
+            size: button.intrinsicContentSize
+        )))
+
+        let backingScale = max(
+            1,
+            Int(round(CGFloat(rep.pixelsWide) / button.intrinsicContentSize.width))
+        )
+        let mechanicalEdge = try XCTUnwrap(rep.colorAt(x: 0, y: 0))
+        let keyedFace = try XCTUnwrap(rep.colorAt(x: backingScale, y: backingScale))
+        XCTAssertEqual(
+            mechanicalEdge.alphaComponent, 0, accuracy: 1 / 255,
+            "the pressed cell did not leave its one-point edge clear for the band ground"
+        )
+        assertSameInk(
+            keyedFace, style.ink,
+            "the pressed face faded instead of keeping the band's full ink"
+        )
     }
 
     /// A rendered pixel comes back in the backing store's own colour space, which is the
@@ -1134,6 +1185,34 @@ final class WindowChromeComponentTests: XCTestCase {
         try pngAtOneX(of: tuiBand).write(to: tuiBandURL)
         print("Rendered the text-mode title band to \(tuiBandURL.path)")
 
+        // Classic Player is also a clean-room design rather than a reconstruction. Imported
+        // Winamp skin sprites have their own importer/resolution tests; this fixture keeps the
+        // stock fallback's pixel controls and stretched title groove visually reviewable.
+        AppThemePalette.set(AppThemeStyles.classicPlayer)
+        let classicChrome = try XCTUnwrap(takeoverChrome(of: AppThemeStyles.classicPlayer))
+        let classicStyle = WindowChromeAppearance.resolved(from: classicChrome)
+        let classicPNG = try XCTUnwrap(captionGlyphStrip(style: classicStyle))
+        let classicURL = directory.appendingPathComponent(
+            "caption-glyphs-\(AppThemeStyles.classicPlayer.id.rawValue).png"
+        )
+        try classicPNG.write(to: classicURL)
+        print("Rendered Classic Player caption state catalogue to \(classicURL.path)")
+        written += 1
+
+        let classicBand = WindowTitleBandView()
+        classicBand.translatesAutoresizingMaskIntoConstraints = true
+        classicBand.frame = NSRect(x: 0, y: 0, width: 420, height: classicStyle.bandHeight)
+        classicBand.fixtureStyle = classicStyle
+        classicBand.fixtureIsKey = true
+        classicBand.setTitle("Threading")
+        classicBand.layoutSubtreeIfNeeded()
+        classicBand.needsDisplay = true
+        let classicBandURL = directory.appendingPathComponent(
+            "title-band-\(AppThemeStyles.classicPlayer.id.rawValue).png"
+        )
+        try pngAtOneX(of: classicBand).write(to: classicBandURL)
+        print("Rendered the Classic Player title band to \(classicBandURL.path)")
+
         XCTAssertEqual(written, AppThemeStyles.takeovers.count)
     }
 
@@ -1158,9 +1237,10 @@ final class WindowChromeComponentTests: XCTestCase {
             let content = try XCTUnwrap(window.contentView)
             content.layoutSubtreeIfNeeded()
 
-            // The hero form: an unshown window is never key, so the band would render its
-            // inactive gray without the fixture saying otherwise.
-            firstBand(in: content)?.fixtureIsKey = true
+            // The hero form: an unshown window is never key. Make every key-sensitive
+            // surface tell the same truth, so the active band is not pictured above an
+            // inexplicably inactive selection.
+            applyKeyFixtureState(in: content)
 
             let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: rep)
@@ -1640,12 +1720,11 @@ final class WindowChromeComponentTests: XCTestCase {
         print("Rendered source-backed Win98 checkboxes to \(win98URL.path)")
     }
 
-    private func firstBand(in view: NSView) -> WindowTitleBandView? {
-        if let band = view as? WindowTitleBandView { return band }
-        for subview in view.subviews {
-            if let band = firstBand(in: subview) { return band }
-        }
-        return nil
+    private func applyKeyFixtureState(in view: NSView) {
+        (view as? WindowTitleBandView)?.fixtureIsKey = true
+        (view as? ThemedTableView)?.fixtureIsKey = true
+        (view as? ThemedOutlineView)?.fixtureIsKey = true
+        view.subviews.forEach(applyKeyFixtureState)
     }
 
     private func strip(appearance: NSAppearance, theme: AppTheme) -> Data? {

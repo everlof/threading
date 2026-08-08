@@ -238,7 +238,7 @@ final class SurfaceBevelTests: XCTestCase {
         view.frame.size.width = 240
         view.layoutSubtreeIfNeeded()
         highlight.layoutIfNeeded()
-        XCTAssertEqual(highlight.shadowPath?.boundingBox.width, highlight.bounds.width)
+        XCTAssertEqual(highlight.shadowPath?.boundingBox.width, view.bounds.width)
 
         AppThemePalette.set(.system)
         view.reapplyRecordedSurfaceForTesting()
@@ -246,6 +246,45 @@ final class SurfaceBevelTests: XCTestCase {
             view.layer?.sublayers?.first { $0.name == "threading.glow.highlight" }
         )
         XCTAssertEqual(view.layer?.shadowOpacity, 0)
+    }
+
+    /// A CSS shadow is behind its caster. A path-only Core Animation sublayer is *above* its
+    /// parent's background, so the first paired-shadow implementation poured a centred opaque
+    /// highlight through the whole surface: Cyberpunk's #1C1C2E settings cards rendered lime
+    /// under #E0E0E0 text. Both panel and control companions must leave the face byte-for-byte
+    /// the authored role while their halo remains outside it.
+    func testCenteredPairedGlowDoesNotPaintInsideItsCaster() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        defer { AppThemePalette.set(.system) }
+
+        let fixtures: [(name: String, fill: NSColor, control: Bool)] = [
+            ("panel", Design.Surface.panel, false),
+            ("control", Design.Surface.controlResting, true)
+        ]
+
+        for fixture in fixtures {
+            let view = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 60))
+            view.applySurface(
+                fill: fixture.fill,
+                radius: .control,
+                glow: !fixture.control,
+                controlGlow: fixture.control
+            )
+            let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: rep)
+
+            let actual = try XCTUnwrap(
+                rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                    .usingColorSpace(.sRGB)
+            )
+            let expected = try XCTUnwrap(fixture.fill.usingColorSpace(.sRGB))
+            XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.02,
+                           "Cyberpunk's \(fixture.name) glow painted inside the face")
+            XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.02,
+                           "Cyberpunk's \(fixture.name) glow painted inside the face")
+            XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.02,
+                           "Cyberpunk's \(fixture.name) glow painted inside the face")
+        }
     }
 
     func testClayControlsUseTheirOwnTighterPairedShadow() throws {
@@ -269,6 +308,18 @@ final class SurfaceBevelTests: XCTestCase {
         XCTAssertEqual(highlight.shadowOffset.width, -4)
         XCTAssertEqual(highlight.shadowOffset.height, 4)
 
+        button.isEnabled = false
+        button.needsDisplay = true
+        button.cacheDisplay(in: button.bounds, to: rep)
+        XCTAssertNil(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.primary" },
+            "a disabled Clay button kept its full-strength violet lift"
+        )
+        XCTAssertNil(
+            button.layer?.sublayers?.first { $0.name == "threading.controlGlow.highlight" },
+            "a disabled Clay button kept its full-strength white lift"
+        )
+
         AppThemePalette.set(.system)
         button.needsDisplay = true
         button.cacheDisplay(in: button.bounds, to: rep)
@@ -279,6 +330,41 @@ final class SurfaceBevelTests: XCTestCase {
         XCTAssertNil(
             button.layer?.sublayers?.first { $0.name == "threading.controlGlow.highlight" }
         )
+    }
+
+    func testIndustrialSeparatesNeutralSecondaryReliefFromCoralCTADepth() throws {
+        AppThemePalette.set(AppThemeStyles.industrial)
+        defer { AppThemePalette.set(.system) }
+
+        func render(_ button: ThemedButton) throws -> (CALayer, CALayer) {
+            let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: rep)
+            return (
+                try XCTUnwrap(button.layer?.sublayers?.first {
+                    $0.name == "threading.controlGlow.primary"
+                }),
+                try XCTUnwrap(button.layer?.sublayers?.first {
+                    $0.name == "threading.controlGlow.highlight"
+                })
+            )
+        }
+
+        let secondary = ThemedButton(frame: NSRect(x: 0, y: 0, width: 100, height: 26))
+        secondary.title = "Duplicate"
+        let secondaryLayers = try render(secondary)
+        XCTAssertEqual(secondaryLayers.0.shadowOffset.width, 8)
+        XCTAssertEqual(secondaryLayers.0.shadowOffset.height, -8)
+        XCTAssertEqual(secondaryLayers.1.shadowOffset.width, -8)
+        XCTAssertEqual(secondaryLayers.1.shadowOffset.height, 8)
+
+        let primary = ThemedButton(frame: NSRect(x: 0, y: 0, width: 100, height: 26))
+        primary.title = "Continue"
+        primary.isProminent = true
+        let primaryLayers = try render(primary)
+        XCTAssertEqual(primaryLayers.0.shadowOffset.width, 4)
+        XCTAssertEqual(primaryLayers.0.shadowOffset.height, -4)
+        XCTAssertEqual(primaryLayers.1.shadowOffset.width, -4)
+        XCTAssertEqual(primaryLayers.1.shadowOffset.height, 4)
     }
 
     func testAComponentMayDeclineTheBevelOutright() throws {
@@ -344,7 +430,10 @@ final class SurfaceBevelTests: XCTestCase {
             }
             guard let tiff = image.tiffRepresentation,
                   let rep = NSBitmapImageRep(data: tiff) else { return nil }
-            return rep.colorAt(x: 20, y: 1)?.usingColorSpace(.sRGB)
+            // The outermost row is the authored highlight. Row one is deliberately the darker
+            // derived sheen (#DFDFDF in the Win98 construction), so sampling it makes this test
+            // judge the secondary ring against the primary ring's threshold.
+            return rep.colorAt(x: 20, y: 0)?.usingColorSpace(.sRGB)
         }
 
         let bevelled = try XCTUnwrap(topEdgeSample(makeBevelTheme()))

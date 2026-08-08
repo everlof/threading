@@ -16,6 +16,7 @@ final class ThemedFloatingGlyphView: NSView, ThemedComponent {
         case changes
         case model
         case plan
+        case speed
     }
 
     private var systemSymbolName: String
@@ -204,6 +205,31 @@ final class ThemedFloatingGlyphView: NSView, ThemedComponent {
                 context.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
             context.strokePath()
+
+        case .speed:
+            // Filled rather than stroked, alone among the marks here. A bolt is read by its
+            // silhouette and nothing else, and its arms are narrower than the box: outlined at
+            // one hairline with antialiasing off, the two halves close up into a smudge at the
+            // 14-point size the corner card sets. The vertices are fractions of the box so the
+            // shape survives the point size moving with the app's text scale.
+            let bolt: [(CGFloat, CGFloat)] = [
+                (0.60, 1.00), (0.15, 0.42), (0.42, 0.42),
+                (0.30, 0.00), (0.85, 0.55), (0.55, 0.55)
+            ]
+            context.beginPath()
+            for (index, point) in bolt.enumerated() {
+                let place = CGPoint(
+                    x: rect.minX + rect.width * point.0,
+                    y: rect.minY + rect.height * point.1
+                )
+                if index == 0 {
+                    context.move(to: place)
+                } else {
+                    context.addLine(to: place)
+                }
+            }
+            context.closePath()
+            context.fillPath()
         }
     }
 }

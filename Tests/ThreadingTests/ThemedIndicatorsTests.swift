@@ -410,6 +410,60 @@ final class ThemedIndicatorsTests: XCTestCase {
                        "the arc is not drawn in the theme's accent")
     }
 
+    /// The accent is the spinner's ordinary status ink and the emphasized sidebar selection's
+    /// fill. When the host lays that fill underneath it, the spinner must take the ink measured
+    /// against the selection rather than drawing the fill on itself and disappearing.
+    func testASpinnerOnASelectionUsesTheSelectionsInk() throws {
+        let spinner = ThemedSpinner(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
+        let arc = try XCTUnwrap(spinner.layer?.sublayers?.compactMap({ $0 as? CAShapeLayer }).first)
+        spinner.isAnimating = true
+
+        for theme in [AppTheme.system, AppThemeStyles.botanical, AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            spinner.hostGround = .selection
+            spinner.display()
+
+            let selected = try XCTUnwrap(arc.strokeColor.flatMap { NSColor(cgColor: $0) })
+            XCTAssertEqual(
+                selected.hexString,
+                Design.Ink.selection.label.hexString,
+                "\(theme.name): the spinner did not take the selection's ink"
+            )
+
+            spinner.hostGround = nil
+            spinner.display()
+            let ordinary = try XCTUnwrap(arc.strokeColor.flatMap { NSColor(cgColor: $0) })
+            XCTAssertEqual(
+                ordinary.hexString,
+                Design.Surface.accent.hexString,
+                "\(theme.name): leaving the selection did not restore the accent"
+            )
+        }
+    }
+
+    /// Selection is one ground change for the whole status slot. Its layered indicators retain
+    /// that semantic ground rather than a resolved colour, so a live theme change can re-resolve it.
+    func testASelectedStatusGroundReachesTheLayeredStatusMarks() throws {
+        AppThemePalette.set(AppThemeStyles.industrial)
+        let indicator = SessionStatusIndicator()
+        indicator.hostGround = .selection
+
+        let spinner = try XCTUnwrap(
+            descendants(of: indicator).compactMap { $0 as? ThemedSpinner }.first
+        )
+        let warning = try XCTUnwrap(
+            descendants(of: indicator).compactMap { $0 as? ThemedWarningMark }.first
+        )
+
+        XCTAssertEqual(indicator.hostGround, .selection)
+        XCTAssertEqual(spinner.hostGround, .selection)
+        XCTAssertEqual(warning.hostGround, .selection)
+
+        indicator.hostGround = nil
+        XCTAssertNil(spinner.hostGround)
+        XCTAssertNil(warning.hostGround)
+    }
+
     // MARK: - Progress Bar
 
     /// The bar fills from the leading edge in proportion to its fraction: at a quarter, a point
@@ -465,6 +519,50 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         AppThemePalette.set(.system)
         XCTAssertEqual(ThemedProgressBar().intrinsicContentSize.height, 3)
+    }
+
+    /// Workbench's manual names a horizontal percentage gauge, not Win32's separated blocks.
+    /// Its native pixels are unavailable, but the authored recipe still has to keep the source's
+    /// hard trough and active title blue distinct from the modern action accent.
+    func testWorkbenchProgressUsesAContinuousSunkenGaugeInTitleBlue() throws {
+        AppThemePalette.set(AppThemeStyles.amiga)
+        let bar = ThemedProgressBar(frame: NSRect(x: 0, y: 0, width: 100, height: 12))
+        bar.progress = 0.5
+
+        XCTAssertEqual(bar.intrinsicContentSize.height, ThemedProgressDrawing.workbenchHeight)
+        let fill = try colour(of: bar, atPointX: 20, y: 6)
+        let track = try colour(of: bar, atPointX: 80, y: 6)
+        XCTAssertNotEqual(fill.hexString, track.hexString,
+                          "the Workbench gauge lost its percentage fill")
+
+        let titleBlue = try XCTUnwrap(
+            WindowChromeAppearance.resolve()?.activeGradient.colors.first?.usingColorSpace(.sRGB)
+        )
+        XCTAssertEqual(fill.redComponent, titleBlue.redComponent, accuracy: 0.01,
+                       "the Workbench gauge changed title blue's red channel")
+        XCTAssertEqual(fill.greenComponent, titleBlue.greenComponent, accuracy: 0.01,
+                       "the Workbench gauge changed title blue's green channel")
+        XCTAssertEqual(fill.blueComponent, titleBlue.blueComponent, accuracy: 0.01,
+                       "the Workbench gauge used the general action accent instead of title blue")
+    }
+
+    /// Indigo Magic's scale is not a modern hairline or a Win32 row of blocks: its measured
+    /// recessed track begins on an eight-pixel diagonal. A full bar therefore fills the upper
+    /// part of the leading edge while the lower corner remains the field, which pins the source
+    /// geometry without depending on one guessed native colour.
+    func testIRIXProgressUsesTheMeasuredSlantedLeadingEdge() throws {
+        AppThemePalette.set(AppThemeStyles.irix)
+        let bar = ThemedProgressBar(frame: NSRect(x: 0, y: 0, width: 100, height: 14))
+        bar.progress = 1
+
+        XCTAssertEqual(bar.intrinsicContentSize.height, ThemedProgressDrawing.irixHeight)
+        let filled = try colour(of: bar, atPointX: 50, y: 7)
+        let leadingOutside = try colour(of: bar, atPointX: 3, y: 11)
+        let leadingInside = try colour(of: bar, atPointX: 15, y: 11)
+        XCTAssertEqual(leadingInside.hexString, filled.hexString,
+                       "the measured diagonal did not admit the filled side of the track")
+        XCTAssertNotEqual(leadingOutside.hexString, filled.hexString,
+                          "the measured diagonal was flattened into a rectangular fill")
     }
 
     /// Setting the fraction is what asks for the redraw; without it the bar would only move when
@@ -1027,10 +1125,11 @@ final class ThemedIndicatorsTests: XCTestCase {
         card.applyInk(WindowBackdrop.ink)
 
         XCTAssertFalse(card.isHidden)
-        // Spoken as the rows are stacked, the agent line last.
+        // Spoken as the rows are stacked, the agent line last — and within it as the row is drawn,
+        // the speed last of all, because on screen it is the bolt after the words.
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "test-levels-and-sidebar-archive  ·  2 files +35 −1  ·  Opus 5 · Fast · Extra High"
+            "test-levels-and-sidebar-archive  ·  2 files +35 −1  ·  Opus 5 · Extra High · Fast"
         )
 
         let marks = descendants(of: card)
@@ -1040,18 +1139,107 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertTrue(marks.contains("Model"), "the agent line lost its mark")
     }
 
-    /// Each part is independently droppable, because the caller has already removed whatever the
-    /// session's own status line prints. A card told only about speed says only that.
-    func testTheAgentLineShowsOnlyTheFactsItWasGiven() {
+    /// Fast mode is a bolt, and only when it is on. The word is gone from the row: it cost a
+    /// sixth of a capped card to say what the mark says at a glance, and every other surface in
+    /// the app already draws this state as `bolt.fill`.
+    func testFastModeIsABoltThatOnlyAppearsWhenItIsOn() {
+        let card = GitStatusOverlayView()
+
+        func drawnMarks() -> [String] {
+            descendants(of: card)
+                .compactMap { $0 as? ThemedFloatingGlyphView }
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .compactMap(\.semanticDescription)
+        }
+
+        func drawnWords() -> String {
+            descendants(of: card)
+                .compactMap { $0 as? NSTextField }
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .map(\.stringValue)
+                .joined(separator: " ")
+        }
+
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "GPT-5", effort: "High"))
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertFalse(drawnMarks().contains("Fast"), "standard speed drew a bolt")
+
+        card.updateModel(GitStatusOverlayView.ModelReading(
+            name: "GPT-5",
+            effort: "High",
+            isFast: true
+        ))
+        XCTAssertTrue(drawnMarks().contains("Fast"), "fast mode drew no bolt")
+        XCTAssertFalse(
+            drawnWords().contains("Fast"),
+            "the bolt replaced the word; both together say it twice"
+        )
+        // The reader who hears the card gets the word, in the bolt's place.
+        XCTAssertEqual(card.accessibilityLabel(), "GPT-5 · High · Fast")
+    }
+
+    /// Speed alone still opens the row, and the row is then the mark and the bolt with no words
+    /// between them — a card is entitled to say one true thing.
+    func testABoltAloneKeepsTheAgentLine() {
         let card = GitStatusOverlayView()
         card.updateModel(GitStatusOverlayView.ModelReading(isFast: true))
         card.applyInk(WindowBackdrop.ink)
 
-        XCTAssertFalse(card.isHidden, "a fact with no Git reading still deserves the card")
+        XCTAssertFalse(card.isHidden, "speed on its own did not hold the card open")
+        let marks = descendants(of: card)
+            .compactMap { $0 as? ThemedFloatingGlyphView }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+            .compactMap(\.semanticDescription)
+        XCTAssertEqual(Set(marks), ["Model", "Fast"])
         XCTAssertEqual(card.accessibilityLabel(), "Fast")
+    }
 
+    /// Each part is independently droppable: a session may know its model and not its posture, or
+    /// the reverse, and the row says whichever it has rather than waiting for a full set.
+    func testTheAgentLineShowsOnlyTheFactsItWasGiven() {
+        let card = GitStatusOverlayView()
         card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertFalse(card.isHidden, "a fact with no Git reading still deserves the card")
         XCTAssertEqual(card.accessibilityLabel(), "Opus 5")
+
+        card.updateModel(GitStatusOverlayView.ModelReading(effort: "Extra High"))
+        XCTAssertEqual(card.accessibilityLabel(), "Extra High")
+    }
+
+    /// The posture reads between the model and how it thinks, which is the order the composer's
+    /// own chips are in — one fact keeps one place wherever it is shown.
+    ///
+    /// It is on the card at all because nothing else showed it: a terminal's mode lives in the
+    /// CLI's own footer, the session's `⋯` menu states only what the *next* launch will ask for,
+    /// and Claude's status-line payload carries no posture for a status line to print.
+    func testTheAgentLineShowsThePostureBetweenTheModelAndItsEffort() {
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(
+            name: "Opus 5",
+            mode: AgentPermissionMode.auto.displayName,
+            effort: "Extra High"
+        ))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertFalse(card.isHidden)
+        XCTAssertEqual(card.accessibilityLabel(), "Opus 5 · Auto · Extra High")
+    }
+
+    /// A posture on its own is a row, for the same reason speed on its own is: the caller has
+    /// already dropped whatever the session's own surfaces say, and what is left is what the card
+    /// owes. This is the live case for a login that pins no model — the observed posture is then
+    /// the only agent fact the pane has.
+    func testAPostureAloneKeepsTheAgentLine() {
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(
+            mode: AgentPermissionMode.bypassPermissions.displayName
+        ))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertFalse(card.isHidden, "the posture did not hold the card open on its own")
+        XCTAssertEqual(card.accessibilityLabel(), "Bypass Permissions")
     }
 
     /// An empty reading and no reading mean the same thing: the caller whose status line already
@@ -1230,9 +1418,11 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         let painted = try XCTUnwrap(NSColor(cgColor: fill)?.usingColorSpace(.sRGB))
         XCTAssertEqual(painted.hexString, "#FFFFE1")
+        // Branch, changes, model, speed — the card's whole semantic set, held whether or not the
+        // reading it was given draws each one.
         XCTAssertEqual(
             descendants(of: card).compactMap { $0 as? ThemedFloatingGlyphView }.count,
-            3,
+            4,
             "the themed card lost one of its semantic marks"
         )
     }
@@ -1369,7 +1559,9 @@ final class ThemedIndicatorsTests: XCTestCase {
                 $0.update(with: .init(branch: "master", summary: GitChangeSummary(
                     files: 76, added: 22_431, removed: 14_004
                 )))
-                $0.updateModel(.init(name: "Opus · 1M", effort: "Extra High"))
+                // Fast, so the bolt the row ends on is in the picture — including under the two
+                // period themes, where it is drawn by hand rather than by SF Symbols.
+                $0.updateModel(.init(name: "Opus · 1M", effort: "Extra High", isFast: true))
             }),
             (false, {
                 $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty))
@@ -1401,7 +1593,10 @@ final class ThemedIndicatorsTests: XCTestCase {
             ("system-dark", .system, .darkAqua, nil),
             ("win98-on-terminal", AppThemeStyles.win98, .aqua,
              NSColor(srgbRed: 0, green: 0.33, blue: 0, alpha: 1)),
-            ("platinum", AppThemeStyles.platinum, .aqua, nil),
+            // Platinum's terminal is white. Rendering its floating card over the gray window
+            // ground hid the exact failure this fixture is meant to catch: a white card over
+            // the real white terminal, visible only as its trailing bevel.
+            ("platinum-on-terminal", AppThemeStyles.platinum, .aqua, .white),
             ("neo-brutalism", AppThemeStyles.neoBrutalism, .aqua, nil),
             ("claymorphism", AppThemeStyles.claymorphism, .aqua, nil)
         ]

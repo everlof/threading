@@ -37,7 +37,7 @@ final class MotionPreviewTests: XCTestCase {
 
     // MARK: - The Working Indicator
 
-    /// Every row carries the orb it stands for, and its own instance of it: seven rows sharing
+    /// Every row carries the orb it stands for, and its own instance of it: ten rows sharing
     /// one view would show the animation in whichever row happened to be laid out last.
     func testEveryWorkingIndicatorRowCarriesItsOwnLiveOrb() throws {
         let popUp = try orbPopUp()

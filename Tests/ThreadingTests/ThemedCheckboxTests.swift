@@ -86,12 +86,49 @@ final class ThemedCheckboxTests: XCTestCase {
         XCTAssertEqual(checkbox.accessibilityTitle(), "Include Fix login flow")
     }
 
+    func testRadioButtonSelectsWithoutTogglingItsSelectedState() {
+        var reported: [NSControl.StateValue] = []
+        let radio = ThemedRadioButton(title: "Use compact", state: .on) {
+            reported.append($0)
+        }
+
+        XCTAssertEqual(radio.accessibilityRole(), .radioButton)
+        XCTAssertEqual(radio.accessibilityValue() as? Bool, true)
+        XCTAssertTrue(radio.performPrimaryAction())
+        XCTAssertEqual(radio.state, .on)
+        XCTAssertTrue(reported.isEmpty, "selecting an already-selected radio should be inert")
+
+        radio.state = .off
+        XCTAssertTrue(radio.performPrimaryAction())
+        XCTAssertEqual(radio.state, .on)
+        XCTAssertEqual(reported, [.on])
+    }
+
+    func testWin98RadioButtonUsesACompactCircularFieldAndDot() throws {
+        AppThemePalette.set(AppThemeStyles.win98)
+        let radio = ThemedRadioButton(title: "", state: .on) { _ in }
+        radio.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+        let rep = try XCTUnwrap(radio.bitmapImageRepForCachingDisplay(in: radio.bounds))
+        radio.cacheDisplay(in: radio.bounds, to: rep)
+
+        XCTAssertEqual(radio.intrinsicContentSize.height, Design.Size.chipHeight)
+        XCTAssertEqual(radio.intrinsicContentSize.width, 20, accuracy: 0.01)
+        let centre = try XCTUnwrap(rep.colorAt(x: 10, y: 10)?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(centre.redComponent, 0, accuracy: 0.05)
+        XCTAssertEqual(centre.greenComponent, 0, accuracy: 0.05)
+        XCTAssertEqual(centre.blueComponent, 0, accuracy: 0.05)
+    }
+
     // MARK: - Gallery
 
     func testGalleryTellsItsStory() {
         XCTAssertTrue(
             ComponentGalleryViewController.componentNames.contains("ThemedCheckbox"),
             "A design-system component without a gallery story is invisible to review"
+        )
+        XCTAssertTrue(
+            ComponentGalleryViewController.componentNames.contains("ThemedRadioButton"),
+            "A design-system radio control without a gallery story is invisible to review"
         )
     }
 

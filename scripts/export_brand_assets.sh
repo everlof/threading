@@ -29,6 +29,15 @@ rsvg-convert --width 1024 --height 1024 \
   --output "$brand/ThreadingMarkMono-1024.png" \
   "$brand/ThreadingMarkMono.svg"
 
+# The social avatar. 400 is what X stores a profile image at; the 1024 is the
+# master for anywhere else that wants one.
+rsvg-convert --width 400 --height 400 \
+  --output "$brand/ThreadingAvatar-400.png" \
+  "$brand/ThreadingAvatar.svg"
+rsvg-convert --width 1024 --height 1024 \
+  --output "$brand/ThreadingAvatar-1024.png" \
+  "$brand/ThreadingAvatar.svg"
+
 cp "$brand/ThreadingMark-1024.png" "$website/threading-mark-1024.png"
 cp "$brand/ThreadingMark-Navy-1024.png" "$website/threading-mark-navy-1024.png"
 cp "$brand/ThreadingMarkMono-1024.png" "$website/threading-mark-mono-1024.png"

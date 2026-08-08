@@ -13,8 +13,11 @@ final class ThemePreferencesViewController: NSViewController {
     private enum Layout {
         static let listHeight: CGFloat = 190
         static let rowHeight: CGFloat = 36
-        static let buttonWidth: CGFloat = 28
-        static let buttonHeight: CGFloat = 22
+        // These are real raised actions in tactile themes, not toolbar glyph slots. Matching
+        // the shared control height gives the face enough body for its radius and paired shadow
+        // while remaining compact beside the borderless actions pop-up.
+        static let buttonWidth: CGFloat = Design.Size.chipHeight
+        static let buttonHeight: CGFloat = Design.Size.chipHeight
     }
 
     private enum Strings {
@@ -140,6 +143,7 @@ final class ThemePreferencesViewController: NSViewController {
     private weak var chromeFontPopUp: ThemedPopUp?
     private weak var conversationFontPopUp: ThemedPopUp?
     private weak var textSizePopUp: ThemedPopUp?
+    private weak var historicalFontFallbackNote: NSTextField?
     private weak var appThemeSubtitle: NSTextField?
     private weak var duplicateAppThemeButton: ThemedButton?
     private weak var deleteAppThemeButton: ThemedButton?
@@ -173,11 +177,14 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        view = ClassicSkinDropHostingView()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        (view as? ClassicSkinDropHostingView)?.onSkinURLs = { [weak self] urls in
+            self?.importClassicSkins(at: urls)
+        }
         setupUI()
         loadThemes()
 
@@ -193,6 +200,13 @@ final class ThemePreferencesViewController: NSViewController {
             self?.appThemeLibraryDidChange()
         }
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themesDidChange() }
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        // CoreText's family list is deliberately live. A licensed historical face installed
+        // while Settings was closed should remove the fallback notice the next time it opens.
+        reloadFontControls()
     }
 
     // MARK: - Setup
@@ -245,6 +259,13 @@ final class ThemePreferencesViewController: NSViewController {
         actions.alignment = .centerY
         actions.spacing = Design.Spacing.small
 
+        let importButton = SettingsUI.button(
+            "Import…",
+            target: self,
+            action: #selector(importClassicSkin)
+        )
+        importButton.setAccessibilityIdentifier("settings.themes.import-classic-skin")
+
         let card = SettingsCard(rows: [
             SettingsUI.row(
                 title: "App theme",
@@ -256,10 +277,33 @@ final class ThemePreferencesViewController: NSViewController {
                 title: "Custom themes",
                 subtitle: "Duplicate a built-in to make an editable copy.",
                 control: actions
+            ),
+            SettingsUI.row(
+                title: "Classic skins",
+                subtitle: "Import a classic Winamp .wsz skin, or drop one on this page. Files stay on this Mac.",
+                control: importButton
             )
         ])
         reloadAppThemeControls()
-        return card
+
+        // In recovery the app wears System while the picker names the user's own theme, and a
+        // page showing two different answers without saying why is a page nobody can trust. The
+        // settings kit's own note, rather than a band: this is a settings page, and the sentence
+        // belongs under the card it is about.
+        guard RecoveryMode.isActive else { return card }
+        let stored = AppThemeLibrary.theme(withID: Self.selectedAppThemeID) ?? .system
+        let note = SettingsUI.note(
+            L10n.format(
+                "Recovery mode is showing the stock appearance. Your saved theme is still %@.",
+                stored.name
+            ),
+            localizes: false
+        )
+        let stack = NSStackView(views: [card, note])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
     }
 
     // MARK: - Fonts
@@ -299,9 +343,23 @@ final class ThemePreferencesViewController: NSViewController {
                 control: conversation
             )
         ])
+        let fallbackNote = SettingsUI.note("", localizes: false)
+        fallbackNote.setAccessibilityIdentifier("settings.themes.font-fallback-note")
+        fallbackNote.isHidden = true
+        historicalFontFallbackNote = fallbackNote
+
+        let content = NSStackView(views: [card, fallbackNote])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = Design.Spacing.small
+        for row in [card, fallbackNote] as [NSView] {
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: content.trailingAnchor).isActive = true
+        }
+
         reloadFontControls()
         reloadTextSizeControl()
-        return card
+        return content
     }
 
     /// Rebuilds both pickers. The families are read at build time rather than cached, since a
@@ -327,10 +385,12 @@ final class ThemePreferencesViewController: NSViewController {
             let index = selected.flatMap { families.firstIndex(of: $0).map { $0 + 1 } } ?? 0
             popUp.selectItem(at: index)
         }
+        reloadHistoricalFontFallbackNote()
     }
 
     @objc private func chromeFontChanged(_ sender: ThemedPopUp) {
         AppSettings.shared.chromeFontFamily = chosenFamily(from: sender)
+        reloadHistoricalFontFallbackNote()
     }
 
     @objc private func conversationFontChanged(_ sender: ThemedPopUp) {
@@ -368,14 +428,94 @@ final class ThemePreferencesViewController: NSViewController {
         static let inherit = "\u{0}inherit"
     }
 
-    @objc private func appThemeChanged(_ sender: ThemedPopUp) {
-        guard let raw = sender.selectedItem?.representedValue as? String,
-              let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
+    /// Describes an active historical-font fallback without turning an unlicensed download
+    /// into an endorsement. The requested family stays first in the theme, so installing a
+    /// legitimately licensed copy later changes the answer automatically.
+    private func reloadHistoricalFontFallbackNote() {
+        guard let note = historicalFontFallbackNote else { return }
+        let material = AppThemeLibrary.current.material(
+            for: NSApplication.shared.effectiveAppearance
+        )
+        note.stringValue = Self.historicalFontFallbackMessage(
+            themeName: AppThemeLibrary.current.name,
+            fontFamilies: material.fontFamilies,
+            availableFamilies: Design.Typography.availableFamilies,
+            overrideFamily: AppSettings.chromeFontFamily
+        ) ?? ""
+        note.isHidden = note.stringValue.isEmpty
+    }
 
+    /// Pure so the exact/fallback/system cases are regression-testable without relying on the
+    /// fonts installed on the test host.
+    static func historicalFontFallbackMessage(
+        themeName: String,
+        fontFamilies: [String],
+        availableFamilies: [String],
+        overrideFamily: String?
+    ) -> String? {
+        guard overrideFamily == nil,
+              let requested = fontFamilies.first else { return nil }
+        let available = Set(availableFamilies.map { $0.lowercased() })
+        guard !available.contains(requested.lowercased()) else { return nil }
+
+        if let fallback = fontFamilies.dropFirst().first(where: {
+            available.contains($0.lowercased())
+        }) {
+            return String(
+                format: L10n.string(
+                    "“%@” requests %@, which is not installed. Using %@. Install a legitimately licensed copy of %@ to use it automatically."
+                ),
+                themeName, requested, fallback, requested
+            )
+        }
+        return String(
+            format: L10n.string(
+                "“%@” requests %@, but neither it nor its fallback fonts are installed. Using the system font."
+            ),
+            themeName, requested
+        )
+    }
+
+    /// Which theme the picker names.
+    ///
+    /// The standing choice, falling back to what is in force when nothing is stored. A recovery
+    /// launch is the one time those differ: it wears System in memory and never writes, so the
+    /// page has to show what the user actually chose or merely opening it becomes a way to lose
+    /// it. See `AppThemeLibrary.restore(_:)`.
+    static var selectedAppThemeID: AppThemeID {
+        AppThemeLibrary.storedThemeID.flatMap { AppThemeLibrary.theme(withID: $0)?.id }
+            ?? AppThemeLibrary.current.id
+    }
+
+    /// What the picker currently names, so a test can assert the ring without a pop-up menu.
+    var selectedAppThemeIDForTesting: AppThemeID? {
+        guard let raw = appThemePopUp?.selectedItem?.representedValue as? String else {
+            return nil
+        }
+        return AppThemeID(raw)
+    }
+
+    @objc private func appThemeChanged(_ sender: ThemedPopUp) {
+        guard let raw = sender.selectedItem?.representedValue as? String else { return }
+        applyAppTheme(id: AppThemeID(raw))
+    }
+
+    /// Applying a theme the user picked, from the picker or from a test.
+    ///
+    /// **This still records, in recovery as anywhere else.** What recovery forbids is the *launch*
+    /// writing a theme nobody chose; a pick made deliberately on this page is a choice, and a
+    /// settings page that silently declined to remember one would be the worse bug.
+    private func applyAppTheme(id: AppThemeID) {
+        guard let theme = AppThemeLibrary.theme(withID: id) else { return }
         AppThemeLibrary.apply(theme)
         // The subtitle describes the *chosen* theme, so it moves with the choice — otherwise
         // it keeps describing the theme that was selected when the card was built.
         appThemeSubtitle?.stringValue = theme.summary ?? ""
+    }
+
+    /// The picker's action, without a pop-up menu to open.
+    func applyAppThemeForTesting(id: AppThemeID) {
+        applyAppTheme(id: id)
     }
 
     private func reloadAppThemeControls() {
@@ -396,11 +536,16 @@ final class ThemePreferencesViewController: NSViewController {
                 ThemedMenuItem(title: title, representedValue: theme.id.rawValue)
             )
         }
-        let index = AppThemeLibrary.all.firstIndex {
-            $0.id == AppThemeLibrary.current.id
-        } ?? 0
+        // **The selection names the user's choice, not what is on screen.** The two are the same
+        // every launch but one: recovery wears System while the stored choice is something else,
+        // and a ring sitting on what is in force would put it on System — so clicking the entry
+        // that already looks selected would record System over their theme. Selecting the stored
+        // one instead makes that click write back the value that was already there.
+        let selectedID = Self.selectedAppThemeID
+        let index = AppThemeLibrary.all.firstIndex { $0.id == selectedID } ?? 0
         popUp.selectItem(at: index)
-        appThemeSubtitle?.stringValue = AppThemeLibrary.current.summary ?? ""
+        let selected = AppThemeLibrary.theme(withID: selectedID) ?? AppThemeLibrary.current
+        appThemeSubtitle?.stringValue = selected.summary ?? ""
         duplicateAppThemeButton?.isEnabled = true
         deleteAppThemeButton?.isEnabled = AppThemeLibrary.isCustom(AppThemeLibrary.current)
     }
@@ -456,6 +601,41 @@ final class ThemePreferencesViewController: NSViewController {
         )
         guard ConfirmationAlert.ask(request) else { return }
         _ = AppThemeLibrary.delete(theme)
+    }
+
+    @objc private func importClassicSkin() {
+        let panel = NSOpenPanel()
+        panel.title = L10n.string("Import Classic Skin")
+        panel.prompt = L10n.string("Import")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        if let skinType = UTType(filenameExtension: "wsz") {
+            panel.allowedContentTypes = [skinType]
+        }
+        guard panel.runModal() == .OK else { return }
+        importClassicSkins(at: panel.urls)
+    }
+
+    private func importClassicSkins(at urls: [URL]) {
+        var lastImported: AppTheme?
+        var failures: [String] = []
+        for url in urls where url.pathExtension.caseInsensitiveCompare("wsz") == .orderedSame {
+            do {
+                lastImported = try ClassicSkinImporter.importSkin(at: url)
+            } catch {
+                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        if let lastImported {
+            AppThemeLibrary.apply(lastImported)
+        }
+        if !failures.isEmpty {
+            presentAlert(
+                L10n.string("Cannot Import Classic Skin"),
+                failures.joined(separator: "\n")
+            )
+        }
     }
 
     /// The theme list on its flat surface, the list-editing controls beneath it, and a note
@@ -755,6 +935,53 @@ final class ThemePreferencesViewController: NSViewController {
         alert.messageText = title
         alert.informativeText = message
         alert.runModal()
+    }
+}
+
+// MARK: - Classic Skin Drop Target
+
+/// The settings page's ordinary host view with one accelerator: local `.wsz` file drops.
+/// It does not draw, hit-test, or construct controls, so the design system still owns every
+/// visible part of the page.
+private final class ClassicSkinDropHostingView: NSView {
+    var onSkinURLs: (([URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        skinURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        !skinURLs(from: sender).isEmpty
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = skinURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        onSkinURLs?(urls)
+        return true
+    }
+
+    private func skinURLs(from sender: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: options
+        ) as? [NSURL] ?? []
+        return objects.map { $0 as URL }.filter {
+            $0.pathExtension.caseInsensitiveCompare("wsz") == .orderedSame
+        }
     }
 }
 
