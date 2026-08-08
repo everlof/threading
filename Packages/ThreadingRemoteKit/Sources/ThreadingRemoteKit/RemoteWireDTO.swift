@@ -167,6 +167,11 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let isPinned: Bool
     /// Included so archived results can use the same row model as the active dashboard.
     public let isArchived: Bool
+    /// Optional so clients and hosts can roll forward independently.
+    public let snoozedAt: Double?
+    public let snoozedUntil: Double?
+    public let wokeReason: String?
+    public let wokeAt: Double?
     /// Whether the owner currently has at least one guest capability for this session.
     public let isShared: Bool
     /// Optional for compatibility with hosts from before remote theme propagation.
@@ -189,6 +194,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt: Double? = nil,
         isPinned: Bool = false,
         isArchived: Bool = false,
+        snoozedAt: Double? = nil,
+        snoozedUntil: Double? = nil,
+        wokeReason: String? = nil,
+        wokeAt: Double? = nil,
         isShared: Bool = false,
         terminalTheme: RemoteTerminalThemeDTO? = nil,
         terminalThemeAssignmentID: String? = nil,
@@ -205,6 +214,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.lastActiveAt = lastActiveAt
         self.isPinned = isPinned
         self.isArchived = isArchived
+        self.snoozedAt = snoozedAt
+        self.snoozedUntil = snoozedUntil
+        self.wokeReason = wokeReason
+        self.wokeAt = wokeAt
         self.isShared = isShared
         self.terminalTheme = terminalTheme
         self.terminalThemeAssignmentID = terminalThemeAssignmentID
@@ -215,6 +228,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     private enum CodingKeys: String, CodingKey {
         case id, title, agentKind, surface, state, projectName, isAvailable, lastActiveAt
         case isPinned, isArchived, isShared
+        case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
         case inheritedTerminalTheme
     }
@@ -232,6 +246,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt = try container.decodeIfPresent(Double.self, forKey: .lastActiveAt)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        snoozedAt = try container.decodeIfPresent(Double.self, forKey: .snoozedAt)
+        snoozedUntil = try container.decodeIfPresent(Double.self, forKey: .snoozedUntil)
+        wokeReason = try container.decodeIfPresent(String.self, forKey: .wokeReason)
+        wokeAt = try container.decodeIfPresent(Double.self, forKey: .wokeAt)
         isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? false
         terminalTheme = try container.decodeIfPresent(
             RemoteTerminalThemeDTO.self,
@@ -249,6 +267,14 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
             RemoteTerminalThemeDTO.self,
             forKey: .inheritedTerminalTheme
         )
+    }
+
+    /// Derived on the client as well as the host, so a missed refresh cannot keep an expired
+    /// session hidden. A backwards wall-clock step deliberately keeps it snoozed to the deadline.
+    public func isSnoozed(at date: Date = Date()) -> Bool {
+        guard !isArchived, let snoozedAt, let snoozedUntil,
+              snoozedAt < snoozedUntil else { return false }
+        return date.timeIntervalSince1970 < snoozedUntil
     }
 }
 
@@ -713,6 +739,16 @@ public struct RemoteSetSessionArchivedRequestDTO: Codable, Equatable, Sendable {
 
     public init(isArchived: Bool) {
         self.isArchived = isArchived
+    }
+}
+
+/// A Unix deadline snoozes; nil reverses it. The host remains authoritative for the start time
+/// and current activity snapshot, so clients cannot forge a stale-failure boundary.
+public struct RemoteSetSessionSnoozeRequestDTO: Codable, Equatable, Sendable {
+    public let snoozedUntil: Double?
+
+    public init(snoozedUntil: Double?) {
+        self.snoozedUntil = snoozedUntil
     }
 }
 

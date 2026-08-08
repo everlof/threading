@@ -183,6 +183,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         sessionActionURL(sessionID: sessionID, action: "archived")
     }
 
+    public func snoozedSessionURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: "snoozed")
+    }
+
     public func sessionSurfaceURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: "surface")
     }

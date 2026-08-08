@@ -151,6 +151,10 @@ final class RemoteSessionMirrorRegistry {
             lastActiveAt: session.lastActiveAt.timeIntervalSince1970,
             isPinned: session.isPinned,
             isArchived: session.isArchived,
+            snoozedAt: session.snoozedAt?.timeIntervalSince1970,
+            snoozedUntil: session.snoozedUntil?.timeIntervalSince1970,
+            wokeReason: session.wake?.reason.rawValue,
+            wokeAt: session.wake?.wokeAt.timeIntervalSince1970,
             isShared: RemoteAccessCoordinator.shared.hasSessionShares(session.id),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: session.id),
             terminalThemeAssignmentID: ThemeAssignments
@@ -277,6 +281,9 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         guard attached else { return false }
+        // Attaching the live surface is a visit, regardless of which window or paired device
+        // supplied it. All clients therefore acknowledge the same durable wake receipt.
+        SessionSnoozeCenter.shared.acknowledge(sessionID)
         let key = ObjectIdentifier(connection)
         presenceIDs[key] = UUID().uuidString
         announcePresence(of: connection, sessionID: sessionID)

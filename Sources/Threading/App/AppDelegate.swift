@@ -418,6 +418,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // in recovery can produce an alert to justify one; the workload monitor watches agents,
         // and there are none.
         if plan.startsBackgroundServices {
+            // Registered before attention alerts so an important activity edge wakes a snoozed
+            // session before the alert centre decides whether that same edge may notify.
+            SessionSnoozeCenter.shared.start()
             AttentionAlertCenter.shared.start()
             AgentWorkloadMonitor.shared.start()
         }

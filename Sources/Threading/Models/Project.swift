@@ -838,6 +838,27 @@ struct ManagedWorkspace: Codable, Sendable, Equatable {
   var lastError: String?
 }
 
+// MARK: - Session Snooze
+
+/// Why a snoozed session returned to attention before (or at) its deadline.
+///
+/// Raw values are a wire and persistence contract. Unknown remote values remain optional on
+/// clients, while an older app simply ignores the newer session keys around this value.
+enum SessionWakeReason: String, Codable, Sendable, Equatable {
+  case timeReached
+  case approvalRequested
+  case inputRequested
+  case failed
+  case turnCompleted
+  case requestedUpdate
+}
+
+/// The durable receipt shown until the session is visited.
+struct SessionWake: Codable, Sendable, Equatable {
+  let reason: SessionWakeReason
+  let wokeAt: Date
+}
+
 // MARK: - Agent Session
 
 /// A single agent conversation belonging to a project.
@@ -1087,6 +1108,20 @@ struct AgentSession: Codable, Identifiable {
   /// side should mean the same thing everywhere the conversation is listed.
   var isPinned: Bool
 
+  /// A visibility overlay only. Neither value changes the process, provider conversation,
+  /// archive state, or managed-workspace lifecycle. Both dates are stored explicitly so an app
+  /// relaunch (or a missed timer) derives the same answer from the record.
+  var snoozedAt: Date?
+  var snoozedUntil: Date?
+
+  /// Captured at the action boundary so only the completion of the turn that was already in
+  /// flight can wake this snooze. A later turn is new work and has its own activity edges.
+  var hadTurnInFlightWhenSnoozed: Bool
+
+  /// Present after an important edge wakes the session, and cleared only by an explicit visit
+  /// or acknowledgement. This is durable so every window and remote client reads one receipt.
+  var wake: SessionWake?
+
   /// The terminal theme this session draws with, by stable ID. Nil inherits — from the project,
   /// and from the app default beyond that — so a session that never chose still follows a
   /// later change to either. See `ThemeResolution.resolve`.
@@ -1161,6 +1196,10 @@ struct AgentSession: Codable, Identifiable {
     self.isArchived = false
     self.lastSynchronizedArchiveState = nil
     self.isPinned = false
+    self.snoozedAt = nil
+    self.snoozedUntil = nil
+    self.hadTurnInFlightWhenSnoozed = false
+    self.wake = nil
     self.usesNativeUI = usesNativeUI && configuration.kind.supportsNativeUI
     self.themeID = nil
     self.notificationsMuted = nil
@@ -1173,6 +1212,7 @@ struct AgentSession: Codable, Identifiable {
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case fastMode, remoteControl, permissionMode, archived, providerArchiveState, pinned, nativeUI
+    case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
     case forkParent
     case continuationSource, continuationSourceKind
     case handoff
@@ -1230,6 +1270,13 @@ struct AgentSession: Codable, Identifiable {
       forKey: .providerArchiveState
     )
     isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+    snoozedAt = try container.decodeIfPresent(Date.self, forKey: .snoozedAt)
+    snoozedUntil = try container.decodeIfPresent(Date.self, forKey: .snoozedUntil)
+    hadTurnInFlightWhenSnoozed = try container.decodeIfPresent(
+      Bool.self,
+      forKey: .hadTurnInFlightWhenSnoozed
+    ) ?? false
+    wake = try container.decodeIfPresent(SessionWake.self, forKey: .wake)
     usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
     let decodedForkParent = try container.decodeIfPresent(
       SessionID.self,
@@ -1476,6 +1523,12 @@ struct AgentSession: Codable, Identifiable {
       forKey: .providerArchiveState
     )
     try container.encode(isPinned, forKey: .pinned)
+    try container.encodeIfPresent(snoozedAt, forKey: .snoozedAt)
+    try container.encodeIfPresent(snoozedUntil, forKey: .snoozedUntil)
+    if hadTurnInFlightWhenSnoozed {
+      try container.encode(true, forKey: .hadTurnInFlightWhenSnoozed)
+    }
+    try container.encodeIfPresent(wake, forKey: .wake)
     try container.encode(usesNativeUI, forKey: .nativeUI)
     try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
     try container.encodeIfPresent(continuedFrom, forKey: .continuationSource)
@@ -1502,12 +1555,33 @@ struct AgentSession: Codable, Identifiable {
   /// Returns whether either persisted field changed, so a batch reconciliation writes once.
   @discardableResult
   mutating func synchronizeArchiveState(_ archived: Bool) -> Bool {
-    guard isArchived != archived || lastSynchronizedArchiveState != archived else {
+    let clearsAttentionOverlay = archived
+      && (snoozedAt != nil || snoozedUntil != nil || wake != nil)
+    guard isArchived != archived || lastSynchronizedArchiveState != archived
+      || clearsAttentionOverlay else {
       return false
     }
     isArchived = archived
     lastSynchronizedArchiveState = archived
+    if archived { clearAttentionOverlay() }
     return true
+  }
+
+  /// Whether the persisted overlay suppresses attention at `date`.
+  ///
+  /// Deliberately does not require `date >= snoozedAt`: if the wall clock moves backwards, the
+  /// session remains snoozed until the stored deadline instead of briefly resurfacing.
+  func isSnoozed(at date: Date) -> Bool {
+    guard !isArchived, let snoozedAt, let snoozedUntil,
+          snoozedAt < snoozedUntil else { return false }
+    return date < snoozedUntil
+  }
+
+  mutating func clearAttentionOverlay() {
+    snoozedAt = nil
+    snoozedUntil = nil
+    hadTurnInFlightWhenSnoozed = false
+    wake = nil
   }
 
   /// Changes a reasoning option only where the provider configuration can carry one.

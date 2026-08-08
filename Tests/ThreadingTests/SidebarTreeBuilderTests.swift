@@ -61,6 +61,13 @@ final class SidebarTreeBuilderTests: XCTestCase {
         nodes.compactMap { $0 as? SessionNode }
     }
 
+    private func allSessionIDs(in nodes: [NSObject]) -> [SessionID] {
+        nodes.flatMap { node -> [SessionID] in
+            let own = (node as? SessionNode).map { [$0.sessionID] } ?? []
+            return own + allSessionIDs(in: SidebarTreeBuilder.children(of: node))
+        }
+    }
+
     private func terminal(_ path: String, branch: String?) -> ProjectTerminal {
         var terminal = ProjectTerminal(currentDirectory: path)
         terminal.branch = branch
@@ -173,6 +180,27 @@ final class SidebarTreeBuilderTests: XCTestCase {
     }
 
     // MARK: - Earning a level
+
+    func testSnoozeScopesFilterWithoutFlatteningTheProjectHierarchy() throws {
+        let date = Date(timeIntervalSince1970: 2_000_000_000)
+        let attentive = session("attentive", isPinned: true)
+        var snoozed = session("snoozed", branch: "feature", isPinned: true)
+        snoozed.snoozedAt = date.addingTimeInterval(-60)
+        snoozed.snoozedUntil = date.addingTimeInterval(3_600)
+        let project = project("p", sessions: [attentive, snoozed])
+
+        let attentionRoots = SidebarTreeBuilder.rootNodes(from: [project], at: date)
+        let snoozedRoots = SidebarTreeBuilder.rootNodes(
+            from: [project],
+            visibility: .snoozed,
+            at: date
+        )
+
+        XCTAssertTrue(try XCTUnwrap(attentionRoots.first) is ProjectNode)
+        XCTAssertTrue(try XCTUnwrap(snoozedRoots.first) is ProjectNode)
+        XCTAssertEqual(allSessionIDs(in: attentionRoots), [attentive.id])
+        XCTAssertEqual(allSessionIDs(in: snoozedRoots), [snoozed.id])
+    }
 
     /// One checkout is a plain project row. The repository level exists to tell *several*
     /// checkouts apart, and an extra level that groups one thing says nothing.

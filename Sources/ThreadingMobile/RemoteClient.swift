@@ -162,6 +162,20 @@ struct RemoteClient {
         )
     }
 
+    func setSessionSnoozed(
+        sessionID: String,
+        until deadline: Date?,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetSessionSnoozeRequestDTO(
+                snoozedUntil: deadline?.timeIntervalSince1970
+            ),
+            to: link.snoozedSessionURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
     func setSessionSurface(
         sessionID: String,
         surface: String,

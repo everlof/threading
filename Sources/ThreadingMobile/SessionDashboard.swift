@@ -1,6 +1,41 @@
 import ThreadingRemoteKit
 import SwiftUI
 
+struct MobileSnoozeChoice: Identifiable {
+    let id: String
+    let title: String
+    let deadline: Date
+}
+
+enum MobileSnoozePresets {
+    static func choices(now: Date = Date(), calendar: Calendar = .current) -> [MobileSnoozeChoice] {
+        var result = [MobileSnoozeChoice(
+            id: "hour",
+            title: MobileL10n.string("In an hour"),
+            deadline: now.addingTimeInterval(3_600)
+        )]
+        if let tomorrow = calendar.nextDate(
+            after: now,
+            matching: DateComponents(hour: 9),
+            matchingPolicy: .nextTime
+        ) {
+            result.append(MobileSnoozeChoice(
+                id: "tomorrow",
+                title: MobileL10n.string("Tomorrow morning"),
+                deadline: tomorrow
+            ))
+        }
+        if let nextWeek = calendar.date(byAdding: .day, value: 7, to: now) {
+            result.append(MobileSnoozeChoice(
+                id: "week",
+                title: MobileL10n.string("Next week"),
+                deadline: nextWeek
+            ))
+        }
+        return result
+    }
+}
+
 private enum SessionOrganization: String, CaseIterable {
     case project
     case recent
@@ -25,6 +60,7 @@ private enum DashboardSessionAction {
     case rename
     case archive
     case restore
+    case snooze(Date?)
     case surface(String)
     case share
     case stopSharing
@@ -55,6 +91,7 @@ struct SessionDashboard: View {
     @State private var themeError: String?
     @State private var pendingThemeID: String?
     @State private var showsArchived = false
+    @State private var showsSnoozed = false
     @State private var showsNewSession = false
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
@@ -73,7 +110,10 @@ struct SessionDashboard: View {
         let all = showsArchived
             ? model.me?.archivedSessions ?? []
             : model.me?.sessions ?? []
-        let filtered = searchText.isEmpty ? all : all.filter {
+        let scoped = showsArchived ? all : all.filter {
+            showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
+        }
+        let filtered = searchText.isEmpty ? scoped : scoped.filter {
             $0.title.localizedCaseInsensitiveContains(searchText)
                 || $0.projectName.localizedCaseInsensitiveContains(searchText)
         }
@@ -106,7 +146,9 @@ struct SessionDashboard: View {
                 deviceSection
 
                 HStack {
-                    Text(MobileL10n.string(showsArchived ? "Archived" : "Sessions"))
+                    Text(MobileL10n.string(
+                        showsArchived ? "Archived" : (showsSnoozed ? "Snoozed" : "Sessions")
+                    ))
                         .font(.title3.weight(.medium))
                     Spacer()
                     Text("\(sessions.count)")
@@ -387,7 +429,17 @@ struct SessionDashboard: View {
                 if model.canManageSessions {
                     Section("Manage") {
                         Button {
+                            showsArchived = false
+                            showsSnoozed.toggle()
+                        } label: {
+                            Label(
+                                MobileL10n.string(showsSnoozed ? "Active sessions" : "Snoozed sessions"),
+                                systemImage: showsSnoozed ? "tray" : "moon.zzz"
+                            )
+                        }
+                        Button {
                             showsArchived.toggle()
+                            if showsArchived { showsSnoozed = false }
                         } label: {
                             Label(
                                 MobileL10n.string(
@@ -460,6 +512,8 @@ struct SessionDashboard: View {
             mutate(session) { try await model.setArchived(true, for: session) }
         case .restore:
             mutate(session) { try await model.setArchived(false, for: session) }
+        case .snooze(let deadline):
+            mutate(session) { try await model.setSnoozed(until: deadline, for: session) }
         case .surface(let surface):
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
@@ -757,6 +811,23 @@ private struct SessionListItem: View {
                     } label: {
                         Label("Rename", systemImage: "pencil")
                     }
+                    if session.isSnoozed() {
+                        Button {
+                            action(.snooze(nil), session)
+                        } label: {
+                            Label("Unsnooze", systemImage: "sun.max")
+                        }
+                    } else {
+                        Menu {
+                            ForEach(MobileSnoozePresets.choices()) { choice in
+                                Button(choice.title) {
+                                    action(.snooze(choice.deadline), session)
+                                }
+                            }
+                        } label: {
+                            Label("Snooze", systemImage: "moon.zzz")
+                        }
+                    }
                     Button {
                         action(.share, session)
                     } label: {
@@ -977,6 +1048,8 @@ private struct SessionRow: View {
 
     private var availabilityLabel: String {
         if session.isArchived { return MobileL10n.string("Archived") }
+        if session.wokeAt != nil { return MobileL10n.string("Woke") }
+        if session.isSnoozed() { return MobileL10n.string("Snoozed") }
         return session.isAvailable ? stateLabel : MobileL10n.string("Disconnected")
     }
 

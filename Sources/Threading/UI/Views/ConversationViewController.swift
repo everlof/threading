@@ -2153,14 +2153,23 @@ final class ConversationViewController: NSViewController {
         // Only a *failed* turn is asked. A provider's refusal arrives through the same channel
         // as a network fault and as the user's own Stop, and only the outcome tells them apart
         // — matching the words alone would stop a session for having written about limits.
-        if case .turnFinished(let text, let outcome, _) = event, outcome == .failed {
-            usageLimit = UsageLimitStop.recognised(in: text)
-            if let usageLimit {
-                EventLog.shared.record(.limitRecovery, "Native turn refused for a usage limit", [
-                    "session": sessionID.uuidString,
-                    "message": usageLimit.message,
-                    "resetHint": usageLimit.resetHint ?? ""
-                ])
+        if case .turnFinished(let text, let outcome, _) = event {
+            if outcome == .failed {
+                if !isReplaying {
+                    SessionSnoozeCenter.shared.record(.failed, for: sessionID)
+                }
+                // Replay still restores the existing usage-limit state; it just must not turn
+                // that historical failure into a fresh Snooze wake edge.
+                usageLimit = UsageLimitStop.recognised(in: text)
+                if let usageLimit {
+                    EventLog.shared.record(.limitRecovery, "Native turn refused for a usage limit", [
+                        "session": sessionID.uuidString,
+                        "message": usageLimit.message,
+                        "resetHint": usageLimit.resetHint ?? ""
+                    ])
+                }
+            } else if !isReplaying {
+                SessionSnoozeCenter.shared.record(.turnCompleted, for: sessionID)
             }
         }
         recordAttachments(in: event)

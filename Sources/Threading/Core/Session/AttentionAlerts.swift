@@ -76,9 +76,13 @@ enum AttentionAlertPolicy {
         from old: SessionActivity,
         to new: SessionActivity,
         appIsActive: Bool,
-        reportsOwnTurns: Bool
+        reportsOwnTurns: Bool,
+        isSnoozed: Bool = false
     ) -> Action {
         guard old != new else { return .none }
+        // Snooze suppresses ordinary attention. Important edges clear the overlay before this
+        // policy runs, so they still receive the notification they would have received unsnoozed.
+        if isSnoozed { return .clear }
 
         switch new {
         case .awaitingUser:
@@ -263,11 +267,13 @@ final class AttentionAlertCenter: NSObject {
         body: String,
         destination: RemoteNotificationDestinationDTO
     ) -> Bool {
-        guard isStarted, destination.isValid,
-              AppSettings.shared.notifiesOnAttention,
-              !AttentionAlertScope.isMuted(sessionID: sessionID) else {
-            return false
-        }
+        guard isStarted, destination.isValid else { return false }
+
+        // A requested update is an explicit promise to notify, so its arrival outranks a
+        // visibility snooze just like an approval request or a fresh failure.
+        SessionSnoozeCenter.shared.record(.requestedUpdate, for: sessionID)
+        guard AppSettings.shared.notifiesOnAttention,
+              !AttentionAlertScope.isMuted(sessionID: sessionID) else { return false }
 
         let content = UNMutableNotificationContent()
         let session = ProjectStore.shared.session(withID: sessionID)
@@ -322,7 +328,8 @@ final class AttentionAlertCenter: NSObject {
             from: old,
             to: new,
             appIsActive: NSApp.isActive,
-            reportsOwnTurns: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
+            reportsOwnTurns: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID),
+            isSnoozed: SessionSnoozeCenter.shared.isSnoozed(sessionID)
         )
 
         switch action {
@@ -344,6 +351,7 @@ final class AttentionAlertCenter: NSObject {
         AppSettings.shared.notifiesOnAttention
             && AppSettings.shared.notifies(on: alert)
             && !AttentionAlertScope.isMuted(sessionID: sessionID)
+            && !SessionSnoozeCenter.shared.isSnoozed(sessionID)
     }
 
     private func post(_ alert: AttentionAlert, for sessionID: SessionID) {

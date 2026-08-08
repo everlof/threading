@@ -1,6 +1,82 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Session is snoozed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen är snoozad" } } }
+    },
+    "Session woke from snooze": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen väcktes från snooze" } } }
+    },
+    "Snooze": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snooza" } } }
+    },
+    "Snooze session": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snooza session" } } }
+    },
+    "Snoozed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snoozad" } } }
+    },
+    "Snoozed Sessions": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snoozade sessioner" } } }
+    },
+    "The session keeps running while snoozed.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen fortsätter att köras medan den är snoozad." } } }
+    },
+    "Unsnooze": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sluta snooza" } } }
+    },
+    "Woke": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väckt" } } }
+    },
+    "Codex may draft the title and description. You review them and press Publish.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex kan skriva ett utkast till titel och beskrivning. Du granskar dem och trycker på Publicera."
+          }
+        }
+      }
+    },
+    "Git Review may push this project's branch, but never creates a pull request.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning kan pusha projektets gren, men skapar aldrig en pull request."
+          }
+        }
+      }
+    },
+    "Pressing Create publishes a draft pull request with the proposed title and description.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "När du trycker på Skapa publiceras ett utkast till pull request med den föreslagna titeln och beskrivningen."
+          }
+        }
+      }
+    },
+    "Pressing Create publishes a ready-for-review pull request with the proposed title and description.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "När du trycker på Skapa publiceras en pull request redo för granskning med den föreslagna titeln och beskrivningen."
+          }
+        }
+      }
+    },
     "The stored baseline image no longer matches its approved revision.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sparade baslinjebilden stämmer inte längre med den godkända revisionen." } } } },
     "the baseline record exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "baslinjeposten överskred sin lagringsgräns" } } } },
     "the captured manifest exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det fångade manifestet överskred sin lagringsgräns" } } } },

@@ -218,6 +218,13 @@ extension BranchGroupNode: SidebarOutlineNode {
 
 // MARK: - Tree Builder
 
+/// Which attention layer the authoritative project hierarchy presents. This filters session
+/// membership only; it never manufactures a second grouping model or changes stored ownership.
+enum SidebarSessionVisibility: Equatable {
+    case attention
+    case snoozed
+}
+
 /// Builds the sidebar's node tree from the store's projects.
 ///
 /// Pure construction — it reads the store and git metadata but holds no view state, which
@@ -230,7 +237,11 @@ enum SidebarTreeBuilder {
     /// Arranges projects into the tree, grouping only where a repository has more than one
     /// checkout added. A single-checkout repository stays a plain project row, so the extra
     /// level never appears without cause.
-    static func rootNodes(from projects: [Project]) -> [NSObject] {
+    static func rootNodes(
+        from projects: [Project],
+        visibility: SidebarSessionVisibility = .attention,
+        at date: Date = Date()
+    ) -> [NSObject] {
         let identities = projects.map { GitInfo.repositoryIdentity(for: $0.folderPath) }
 
         var checkoutCounts: [String: Int] = [:]
@@ -259,12 +270,20 @@ enum SidebarTreeBuilder {
             let order = AppSettings.sidebarSessionOrder
             let isReversed = AppSettings.sidebarSessionOrderIsReversed
             let activeSessions = project.sessions
-                .filter { !$0.isArchived }
+                .filter {
+                    guard !$0.isArchived else { return false }
+                    let isSnoozed = $0.isSnoozed(at: date)
+                    return visibility == .snoozed ? isSnoozed : !isSnoozed
+                }
                 .enumerated()
                 .sorted { precedes($0, $1, order: order, isReversed: isReversed) }
                 .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
-            let terminals = terminalsByDisplayProject[project.id] ?? []
+            // Standalone terminals are not sessions and cannot be snoozed. They remain in the
+            // ordinary attention view, never leaking into the dedicated Snoozed scope.
+            let terminals = visibility == .attention
+                ? terminalsByDisplayProject[project.id] ?? []
+                : []
             node.terminalNodes = terminals.map {
                 TerminalNode(terminalID: $0.id, displayProjectFolderPath: project.folderPath)
             }

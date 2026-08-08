@@ -84,11 +84,14 @@
       "sessions.empty": "No sessions yet. Start Claude Code or Codex on the Mac.",
       "sessions.connectedSecurely": "Connected securely",
       "sessions.heading": "Sessions",
+      "sessions.snoozed": "Snoozed",
       "sessions.otherProject": "Other",
       "session.defaultName": "Session",
       "session.disconnected": "Disconnected",
       "session.working": "Working",
       "session.needsAttention": "Needs attention",
+      "session.snoozed": "Snoozed",
+      "session.woke": "Woke",
       "session.connected": "Connected",
       "session.resuming": "Resuming this session on the Mac…",
       "session.resumeFailed": "The session could not be resumed.",
@@ -207,11 +210,14 @@
       "sessions.empty": "Inga sessioner ännu. Starta Claude Code eller Codex på Mac-datorn.",
       "sessions.connectedSecurely": "Säkert ansluten",
       "sessions.heading": "Sessioner",
+      "sessions.snoozed": "Snoozade",
       "sessions.otherProject": "Övrigt",
       "session.defaultName": "Session",
       "session.disconnected": "Frånkopplad",
       "session.working": "Arbetar",
       "session.needsAttention": "Kräver uppmärksamhet",
+      "session.snoozed": "Snoozad",
+      "session.woke": "Väckt",
       "session.connected": "Ansluten",
       "session.resuming": "Återupptar sessionen på Mac-datorn…",
       "session.resumeFailed": "Det gick inte att återuppta sessionen.",
@@ -1588,18 +1594,38 @@
     addDiagnosticControl(device, me);
     els.sessions.appendChild(device);
 
+    var attentionSessions = me.sessions.filter(function (session) {
+      return !isSessionSnoozed(session);
+    });
+    var snoozedSessions = me.sessions.filter(isSessionSnoozed);
+    renderSessionSection(t("sessions.heading"), attentionSessions);
+    if (snoozedSessions.length) {
+      renderSessionSection(t("sessions.snoozed"), snoozedSessions);
+    }
+    show("sessions");
+  }
+
+  // A deadline is interpreted locally as well as on the host. A refresh or timer missed while
+  // either side slept therefore cannot strand an expired row in the Snoozed section.
+  function isSessionSnoozed(session) {
+    return !session.isArchived && typeof session.snoozedAt === "number" &&
+      typeof session.snoozedUntil === "number" &&
+      session.snoozedAt < session.snoozedUntil && Date.now() / 1000 < session.snoozedUntil;
+  }
+
+  function renderSessionSection(title, sessions) {
     var sessionHeading = document.createElement("li");
     sessionHeading.className = "section-heading";
     var sessionHeadingLabel = document.createElement("span");
-    sessionHeadingLabel.textContent = t("sessions.heading");
+    sessionHeadingLabel.textContent = title;
     var sessionCount = document.createElement("span");
-    sessionCount.textContent = String(me.sessions.length);
+    sessionCount.textContent = String(sessions.length);
     sessionHeading.appendChild(sessionHeadingLabel);
     sessionHeading.appendChild(sessionCount);
     els.sessions.appendChild(sessionHeading);
 
     var groups = Object.create(null);
-    me.sessions.forEach(function (session) {
+    sessions.forEach(function (session) {
       var project = session.projectName || t("sessions.otherProject");
       (groups[project] || (groups[project] = [])).push(session);
     });
@@ -1634,9 +1660,12 @@
         var dot = document.createElement("span");
         dot.className = "dot " + (session.isAvailable ? (session.state || "idle") : "dormant");
         meta.appendChild(dot);
+        var state = session.wokeAt ? t("session.woke")
+          : isSessionSnoozed(session) ? t("session.snoozed")
+          : session.isAvailable ? stateLabel(session.state)
+          : t("session.disconnected");
         meta.appendChild(document.createTextNode(
-          (session.isAvailable ? stateLabel(session.state) : t("session.disconnected")) +
-          " · " + agentLabel(session.agentKind)
+          state + " · " + agentLabel(session.agentKind)
         ));
 
         button.appendChild(topLine);
@@ -1646,7 +1675,6 @@
         els.sessions.appendChild(li);
       });
     });
-    show("sessions");
   }
 
   function stateLabel(state) {

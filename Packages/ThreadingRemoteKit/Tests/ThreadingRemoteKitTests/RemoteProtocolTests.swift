@@ -339,6 +339,36 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertFalse(summary.isPinned)
         XCTAssertFalse(summary.isArchived)
         XCTAssertFalse(summary.isShared)
+        XCTAssertNil(summary.snoozedAt)
+        XCTAssertNil(summary.snoozedUntil)
+        XCTAssertNil(summary.wokeReason)
+        XCTAssertNil(summary.wokeAt)
+        XCTAssertFalse(summary.isSnoozed())
+    }
+
+    func testSessionSnoozeFieldsRoundTripAndDeriveFromTheDeadline() throws {
+        let start = 2_000_000_000.0
+        let deadline = start + 3_600
+        let summary = RemoteSessionSummaryDTO(
+            id: "s",
+            title: "Session",
+            agentKind: "codex",
+            surface: "conversation",
+            state: "working",
+            projectName: "Project",
+            snoozedAt: start,
+            snoozedUntil: deadline,
+            wokeReason: nil,
+            wokeAt: nil
+        )
+        let roundTrip = try JSONDecoder().decode(
+            RemoteSessionSummaryDTO.self,
+            from: JSONEncoder().encode(summary)
+        )
+
+        XCTAssertEqual(roundTrip, summary)
+        XCTAssertTrue(roundTrip.isSnoozed(at: Date(timeIntervalSince1970: start + 1)))
+        XCTAssertFalse(roundTrip.isSnoozed(at: Date(timeIntervalSince1970: deadline)))
     }
 
     func testOlderHelloAndMePayloadsDecodeWithoutThemes() throws {
@@ -634,6 +664,14 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             archived
         )
+        let snoozed = RemoteSetSessionSnoozeRequestDTO(snoozedUntil: 2_000_003_600)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSetSessionSnoozeRequestDTO.self,
+                from: JSONEncoder().encode(snoozed)
+            ),
+            snoozed
+        )
         let surface = RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -811,6 +849,10 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(
             link.archivedSessionURL(sessionID: "abc").absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/archived"
+        )
+        XCTAssertEqual(
+            link.snoozedSessionURL(sessionID: "abc").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/snoozed"
         )
         XCTAssertEqual(
             link.sessionSurfaceURL(sessionID: "abc").absoluteString,

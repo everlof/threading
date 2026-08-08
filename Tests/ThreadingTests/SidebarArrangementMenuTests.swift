@@ -27,9 +27,7 @@ final class SidebarArrangementMenuTests: XCTestCase {
 
     // MARK: - Shape
 
-    /// Grouping first, then a separator, then one item per order, then a separator and the two
-    /// directions — how the list groups is a bigger rearrangement than how it sorts, so it
-    /// reads first, and a direction only means anything once an order is named.
+    /// Visibility first, grouping second, then the orders and their two directions.
     func testMenuOffersGroupingThenEveryOrderThenBothDirections() throws {
         try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
             let entries = ProjectSidebarViewController().arrangementMenuEntries()
@@ -37,7 +35,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
             let titles = entries.map { $0.item?.title ?? "—" }
             XCTAssertEqual(
                 titles,
-                ["Group Sessions by Branch", "Headings for Lone Branches", "Compact Tree", "—"]
+                ["Snoozed Sessions", "—", "Group Sessions by Branch",
+                 "Headings for Lone Branches", "Compact Tree", "—"]
                     + SidebarSessionOrder.allCases.map(\.menuTitle)
                     + ["—", "Oldest First", "Newest First"]
             )

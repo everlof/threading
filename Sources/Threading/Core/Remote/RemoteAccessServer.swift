@@ -387,6 +387,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "POST",
+           let sessionID = RemoteRouter.snoozedSessionID(forPath: path) {
+            handleSnoozedSession(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
            let sessionID = RemoteRouter.surfaceSessionID(forPath: path) {
             handleSessionSurface(request, sessionID: sessionID, respond: respond)
             return
@@ -1114,6 +1120,47 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(RemoteRouter.error(status, failure.localizedDescription)))
                 }
             }
+        }
+    }
+
+    private func handleSnoozedSession(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteSetSessionSnoozeRequestDTO.self,
+            from: request.body
+        ) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = ProjectStore.shared.session(withID: sessionID),
+                  !session.isArchived else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            if let rawDeadline = choice.snoozedUntil {
+                let deadline = Date(timeIntervalSince1970: rawDeadline)
+                guard deadline > Date(), deadline < Date().addingTimeInterval(366 * 86_400) else {
+                    respond(.respond(RemoteRouter.error(422, "Invalid snooze deadline")))
+                    return
+                }
+                SessionSnoozeCenter.shared.snooze(sessionID, until: deadline)
+            } else {
+                SessionSnoozeCenter.shared.unsnooze(sessionID)
+            }
+            respond(.respond(RemoteRouter.json(
+                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+            )))
         }
     }
 

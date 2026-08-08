@@ -556,6 +556,7 @@ extension ProjectSidebarViewController {
         entries.append(action(
             session.isPinned ? L10n.string("Unpin") : L10n.string("Pin")
         ) { [weak self] in self?.togglePinnedClicked() })
+        entries.append(snoozeEntry(for: session))
         // The sidebar only ever lists unarchived sessions, so this is always "Archive";
         // restoring one happens from Settings, where the archived sessions live.
         entries.append(action(L10n.string("Archive")) { [weak self] in
@@ -643,6 +644,41 @@ extension ProjectSidebarViewController {
     /// One plain action row.
     private func action(_ title: String, _ body: @escaping () -> Void) -> ThemedMenuEntry {
         .item(ThemedMenuItem(title: title, onChoose: body))
+    }
+
+    /// Snooze sits beside Pin and Archive because all three change how a row is found, while
+    /// only Archive files or closes anything. The shared builder gives row, context, and pane
+    /// header the same Snooze/Unsnooze contract.
+    private func snoozeEntry(for session: AgentSession) -> ThemedMenuEntry {
+        if session.isSnoozed(at: Date()) {
+            return action(L10n.string("Unsnooze")) {
+                SessionSnoozeCenter.shared.unsnooze(session.id)
+            }
+        }
+
+        var submenu = ScheduledTimePresets.wallClock(now: Date()).map { preset in
+            ThemedMenuEntry.item(ThemedMenuItem(
+                title: preset.title,
+                subtitle: preset.detail,
+                onChoose: {
+                    SessionSnoozeCenter.shared.snooze(session.id, until: preset.date)
+                }
+            ))
+        }
+        submenu.append(.separator)
+        submenu.append(action(L10n.string("Custom time…")) { [weak self] in
+            guard let self else { return }
+            ScheduleMessageAlert.present(
+                over: view.window,
+                title: L10n.string("Snooze session"),
+                informativeText: L10n.string("The session keeps running while snoozed."),
+                confirmTitle: L10n.string("Snooze")
+            ) { deadline in
+                guard let deadline else { return }
+                SessionSnoozeCenter.shared.snooze(session.id, until: deadline)
+            }
+        })
+        return .item(ThemedMenuItem(title: L10n.string("Snooze"), submenu: submenu))
     }
 
     /// Everything about a chat that is needed *elsewhere*, folded behind one Copy item: the

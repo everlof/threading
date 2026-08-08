@@ -110,6 +110,10 @@ struct RemoteRouter {
         sessionID(forPath: path, action: "archived")
     }
 
+    static func snoozedSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "snoozed")
+    }
+
     static func surfaceSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: "surface")
     }

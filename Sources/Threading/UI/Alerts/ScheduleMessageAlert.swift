@@ -22,6 +22,8 @@ enum ScheduleMessageAlert {
     static func present(
         over window: NSWindow?,
         title: String,
+        informativeText: String? = nil,
+        confirmTitle: String = L10n.string("Schedule Message"),
         now: Date = Date(),
         calendar: Calendar = .current,
         locale: Locale = .current,
@@ -29,12 +31,13 @@ enum ScheduleMessageAlert {
     ) {
         let alert = ThemedAlert()
         alert.messageText = title
-        alert.informativeText = [
-            L10n.format("Time zone: %@", TimeZone.current.localizedName(
+        let timeZone = L10n.format("Time zone: %@", TimeZone.current.localizedName(
                 for: .generic,
                 locale: locale
-            ) ?? TimeZone.current.identifier),
-            L10n.string("Sends while Threading is running.")
+            ) ?? TimeZone.current.identifier)
+        alert.informativeText = [
+            timeZone,
+            informativeText ?? L10n.string("Sends while Threading is running.")
         ].joined(separator: "\n")
         alert.alertStyle = .informational
 
@@ -64,7 +67,7 @@ enum ScheduleMessageAlert {
         ).isActive = true
         alert.accessoryView = row
 
-        alert.addButton(withTitle: L10n.string("Schedule Message"))
+        alert.addButton(withTitle: confirmTitle)
         alert.addButton(withTitle: L10n.string("Cancel"))
 
         let resolve: (NSApplication.ModalResponse) -> Void = { response in

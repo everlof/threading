@@ -186,6 +186,19 @@ final class AgentRuntime {
         // only line that answers it.
         let wasInferring = !tracker.reportsOwnActivity
 
+        // These are new edges, not readings of the resulting state. That distinction is what
+        // lets Snooze ignore a request that was already pending when the action was chosen.
+        switch report.event {
+        case .turnFinished:
+            SessionSnoozeCenter.shared.record(.turnCompleted, for: report.sessionID)
+        case .awaitingUser:
+            SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
+        case .blockingAskOpened:
+            SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
+        case .turnStarted, .blockingAskClosed, .sessionStarted, .subagentStarted, .subagentStopped:
+            break
+        }
+
         switch report.event {
         case .turnStarted: tracker.noteTurnStarted(turnID: report.turnID)
         case .turnFinished:
@@ -355,6 +368,7 @@ final class AgentRuntime {
         // Coming on screen answers the session's notification the same way it lowers its
         // sidebar flag — the no-op before `start()` keeps notification machinery out of tests.
         if let sessionID {
+            SessionSnoozeCenter.shared.acknowledge(sessionID)
             AttentionAlertCenter.shared.sessionWasViewed(sessionID)
         }
     }

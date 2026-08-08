@@ -96,6 +96,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private var accountChipView: NSImageView?
 
     private let titleLabel = MorphingTitleLabel()
+    /// Durable visibility state in words: the row remains findable while snoozed, and an early
+    /// wake remains obvious until the session is visited.
+    private let attentionOverlayLabel = NSTextField(labelWithString: "")
     /// Pinning is stronger than every sidebar sort, so it remains visible beside the title
     /// rather than being communicated only by the row's position.
     /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
@@ -109,7 +112,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
     private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, afterTitleSlot]
+        views: [contentContainer, attentionOverlayLabel, afterTitleSlot]
     )
     private var identityCustomizationHostIsMaterialized = false
     private lazy var identityCustomizationHost: ComponentCustomizationHost = {
@@ -271,6 +274,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             SidebarRowDefaults.stretchableHugging,
             for: .horizontal
         )
+
+        attentionOverlayLabel.applyFont(.caption)
+        attentionOverlayLabel.setAccessibilityIdentifier("sidebar.session.attention-overlay")
+        attentionOverlayLabel.setContentHuggingPriority(.required, for: .horizontal)
+        attentionOverlayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        attentionOverlayLabel.isHidden = true
 
         setupTrailingSlot()
         setupCustomizableContent()
@@ -767,6 +776,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         nativeTitle = session.displayTitle
         nativeToolTip = nil
         setPinned(session.isPinned)
+        if session.wake != nil {
+            attentionOverlayLabel.stringValue = L10n.string("Woke")
+            attentionOverlayLabel.setAccessibilityLabel(L10n.string("Session woke from snooze"))
+            attentionOverlayLabel.isHidden = false
+        } else if session.isSnoozed(at: Date()) {
+            attentionOverlayLabel.stringValue = L10n.string("Snoozed")
+            attentionOverlayLabel.setAccessibilityLabel(L10n.string("Session is snoozed"))
+            attentionOverlayLabel.isHidden = false
+        } else {
+            attentionOverlayLabel.stringValue = ""
+            attentionOverlayLabel.isHidden = true
+        }
 
         // Bound to *this* session rather than reading the row's id when it fires. A press
         // outlives the row it started on — `ThemedIconButton` completes the gesture even after
@@ -1115,6 +1136,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
+        attentionOverlayLabel.textColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.tertiary
         statusIndicator?.hostGround = ground
         actionButton.hostGround = ground
         archiveButton.hostGround = ground

@@ -915,6 +915,10 @@ extension AgentSessionViewController: TerminalSessionDelegate {
             stored.lastActiveAt = Date()
         }
 
+        if let exitCode, exitCode != 0 {
+            SessionSnoozeCenter.shared.record(.failed, for: sessionID)
+        }
+
         // A blank TUI of this kind creates no session until the first prompt. If the initial
         // poll finished before the user typed, exiting is the next exact point at which to retry.
         if agentKind.supports(.deferredSessionIdentifier) {

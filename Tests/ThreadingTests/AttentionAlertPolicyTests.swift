@@ -111,6 +111,19 @@ final class AttentionAlertPolicyTests: XCTestCase {
         )
     }
 
+    func testSnoozedSessionClearsInsteadOfPostingOrdinaryAttention() {
+        XCTAssertEqual(
+            AttentionAlertPolicy.action(
+                from: .working,
+                to: .awaitingUser,
+                appIsActive: false,
+                reportsOwnTurns: true,
+                isSnoozed: true
+            ),
+            .clear
+        )
+    }
+
     // MARK: - Which Alerts Are Wanted
 
     /// The three kinds are separately switchable, and the raw values are stored preferences —

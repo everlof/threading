@@ -927,6 +927,17 @@ final class RemoteServerIntegrationTests: XCTestCase {
             )).status,
             403
         )
+        let snooze = try JSONEncoder().encode(
+            RemoteSetSessionSnoozeRequestDTO(snoozedUntil: Date().timeIntervalSince1970 + 3_600)
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(sessionID.uuidString)/snoozed",
+                bearer: "guesttoken",
+                body: snooze
+            )).status,
+            403
+        )
         let share = try JSONEncoder().encode(
             RemoteCreateShareRequestDTO(capability: RemoteCapability.view.rawValue)
         )
@@ -1559,6 +1570,11 @@ final class RemoteServerIntegrationTests: XCTestCase {
             "abc"
         )
         XCTAssertNil(RemoteRouter.surfaceSessionID(forPath: "/api/session/a/b/surface"))
+        XCTAssertEqual(
+            RemoteRouter.snoozedSessionID(forPath: "/api/session/abc/snoozed"),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.snoozedSessionID(forPath: "/api/session/a/b/snoozed"))
         XCTAssertEqual(
             RemoteRouter.shareSessionID(forPath: "/api/session/abc/share"),
             "abc"

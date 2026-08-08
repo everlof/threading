@@ -921,6 +921,7 @@ extension ConversationViewController {
         _ = view
 
         permissionQueue.append((request, decide))
+        SessionSnoozeCenter.shared.record(.approvalRequested, for: sessionID)
         delegate?.conversationDidChangeActivity(self)
 
         // A request raised in a session the user is not looking at bounces the dock, since the

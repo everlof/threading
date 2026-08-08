@@ -548,6 +548,23 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
+    func setSnoozed(until deadline: Date?, for session: RemoteSessionSummaryDTO) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionSnoozed(
+                sessionID: session.id,
+                until: deadline,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
     func setSurface(_ surface: String, for session: RemoteSessionSummaryDTO) async throws {
         guard canManageSessions, let host = activeHost else {
             throw RemoteClientError.unauthorized

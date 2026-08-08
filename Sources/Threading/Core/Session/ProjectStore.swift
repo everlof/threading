@@ -478,6 +478,10 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].isArchived
             != archived else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].isArchived = archived
+        // Archiving ends a snooze rather than preserving it: the row leaves the list, so a
+        // "Snoozed"/"Woke" overlay it carries back on restore would describe a wait nobody is
+        // still having. Archive semantics themselves are unchanged.
+        if archived { projects[location.projectIndex].sessions[location.sessionIndex].clearAttentionOverlay() }
         guard save() else {
             notifyChanged()
             return .persistenceRefused
@@ -519,6 +523,60 @@ final class ProjectStore {
         }
         notifyChanged()
         return .applied
+    }
+
+    /// Applies the visibility overlay without touching process or provider state.
+    func setSnoozed(
+        until deadline: Date,
+        at date: Date,
+        hadTurnInFlight: Bool,
+        for sessionID: SessionID
+    ) {
+        guard let session = session(withID: sessionID), !session.isArchived, deadline > date else {
+            return
+        }
+        update(sessionID: sessionID) {
+            $0.snoozedAt = date
+            $0.snoozedUntil = deadline
+            $0.hadTurnInFlightWhenSnoozed = hadTurnInFlight
+            $0.wake = nil
+        }
+        // The row moves between the attention and Snoozed scopes.
+        notifyChanged()
+    }
+
+    func clearSnooze(for sessionID: SessionID) {
+        guard let session = session(withID: sessionID),
+              session.snoozedAt != nil || session.snoozedUntil != nil else { return }
+        update(sessionID: sessionID) {
+            $0.snoozedAt = nil
+            $0.snoozedUntil = nil
+            $0.hadTurnInFlightWhenSnoozed = false
+        }
+        // The row moves from Snoozed back into the attention scope.
+        notifyChanged()
+    }
+
+    func wakeSnoozedSession(
+        _ sessionID: SessionID,
+        reason: SessionWakeReason,
+        at date: Date
+    ) {
+        guard session(withID: sessionID)?.snoozedAt != nil else { return }
+        update(sessionID: sessionID) {
+            $0.snoozedAt = nil
+            $0.snoozedUntil = nil
+            $0.hadTurnInFlightWhenSnoozed = false
+            $0.wake = SessionWake(reason: reason, wokeAt: date)
+        }
+        // An early or deadline wake moves the row between sidebar scopes.
+        notifyChanged()
+    }
+
+    func acknowledgeWake(for sessionID: SessionID) {
+        guard session(withID: sessionID)?.wake != nil else { return }
+        update(sessionID: sessionID) { $0.wake = nil }
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
     }
 
     /// Switches which surface renders a session: Threading's own conversation view, or the

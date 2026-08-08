@@ -1,6 +1,38 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "In an hour": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om en timme" } } }
+    },
+    "Next week": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa vecka" } } }
+    },
+    "Snooze": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snooza" } } }
+    },
+    "Snoozed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snoozad" } } }
+    },
+    "Snoozed sessions": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snoozade sessioner" } } }
+    },
+    "Tomorrow morning": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I morgon bitti" } } }
+    },
+    "Unsnooze": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sluta snooza" } } }
+    },
+    "Woke": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väckt" } } }
+    },
     "This turn did not reach a complete checkpoint.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen nådde inte en fullständig kontrollpunkt." } } }
     },

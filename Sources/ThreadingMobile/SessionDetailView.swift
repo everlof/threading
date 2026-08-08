@@ -143,6 +143,33 @@ struct SessionDetailView: View {
                         } label: {
                             Label("Rename", systemImage: "pencil")
                         }
+                        if currentSession.isSnoozed() {
+                            Button {
+                                mutate {
+                                    try await model.setSnoozed(
+                                        until: nil,
+                                        for: currentSession
+                                    )
+                                }
+                            } label: {
+                                Label("Unsnooze", systemImage: "sun.max")
+                            }
+                        } else {
+                            Menu {
+                                ForEach(MobileSnoozePresets.choices()) { choice in
+                                    Button(choice.title) {
+                                        mutate {
+                                            try await model.setSnoozed(
+                                                until: choice.deadline,
+                                                for: currentSession
+                                            )
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label("Snooze", systemImage: "moon.zzz")
+                            }
+                        }
                         Section("Interface") {
                             Button {
                                 confirmSurfaceSwitch(to: "conversation")

@@ -162,6 +162,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// a bare `ProjectNode` for everything else.
     private var rootNodes: [NSObject] = []
 
+    /// A per-window presentation choice. The attention view is the default; Snoozed is a
+    /// discoverable alternate view over the same project hierarchy, not a second flat model.
+    private var sessionVisibility: SidebarSessionVisibility = .attention
+
     /// The shape the outline is currently showing, so a change that leaves it alone can refresh
     /// the rows rather than rebuild them — and one that does not can be told to the outline as
     /// the rows that arrived, left and moved. See `reload`.
@@ -559,7 +563,10 @@ extension ProjectSidebarViewController {
             category: "sidebar",
             metadata: ["projects": String(projects.count)]
         )
-        let rebuilt = SidebarTreeBuilder.rootNodes(from: projects)
+        let rebuilt = SidebarTreeBuilder.rootNodes(
+            from: projects,
+            visibility: sessionVisibility
+        )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         let shape = SidebarTreeShape(roots: rebuilt)
 
@@ -1798,6 +1805,14 @@ private extension ProjectSidebarViewController {
         presentSidebarMenu(arrangementMenuEntries(), from: arrangeButton)
     }
 
+    private func snoozedSessionsEntry() -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: L10n.string("Snoozed Sessions"),
+            isSelected: sessionVisibility == .snoozed,
+            onChoose: { [weak self] in self?.toggleSnoozedSessionsClicked() }
+        ))
+    }
+
     /// The grouping toggle, its check showing the current state.
     private func branchGroupingEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
@@ -1855,6 +1870,11 @@ private extension ProjectSidebarViewController {
         AppSettings.shared.groupsSessionsByBranch.toggle()
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func toggleSnoozedSessionsClicked() {
+        sessionVisibility = sessionVisibility == .snoozed ? .attention : .snoozed
+        reload()
     }
 
     @objc private func toggleLoneBranchHeadingsClicked() {
@@ -2655,6 +2675,8 @@ extension ProjectSidebarViewController {
     /// no matter what they intend.
     func arrangementMenuEntries() -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = [
+            snoozedSessionsEntry(),
+            .separator,
             branchGroupingEntry(),
             loneBranchHeadingsEntry(),
             compactTreeEntry(),
