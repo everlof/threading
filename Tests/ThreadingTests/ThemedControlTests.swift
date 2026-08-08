@@ -1934,6 +1934,61 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// A symbol-only raised button has nothing it can truncate, so a narrow face keeps the mark
+    /// centred instead of treating it like the leading edge of an overflowing title. The Themes
+    /// page's 26pt duplicate/delete buttons are the measured case: two title insets plus the
+    /// image slot need 34pt, and the generic overflow path used to pin their ink four points to
+    /// the right under every chrome.
+    func testANarrowBorderedImageButtonCentresItsInkAcrossChromes() throws {
+        let mark = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
+            NSColor.black.setFill()
+            rect.fill()
+            return true
+        }
+        mark.isTemplate = true
+        let marker = NSColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
+
+        for theme in [AppTheme.system, AppThemeStyles.bauhaus, AppThemeStyles.win98] {
+            AppThemePalette.set(theme)
+            let button = ThemedButton(image: mark, target: nil, action: nil)
+            button.isBordered = true
+            button.contentTintColor = marker
+            button.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: Design.Size.chipHeight,
+                height: Design.Size.chipHeight
+            )
+
+            let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: rep)
+            var inkBounds = CGRect.null
+            for y in 0..<rep.pixelsHigh {
+                for x in 0..<rep.pixelsWide {
+                    guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                          color.redComponent > 0.8,
+                          color.greenComponent < 0.5,
+                          color.blueComponent > 0.8 else { continue }
+                    inkBounds = inkBounds.union(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+
+            XCTAssertFalse(inkBounds.isNull, "\(theme.name)'s button drew no marker ink")
+            XCTAssertEqual(
+                inkBounds.midX,
+                CGFloat(rep.pixelsWide) / 2,
+                accuracy: 0.5,
+                "\(theme.name)'s image-only button shifted its ink horizontally"
+            )
+            XCTAssertEqual(
+                inkBounds.midY,
+                CGFloat(rep.pixelsHigh) / 2,
+                accuracy: 0.5,
+                "\(theme.name)'s image-only button shifted its ink vertically"
+            )
+        }
+    }
+
     func testOutlinedAndFilledPrimaryTreatmentsProduceDifferentSurfaces() throws {
         func interiorAlpha(under theme: AppTheme) throws -> CGFloat {
             AppThemePalette.set(theme)

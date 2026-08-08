@@ -991,6 +991,10 @@ Nine bugs are worth keeping, because each is a trap the next drawn control will 
   intrinsic width after Auto Layout has squeezed the control is a different version of the same
   escape: its origin moves outside the leading edge and the visible text becomes an arbitrary
   middle slice. Centre while the content fits; otherwise lead-align it and truncate the tail.
+  That overflow rule does not apply to an image-only button: the image is one indivisible mark,
+  not a title with a tail to lose. A 14pt mark in a 26pt bordered button has only 6pt left after
+  the title's 10pt insets; pinning it to that inset moved those Themes-page actions 4pt right.
+  Image-only content stays centred on the button face even when title padding would not fit.
 - **`NSTextField(string:)` is a class factory method**, free to return a plain `NSTextField`. A
   subclass declares its own or is one only by the annotation at the call site.
 - **A single-line field draws on the *field's* baseline, not the string's.** A label built from

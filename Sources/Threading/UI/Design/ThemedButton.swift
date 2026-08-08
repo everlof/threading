@@ -537,8 +537,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // with a label hanging off it. Once squeezed, anchor that unit at the leading inset:
         // centring its *intrinsic* width in a narrower frame puts the drawing origin outside the
         // control and reveals an arbitrary middle slice instead of a conventional tail truncation.
+        //
+        // An image on its own is indivisible, however: there is no title to truncate and no
+        // conventional leading edge for the mark to take. The Themes page's 26pt raised actions
+        // are narrower than two title insets plus the 14pt image slot, so treating their symbol
+        // as squeezed content pinned each affected mark four points to the right. Keep that unit on
+        // the face's centre even when the title-padding budget does not fit.
         let measuredWidth = titleWidth + imageWidth + gap + shortcutWidth + shortcutGap
-        var x = max(content.minX, content.midX - measuredWidth / 2)
+        let isImageOnly = image != nil && titleWidth == 0 && shortcutWidth == 0
+        var x = measuredWidth <= content.width || isImageOnly
+            ? faceBounds.midX - measuredWidth / 2
+            : content.minX
 
         if let image {
             draw(image, in: imageRect(for: image, centredOn: content.midY, from: x))
