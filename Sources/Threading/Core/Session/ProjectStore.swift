@@ -87,6 +87,7 @@ final class ProjectStore {
 
     func removeProject(id: ProjectID) {
         let removedProject = project(withID: id)
+        AgentWorkTraceStore.shared.remove(projectID: id)
         if let icon = removedProject?.icon {
             ProjectIconStore.remove(fileName: icon.fileName)
         }
@@ -507,6 +508,10 @@ final class ProjectStore {
 
     func removeSession(id sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
+        AgentWorkTraceStore.shared.remove(
+            sessionID: sessionID,
+            projectID: projects[location.projectIndex].id
+        )
         ConversationHandoffStore.remove(for: sessionID)
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)

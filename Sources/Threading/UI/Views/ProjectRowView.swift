@@ -20,6 +20,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     private let iconView = NSImageView()
     private let nameLabel = MorphingTitleLabel()
     private let countLabel = NSTextField(labelWithString: "")
+    /// The all-agent aggregate on the same stable path axis as each child session.
+    private let workprint = FileActivityMapView()
 
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
@@ -193,6 +195,11 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             dismissPopover()
         }
         popoverProject = project
+        workprint.bind(to: .project(
+            projectID: project.id,
+            rootPath: project.folderPath,
+            detailed: false
+        ))
 
         setHoverControls(
             moreSymbol: SidebarRowDefaults.actionSymbol,
@@ -233,6 +240,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         isHeading = true
         popoverProject = nil
         dismissPopover()
+        workprint.bind(to: nil)
         hideIcon()
         setHoverControls(moreSymbol: nil, showsCreate: false)
         nameLabel.applyFont(.caption)
@@ -252,6 +260,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         isHeading = true
         popoverProject = nil
         dismissPopover()
+        workprint.bind(to: nil)
         hideIcon()
         setHoverControls(
             moreSymbol: SidebarRowDefaults.settingsSymbol,
@@ -333,6 +342,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         setupTrailingSlot()
         setupCustomizableContent()
+        setupWorkprint()
         setAccessibilityRole(.staticText)
 
         NSLayoutConstraint.activate([
@@ -405,6 +415,24 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         addSubview(trailingSlot)
 
         _ = customizationHost
+    }
+
+    private func setupWorkprint() {
+        workprint.translatesAutoresizingMaskIntoConstraints = false
+        workprint.setAccessibilityIdentifier("sidebar.project.workprint")
+        addSubview(workprint)
+        NSLayoutConstraint.activate([
+            workprint.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: SidebarRowDefaults.leadingInset
+            ),
+            workprint.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -SidebarRowDefaults.trailingInset
+            ),
+            workprint.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            workprint.heightAnchor.constraint(equalToConstant: 3)
+        ])
     }
 
     /// Shows the project's stored icon, or the folder symbol while it has none.
@@ -698,18 +726,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     private static func nativeProjectHoverContent(for project: Project) -> NSViewController? {
-        // A reading shows itself; a machine known to have no scc shows how to get one. A
-        // project merely not counted *yet* still contributes no native content.
-        if let info = ProjectStatsPopoverViewController.Info(project: project) {
-            return ProjectStatsPopoverViewController(info: info, isEmbedded: true)
-        }
-        if CodeStatsService.shared.toolIsMissing {
-            return ProjectStatsPopoverViewController(
-                missingToolFor: project.name,
-                isEmbedded: true
-            )
-        }
-        return nil
+        // Observed work is always useful, including before code statistics have completed.
+        // The controller adds cached scc information (or its install hint) when available.
+        ProjectStatsPopoverViewController(project: project, isEmbedded: true)
     }
 
     private func dismissPopover() {

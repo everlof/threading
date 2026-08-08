@@ -3,6 +3,7 @@
 # Non-interactive performance entry point for Threading.
 #
 #   scripts/profile_threading.sh git-stress
+#   scripts/profile_threading.sh agent-work-stress
 #   scripts/profile_threading.sh conversation-stress
 #   scripts/profile_threading.sh conversation-massive-stress
 #   scripts/profile_threading.sh conversation-active-turn-stress
@@ -427,6 +428,59 @@ run_git_stress() {
         -XCTest ThreadingTests.GitReviewViewTests/testStressLargeFileIndexesWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/git-review-stress.log"
+}
+
+build_macos_stress_test_bundle() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+
+  xcodebuild \
+    -project Threading.xcodeproj \
+    -scheme Threading \
+    -testPlan Threading-Fast \
+    -destination "platform=macOS" \
+    -configuration Debug \
+    -derivedDataPath "${derived_data}" \
+    -jobs "${jobs}" \
+    -quiet \
+    build-for-testing
+
+  local build_directory
+  build_directory="$(
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -configuration Debug \
+      -destination "platform=macOS" \
+      -derivedDataPath "${derived_data}" \
+      -showBuildSettings \
+      -json \
+      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+  )"
+  THREADING_STRESS_APP="${build_directory}/Threading.app"
+  THREADING_STRESS_TEST_BUNDLE="${THREADING_STRESS_APP}/Contents/PlugIns/ThreadingTests.xctest"
+  [[ -d "${THREADING_STRESS_TEST_BUNDLE}" ]] || {
+    echo "Built test bundle not found at ${THREADING_STRESS_TEST_BUNDLE}." >&2
+    return 1
+  }
+}
+
+run_agent_work_stress() {
+  local output_directory="$1"
+  echo "Running 100k-file, 64-agent work-atlas benchmark…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    THREADING_AGENT_WORK_STRESS=1 \
+    DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.FileActivityMapTests/testAgentWorkProjectionStressBenchmark \
+        "${THREADING_STRESS_TEST_BUNDLE}"
+  ) 2>&1 | tee "${output_directory}/agent-work-stress.log"
 }
 
 run_conversation_stress() {
@@ -993,6 +1047,11 @@ case "${command}" in
   git-stress)
     output_directory="$(new_run_directory git-stress)"
     run_git_stress "${output_directory}"
+    ;;
+
+  agent-work-stress)
+    output_directory="$(new_run_directory agent-work-stress)"
+    run_agent_work_stress "${output_directory}"
     ;;
 
   conversation-stress)

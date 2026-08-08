@@ -2,10 +2,10 @@ import AppKit
 
 // MARK: - Project Stats Popover
 
-/// The hover popover for a project row: what the project's code is made of.
+/// The hover popover for a project row: where every agent has worked, and what the code is made of.
 ///
 /// The session popover answers "what is this conversation"; this one answers "what is this
-/// codebase" — the composition bar, the languages behind it, and how big the whole thing is.
+/// codebase" — first the shared work atlas, then the composition bar, languages and size.
 ///
 /// With scc known to be absent it answers with the install hint instead: a feature whose
 /// only trace is a popover that never appears cannot be discovered, so the one moment the
@@ -19,6 +19,14 @@ final class ProjectStatsPopoverViewController: NSViewController {
     private enum Content {
         case stats(Info)
         case missingTool(projectName: String)
+        case workOnly(projectName: String)
+
+        var projectName: String {
+            switch self {
+            case .stats(let info): return info.projectName
+            case .missingTool(let projectName), .workOnly(let projectName): return projectName
+            }
+        }
     }
 
     // MARK: - Info
@@ -56,6 +64,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
     /// The ordinary controller owns its popover width and insets. When it becomes the native
     /// `.proceed` content of a customizable presentation, the outer host owns that chrome.
     private let isEmbedded: Bool
+    private let workTarget: AgentWorkTarget?
 
     private static let count: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -74,12 +83,31 @@ final class ProjectStatsPopoverViewController: NSViewController {
     init(info: Info, isEmbedded: Bool = false) {
         self.content = .stats(info)
         self.isEmbedded = isEmbedded
+        self.workTarget = nil
         super.init(nibName: nil, bundle: nil)
     }
 
     init(missingToolFor projectName: String, isEmbedded: Bool = false) {
         self.content = .missingTool(projectName: projectName)
         self.isEmbedded = isEmbedded
+        self.workTarget = nil
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    init(project: Project, isEmbedded: Bool = false) {
+        if let info = Info(project: project) {
+            content = .stats(info)
+        } else if CodeStatsService.shared.toolIsMissing {
+            content = .missingTool(projectName: project.name)
+        } else {
+            content = .workOnly(projectName: project.name)
+        }
+        self.isEmbedded = isEmbedded
+        workTarget = .project(
+            projectID: project.id,
+            rootPath: project.folderPath,
+            detailed: true
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -125,9 +153,27 @@ final class ProjectStatsPopoverViewController: NSViewController {
     // MARK: - Private Methods
 
     private func makeRows() -> [NSView] {
+        if let workTarget {
+            var rows: [NSView] = [
+                nameLabel(content.projectName),
+                AgentWorkSummaryView(target: workTarget)
+            ]
+            switch content {
+            case .stats(let info):
+                rows.append(SeparatorView())
+                rows.append(contentsOf: makeStatsRows(info).dropFirst())
+            case .missingTool(let projectName):
+                rows.append(SeparatorView())
+                rows.append(contentsOf: makeMissingToolRows(projectName).dropFirst())
+            case .workOnly:
+                break
+            }
+            return rows
+        }
         switch content {
         case .stats(let info): return makeStatsRows(info)
         case .missingTool(let projectName): return makeMissingToolRows(projectName)
+        case .workOnly(let projectName): return [nameLabel(projectName)]
         }
     }
 

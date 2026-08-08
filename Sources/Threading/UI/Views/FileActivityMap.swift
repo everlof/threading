@@ -35,10 +35,7 @@ struct FileActivityMap {
 
     /// The two things worth distinguishing. Reads are the novel data — git never sees them —
     /// and edits are the consequential ones.
-    enum Kind {
-        case read
-        case edit
-    }
+    typealias Kind = AgentFileActivityKind
 
     // MARK: - Entries
 
@@ -216,29 +213,7 @@ extension FileActivityMap {
     /// shell parsed — both are omitted rather than guessed at, because a mark that might be
     /// wrong poisons the ones that are right.
     static func touches(tool: ToolIdentity, input: [String: Any]) -> [(kind: Kind, path: String)] {
-        let kind: Kind
-        switch tool {
-        case .read, .notebookRead:
-            kind = .read
-        case .edit, .multiEdit, .write, .notebookEdit:
-            kind = .edit
-        default:
-            return []
-        }
-
-        // A Codex patch can touch several files; everything else names one.
-        // `TranscriptReplay.normalised` has already mapped Codex's `path` onto `file_path`.
-        if kind == .edit, let patch = input["patch"] as? String {
-            let paths = CodexPatch.paths(in: patch)
-            if !paths.isEmpty { return paths.map { (kind, $0) } }
-        }
-
-        for key in ["file_path", "notebook_path"] {
-            if let path = input[key] as? String, !path.isEmpty {
-                return [(kind, path)]
-            }
-        }
-        return []
+        AgentFileActivityClassifier.signals(tool: tool, input: input).map { ($0.kind, $0.path) }
     }
 }
 

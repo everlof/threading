@@ -2542,6 +2542,13 @@ not show it at all. Requires macOS 14.
 ### Sidebar
 - **Cmd+Ctrl+S**, or the toggle button at the left of the header: show/hide the sidebar
 
+Each agent row has a tiny workprint along its lower edge showing where that agent has read and
+edited files in the project. Hover the row for the expanded repository map, work counts and recent
+action ribbon. The project row uses the same map for all of its agents together; overlap marks show
+where several agents have worked in the same region, and the expanded card names recent agents.
+The map stays a fixed visual size even in very large projects, and new files collect in a stable
+end cell rather than rearranging the existing file layout.
+
 ### Text and terminal size
 
 - **Settings ▸ Themes ▸ Fonts ▸ Text size** scales the app's semantic type immediately,

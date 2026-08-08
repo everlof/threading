@@ -25,6 +25,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         let worktree: String?
         let stateText: String
         let stateSymbol: String
+        let workTarget: AgentWorkTarget?
 
         /// Built from the session, so the row does not have to know how to read git or
         /// resolve accounts.
@@ -60,7 +61,16 @@ final class SessionInfoPopoverViewController: NSViewController {
                 handoffLine = nil
             }
 
-            let folderPath = ProjectStore.shared.project(forSessionID: session.id)?.folderPath
+            let project = ProjectStore.shared.project(forSessionID: session.id)
+            let folderPath = project?.folderPath
+            workTarget = project.map {
+                .session(
+                    projectID: $0.id,
+                    sessionID: session.id,
+                    rootPath: $0.folderPath,
+                    detailed: true
+                )
+            }
             path = folderPath ?? ""
             // The session's own record first: a dormant session belongs to the branch it
             // ran on, not whatever the checkout has moved to since.
@@ -190,6 +200,11 @@ final class SessionInfoPopoverViewController: NSViewController {
             text: info.stateText,
             emphasis: .muted
         ))
+
+        if let workTarget = info.workTarget {
+            rows.append(SeparatorView())
+            rows.append(AgentWorkSummaryView(target: workTarget))
+        }
 
         return rows
     }

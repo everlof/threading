@@ -176,6 +176,81 @@ final class FileActivityMapRenderTests: XCTestCase {
         XCTAssertEqual(written, 2)
     }
 
+    func testRendersAgentAndProjectWorkSummariesAcrossThemeFamilies() throws {
+        let files = (0..<12_000).map {
+            "Sources/Area\($0 / 300)/Feature\($0 / 30)/file-\($0).swift"
+        }
+        let atlas = RepositoryFileAtlas(files: files)
+        let firstID = SessionID()
+        let secondID = SessionID()
+        var first = AgentSessionWorkTrace()
+        first.sessionTitle = "Refactor sidebar"
+        first.agentLabel = "Codex"
+        var second = AgentSessionWorkTrace()
+        second.sessionTitle = "Harden tests"
+        second.agentLabel = "Claude"
+
+        for (offset, index) in stride(from: 900, through: 2_700, by: 17).enumerated() {
+            _ = first.recordFile(.read, path: files[index], root: nil, at: seconds(index % 80))
+            if offset.isMultiple(of: 4) {
+                _ = first.recordFile(.edit, path: files[index], root: nil, at: seconds(index % 40))
+            }
+        }
+        for index in stride(from: 2_100, through: 4_500, by: 23) {
+            _ = second.recordFile(.edit, path: files[index], root: nil, at: seconds(index % 75))
+        }
+        for index in 0..<18 {
+            first.recordAction(
+                category: index.isMultiple(of: 3) ? .shell : .filesystem,
+                operation: index.isMultiple(of: 3) ? "exec" : "Read",
+                at: seconds(18 - index),
+                sessionID: firstID
+            )
+            second.recordAction(
+                category: index.isMultiple(of: 4) ? .subagent : .network,
+                operation: index.isMultiple(of: 4) ? "Agent" : "WebSearch",
+                at: seconds(20 - index),
+                sessionID: secondID
+            )
+        }
+
+        let traces = [firstID: first, secondID: second]
+        let session = AgentWorkPresentation.session(
+            first, sessionID: firstID, atlas: atlas, detailed: true
+        )
+        let project = AgentWorkPresentation.project(
+            AgentProjectWorkAggregate(traces: traces),
+            traces: traces,
+            projectID: ProjectID(),
+            atlas: atlas,
+            detailed: true
+        )
+
+        let previous = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previous) }
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+        var written = 0
+        for (name, theme, appearance) in variants {
+            AppThemeLibrary.apply(theme)
+            written += try writeSummary(
+                story: "09-session-summary-\(name)",
+                presentation: session,
+                appearanceName: appearance
+            )
+            written += try writeSummary(
+                story: "10-project-summary-\(name)",
+                presentation: project,
+                appearanceName: appearance
+            )
+        }
+        XCTAssertEqual(written, 8)
+    }
+
     // MARK: - Harness
 
     private func seconds(_ age: Int) -> Date {
@@ -245,5 +320,41 @@ final class FileActivityMapRenderTests: XCTestCase {
             written += 1
         }
         return written
+    }
+
+    private func writeSummary(
+        story: String,
+        presentation: AgentWorkPresentation,
+        appearanceName: NSAppearance.Name
+    ) throws -> Int {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+            host.appearance = appearance
+            host.wantsLayer = true
+            host.layer?.backgroundColor = Design.Surface.elevated.cgColor
+
+            let summary = AgentWorkSummaryView()
+            summary.setClock { self.now }
+            summary.setPresentation(presentation)
+            host.addSubview(summary)
+            NSLayoutConstraint.activate([
+                summary.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Design.Spacing.inset),
+                summary.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -Design.Spacing.inset),
+                summary.topAnchor.constraint(equalTo: host.topAnchor, constant: Design.Spacing.inset)
+            ])
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+            host.cacheDisplay(in: host.bounds, to: rep)
+            data = rep.representation(using: .png, properties: [:])
+        }
+        let image = try XCTUnwrap(data)
+        try image.write(to: directory.appendingPathComponent("activity-\(story).png"))
+        return 1
     }
 }

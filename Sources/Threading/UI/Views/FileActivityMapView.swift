@@ -14,7 +14,7 @@ final class FileActivityMapView: NSView {
 
     // MARK: - Metrics
 
-    private enum Metrics {
+    fileprivate enum Metrics {
         /// The dimmest a glowing mark draws; the residual floor must stay visible.
         static let minimumGlowAlpha: CGFloat = 0.25
 
@@ -29,11 +29,16 @@ final class FileActivityMapView: NSView {
         /// tens of seconds, so a film-rate timer would burn the battery repainting
         /// differences no eye can see.
         static let glowRefreshInterval: TimeInterval = 0.25
+
+        static let railReadHeight: CGFloat = 1
+        static let detailGap: CGFloat = 1
     }
 
     // MARK: - Properties
 
     private(set) var map = FileActivityMap(files: [])
+    private(set) var workPresentation: AgentWorkPresentation?
+    private var workTarget: AgentWorkTarget?
 
     /// The clock heat is measured against, injectable so a render harness can draw the same
     /// moment twice.
@@ -48,12 +53,19 @@ final class FileActivityMapView: NSView {
 
     nonisolated(unsafe) private var glowTimer: Timer?
     private var themeRedraw: ThemeRedraw?
+    private let appEvents = AppEventObservations()
 
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         themeRedraw = ThemeRedraw(self)
+        appEvents.observe(AgentWorkDidChange.self) { [weak self] event in
+            guard let self, let target = self.workTarget,
+                  target.projectID == event.projectID,
+                  target.sessionID == nil || target.sessionID == event.sessionID else { return }
+            self.refreshBoundPresentation()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -75,6 +87,8 @@ final class FileActivityMapView: NSView {
 
     /// Replaces the whole map — how a harness hands over a pre-built state.
     func setMap(_ map: FileActivityMap) {
+        workTarget = nil
+        workPresentation = nil
         self.map = map
         hoverIndex = nil
         needsDisplay = true
@@ -97,9 +111,47 @@ final class FileActivityMapView: NSView {
         scheduleGlowRefreshIfNeeded()
     }
 
+    /// Binds a sidebar rail or detail atlas to the store. The first read is an O(1) cache
+    /// lookup; repository enumeration and projection happen asynchronously on a utility queue.
+    func bind(to target: AgentWorkTarget?) {
+        guard target != workTarget else {
+            refreshBoundPresentation()
+            return
+        }
+        workTarget = target
+        workPresentation = nil
+        hoverIndex = nil
+        refreshBoundPresentation()
+    }
+
+    /// Direct injection for render tests and the Component Gallery.
+    func setWorkPresentation(_ presentation: AgentWorkPresentation?) {
+        workTarget = nil
+        workPresentation = presentation
+        hoverIndex = nil
+        needsDisplay = true
+        scheduleGlowRefreshIfNeeded()
+    }
+
+    private func refreshBoundPresentation() {
+        guard let target = workTarget else { return }
+        if let presentation = AgentWorkTraceStore.shared.presentation(for: target) {
+            workPresentation = presentation
+            hoverIndex = hoverIndex.flatMap {
+                presentation.bins.indices.contains($0) ? $0 : nil
+            }
+            needsDisplay = true
+            scheduleGlowRefreshIfNeeded()
+        }
+    }
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        if let workPresentation {
+            draw(workPresentation, dirtyRect: dirtyRect)
+            return
+        }
         guard let layout = FileActivityMap.Layout.compute(count: map.entries.count, size: bounds.size)
         else { return }
 
@@ -144,6 +196,72 @@ final class FileActivityMapView: NSView {
         }
 
         drawHoverLabel(layout: layout, origin: origin)
+    }
+
+    private func draw(_ presentation: AgentWorkPresentation, dirtyRect: NSRect) {
+        guard !presentation.bins.isEmpty else { return }
+        let now = clock()
+        let accent = Design.Surface.accent
+        // Reads and edits belong to one semantic family. Sharing the accent makes a read-only
+        // session visible under System too; thickness, rather than a fragile second hue, tells
+        // the two facts apart.
+        let read = accent.withAlphaComponent(accent.alphaComponent * 0.7)
+        let tertiary = Design.Text.tertiary
+        let quaternary = Design.Text.quaternary
+        let restingEven = tertiary.withAlphaComponent(
+            tertiary.alphaComponent * Metrics.evenRunDimming
+        )
+        let restingOdd = quaternary.withAlphaComponent(
+            quaternary.alphaComponent * Metrics.oddRunDimming
+        )
+        let layout = WorkProjectionLayout(
+            count: presentation.bins.count,
+            bounds: bounds,
+            detailed: presentation.isDetailed
+        )
+
+        for index in presentation.bins.indices {
+            let rect = layout.rect(at: index)
+            guard rect.intersects(dirtyRect), rect.width > 0, rect.height > 0 else { continue }
+            let bin = presentation.bins[index]
+
+            let resting = bin.seed.runOrdinal.isMultiple(of: 2) ? restingEven : restingOdd
+            resting.setFill()
+            rect.fill()
+
+            let readHeat = FileActivityMap.heat(since: bin.lastRead, now: now)
+            let editHeat = FileActivityMap.heat(since: bin.lastEdit, now: now)
+            if editHeat > 0 {
+                accent.withAlphaComponent(accent.alphaComponent * glowAlpha(editHeat)).setFill()
+                rect.fill()
+            }
+            if readHeat > 0 {
+                read.withAlphaComponent(read.alphaComponent * glowAlpha(readHeat)).setFill()
+                let height = presentation.isDetailed
+                    ? max(1, floor(rect.height * 0.32))
+                    : min(rect.height, Metrics.railReadHeight)
+                NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: height).fill()
+            }
+
+            // In the project aggregate, a light cap says the same region has more than one
+            // agent behind it. The exact recent agents remain textual in the detail card.
+            if presentation.scope.isProject, bin.contributorCount > 1 {
+                Design.Text.label.withAlphaComponent(0.55).setFill()
+                let cap = min(rect.height, max(1, CGFloat(min(bin.contributorCount, 3))))
+                NSRect(x: rect.minX, y: rect.maxY - cap, width: rect.width, height: cap).fill()
+            }
+
+            if index == hoverIndex {
+                Design.Text.label.setStroke()
+                let outline = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+                outline.lineWidth = 1
+                outline.stroke()
+            }
+        }
+
+        if presentation.isDetailed {
+            drawWorkHoverLabel(presentation, layout: layout)
+        }
     }
 
     private func glowAlpha(_ heat: Double) -> CGFloat {
@@ -227,7 +345,7 @@ final class FileActivityMapView: NSView {
     /// Repaints while anything is still fading, and stops itself the moment nothing is —
     /// a strip nobody has touched costs nothing.
     private func scheduleGlowRefreshIfNeeded() {
-        guard glowTimer == nil, map.hasActiveGlow(now: clock()) else { return }
+        guard window != nil, glowTimer == nil, hasActiveGlow(now: clock()) else { return }
 
         glowTimer = Timer.scheduledTimer(
             timeInterval: Metrics.glowRefreshInterval,
@@ -240,9 +358,31 @@ final class FileActivityMapView: NSView {
 
     @objc private func refreshGlow() {
         needsDisplay = true
-        if !map.hasActiveGlow(now: clock()) {
+        if !hasActiveGlow(now: clock()) {
             glowTimer?.invalidate()
             glowTimer = nil
+        }
+    }
+
+    private func hasActiveGlow(now: Date) -> Bool {
+        if let workPresentation {
+            return workPresentation.bins.contains { bin in
+                [bin.lastRead, bin.lastEdit].contains { touch in
+                    guard let touch else { return false }
+                    return now.timeIntervalSince(touch) < FileActivityMap.Metrics.glowDuration
+                }
+            }
+        }
+        return map.hasActiveGlow(now: now)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            glowTimer?.invalidate()
+            glowTimer = nil
+        } else {
+            scheduleGlowRefreshIfNeeded()
         }
     }
 
@@ -271,6 +411,19 @@ final class FileActivityMapView: NSView {
     }
 
     private func updateHoverIndex(with event: NSEvent) {
+        if let presentation = workPresentation {
+            guard presentation.isDetailed else {
+                hoverIndex = nil
+                return
+            }
+            let layout = WorkProjectionLayout(
+                count: presentation.bins.count,
+                bounds: bounds,
+                detailed: true
+            )
+            hoverIndex = layout.index(at: convert(event.locationInWindow, from: nil))
+            return
+        }
         guard let layout = FileActivityMap.Layout.compute(count: map.entries.count, size: bounds.size)
         else {
             hoverIndex = nil
@@ -296,14 +449,146 @@ final class FileActivityMapView: NSView {
 
     /// A drawn view is invisible to VoiceOver unless it says otherwise — the trap
     /// `ThemedControl` documents, walked into by every view that renders itself.
-    override func isAccessibilityElement() -> Bool { true }
+    override func isAccessibilityElement() -> Bool {
+        workPresentation?.isDetailed != false
+    }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .image }
 
     override func accessibilityLabel() -> String? {
+        if let workPresentation {
+            let scope = workPresentation.scope.isProject
+                ? L10n.string("Project work map")
+                : L10n.string("Agent work map")
+            return L10n.format(
+                "%@, %d of %d files touched",
+                scope,
+                workPresentation.touchedFileCount,
+                max(
+                    workPresentation.repositoryFileCount,
+                    workPresentation.touchedFileCount
+                )
+            )
+        }
         let touched = map.touchedCount
         let total = map.entries.count
         guard total > 0 else { return "File activity map, empty" }
         return "File activity map, \(touched) of \(total) files touched"
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let workPresentation, !workPresentation.isDetailed { return nil }
+        return super.hitTest(point)
+    }
+
+    private func drawWorkHoverLabel(
+        _ presentation: AgentWorkPresentation,
+        layout: WorkProjectionLayout
+    ) {
+        guard let hoverIndex, presentation.bins.indices.contains(hoverIndex) else { return }
+        let bin = presentation.bins[hoverIndex]
+        var text = bin.seed.isOverflow ? L10n.string("New files") : bin.seed.directory
+        if text.isEmpty { text = bin.seed.firstPath }
+        if bin.seed.fileCount > 1 {
+            text += L10n.format(
+                " · %d/%d files", bin.touchedFileCount, bin.seed.fileCount
+            )
+        }
+        if bin.contributorCount > 1 {
+            text += L10n.format(" · %d agents", bin.contributorCount)
+        }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.detail(),
+            .foregroundColor: Design.Text.label
+        ]
+        let padding = Design.Spacing.tight
+        let label = truncatedFromTheHead(
+            text, toFit: bounds.width - padding * 2, attributes: attributes
+        )
+        let size = label.size(withAttributes: attributes)
+        let mark = layout.rect(at: hoverIndex)
+        var frame = NSRect(
+            x: mark.minX,
+            y: min(max(0, mark.midY - size.height / 2), bounds.height - size.height - padding * 2),
+            width: size.width + padding * 2,
+            height: size.height + padding * 2
+        )
+        frame.origin.x = min(frame.origin.x, max(0, bounds.width - frame.width))
+        let wash = NSBezierPath(
+            roundedRect: frame,
+            xRadius: Design.Spacing.tight,
+            yRadius: Design.Spacing.tight
+        )
+        Design.Surface.elevated.setFill()
+        wash.fill()
+        Design.Surface.border.setStroke()
+        wash.stroke()
+        label.draw(
+            at: NSPoint(x: frame.minX + padding, y: frame.minY + padding),
+            withAttributes: attributes
+        )
+    }
+}
+
+private extension AgentWorkPresentation.Scope {
+    var isProject: Bool {
+        if case .project = self { return true }
+        return false
+    }
+}
+
+private struct WorkProjectionLayout {
+    let count: Int
+    let bounds: NSRect
+    let detailed: Bool
+    let columns: Int
+    let rows: Int
+
+    init(count: Int, bounds: NSRect, detailed: Bool) {
+        self.count = count
+        self.bounds = bounds
+        self.detailed = detailed
+        if detailed, count > 0, bounds.width > 0, bounds.height > 0 {
+            columns = max(1, Int(ceil(sqrt(
+                Double(count) * Double(bounds.width / max(bounds.height, 1))
+            ))))
+            rows = max(1, Int(ceil(Double(count) / Double(columns))))
+        } else {
+            columns = max(1, count)
+            rows = 1
+        }
+    }
+
+    func rect(at index: Int) -> NSRect {
+        guard count > 0 else { return .zero }
+        if !detailed {
+            let lower = bounds.minX + floor(CGFloat(index) * bounds.width / CGFloat(count))
+            let upper = bounds.minX + floor(CGFloat(index + 1) * bounds.width / CGFloat(count))
+            return NSRect(x: lower, y: bounds.minY, width: max(0.5, upper - lower), height: bounds.height)
+        }
+
+        // Path order runs top-to-bottom, then into the next column, matching the original
+        // FileActivityMap and keeping contiguous directories spatially contiguous.
+        let column = index / rows
+        let row = index % rows
+        let gap = FileActivityMapView.Metrics.detailGap
+        let width = max(0, (bounds.width - CGFloat(columns - 1) * gap) / CGFloat(columns))
+        let height = max(0, (bounds.height - CGFloat(rows - 1) * gap) / CGFloat(rows))
+        return NSRect(
+            x: bounds.minX + CGFloat(column) * (width + gap),
+            y: bounds.minY + CGFloat(row) * (height + gap),
+            width: width,
+            height: height
+        )
+    }
+
+    func index(at point: NSPoint) -> Int? {
+        guard bounds.contains(point), count > 0 else { return nil }
+        if !detailed {
+            return min(count - 1, max(0, Int((point.x - bounds.minX) / bounds.width * CGFloat(count))))
+        }
+        // At most 512 bounded cells; this runs only on a pointer move over the detail card.
+        return (0..<count).first { rect(at: $0).contains(point) }
     }
 }

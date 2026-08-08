@@ -836,6 +836,12 @@ final class ConversationViewController: NSViewController {
         if let reporting = stream as? ProviderExecutionReportingConversation {
             reporting.onProviderExecution = { [weak self] event in
                 guard let self else { return }
+                AgentWorkTraceStore.shared.record(
+                    providerEvent: event,
+                    projectID: self.project.id,
+                    session: self.agentSession,
+                    rootPath: self.project.folderPath
+                )
                 ExecutionAuditStore.shared.record(
                     providerEvent: event,
                     sessionID: self.sessionID,
@@ -846,6 +852,12 @@ final class ConversationViewController: NSViewController {
 
         stream.onEvent = { [weak self] event in
             guard let self else { return }
+            AgentWorkTraceStore.shared.record(
+                streamEvent: event,
+                projectID: self.project.id,
+                session: self.agentSession,
+                rootPath: self.project.folderPath
+            )
             ExecutionAuditStore.shared.record(
                 streamEvent: event,
                 sessionID: self.sessionID,
@@ -1155,6 +1167,13 @@ final class ConversationViewController: NSViewController {
         apply(.status(.loading))
         TranscriptReplay.load(for: agentSession, in: project) { [weak self] events, isTruncated in
             guard let self else { return }
+
+            AgentWorkTraceStore.shared.seedReplayIfEmpty(
+                events,
+                projectID: self.project.id,
+                session: self.agentSession,
+                rootPath: self.project.folderPath
+            )
 
             if isTruncated {
                 self.appendNotice(ConversationDefaults.truncated, kind: .muted)

@@ -1,6 +1,70 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    " · %d agents": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": " · %d agenter" } } }
+    },
+    " · %d/%d files": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": " · %d/%d filer" } } }
+    },
+    "%@, %d of %d files touched": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@, %d av %d filer berörda" } } }
+    },
+    "%d actions · %d shell · %d web · %d subagent": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d åtgärder · %d skal · %d webb · %d underagenter" } } }
+    },
+    "%d of %d files · %d reads · %d edits": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d av %d filer · %d läsningar · %d redigeringar" } } }
+    },
+    "Agent work map": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agentens arbetskarta" } } }
+    },
+    "Loading repository activity…": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in aktivitet i kodförrådet…" } } }
+    },
+    "New files": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nya filer" } } }
+    },
+    "No agent work observed yet": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inget agentarbete observerat ännu" } } }
+    },
+    "Observed agent work": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat agentarbete" } } }
+    },
+    "Observed work": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat arbete" } } }
+    },
+    "Project work · all agents": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektarbete · alla agenter" } } }
+    },
+    "Project work map": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektets arbetskarta" } } }
+    },
+    "Recent agents: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senaste agenter: %@" } } }
+    },
+    "Thin marks are reads; solid marks are edits.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tunna markeringar är läsningar; fyllda markeringar är redigeringar." } } }
+    },
+    "Thin marks are reads; solid marks are edits; a cap means agents overlap.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tunna markeringar är läsningar; fyllda är redigeringar; en toppmarkering betyder att agenter överlappar." } } }
+    },
     "Couldn’t ask “%@” to report back": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte be ”%@” rapportera tillbaka" } } }

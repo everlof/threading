@@ -202,6 +202,21 @@ surface, where the chrome's ink still reads. All three selectable sidebar rows s
 candidate inks the rendered glyph *is*, since contrast cannot separate them (under Bauhaus the
 wrong ink reads better than the right one).
 
+**Status says whether an agent is working; the workprint says where the work has landed.** The
+3pt strip along the bottom of a session row is a compressed repository atlas, not another progress
+bar: thin marks are reads, full-height marks are edits, and age fades both back into alternating
+directory runs. A project row uses the identical path axis and adds a top cap where multiple agents
+overlap, so moving between an agent and its project is a literal spatial comparison. Hovering a
+session expands that agent's atlas; hovering a project expands the aggregate for every agent in the
+project and names the recent contributors. New paths have one stable overflow cell rather than
+resorting the map under the pointer.
+
+The implementation stays inside the design boundary: `FileActivityMapView` is the drawing
+primitive and `AgentWorkSummaryView` composes only `Design/` controls. The rail is decorative and
+passes hit testing through to the row; the detailed map is one accessible image with a summarized
+file count, and its directory/path hover label is supplementary. Colour is never the only encoding
+because reads, edits, overlap and activity categories also differ in shape or position.
+
 **A translucent glyph tint composites over the ground, not into the artwork.**
 `TemplateImageDrawing` filled the symbol `.sourceAtop` inside its transparency layer, which is
 right for an opaque tint and wrong for every other one: a template's own artwork is black, so atop
