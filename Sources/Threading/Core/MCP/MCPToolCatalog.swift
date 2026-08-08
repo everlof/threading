@@ -93,6 +93,12 @@ struct MCPToolGroup {
   }
 }
 
+enum MCPInstructionDefaults {
+  /// Codex may make its initial server-routing decision from only this leading slice of the
+  /// MCP `instructions` field. Keep the decision prefix self-contained inside the budget.
+  static let decisionPrefixCharacterLimit = 512
+}
+
 // MARK: - Tool Catalogue
 
 /// The single source of truth for the tools Threading exposes over MCP: what they are, how they
@@ -154,7 +160,7 @@ enum MCPToolCatalog {
     id: "display",
     family: .display,
     title: "Display panel",
-    summary: "Let agents show images, native scenes, and rendered HTML in the side panel.",
+    summary: "Let agents show inspectable attachments and live content beside the chat.",
     symbol: "photo.on.rectangle",
     tools: [
       MCPToolInfo(
@@ -172,7 +178,7 @@ enum MCPToolCatalog {
       MCPToolInfo(
         tool: .displayHTML,
         title: "Show HTML",
-        detail: "Render an HTML document — tables, charts, diagrams, rich reports.",
+        detail: "Capture an HTML attachment — tables, charts, diagrams, rich reports.",
         symbol: "doc.richtext"
       ),
       MCPToolInfo(
@@ -200,7 +206,8 @@ enum MCPToolCatalog {
 
       Use display_html when structure is the point and ASCII would mangle it: tables with \
       more than a few columns, charts, Mermaid or graphviz diagrams, side-by-side diffs, \
-      rendered reports. It is a real browser engine, so scripts run and CDN libraries load.
+      rendered reports. Threading keeps the document as an Attachment and previews it with a \
+      real browser engine, so scripts run and CDN libraries load.
 
       Neither replaces talking to the user. Show the artefact, then say what it means — the \
       panel carries the picture, your reply carries the point.
@@ -525,7 +532,8 @@ enum MCPToolCatalog {
     instruction: """
       The display panel holds a set of tabs that coexist — each image and document opens its \
       own, and the browser is a tab too. panel_list_tabs shows what is open and which tab is \
-      active; panel_activate_tab brings one to the front.
+      active; panel_activate_tab brings one to the front and returns a notification target for \
+      browser and extension-panel tabs.
       """
   )
 
@@ -724,7 +732,7 @@ enum MCPToolCatalog {
     id: "notifications",
     family: .notifications,
     title: "Notifications",
-    summary: "Let agents notify your paired devices when requested work is ready.",
+    summary: "Let agents notify this Mac or a paired iPhone when requested work is ready.",
     symbol: "bell",
     tools: [
       MCPToolInfo(
@@ -741,7 +749,10 @@ enum MCPToolCatalog {
       participant asks you to involve them. Use it only after that explicit request and \
       only once the milestone is actually reached. Keep the message concise and useful on \
       a lock screen. It cannot notify another chat. Still write the normal final response \
-      in the conversation after notifying.
+      in the conversation after notifying. When a display or browser tool returned target_ref, \
+      pass it unchanged to make the notification open that exact attachment or live Browser or \
+      extension panel. \
+      Use delivery=mac, ios, or both only when the participant specified a device.
       """
   )
 
@@ -1065,20 +1076,53 @@ enum MCPToolCatalog {
       .joined(separator: "\n\n")
   }
 
+  /// The self-contained routing guidance at the front of the server instructions.
+  ///
+  /// Clients may load individual tool schemas lazily, so this prefix teaches discovery before
+  /// the model sees the longer per-group workflows. Exceptional lifecycle and safety triggers
+  /// are conditional on the tools actually being advertised. Keep the all-groups result within
+  /// `MCPInstructionDefaults.decisionPrefixCharacterLimit`; the focused tests enforce the budget.
+  static func decisionPrefix(for enabledGroups: [MCPToolGroup]) -> String {
+    let toolNames = Set(enabledGroups.flatMap { $0.tools.map(\.name) })
+    var sentences = [
+      "You are in Threading, the app hosting this session.",
+      "Threading tools may load lazily; before saying an in-app action is unavailable, "
+        + "discover a matching tool.",
+    ]
+
+    if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
+      sentences.append(
+        "When images or rich visuals matter, show them in the display panel rather than only "
+          + "printing paths."
+      )
+    }
+    if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
+      sentences.append(
+        "If the user asks to close, archive, finish, or be done with this chat, call "
+          + "archive_session after prior work; it runs after your reply."
+      )
+    }
+    if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {
+      sentences.append(
+        "For disk-full/ENOSPC errors, call list_reclaimable_storage; never delete build output "
+          + "directly."
+      )
+    }
+
+    return sentences.joined(separator: " ")
+  }
+
   /// The `initialize` instructions, assembled from the enabled groups so the model is told about
-  /// exactly the tools it has. Empty when everything is off — the server then advertises nothing.
+  /// exactly the tools it has. The bounded decision prefix comes first so lazy tool loading still
+  /// discovers important in-app actions. Empty when everything is off — the server then advertises
+  /// nothing.
   @MainActor
   static var instructions: String {
     let enabled = enabledGroups
     guard !enabled.isEmpty else { return "" }
 
-    let intro = """
-      You are running inside Threading, a native macOS app, in a terminal pane beside a \
-      display panel that can render what the terminal itself cannot. The panel belongs to \
-      this session alone; other sessions have their own.
-      """
-
-    return ([intro] + enabled.map(\.instruction)).joined(separator: "\n\n")
+    return ([decisionPrefix(for: enabled)] + enabled.map(\.instruction))
+      .joined(separator: "\n\n")
   }
 
   @MainActor

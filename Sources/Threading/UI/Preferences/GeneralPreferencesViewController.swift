@@ -6,6 +6,8 @@ final class GeneralPreferencesViewController: NSViewController {
     // MARK: - Controls
 
     private let defaultAgentPopUp = ThemedPopUp()
+    private let claudeStartupSpeedPopUp = ThemedPopUp()
+    private let codexStartupSpeedPopUp = ThemedPopUp()
     private let terminalTitleToggle = ThemedToggle()
     private let branchGroupingToggle = ThemedToggle()
     private let compactTreeToggle = ThemedToggle()
@@ -76,6 +78,17 @@ final class GeneralPreferencesViewController: NSViewController {
         defaultAgentPopUp.action = #selector(defaultAgentChanged)
         defaultAgentPopUp.translatesAutoresizingMaskIntoConstraints = false
         defaultAgentPopUp.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+
+        configureStartupSpeedPopUp(
+            claudeStartupSpeedPopUp,
+            kind: .claude,
+            accessibilityIdentifier: "settings.general.claude-startup-speed"
+        )
+        configureStartupSpeedPopUp(
+            codexStartupSpeedPopUp,
+            kind: .codex,
+            accessibilityIdentifier: "settings.general.codex-startup-speed"
+        )
 
         configure(terminalTitleToggle, isOn: AppSettings.shared.usesAgentTitleInSidebar, action: #selector(terminalTitleChanged))
         configure(branchGroupingToggle,
@@ -212,6 +225,29 @@ final class GeneralPreferencesViewController: NSViewController {
         toggle.action = action
     }
 
+    private func configureStartupSpeedPopUp(
+        _ popUp: ThemedPopUp,
+        kind: AgentKind,
+        accessibilityIdentifier: String
+    ) {
+        for speed in AgentStartupSpeed.allCases {
+            popUp.addItem(
+                ThemedMenuItem(title: speed.settingsTitle, representedValue: speed)
+            )
+        }
+        popUp.selectItem(
+            at: AgentStartupSpeed.allCases.firstIndex(
+                of: AppSettings.shared.startupSpeed(for: kind)
+            ) ?? 0
+        )
+        popUp.target = self
+        popUp.action = #selector(startupSpeedChanged)
+        popUp.setAccessibilityIdentifier(accessibilityIdentifier)
+        popUp.translatesAutoresizingMaskIntoConstraints = false
+        popUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+    }
+
     private func setupLayout() {
         let sessions = SettingsCard(rows: [
             SettingsUI.row(title: "New sessions use",
@@ -273,6 +309,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
         let page = SettingsUI.page(title: "General", sections: [
             SettingsUI.section("Sessions", sessions),
+            SettingsUI.section("Conversation Speed", conversationSpeedCard()),
             SettingsUI.section("Opening Message", openingMessageCard()),
             SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Startup", startup),
@@ -297,6 +334,28 @@ final class GeneralPreferencesViewController: NSViewController {
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    /// The two providers expose Fast through different wires, but the user-facing decision is
+    /// the same. Each row is separate because account settings and availability are separate;
+    /// both explicitly cover terminal and Native surfaces so the choice does not read as a
+    /// preference for only the composer beneath it.
+    private func conversationSpeedCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Claude sessions start in",
+                subtitle: "Applies to Terminal and Native chats. Agent's Setting preserves "
+                    + "Claude Code's own choice; Fast uses more credits and works only with "
+                    + "supported models.",
+                control: claudeStartupSpeedPopUp
+            ),
+            SettingsUI.row(
+                title: "Codex sessions start in",
+                subtitle: "Applies to Terminal and Native chats. Agent's Setting preserves "
+                    + "Codex's own service tier; Fast uses more credits.",
+                control: codexStartupSpeedPopUp
+            )
         ])
     }
 
@@ -558,6 +617,18 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func defaultAgentChanged() {
         guard let kind = defaultAgentPopUp.selectedItem?.representedValue as? AgentKind else { return }
         AppSettings.shared.defaultAgentKind = kind
+    }
+
+    @objc private func startupSpeedChanged(_ sender: ThemedPopUp) {
+        guard let speed = sender.selectedItem?.representedValue as? AgentStartupSpeed else {
+            return
+        }
+
+        if sender === claudeStartupSpeedPopUp {
+            AppSettings.shared.setStartupSpeed(speed, for: .claude)
+        } else if sender === codexStartupSpeedPopUp {
+            AppSettings.shared.setStartupSpeed(speed, for: .codex)
+        }
     }
 
     @objc private func restoreSessionChanged() {

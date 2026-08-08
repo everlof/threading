@@ -473,6 +473,23 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertEqual(opened, "motion")
     }
 
+    /// An answer already held for the same query is re-shown rather than re-bought: the run
+    /// spends the user's usage, and the Ask AI button doubles as the way back into the
+    /// suggestions after opening one. A guard that stopped holding would put a paid run
+    /// behind every return trip.
+    func testAskingTheSameQueryAgainReusesTheAnswerInsteadOfRerunning() {
+        let results = SettingsAISearchViewController()
+        results.loadView()
+        let answered = SettingsAISearchViewController.Phase.answered(
+            query: "flashing",
+            matches: [.init(pageID: "motion", title: "Motion", symbol: "sparkles", reason: "r")]
+        )
+        results.apply(answered)
+
+        results.begin(query: "flashing")
+        XCTAssertEqual(results.phase, answered, "the held answer was re-bought")
+    }
+
     /// A run in flight says who is being asked; a run that answered nothing says so in the
     /// same words the term filter uses, because to the reader it is the same outcome.
     func testTheAIResultsPageReportsProgressAndAnEmptyAnswer() {

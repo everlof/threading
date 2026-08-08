@@ -37,9 +37,12 @@ final class SettingsAISearchViewController: NSViewController {
     ///
     /// A click while a run is in flight is ignored rather than refused with an error: the
     /// spinner already says a run is happening, and failing the surface over an impatient
-    /// second click would replace progress with an apology.
+    /// second click would replace progress with an apology. An answer already held for the
+    /// same query is re-shown rather than re-bought — which also makes the Ask AI button a
+    /// way back to the suggestions after opening one of them.
     func begin(query: String) {
         guard !SettingsSearchResearch.isRunning else { return }
+        if case .answered(let answered, _) = phase, answered == query { return }
 
         let providerName = SettingsSearchResearch.provider?.displayName ?? ""
         apply(.running(query: query, providerName: providerName))

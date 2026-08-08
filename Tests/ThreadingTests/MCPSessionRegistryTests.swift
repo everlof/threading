@@ -217,7 +217,7 @@ final class MCPWireTests: XCTestCase {
 
   func testNotifyUserCallIsTypedAndSessionScopedByTheServer() throws {
     let data = Data(
-      #"{"name":"notify_user","arguments":{"title":"Ready","message":"The review is complete.","recipient":"Kalle’s iPhone"}}"#
+      #"{"name":"notify_user","arguments":{"title":"Ready","message":"The review is complete.","recipient":"Kalle’s iPhone","delivery":"ios","target_ref":"opaque-target"}}"#
         .utf8
     )
     let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
@@ -227,10 +227,29 @@ final class MCPWireTests: XCTestCase {
     XCTAssertEqual(arguments.title, "Ready")
     XCTAssertEqual(arguments.message, "The review is complete.")
     XCTAssertEqual(arguments.recipient, "Kalle’s iPhone")
+    XCTAssertEqual(arguments.delivery, "ios")
+    XCTAssertEqual(arguments.targetRef, "opaque-target")
     XCTAssertTrue(MCPTools.notificationTools.contains(decoded.call.name))
     XCTAssertTrue(
       MCPTools.definitions.contains { $0.name == MCPTools.notifyUser }
     )
+  }
+
+  func testTargetedResultCarriesAnOpaqueStructuredReference() throws {
+    let encoded = try JSONEncoder().encode(
+      MCPToolResult.targeted(
+        "Showing the captured document.",
+        reference: "opaque-target",
+        kind: "attachment"
+      )
+    )
+    let object = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    )
+    let structured = try XCTUnwrap(object["structuredContent"] as? [String: String])
+    XCTAssertEqual(structured["target_ref"], "opaque-target")
+    XCTAssertEqual(structured["target_kind"], "attachment")
+    XCTAssertEqual(object["isError"] as? Bool, false)
   }
 
   func testWorkspaceControlCallsAreTypedAndAdvertised() throws {
@@ -609,6 +628,35 @@ final class MCPWireTests: XCTestCase {
       MCPToolCatalog.continuation.tools.map(\.name),
       [MCPTools.conversationHistory]
     )
+  }
+
+  func testServerDecisionPrefixFitsTheLazyDiscoveryBudget() {
+    let prefix = MCPToolCatalog.decisionPrefix(for: MCPToolCatalog.groups)
+
+    XCTAssertLessThanOrEqual(
+      prefix.count,
+      MCPInstructionDefaults.decisionPrefixCharacterLimit,
+      "the server's most important routing guidance must fit in Codex's leading instruction slice"
+    )
+    XCTAssertTrue(prefix.contains("may load lazily"))
+    XCTAssertTrue(prefix.contains("discover a matching tool"))
+    XCTAssertTrue(prefix.contains("display panel"))
+    XCTAssertTrue(prefix.contains("archive_session"))
+    XCTAssertTrue(prefix.contains("list_reclaimable_storage"))
+    XCTAssertTrue(prefix.hasSuffix("."), "the bounded prefix must stand on its own")
+  }
+
+  func testServerDecisionPrefixOnlyNamesEnabledExceptionalCapabilities() {
+    let ordinaryPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.notifications])
+    XCTAssertTrue(ordinaryPrefix.contains("discover a matching tool"))
+    XCTAssertFalse(ordinaryPrefix.contains("display panel"))
+    XCTAssertFalse(ordinaryPrefix.contains("archive_session"))
+    XCTAssertFalse(ordinaryPrefix.contains("list_reclaimable_storage"))
+
+    let sessionPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.session])
+    XCTAssertTrue(sessionPrefix.contains("close, archive, finish"))
+    XCTAssertTrue(sessionPrefix.contains("after your reply"))
+    XCTAssertFalse(sessionPrefix.contains("list_reclaimable_storage"))
   }
 
   /// The session the archive acts on is the one the call arrived on: the URL carries the

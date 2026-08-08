@@ -20,7 +20,7 @@ final class ToolsPreferencesViewController: NSViewController {
     /// not a preference — the same session-only fold Storage keeps for its checkouts.
     private var expandedGroups: Set<String> = []
     private let appEvents = AppEventObservations()
-    private var pageView: NSView?
+    private var pageView: SettingsPageView?
     private let groupOverride: [MCPToolGroup]?
     private let browserAccessStore: BrowserAccessStore
     private let chromeAutomationProfile: ChromeAutomationProfile
@@ -29,6 +29,52 @@ final class ToolsPreferencesViewController: NSViewController {
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
     private var exemptSubmissionOrigins: [String] = []
+    private var extensionSections: [ExtensionSettingsSectionModel] = []
+
+    /// The complete page ordering is cheap value state. AppKit owns only the cells around the
+    /// viewport, so an expanded Browser group no longer leaves hundreds of views and constraints
+    /// alive after it scrolls away.
+    private enum PresentationRow {
+        case note
+        case group(Int)
+        case tool(group: Int, tool: Int)
+        case browserSignIn
+        case chromeAutomation
+        case websiteAccess
+        case extensionCaption(Int)
+        case extensionField(section: Int, field: Int)
+    }
+
+    private var presentationRows: [PresentationRow] = []
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("ToolsSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = ToolsPreferencesDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
 
     /// Hosts whose accounts are worth more than a vault without a biometric gate protects.
     ///
@@ -75,37 +121,34 @@ final class ToolsPreferencesViewController: NSViewController {
         }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
+    }
+
     // MARK: - Setup
 
     private func render() {
         guard isViewLoaded else { return }
-        pageView?.removeFromSuperview()
+        extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .tools)
+        presentationRows = makePresentationRows()
+        updateCardDecorations()
 
-        var sections: [NSView] = [
-            SettingsUI.note(
-                "Threading exposes these tools to the Claude and Codex sessions it launches, so an "
-                + "agent can reach the app it is running inside. Turn a group off to hide its "
-                + "tools from agents. Changes apply to sessions started afterwards."
-            )
-        ]
-
-        for (index, group) in displayedGroups.enumerated() {
-            sections.append(groupSection(group, index: index))
+        if let pageView {
+            pageView.updateSummary(enabledSummary)
+            tableView.reloadData()
+            return
         }
-        sections.append(browserSignInSection())
-        sections.append(chromeAutomationSection())
-        sections.append(websiteAccessSection())
 
-        let enabled = displayedGroups.filter { MCPToolCatalog.isEnabled($0) }.count
-        let page = SettingsUI.page(
+        let page = SettingsUI.listPage(
             title: "Tools",
-            summary: L10n.format(
-                "%lld of %lld tool groups enabled",
-                Int64(enabled),
-                Int64(displayedGroups.count)
-            ),
-            sections: sections,
-            hostPage: .tools
+            summary: enabledSummary,
+            body: scrollView
         )
         pageView = page
         page.translatesAutoresizingMaskIntoConstraints = false
@@ -118,9 +161,72 @@ final class ToolsPreferencesViewController: NSViewController {
         ])
     }
 
+    private var enabledSummary: String {
+        let enabled = displayedGroups.filter { MCPToolCatalog.isEnabled($0) }.count
+        return L10n.format(
+            "%lld of %lld tool groups enabled",
+            Int64(enabled),
+            Int64(displayedGroups.count)
+        )
+    }
+
+    private func makePresentationRows() -> [PresentationRow] {
+        var rows: [PresentationRow] = [.note]
+        for (groupIndex, group) in displayedGroups.enumerated() {
+            rows.append(.group(groupIndex))
+            if expandedGroups.contains(group.id) {
+                rows.append(contentsOf: group.tools.indices.map {
+                    .tool(group: groupIndex, tool: $0)
+                })
+            }
+        }
+        rows.append(contentsOf: [.browserSignIn, .chromeAutomation, .websiteAccess])
+        for (sectionIndex, section) in extensionSections.enumerated() {
+            if section.visibleTitle != nil {
+                rows.append(.extensionCaption(sectionIndex))
+            }
+            rows.append(contentsOf: section.fields.indices.map {
+                .extensionField(section: sectionIndex, field: $0)
+            })
+        }
+        return rows
+    }
+
+    private func updateCardDecorations() {
+        var decorations: [ThemedTableCardDecoration] = presentationRows.indices.compactMap { index in
+            guard case .group(let groupIndex) = presentationRows[index],
+                  displayedGroups.indices.contains(groupIndex) else { return nil }
+            let toolRows = expandedGroups.contains(displayedGroups[groupIndex].id)
+                ? displayedGroups[groupIndex].tools.count
+                : 0
+            return ThemedTableCardDecoration(
+                rows: index...(index + toolRows),
+                topInset: Design.Spacing.large
+            )
+        }
+        var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        for (rowIndex, row) in presentationRows.enumerated() {
+            guard case .extensionField(let sectionIndex, _) = row else { continue }
+            if var bounds = extensionBounds[sectionIndex] {
+                bounds.last = rowIndex
+                extensionBounds[sectionIndex] = bounds
+            } else {
+                extensionBounds[sectionIndex] = (rowIndex, rowIndex)
+            }
+        }
+        decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
+            let section = extensionSections[$0.key]
+            return ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: section.visibleTitle == nil ? Design.Spacing.large : 0
+            )
+        })
+        tableView.cardDecorations = decorations
+    }
+
     /// One group, folded: the switch and the group's size on the header, the per-tool
     /// documentation as detail rows only while unfolded.
-    private func groupSection(_ group: MCPToolGroup, index: Int) -> NSView {
+    private func groupHeader(_ group: MCPToolGroup, index: Int) -> NSView {
         let enabled = MCPToolCatalog.isEnabled(group)
         let available = MCPToolCatalog.isAvailable(group)
 
@@ -133,21 +239,8 @@ final class ToolsPreferencesViewController: NSViewController {
         toggle.setAccessibilityLabel(group.title)
 
         let expanded = expandedGroups.contains(group.id)
-        var detailRows: [NSView] = []
-        if expanded {
-            detailRows = group.tools.map { tool in
-                let content = toolRow(tool)
-                // The tools stay listed when the group is off — the page is documentation
-                // too — but read as inactive.
-                content.alphaValue = enabled && available
-                    ? 1
-                    : ToolsPreferencesDefaults.disabledAlpha
-                return SettingsUI.fullRow(content)
-            }
-        }
-
         let groupID = group.id
-        return SettingsUI.disclosureCard(
+        return SettingsUI.disclosureHeader(
             title: group.title,
             subtitle: group.summary,
             summary: toolCount(group.tools.count),
@@ -155,16 +248,45 @@ final class ToolsPreferencesViewController: NSViewController {
             isExpanded: expanded,
             accessibilityIdentifier: "settings.tools.group.\(groupID)",
             onToggle: { [weak self] nowExpanded in
-                guard let self else { return }
-                if nowExpanded {
-                    self.expandedGroups.insert(groupID)
-                } else {
-                    self.expandedGroups.remove(groupID)
-                }
-                self.render()
-            },
-            detailRows: detailRows
+                self?.setGroup(groupID, expanded: nowExpanded)
+            }
         )
+    }
+
+    /// Inserts or removes only this group's tool rows. The table keeps the scroll position and
+    /// every unrelated visible control in place; an offscreen group changes as model state only.
+    func setGroup(_ groupID: String, expanded: Bool) {
+        guard let header = presentationRows.firstIndex(where: {
+            guard case .group(let index) = $0,
+                  displayedGroups.indices.contains(index) else { return false }
+            return displayedGroups[index].id == groupID
+        }), case .group(let groupIndex) = presentationRows[header] else { return }
+
+        let group = displayedGroups[groupIndex]
+        let wasExpanded = expandedGroups.contains(groupID)
+        guard wasExpanded != expanded else { return }
+
+        if expanded {
+            expandedGroups.insert(groupID)
+            if !group.tools.isEmpty {
+                let range = (header + 1)..<(header + 1 + group.tools.count)
+                presentationRows.insert(
+                    contentsOf: group.tools.indices.map { .tool(group: groupIndex, tool: $0) },
+                    at: header + 1
+                )
+                tableView.insertRows(at: IndexSet(integersIn: range), withAnimation: [])
+            }
+        } else {
+            expandedGroups.remove(groupID)
+            if !group.tools.isEmpty {
+                let range = (header + 1)..<(header + 1 + group.tools.count)
+                presentationRows.removeSubrange(range)
+                tableView.removeRows(at: IndexSet(integersIn: range), withAnimation: [])
+            }
+        }
+
+        updateCardDecorations()
+        tableView.reloadData(forRowIndexes: IndexSet(integer: header), columnIndexes: IndexSet(integer: 0))
     }
 
     private func toolCount(_ count: Int) -> String {
@@ -489,11 +611,22 @@ final class ToolsPreferencesViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func groupToggled(_ sender: ThemedToggle) {
+        guard displayedGroups.indices.contains(sender.tag) else { return }
         let group = displayedGroups[sender.tag]
         AppSettings.shared.setToolGroup(group.id, enabled: sender.state == .on)
-        // Rebuilt rather than dimmed in place: the header's count line and the page summary
-        // both state enablement, and a wholesale rebuild is the page's one update path.
-        render()
+        pageView?.updateSummary(enabledSummary)
+
+        guard let header = presentationRows.firstIndex(where: {
+            if case .group(let index) = $0 { return index == sender.tag }
+            return false
+        }) else { return }
+        let end = expandedGroups.contains(group.id)
+            ? min(header + group.tools.count, presentationRows.count - 1)
+            : header
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integersIn: header...end),
+            columnIndexes: IndexSet(integer: 0)
+        )
     }
 
     @objc private func setUpChromeAutomationProfile() {
@@ -768,6 +901,118 @@ final class ToolsPreferencesViewController: NSViewController {
 
 }
 
+// MARK: - Virtualized Page
+
+extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("ToolsSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+
+        let content = content(for: presentationRows[tableRow])
+        host.install(
+            content,
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(for: presentationRows[tableRow]),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func bottomInset(forRowAt row: Int) -> CGFloat {
+        guard presentationRows.indices.contains(row) else { return 0 }
+        if case .extensionCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        return row == presentationRows.count - 1 ? Design.Spacing.large : 0
+    }
+
+    private func topInset(for row: PresentationRow) -> CGFloat {
+        switch row {
+        case .tool:
+            return 0
+        case .note, .group, .browserSignIn, .chromeAutomation, .websiteAccess,
+             .extensionCaption:
+            return Design.Spacing.large
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
+                return 0
+            }
+            return extensionSections[sectionIndex].visibleTitle == nil ? Design.Spacing.large : 0
+        }
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .note:
+            return SettingsUI.note(
+                "Threading exposes these tools to the Claude and Codex sessions it launches, so an "
+                    + "agent can reach the app it is running inside. Turn a group off to hide its "
+                    + "tools from agents. Changes apply to sessions started afterwards."
+            )
+        case .group(let groupIndex):
+            guard displayedGroups.indices.contains(groupIndex) else { return NSView() }
+            return groupHeader(displayedGroups[groupIndex], index: groupIndex)
+        case .tool(let groupIndex, let toolIndex):
+            guard displayedGroups.indices.contains(groupIndex),
+                  displayedGroups[groupIndex].tools.indices.contains(toolIndex) else {
+                return NSView()
+            }
+            let group = displayedGroups[groupIndex]
+            let content = toolRow(group.tools[toolIndex])
+            content.alphaValue = MCPToolCatalog.isEnabled(group) && MCPToolCatalog.isAvailable(group)
+                ? 1
+                : ToolsPreferencesDefaults.disabledAlpha
+            return SettingsUI.fullRow(content)
+        case .browserSignIn:
+            return browserSignInSection()
+        case .chromeAutomation:
+            return chromeAutomationSection()
+        case .websiteAccess:
+            return websiteAccessSection()
+        case .extensionCaption(let index):
+            guard extensionSections.indices.contains(index),
+                  let title = extensionSections[index].visibleTitle else { return NSView() }
+            let caption = SettingsUI.caption(title, localizes: false)
+            caption.setAccessibilityIdentifier(extensionSections[index].accessibilityIdentifier)
+            return caption
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard extensionSections.indices.contains(sectionIndex) else { return NSView() }
+            return ExtensionSettingsRenderer.fieldRow(
+                in: extensionSections[sectionIndex],
+                fieldIndex: fieldIndex
+            )
+        }
+    }
+
+    /// Values used by the command-line stress fixture to assert that expansion grows the cheap
+    /// model without retaining the whole expanded page as views.
+    var virtualRowCount: Int { presentationRows.count }
+
+    var materializedRowCount: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+}
+
 // MARK: - Tools Preferences Defaults
 
 enum ToolsPreferencesDefaults {
@@ -775,4 +1020,5 @@ enum ToolsPreferencesDefaults {
     static let toolNameFontSize: CGFloat = 10.5
     static let disabledAlpha: CGFloat = 0.45
     static let sheetFieldWidth: CGFloat = 260
+    static let estimatedRowHeight: CGFloat = 64
 }

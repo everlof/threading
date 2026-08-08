@@ -212,27 +212,10 @@ final class AdvancedPreferencesViewController: NSViewController {
         guard ConfirmationAlert.ask(request) else { return }
 
         do {
-            if case .everything = scope {
-                // An app-data reset must not leave durable owner credentials behind. Stop the
-                // listener first, then erase the one app-owned Keychain item before moving the
-                // file state aside. A settings-only reset deliberately keeps pairings.
-                try RemoteAccessCoordinator.shared.deleteOwnerDevicesForAppReset()
-                // Same reason, second store: the browser's test credentials are Keychain items,
-                // so moving the app's directories aside would leave every one of them behind
-                // while telling the user their state had been removed.
-                try BrowserCredentialStore().deleteAll()
-                // The 1Password references deliberately have *no* line here. They live in the
-                // preferences domain, which `AppDataReset` snapshots into the backup and then
-                // removes — so clearing them first would delete them from the recovery copy and
-                // lose them outright if the reset went on to fail. The Keychain call above is not
-                // symmetric with that: keychain items are in neither the domain nor the support
-                // directory, so nothing else would ever remove them.
-            }
-            let outcome = try AppDataReset.perform(scope, at: Date())
-            ThreadingLogger.agent.info(
-                "Reset app data into \(outcome.backup.lastPathComponent, privacy: .public)"
-            )
-            AppRelaunch.discardingState()
+            // The order the sequence has to run in — Keychain first, directories second — lives
+            // in `AppDataResetFlow`, because the recovery surface offers this too and a second
+            // copy of it is how one screen quietly stops clearing a credential.
+            try AppDataResetFlow.perform(scope, at: Date())
         } catch {
             // Nothing has been restarted, so the app is still usable and saying so is the whole
             // response. A reset that half-happened is the case this must not hide.

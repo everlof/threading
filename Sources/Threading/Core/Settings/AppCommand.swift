@@ -134,6 +134,11 @@ enum AppCommands {
         static let navigateBack = "nav.back"
         static let navigateForward = "nav.forward"
 
+        static let previousTurn = "conversation.previousTurn"
+        static let nextTurn = "conversation.nextTurn"
+        static let previousStep = "conversation.previousStep"
+        static let nextStep = "conversation.nextStep"
+
         /// `tab.select.1` … `tab.select.9` — one id per ⌘-digit, stable like every other.
         static func selectTab(_ number: Int) -> String { "tab.select.\(number)" }
         static let selectTabNumbers = 1...9
@@ -181,6 +186,22 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "\u{F702}", modifiers: [.command, .control]), isEditable: true),
         AppCommand(id: ID.navigateForward, group: .view, title: "Go Forward",
                    defaultShortcut: KeyboardShortcut(key: "\u{F703}", modifiers: [.command, .control]), isEditable: true),
+        // The vertical siblings of Go Back / Go Forward, on the same ⌃⌘ layer and the same arrow
+        // keys: those retrace the window's pages, these retrace one conversation's exchanges.
+        // Mission Control owns the *bare* ⌃↑/↓, not these.
+        AppCommand(id: ID.previousTurn, group: .view, title: "Previous Turn",
+                   detail: "Jumps to the exchange before the one at the top of the conversation.",
+                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .control]), isEditable: true),
+        AppCommand(id: ID.nextTurn, group: .view, title: "Next Turn",
+                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .control]), isEditable: true),
+        // The ⌥⌘ layer of the same keys, the way Group by Branch's ⌃⌘B refines to ⌥⌘B: one idea
+        // at two depths, the turn and the steps inside it. Steps in a folded turn are skipped,
+        // because a folded turn is one line by the reader's own choice.
+        AppCommand(id: ID.previousStep, group: .view, title: "Previous Step",
+                   detail: "Jumps to the previous tool call, within a turn that is showing its work.",
+                   defaultShortcut: KeyboardShortcut(key: "\u{F700}", modifiers: [.command, .option]), isEditable: true),
+        AppCommand(id: ID.nextStep, group: .view, title: "Next Step",
+                   defaultShortcut: KeyboardShortcut(key: "\u{F701}", modifiers: [.command, .option]), isEditable: true),
         // B for branch, on the sidebar-toggle's own ⌃⌘ layer — ⇧⌘B is the browser's. The
         // lone-branch refinement takes the ⌥⌘ layer of the same key, so the pair reads as
         // one idea at two depths.

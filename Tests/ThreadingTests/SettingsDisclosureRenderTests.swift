@@ -3,7 +3,7 @@ import XCTest
 @testable import Threading
 
 /// Draws the reworked settings surfaces — the pinned page header and the collapsed cards — to
-/// images, under System light and dark plus two deliberately different authored themes.
+/// images, under System light and dark plus three deliberately different authored themes.
 ///
 /// The claims these pages now make are visual: a collapsed group reads as one scannable row, an
 /// unfolded one still lines its tools up, and the header band sits above the scroll rather than
@@ -24,14 +24,15 @@ final class SettingsDisclosureRenderTests: XCTestCase {
                 .appendingPathComponent("ThreadingRenders", isDirectory: true)
         }
 
-        /// System in both appearances, plus the two styles the design docs name as the
-        /// representative extremes — neon-on-dark and print-red-on-light.
+        /// System in both appearances, plus the styles that stress glow, hard-shadow and
+        /// square print constructions respectively.
         @MainActor
         static var fixtures: [(name: String, theme: AppTheme, appearance: NSAppearance.Name)] {
             [
                 ("system-light", .system, .aqua),
                 ("system-dark", .system, .darkAqua),
                 ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+                ("neo-brutalism", AppThemeStyles.neoBrutalism, .aqua),
                 ("swiss", AppThemeStyles.swissMinimalist, .aqua)
             ]
         }
@@ -46,7 +47,8 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         )
         let host = laidOut(controller.view)
 
-        let collapsedHeight = documentHeight(in: controller.view)
+        let collapsedRows = controller.virtualRowCount
+        let originalScroll = try XCTUnwrap(firstScrollView(in: controller.view))
         let disclosure = try XCTUnwrap(
             descendants(of: controller.view, type: ThemedDisclosureRow.self).first,
             "the Tools page built no disclosure headers"
@@ -56,9 +58,33 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         XCTAssertGreaterThan(
-            documentHeight(in: controller.view), collapsedHeight,
+            controller.virtualRowCount, collapsedRows,
             "unfolding the first group did not add its tool rows"
         )
+        XCTAssertTrue(
+            firstScrollView(in: controller.view) === originalScroll,
+            "a disclosure replaced the page instead of mutating its virtual rows"
+        )
+    }
+
+    @MainActor
+    func testExpandedToolsMaterializeOnlyTheViewport() throws {
+        let groups = MCPToolCatalog.allGroups
+        let controller = ToolsPreferencesViewController(groups: groups)
+        let host = laidOut(controller.view, height: 360)
+
+        for group in groups {
+            controller.setGroup(group.id, expanded: true)
+        }
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(controller.virtualRowCount, 60)
+        XCTAssertLessThan(
+            controller.materializedRowCount,
+            controller.virtualRowCount / 2,
+            "the expanded Tools page retained rows far outside its viewport"
+        )
+        withExtendedLifetime(host) {}
     }
 
     // MARK: - The Header Stays Put
@@ -267,6 +293,151 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         )
     }
 
+    // MARK: - Performance
+
+    /// Keeps the Tools settings page's cold render, disclosure mutation and fully expanded scroll
+    /// as separate numbers. The page synchronously reads its catalog and account/browser state,
+    /// then materializes only the viewport; one elapsed time would make model, mount and paint
+    /// costs indistinguishable.
+    @MainActor
+    func testStressToolsPreferencesWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_TOOLS_SETTINGS_STRESS"] == "1" else {
+            throw XCTSkip("Set THREADING_TOOLS_SETTINGS_STRESS=1 to run the Tools settings stress case")
+        }
+
+        let themeID = AppThemeID(
+            ProcessInfo.processInfo.environment["THREADING_TOOLS_SETTINGS_STRESS_THEME"] ?? "system"
+        )
+        let theme = try XCTUnwrap(AppThemeLibrary.theme(withID: themeID))
+        let previousTheme = AppThemePalette.current
+        let application = NSApplication.shared
+        let previousAppearance = application.appearance
+        AppThemePalette.set(theme)
+        application.appearance = theme.mode.appearance
+        defer {
+            AppThemePalette.set(previousTheme)
+            application.appearance = previousAppearance
+        }
+
+        let catalogStarted = DispatchTime.now().uptimeNanoseconds
+        let groups = MCPToolCatalog.allGroups
+        let catalogEnded = DispatchTime.now().uptimeNanoseconds
+        let toolCount = groups.reduce(0) { $0 + $1.tools.count }
+
+        let controllerStarted = DispatchTime.now().uptimeNanoseconds
+        let controller = ToolsPreferencesViewController(groups: groups)
+        let controllerEnded = DispatchTime.now().uptimeNanoseconds
+        let page = controller.view
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let collapsedDescendants = descendantCount(in: page)
+        let largestGroupIndex = try XCTUnwrap(
+            groups.indices.max { groups[$0].tools.count < groups[$1].tools.count }
+        )
+
+        let expandStarted = DispatchTime.now().uptimeNanoseconds
+        controller.setGroup(groups[largestGroupIndex].id, expanded: true)
+        let expandRenderEnded = DispatchTime.now().uptimeNanoseconds
+        host.layoutSubtreeIfNeeded()
+        let expandLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let expandedDescendants = descendantCount(in: page)
+        let collapseStarted = DispatchTime.now().uptimeNanoseconds
+        controller.setGroup(groups[largestGroupIndex].id, expanded: false)
+        let collapseRenderEnded = DispatchTime.now().uptimeNanoseconds
+        host.layoutSubtreeIfNeeded()
+        let collapseLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let expandedController = ToolsPreferencesViewController(groups: groups)
+        let expandedPage = expandedController.view
+        let expandedWindow = performanceWindow(expandedPage)
+        let expandedHost = try XCTUnwrap(expandedWindow.contentView)
+        expandedHost.layoutSubtreeIfNeeded()
+
+        var expandAllRenderNanoseconds: UInt64 = 0
+        var expandAllLayoutNanoseconds: UInt64 = 0
+        for index in groups.indices {
+            let started = DispatchTime.now().uptimeNanoseconds
+            expandedController.setGroup(groups[index].id, expanded: true)
+            let rendered = DispatchTime.now().uptimeNanoseconds
+            expandedHost.layoutSubtreeIfNeeded()
+            let laidOut = DispatchTime.now().uptimeNanoseconds
+            expandAllRenderNanoseconds += rendered - started
+            expandAllLayoutNanoseconds += laidOut - rendered
+        }
+
+        let scroll = try XCTUnwrap(firstScrollView(in: expandedPage))
+        let document = try XCTUnwrap(scroll.documentView)
+        let viewport = scroll.bounds
+        let overflow = max(document.bounds.height - scroll.contentSize.height, 0)
+        let frames = 48
+        let bitmap = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: viewport))
+        var scrollNanoseconds: UInt64 = 0
+        var scrollLayoutNanoseconds: UInt64 = 0
+        var drawNanoseconds: UInt64 = 0
+        for frame in 0..<frames {
+            let fraction = CGFloat(frame) / CGFloat(max(frames - 1, 1))
+            let started = DispatchTime.now().uptimeNanoseconds
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: overflow * fraction))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let scrolled = DispatchTime.now().uptimeNanoseconds
+            expandedHost.layoutSubtreeIfNeeded()
+            let laidOut = DispatchTime.now().uptimeNanoseconds
+            scroll.cacheDisplay(in: viewport, to: bitmap)
+            let drawn = DispatchTime.now().uptimeNanoseconds
+            scrollNanoseconds += scrolled - started
+            scrollLayoutNanoseconds += laidOut - scrolled
+            drawNanoseconds += drawn - laidOut
+        }
+
+        print(
+            "THREADING_PERF tools-settings-cold "
+                + "theme=\(themeID.rawValue) groups=\(groups.count) tools=\(toolCount) "
+                + "catalog_ms=\(Self.milliseconds(catalogEnded - catalogStarted)) "
+                + "controller_ms=\(Self.milliseconds(controllerEnded - controllerStarted)) "
+                + "render_ms=\(Self.milliseconds(renderEnded - controllerEnded)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "descendants=\(collapsedDescendants)"
+        )
+        print(
+            "THREADING_PERF tools-settings-disclosure "
+                + "theme=\(themeID.rawValue) group=\(groups[largestGroupIndex].id) "
+                + "tools=\(groups[largestGroupIndex].tools.count) "
+                + "expand_render_ms=\(Self.milliseconds(expandRenderEnded - expandStarted)) "
+                + "expand_layout_ms=\(Self.milliseconds(expandLayoutEnded - expandRenderEnded)) "
+                + "collapse_render_ms=\(Self.milliseconds(collapseRenderEnded - collapseStarted)) "
+                + "collapse_layout_ms=\(Self.milliseconds(collapseLayoutEnded - collapseRenderEnded)) "
+                + "expanded_descendants=\(expandedDescendants)"
+        )
+        print(
+            "THREADING_PERF tools-settings-expanded "
+                + "theme=\(themeID.rawValue) groups=\(groups.count) tools=\(toolCount) "
+                + "expand_render_ms=\(Self.milliseconds(expandAllRenderNanoseconds)) "
+                + "expand_layout_ms=\(Self.milliseconds(expandAllLayoutNanoseconds)) "
+                + "document_height=\(Int(document.bounds.height)) "
+                + "descendants=\(descendantCount(in: expandedPage)) "
+                + "virtual_rows=\(expandedController.virtualRowCount) "
+                + "materialized_rows=\(expandedController.materializedRowCount) "
+                + "frames=\(frames) "
+                + "scroll_ms=\(Self.milliseconds(scrollNanoseconds / UInt64(frames))) "
+                + "layout_ms=\(Self.milliseconds(scrollLayoutNanoseconds / UInt64(frames))) "
+                + "draw_ms=\(Self.milliseconds(drawNanoseconds / UInt64(frames)))"
+        )
+
+        XCTAssertGreaterThanOrEqual(expandedController.virtualRowCount, groups.count + toolCount)
+        XCTAssertLessThan(
+            expandedController.materializedRowCount,
+            expandedController.virtualRowCount,
+            "the virtual Tools page retained every expanded row"
+        )
+        XCTAssertGreaterThan(document.bounds.height, scroll.contentSize.height)
+        withExtendedLifetime((window, expandedWindow)) {}
+    }
+
     @MainActor
     private func labels(in root: NSView) -> [NSTextField] {
         descendants(of: root, type: NSTextField.self)
@@ -333,6 +504,37 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     }
 
     @MainActor
+    private func performanceWindow(_ page: NSView) -> NSWindow {
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: 700
+        ))
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        return window
+    }
+
+    @MainActor
+    private func descendantCount(in root: NSView) -> Int {
+        1 + root.subviews.reduce(0) { $0 + descendantCount(in: $1) }
+    }
+
+    @MainActor
     private func descendants<T: NSView>(of root: NSView, type: T.Type) -> [T] {
         var found: [T] = []
         for view in root.subviews {
@@ -350,5 +552,9 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         host.layer?.backgroundColor = AppThemePalette.current.resolved(.ground).cgColor
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.2f", Double(nanoseconds) / 1_000_000)
     }
 }

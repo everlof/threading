@@ -118,6 +118,9 @@ enum SettingsPages {
     static let toolsID = ExtensionHostSettingsPage.tools.rawValue
     static let keyboardID = ExtensionHostSettingsPage.keyboard.rawValue
     static let usageID = ExtensionHostSettingsPage.usage.rawValue
+    /// No `hostPage`: an extension contributing rows to the page that spends the user's rate
+    /// limits on a schedule is a door nothing needs opened.
+    static let usageWindowsID = "usage-windows"
     static let storageID = ExtensionHostSettingsPage.storage.rawValue
     static let archivedID = ExtensionHostSettingsPage.archived.rawValue
     /// No `hostPage`: an extension contributing rows to the page that resets the app — and that
@@ -159,7 +162,12 @@ enum SettingsPages {
                 "project icons", "account avatars", "Codex hooks",
                 "Claude Remote Control", "notifications", "mute", "sound", "alerts",
                 "confirmations", "don't ask again", "ask before", "opening message",
-                "first message", "instructions"
+                "first message", "instructions", "conversation speed", "fast mode",
+                "standard mode", "service tier", "credits",
+                // The Startup section's own verbs, added the day a search for
+                // "automatic loading on startup" found nothing: the section relaunches and
+                // reopens sessions, and none of those words appeared here.
+                "relaunch", "reopen", "restore", "resume automatically", "running at quit"
             )
         ) { GeneralPreferencesViewController() },
         Page(
@@ -235,6 +243,17 @@ enum SettingsPages {
             group: agentsGroup,
             searchTerms: terms("tokens", "cost", "spend", "account", "checkout", "model", "day")
         ) { UsagePreferencesViewController() },
+        Page(
+            id: usageWindowsID,
+            hostPage: nil,
+            title: L10n.string("Usage Windows"),
+            symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+            group: agentsGroup,
+            searchTerms: terms(
+                "rate limit", "5-hour window", "session limit", "reset", "schedule",
+                "poke", "weekly limit", "working hours", "workday"
+            )
+        ) { UsageWindowPreferencesViewController() },
         // MARK: Access
         Page(
             id: remoteAccessID,

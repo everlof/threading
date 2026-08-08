@@ -122,16 +122,25 @@ extension MainWindowController {
         return (image, WindowSnapshot.writePNG(rep)?.path)
     }
 
+    /// The environment is read here rather than by each report, because it is the same reading
+    /// for all three and it belongs to the *window* the capture was taken from — which is the
+    /// one thing an `ElementReport` built from a detached view in a test cannot have.
     private func presentReport(
         heading: String,
         subheading: String,
         markdown: String,
         screenshot: NSImage?
     ) {
+        let environment = InspectorEnvironment.capture(
+            window: window,
+            sessionID: currentSessionID
+        )
+
         let sheet = InspectorReportViewController(
             heading: heading,
             subheading: subheading,
             markdown: markdown,
+            environment: environment.markdown,
             screenshot: screenshot
         )
         sheet.onDone = { [weak self, weak sheet] in

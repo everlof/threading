@@ -107,6 +107,37 @@ final class GeneralSettingsRenderTests: XCTestCase {
         )
     }
 
+    /// The startup policy is useful only if each provider is independently reachable and every
+    /// state survives the UI boundary. Accessibility identifiers are part of that contract too:
+    /// two identical three-row pop-ups cannot otherwise be distinguished by automation.
+    @MainActor
+    func testClaudeAndCodexStartupSpeedRowsOfferEveryState() throws {
+        let controller = GeneralPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+
+        for (kind, identifier) in [
+            (AgentKind.claude, "settings.general.claude-startup-speed"),
+            (AgentKind.codex, "settings.general.codex-startup-speed")
+        ] {
+            let popUp = try XCTUnwrap(
+                Self.view(in: controller.view, identifiedBy: identifier) as? ThemedPopUp,
+                "\(kind) has no startup speed control"
+            )
+            XCTAssertEqual(
+                (0..<popUp.numberOfItems).compactMap { popUp.item(at: $0)?.title },
+                AgentStartupSpeed.allCases.map(\.settingsTitle)
+            )
+            XCTAssertEqual(
+                popUp.selectedItem?.representedValue as? AgentStartupSpeed,
+                AppSettings.shared.startupSpeed(for: kind)
+            )
+        }
+
+        let labels = Self.labels(in: controller.view)
+        XCTAssertTrue(labels.contains(L10n.string("Claude sessions start in")))
+        XCTAssertTrue(labels.contains(L10n.string("Codex sessions start in")))
+    }
+
     private static func labels(in view: NSView) -> Set<String> {
         var found: Set<String> = []
         if let field = view as? NSTextField { found.insert(field.stringValue) }
@@ -114,6 +145,14 @@ final class GeneralSettingsRenderTests: XCTestCase {
             found.formUnion(labels(in: subview))
         }
         return found
+    }
+
+    private static func view(in root: NSView, identifiedBy identifier: String) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        for subview in root.subviews {
+            if let found = view(in: subview, identifiedBy: identifier) { return found }
+        }
+        return nil
     }
 
     // MARK: - Rendering

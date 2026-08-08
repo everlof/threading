@@ -43,7 +43,21 @@ final class ListSelectionStrengthTests: XCTestCase {
         NSTableViewDelegate,
         NSOutlineViewDataSource,
         NSOutlineViewDelegate {
+
+        /// Set to hand back a row class of the fixture's choosing. Left nil, the list is asked for
+        /// nothing and vends its own — which is the case that matters most, since that is the row
+        /// nobody wrote.
+        var rowView: (() -> NSTableRowView)?
+
         func numberOfRows(in tableView: NSTableView) -> Int { Fixture.rows }
+
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            rowView?()
+        }
+
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            rowView?()
+        }
 
         func tableView(
             _ tableView: NSTableView,
@@ -79,7 +93,10 @@ final class ListSelectionStrengthTests: XCTestCase {
     // MARK: - The Rule
 
     /// The regression, stated the way AppKit states it: the list resigning demotes every row, and
-    /// that must not survive to the next draw.
+    /// that must not survive to the next draw. The end-to-end shape of the rule — the row now
+    /// declines the demotion outright, so what this pins is the *outcome* a draw arrives at. See
+    /// `testADemotionIsRefusedWhereItArrivesRatherThanAtTheNextDraw` for why the draw alone was
+    /// never enough.
     func testTheListRestoresItsSelectionStrengthBeforeItDraws() throws {
         let table = try list(isKey: true)
 
@@ -174,6 +191,101 @@ final class ListSelectionStrengthTests: XCTestCase {
         )
     }
 
+    // MARK: - Where The Rule Is Applied
+
+    /// **The regression, and the one every test above missed.**
+    ///
+    /// The rule shipped as a re-assert from `viewWillDraw`, and the defect was reported again
+    /// against the built app while all of these kept passing — because they reach the list's draw
+    /// through `cacheDisplay`, and nothing in a running window does. Every window is layer-backed
+    /// on modern macOS, so a demoted row repaints from its own layer and the list is never asked
+    /// to draw: probed against a live window, `viewWillDraw` fires once for the first paint and
+    /// not again as focus comes and goes.
+    ///
+    /// So this asserts the demotion is refused **where it arrives**, with no draw of any kind
+    /// between the two lines — which is the only form of the rule that survives the app.
+    func testADemotionIsRefusedWhereItArrivesRatherThanAtTheNextDraw() throws {
+        let table = try list(isKey: true)
+        try draw(table)
+
+        demoteEveryRow(in: table)
+
+        XCTAssertEqual(
+            emphasizedRowCount(in: table),
+            Fixture.rows,
+            "A demotion should be refused as it arrives, not repaired by a draw that never comes"
+        )
+    }
+
+    /// The other direction, asserted the same way: refusing AppKit's demotion must not become
+    /// "always shout". A list that is genuinely not in the front window takes the quiet fill the
+    /// moment it is asked, with no draw to recover through either.
+    func testABackgroundWindowsListTakesTheQuietFillWithoutADrawEither() throws {
+        let table = try list(isKey: false)
+        try draw(table)
+
+        table.enumerateAvailableRowViews { row, _ in row.isEmphasized = true }
+
+        XCTAssertEqual(
+            emphasizedRowCount(in: table),
+            0,
+            "A background window's list should hold the quiet fill against a promotion too"
+        )
+    }
+
+    /// A row built while scrolling arrives after every notification and after the list's last
+    /// draw. It cannot refuse anything on the way in — AppKit sets its emphasis *before* it has a
+    /// superview to ask, which is measured rather than assumed — so landing in the list is where
+    /// it takes the list's answer.
+    func testARowTakesTheListsStrengthAsItLandsInTheList() throws {
+        let table = try list(isKey: true)
+        let row = ThemedTableRowView()
+        row.isEmphasized = false
+
+        table.addSubview(row)
+
+        XCTAssertTrue(
+            row.isEmphasized,
+            "A row joining a list in the front window should adopt its strength on arrival"
+        )
+    }
+
+    /// Both row classes, asked of each rather than of one: the override is a property, so it has
+    /// to be restated per class and is exactly the kind of thing that gets half-written.
+    func testBothRowClassesRefuseADemotionTheirListDidNotAskFor() throws {
+        for make in [{ ThemedTableRowView() as NSTableRowView }, { SidebarHoverRowView() }] {
+            rows.rowView = make
+            defer { rows.rowView = nil }
+
+            let table = try list(isKey: true)
+            try draw(table)
+            let vended = String(describing: type(of: try XCTUnwrap(
+                table.rowView(atRow: 0, makeIfNecessary: false),
+                "Fixture premise: the list built the row it was handed"
+            )))
+
+            demoteEveryRow(in: table)
+
+            XCTAssertEqual(
+                emphasizedRowCount(in: table),
+                Fixture.rows,
+                "\(vended) should hold its list's strength against AppKit's demotion"
+            )
+        }
+    }
+
+    /// And a list that is asked for nothing still gets a row that carries it — the row nobody
+    /// wrote, which is what made this a rule about lists in the first place.
+    func testTheRowAListVendsForItselfCarriesTheRefusal() throws {
+        let table = try list(isKey: true)
+        try draw(table)
+
+        XCTAssertTrue(
+            table.rowView(atRow: 0, makeIfNecessary: false) is ThemedTableRowView,
+            "A list whose delegate returns no row view should still get the themed row"
+        )
+    }
+
     // MARK: - Reach
 
     /// What makes this a construction rather than another fix: there is nowhere else to put a
@@ -198,6 +310,32 @@ final class ListSelectionStrengthTests: XCTestCase {
             lists,
             ["ThemedTableView", "ThemedOutlineView"],
             "A list outside these two would draw its selection by AppKit's rule again"
+        )
+    }
+
+    /// The same reach argument for the half of the rule that lives on the row. A *direct*
+    /// subclass of `NSTableRowView` is one that has not inherited the refusal from anywhere, so
+    /// a third one is a row that would believe AppKit again — deriving from either of these two
+    /// is free and stays free.
+    func testEveryRowBuiltFromScratchInTheAppIsOneOfTheTwoThatRefuseTheDemotion() throws {
+        let declarations = try NSRegularExpression(
+            pattern: #"(?m)^(?:final )?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSTableRowView\b"#
+        )
+
+        var rowClasses: Set<String> = []
+        for source in try appSources() {
+            let text = try String(contentsOf: source, encoding: .utf8)
+            let range = NSRange(text.startIndex..., in: text)
+            for match in declarations.matches(in: text, range: range) {
+                guard let name = Range(match.range(at: 1), in: text) else { continue }
+                rowClasses.insert(String(text[name]))
+            }
+        }
+
+        XCTAssertEqual(
+            rowClasses,
+            ["ThemedTableRowView", "SidebarHoverRowView"],
+            "A row built straight on NSTableRowView would take AppKit's demotion again"
         )
     }
 

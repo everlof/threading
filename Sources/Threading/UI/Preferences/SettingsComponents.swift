@@ -17,10 +17,17 @@ enum SettingsUI {
         _ sections: [NSView],
         hostPage: ExtensionHostSettingsPage? = nil
     ) -> NSView {
-        let allSections = sections + (hostPage.map {
-            ExtensionSettingsRenderer.hostSections(for: $0)
-        } ?? [])
-        let stack = NSStackView(views: allSections)
+        let extensionSections = hostPage.map {
+            ExtensionSettingsRenderer.hostSectionModels(for: $0)
+        } ?? []
+        if !extensionSections.isEmpty {
+            return ExtensionSettingsListView(
+                baseSections: sections,
+                extensionSections: extensionSections
+            )
+        }
+
+        let stack = NSStackView(views: sections)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.large
@@ -54,7 +61,7 @@ enum SettingsUI {
         // Every section fills the column, so cards and their rows share one width — otherwise a
         // card with no stretchy row (a lone field, a full-width preview) hugs its content and
         // sits narrower than the rest.
-        for section in allSections {
+        for section in sections {
             section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
@@ -77,53 +84,54 @@ enum SettingsUI {
         hostPage: ExtensionHostSettingsPage? = nil,
         localizes: Bool = true
     ) -> NSView {
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
+        fixedHeaderPage(
+            title: title,
+            summary: summary,
+            actions: actions,
+            body: page(sections, hostPage: hostPage),
+            localizes: localizes
+        )
+    }
 
+    /// The fixed settings header above an already-virtualized scrolling body.
+    ///
+    /// `page(_:hostPage:)` owns a retained stack and therefore must not wrap a table-backed page:
+    /// doing so would introduce nested scrolling and forfeit the table's viewport. This sibling
+    /// entry point keeps the exact same header geometry while leaving row ownership with AppKit.
+    static func listPage(
+        title: String,
+        summary: String? = nil,
+        actions: [NSView] = [],
+        body: NSView,
+        localizes: Bool = true
+    ) -> SettingsPageView {
+        fixedHeaderPage(
+            title: title,
+            summary: summary,
+            actions: actions,
+            body: body,
+            localizes: localizes
+        )
+    }
+
+    private static func fixedHeaderPage(
+        title: String,
+        summary: String?,
+        actions: [NSView],
+        body: NSView,
+        localizes: Bool
+    ) -> SettingsPageView {
         let header = pageHeader(
             title: title,
             summary: summary,
             actions: actions,
             localizes: localizes
         )
-        let separator = SeparatorView()
-        let scroll = page(sections, hostPage: hostPage)
-
-        for view in [header, separator, scroll] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(view)
-        }
-
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(
-                equalTo: container.topAnchor,
-                constant: Design.Spacing.large
-            ),
-            // The header's text lines up with the cards' own edge: the scroll column holds
-            // `glowGutter` clear on either side, so the header holds the same.
-            header.leadingAnchor.constraint(
-                equalTo: container.leadingAnchor,
-                constant: Design.Size.glowGutter
-            ),
-            header.trailingAnchor.constraint(
-                equalTo: container.trailingAnchor,
-                constant: -Design.Size.glowGutter
-            ),
-
-            separator.topAnchor.constraint(
-                equalTo: header.bottomAnchor,
-                constant: Design.Spacing.medium
-            ),
-            separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ])
-
-        return container
+        return SettingsPageView(
+            header: header.view,
+            summaryField: header.summaryField,
+            body: body
+        )
     }
 
     /// The fixed band above a page's scroll: title leading, actions trailing, the optional
@@ -133,14 +141,16 @@ enum SettingsUI {
         summary: String?,
         actions: [NSView],
         localizes: Bool
-    ) -> NSView {
+    ) -> (view: NSView, summaryField: NSTextField?) {
         var labelViews: [NSView] = [heading(title, localizes: localizes)]
+        var summaryField: NSTextField?
         if let summary {
             let line = NSTextField(labelWithString: localized(summary, if: localizes))
             line.applyFont(.subheading)
             line.textColor = Design.Text.secondary
             line.lineBreakMode = .byTruncatingTail
             labelViews.append(line)
+            summaryField = line
         }
 
         let labels = NSStackView(views: labelViews)
@@ -161,7 +171,7 @@ enum SettingsUI {
             row.addArrangedSubview(action)
         }
 
-        return row
+        return (row, summaryField)
     }
 
     /// A collapsible card: a disclosure header carrying the section's name, an optional
@@ -169,8 +179,8 @@ enum SettingsUI {
     /// while expanded.
     ///
     /// The caller keeps the expansion state (a view state, not a preference — Storage's fold
-    /// set the pattern) and rebuilds its page on toggle, which is the idiom every settings page
-    /// already follows for its own events.
+    /// set the pattern) and chooses the update boundary: a small retained page may rebuild its
+    /// card, while a large page uses `disclosureHeader` and inserts only its virtual detail rows.
     @MainActor
     static func disclosureCard(
         title: String,
@@ -183,6 +193,34 @@ enum SettingsUI {
         accessibilityIdentifier: String? = nil,
         onToggle: @escaping (Bool) -> Void,
         detailRows: [NSView] = []
+    ) -> NSView {
+        let header = disclosureHeader(
+            title: title,
+            subtitle: subtitle,
+            summary: summary,
+            summaryColor: summaryColor,
+            control: control,
+            isExpanded: isExpanded,
+            localizes: localizes,
+            accessibilityIdentifier: accessibilityIdentifier,
+            onToggle: onToggle
+        )
+
+        return SettingsCard(rows: [header] + (isExpanded ? detailRows : []))
+    }
+
+    /// The header portion of `disclosureCard`, for a card whose detail rows are owned by a
+    /// virtual table rather than retained in one stack.
+    static func disclosureHeader(
+        title: String,
+        subtitle: String? = nil,
+        summary: String? = nil,
+        summaryColor: NSColor? = nil,
+        control: NSView? = nil,
+        isExpanded: Bool,
+        localizes: Bool = true,
+        accessibilityIdentifier: String? = nil,
+        onToggle: @escaping (Bool) -> Void
     ) -> NSView {
         let disclosure = disclosureRow(
             title: title,
@@ -214,7 +252,7 @@ enum SettingsUI {
             header = disclosure
         }
 
-        return SettingsCard(rows: [header] + (isExpanded ? detailRows : []))
+        return header
     }
 
     /// A bare disclosure row, for a fold *inside* a card — Storage's "N smaller directories"
@@ -601,6 +639,62 @@ enum SettingsUI {
 
     private static func localized(_ text: String, if localizes: Bool) -> String {
         localizes ? L10n.string(text) : text
+    }
+}
+
+// MARK: - Fixed Settings Page
+
+/// A settings page whose title band stays fixed above a caller-owned body.
+///
+/// The summary field is retained so a live page can update its count without replacing the
+/// header — or, transitively, the scrolling view and all of its visible rows.
+final class SettingsPageView: NSView {
+    private let summaryField: NSTextField?
+
+    init(header: NSView, summaryField: NSTextField?, body: NSView) {
+        self.summaryField = summaryField
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let separator = SeparatorView()
+        for child in [header, separator, body] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(child)
+        }
+
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.large),
+            // The title aligns to the panels, whose halo gutter is held inside the scroll clip.
+            header.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Design.Size.glowGutter
+            ),
+            header.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Design.Size.glowGutter
+            ),
+
+            separator.topAnchor.constraint(
+                equalTo: header.bottomAnchor,
+                constant: Design.Spacing.medium
+            ),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            body.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            body.leadingAnchor.constraint(equalTo: leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    func updateSummary(_ text: String) {
+        summaryField?.stringValue = text
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 

@@ -827,6 +827,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   let progressStyle: String?
   let choiceStyle: String?
   let checkboxStyle: String?
+  let toggleStyle: String?
 
   private enum CodingKeys: String, CodingKey {
     case panelRadius = "panel_radius"
@@ -862,6 +863,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
     case progressStyle = "progress_style"
     case choiceStyle = "choice_style"
     case checkboxStyle = "checkbox_style"
+    case toggleStyle = "toggle_style"
   }
 }
 
@@ -897,6 +899,7 @@ struct AppThemeBackdropPatternArguments: Decodable, Sendable {
 
 struct AppThemeButtonStyleArguments: Decodable, Sendable {
   let textTransform: String?
+  let titleRendering: String?
   let fontWeight: String?
   let typeface: String?
   let fontFamily: String?
@@ -921,6 +924,7 @@ struct AppThemeButtonStyleArguments: Decodable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case textTransform = "text_transform"
+    case titleRendering = "title_rendering"
     case fontWeight = "font_weight"
     case typeface, tracking
     case fontFamily = "font_family"
@@ -1329,11 +1333,26 @@ struct NotifyUserArguments: Decodable, Sendable {
   let title: String?
   let message: String?
   let recipient: String?
+  let delivery: String?
+  let targetRef: String?
 
-  init(title: String?, message: String?, recipient: String? = nil) {
+  private enum CodingKeys: String, CodingKey {
+    case title, message, recipient, delivery
+    case targetRef = "target_ref"
+  }
+
+  init(
+    title: String?,
+    message: String?,
+    recipient: String? = nil,
+    delivery: String? = nil,
+    targetRef: String? = nil
+  ) {
     self.title = title
     self.message = message
     self.recipient = recipient
+    self.delivery = delivery
+    self.targetRef = targetRef
   }
 }
 
@@ -2086,6 +2105,7 @@ struct MCPToolResult: Encodable, Sendable {
 
   private let content: [Content]
   let isError: Bool
+  private let structuredContent: MCPJSONValue?
 
   /// Plain-text projection for handlers that compose one tool result into another. Image
   /// blocks stay on the wire and are deliberately omitted here.
@@ -2097,11 +2117,26 @@ struct MCPToolResult: Encodable, Sendable {
   }
 
   static func success(_ text: String) -> MCPToolResult {
-    MCPToolResult(content: [.text(text)], isError: false)
+    MCPToolResult(content: [.text(text)], isError: false, structuredContent: nil)
   }
 
   static func failure(_ text: String) -> MCPToolResult {
-    MCPToolResult(content: [.text(text)], isError: true)
+    MCPToolResult(content: [.text(text)], isError: true, structuredContent: nil)
+  }
+
+  static func targeted(
+    _ text: String,
+    reference: String,
+    kind: String
+  ) -> MCPToolResult {
+    MCPToolResult(
+      content: [.text(text)],
+      isError: false,
+      structuredContent: .object([
+        "target_ref": .string(reference),
+        "target_kind": .string(kind),
+      ])
+    )
   }
 
   static func screenshot(_ text: String, pngData: Data, includeImage: Bool) -> MCPToolResult {
@@ -2113,17 +2148,18 @@ struct MCPToolResult: Encodable, Sendable {
           mimeType: "image/png"
         ))
     }
-    return MCPToolResult(content: content, isError: false)
+    return MCPToolResult(content: content, isError: false, structuredContent: nil)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case content, isError
+    case content, isError, structuredContent
   }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(content, forKey: .content)
     try container.encode(isError, forKey: .isError)
+    try container.encodeIfPresent(structuredContent, forKey: .structuredContent)
   }
 }
 
@@ -2564,9 +2600,9 @@ enum MCPTools {
         Use this for screenshots, generated charts and diagrams, or any image file \
         worth looking at — the terminal cannot render images, so this is the only way \
         the user can actually see one. Supports PNG, JPEG, GIF, HEIC, PDF, and SVG. \
-        The image appears in the panel's Attachments list, selected and previewed, \
-        alongside everything else shown in this session; showing the same file again \
-        refreshes that entry rather than adding a second one.
+        The image is captured into the panel's Attachments list, selected and previewed, \
+        alongside everything else shown in this session. The result returns an opaque \
+        target_ref that notify_user can use to open these exact captured bytes later.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -2732,13 +2768,14 @@ enum MCPTools {
     MCPToolDefinition(
       tool: .notifyUser,
       description: """
-        Send a notification about this session. By default it reaches the participant \
-        who wrote the current turn, so “notify me” follows the speaker rather than \
-        always meaning the Mac owner. It can explicitly target the owner, everyone in \
-        this chat, or one member by exact display name. It cannot target another chat. \
-        Use it only when a participant explicitly asks for the notification, and call \
-        it once when the requested milestone has actually been reached. It does not \
-        replace the normal final response in the conversation.
+        Notify this session's participant once a requested milestone has actually been \
+        reached. Call it only when a participant explicitly asks to be notified. By \
+        default it reaches whoever wrote the current turn, so “notify me” follows the \
+        speaker rather than always meaning the Mac owner. It can explicitly target the \
+        owner, everyone in this chat, or one member by exact display name. It cannot \
+        target another chat or replace the normal final response in the conversation. Pass \
+        target_ref from a display, Browser, or panel tool to make a tap open that attachment or \
+        live surface; omit it to open the chat itself.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -2757,6 +2794,14 @@ enum MCPTools {
               member's exact display name.
               """
           ),
+          "delivery": MCPPropertySchema(
+            type: .string,
+            description: "auto or both (default), mac, or ios."
+          ),
+          "target_ref": MCPPropertySchema(
+            type: .string,
+            description: "Opaque target_ref returned by a display, Browser, or panel tool in this chat."
+          ),
         ],
         required: ["message"]
       )
@@ -2764,7 +2809,7 @@ enum MCPTools {
     MCPToolDefinition(
       tool: .displayHTML,
       description: """
-        Render an HTML document in Threading's side panel, beside this terminal. Use \
+        Capture an HTML document in Threading's Attachments pane beside this terminal. Use \
         this when structure carries the meaning and plain text would destroy it: \
         wide tables, charts, Mermaid or graphviz diagrams, side-by-side diffs, \
         rendered reports.
@@ -2776,7 +2821,8 @@ enum MCPTools {
         The panel follows the system appearance and is narrow, often around 400px \
         wide. Write for both light and dark, use `prefers-color-scheme` if you set \
         your own colours, and let content reflow rather than assuming a wide viewport. \
-        Links open in the user's real browser rather than navigating the panel.
+        Links open in the user's real browser rather than navigating the preview. The result \
+        returns target_ref for notify_user to open this exact captured document later.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4311,6 +4357,12 @@ enum MCPTools {
         moment after that reply lands. Until then the request can be taken back with \
         cancel_session_archive.
 
+        In a Threading-managed isolated worktree this call is also the finish handshake. \
+        After the reply lands, Threading verifies that the worktree is clean and committed, \
+        then performs the delivery chosen in the draft (normally a local fast-forward merge \
+        followed by safe worktree removal). If validation fails, the session and worktree are \
+        kept and the user is shown the reason.
+
         Only archive when you have been asked to. A conversation the user has not finished \
         with is not yours to close, and a session that merely looks done is not an \
         instruction.
@@ -4463,7 +4515,8 @@ enum MCPTools {
       tool: .panelActivateTab,
       description: """
         Bring one of the display panel's tabs to the front, so the user is looking at it. \
-        Identify the tab by its index (from panel_list_tabs) or its id.
+        Identify the tab by its index (from panel_list_tabs) or its id. Activating a browser or \
+        extension panel also returns a target_ref that notify_user can open later.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -4478,12 +4531,12 @@ enum MCPTools {
     MCPToolDefinition(
       tool: .listReclaimableStorage,
       description: """
-        List build output across the user's projects that can be deleted and rebuilt — \
-        Rust and Swift build directories, node_modules, caches — with the size of each, \
-        which checkout it belongs to, and when it was last written. Use this when disk \
-        space is short, or when the user asks what is taking up space. Threading has \
-        already checked that everything listed is ignored by git and rebuildable by a \
-        known command, so nothing tracked or irreplaceable appears here. Reading this \
+        Find safe, rebuildable build output when disk space is short, a command fails \
+        with ENOSPC or “No space left on device”, or the user asks what is taking up \
+        space. Lists Rust and Swift build directories, node_modules, and caches across \
+        the user's projects, with each size, checkout, and last-write time. Threading \
+        has already checked that everything listed is ignored by git and rebuildable by \
+        a known command, so nothing tracked or irreplaceable appears here. Reading this \
         changes nothing.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
@@ -5455,6 +5508,12 @@ enum MCPTools {
             description: "\"none\" (default) or \"uppercase\" for the painted title. "
               + "Accessibility keeps the original title."
           ),
+          "title_rendering": MCPPropertySchema(
+            type: .string,
+            description: "\"font\" (default) uses the authored scalable face; "
+              + "\"pixel_5x6\" uses a one-bit five-by-six display alphabet when every "
+              + "character is supported and otherwise falls back to the font intact."
+          ),
           "font_weight": MCPPropertySchema(
             type: .string,
             description: "\"regular\", \"medium\" (default), \"semibold\" or \"bold\"."
@@ -5491,8 +5550,8 @@ enum MCPTools {
           ),
           "antialiases_title": MCPPropertySchema(
             type: .boolean,
-            description: "False keeps a bitmap-era button title on hard device pixels; "
-              + "default true preserves modern font smoothing."
+            description: "Whether scalable-font titles use smoothing; default true. A real "
+              + "one-bit label should use title_rendering \"pixel_5x6\" instead."
           ),
           "primary_treatment": MCPPropertySchema(
             type: .string,
@@ -5665,6 +5724,12 @@ enum MCPTools {
           + "BeOS's white nested box and X mark. The same family colours the separate radio "
           + "gadget, whose period geometry is a circular well and dot."
       ),
+      "toggle_style": MCPPropertySchema(
+        type: .string,
+        description: "Immediate binary-toggle anatomy: \"automatic\" keeps the modern sliding "
+          + "track and knob; \"on_off_button\" draws a compact raised/sunken hardware latch "
+          + "with one-bit OFF/ON labels and a status lamp."
+      ),
       "bevel": MCPPropertySchema(
         type: .object,
         description: """
@@ -5732,10 +5797,11 @@ enum MCPTools {
         "kind": MCPPropertySchema(
           type: .string,
           description: "\"pinstripes\" draws horizontal one-point rules; "
-            + "\"aqua_pinstripes\" draws Cheetah's four-row glass rib; \"dither\" "
-            + "draws a one-bit checker stipple; \"brushed_metal\" draws Tiger's fine "
-            + "silver horizontal grain; \"rule\" draws one line along the band's bottom "
-            + "edge, the seam a text-mode interface puts under its header row."
+            + "\"caption_rails\" draws a raised rail on either side of a centred title; "
+            + "\"aqua_pinstripes\" draws Cheetah's four-row glass rib; \"dither\" draws "
+            + "a one-bit checker stipple; \"brushed_metal\" draws Tiger's fine silver "
+            + "horizontal grain; \"rule\" draws one line along the band's bottom edge, "
+            + "the seam a text-mode interface puts under its header row."
         ),
         "color": MCPPropertySchema(
           type: .string,
@@ -5803,7 +5869,7 @@ enum MCPTools {
           ),
           "height": MCPPropertySchema(
             type: .number,
-            description: "Band height, 18–44 points. Default 28."
+            description: "Band height, 14–44 points. Default 28."
           ),
           "remove_height": MCPPropertySchema(
             type: .boolean,
@@ -5819,7 +5885,8 @@ enum MCPTools {
               + "caption boxes), \"amiga\" (one-bit Workbench Close, Zoom, and Depth "
               + "gadgets), \"aqua\" (early Mac OS X traffic-light gems), "
               + "\"aqua_tiger\" (10.4's tighter glass), \"tui\" (hairline text-mode "
-              + "cells that invert under the pointer), or "
+              + "cells that invert under the pointer), \"classic_player\" (compact "
+              + "clean-room player cells; local .wsz artwork is import-only), or "
               + "\"plain\" (bare glyphs in the band's ink)."
           ),
           "button_placement": MCPPropertySchema(

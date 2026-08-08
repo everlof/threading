@@ -675,4 +675,131 @@ final class ElementInspectionTests: XCTestCase {
             "it stays where it was asked to be and is drawn faded instead"
         )
     }
+
+    // MARK: - Environment
+
+    private func makeEnvironment(
+        theme: InspectorEnvironment.Theme = InspectorEnvironment.Theme(
+            name: "System",
+            mode: "adaptive",
+            appearance: "dark",
+            drawsWindowChrome: false
+        ),
+        terminal: InspectorEnvironment.Terminal? = nil,
+        window: InspectorEnvironment.Window = InspectorEnvironment.Window(
+            size: NSSize(width: 1440, height: 900),
+            backingScale: 2,
+            isFullScreen: false
+        ),
+        textSize: AppTextSize = .standard,
+        chromeFontFamily: String? = nil,
+        conversationFontFamily: String? = nil,
+        accommodations: [String] = [],
+        language: String? = nil
+    ) -> InspectorEnvironment {
+        InspectorEnvironment(
+            build: "Threading 1.0 (1) · Version 15.5 (Build 24F74)",
+            theme: theme,
+            terminal: terminal,
+            window: window,
+            textSize: textSize,
+            chromeFontFamily: chromeFontFamily,
+            conversationFontFamily: conversationFontFamily,
+            accommodations: accommodations,
+            language: language
+        )
+    }
+
+    /// The five facts every capture carries. The scale is one of them because the report speaks
+    /// points and the PNG beside it is pixels.
+    func testTheEnvironmentAlwaysStatesBuildThemeChromeWindowAndTextSize() {
+        let markdown = makeEnvironment().markdown
+
+        XCTAssertTrue(markdown.contains("- Threading 1.0 (1) · Version 15.5 (Build 24F74)"))
+        XCTAssertTrue(markdown.contains("- App theme: System, adaptive, drawing dark"))
+        XCTAssertTrue(markdown.contains("- Window chrome: the native frame"))
+        XCTAssertTrue(markdown.contains("- Window: 1440×900 at 2×"))
+        XCTAssertTrue(markdown.contains("- Text size: standard"))
+    }
+
+    /// A fixed theme is one answer, not two: "dark, drawing dark" is how a line stops being read.
+    func testAFixedThemeSaysItsModeOnce() {
+        let markdown = makeEnvironment(
+            theme: InspectorEnvironment.Theme(
+                name: "Platinum",
+                mode: "light",
+                appearance: "light",
+                drawsWindowChrome: true
+            )
+        ).markdown
+
+        XCTAssertTrue(markdown.contains("- App theme: Platinum, light\n"))
+        XCTAssertFalse(markdown.contains("drawing"))
+        XCTAssertTrue(markdown.contains("- Window chrome: drawn by the theme"))
+    }
+
+    /// Silence where there is nothing to say. Every one of these lines is the default, and a
+    /// block that states its defaults is a block whose real answers are buried in them.
+    func testTheEnvironmentOmitsWhatWasNotSet() {
+        let markdown = makeEnvironment().markdown
+
+        XCTAssertFalse(markdown.contains("Terminal"))
+        XCTAssertFalse(markdown.contains("font"))
+        XCTAssertFalse(markdown.contains("Display settings"))
+        XCTAssertFalse(markdown.contains("language"))
+        XCTAssertFalse(markdown.contains("full screen"))
+    }
+
+    func testTheEnvironmentNamesWhatWasSet() {
+        let markdown = makeEnvironment(
+            terminal: InspectorEnvironment.Terminal(
+                paletteName: "Ocean",
+                scope: .project,
+                font: "SF Mono 13"
+            ),
+            window: InspectorEnvironment.Window(
+                size: NSSize(width: 1440, height: 900),
+                backingScale: 1,
+                isFullScreen: true
+            ),
+            textSize: .large,
+            chromeFontFamily: "Iowan Old Style",
+            accommodations: ["reduced motion"],
+            language: "sv"
+        ).markdown
+
+        XCTAssertTrue(markdown.contains("- Terminal theme: Ocean, set on the project"))
+        XCTAssertTrue(markdown.contains("- Terminal font: SF Mono 13"))
+        XCTAssertTrue(markdown.contains("- Window: 1440×900 at 1×, full screen"))
+        XCTAssertTrue(markdown.contains("- Text size: large, 1.15×"))
+        XCTAssertTrue(markdown.contains("- Chrome font: Iowan Old Style"))
+        XCTAssertTrue(markdown.contains("- Display settings: reduced motion"))
+        XCTAssertTrue(markdown.contains("- Interface language: sv"))
+        XCTAssertFalse(markdown.contains("Conversation font"))
+    }
+
+    /// The rule that lets a capture leave the window: a ticket travels to a public tracker, so
+    /// what rides along is a choice from a catalogue rather than anything the user typed. A
+    /// theme they made and named is reported as `custom`.
+    func testACaptureCarriesNoNameTheUserTyped() {
+        let secret = "Client Acme — internal"
+        let theme = AppTheme(
+            id: AppThemeLibrary.makeCustomID(),
+            name: secret,
+            mode: .dark,
+            summary: nil,
+            roles: [:]
+        )
+        AppThemeStore.shared.insert(theme)
+        defer { _ = AppThemeStore.shared.remove(id: theme.id) }
+        AppThemePalette.set(theme)
+        defer { AppThemePalette.set(.system) }
+
+        let markdown = InspectorEnvironment
+            .capture(window: nil, sessionID: nil)
+            .markdown
+
+        XCTAssertFalse(markdown.contains(secret), "a name the user typed left in a report")
+        XCTAssertTrue(markdown.contains("- App theme: custom, dark"))
+    }
 }

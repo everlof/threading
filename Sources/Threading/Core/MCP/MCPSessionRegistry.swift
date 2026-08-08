@@ -141,8 +141,8 @@ enum MCPSessionRegistry {
     /// `brokersPermissions` and `reportsLifecycle` are deliberately separate. A terminal
     /// session asks the user through the CLI's own prompt and must not be intercepted; a
     /// headless one has nowhere to ask and would silently block instead. Lifecycle hooks are
-    /// observational and user-optional on either surface. When both are false and Remote
-    /// Control has no override, no settings file is written at all.
+    /// observational and user-optional on either surface. When both are false and none of the
+    /// settings-layer overrides is present, no settings file is written at all.
     ///
     /// `remoteControl` is not a hook at all: it is Claude's own `remoteControlAtStartup`,
     /// carried here because this is already the settings file the session launches with, and a
@@ -150,11 +150,16 @@ enum MCPSessionRegistry {
     /// session defers to `claude /config` rather than overriding it. Because both Claude launch
     /// paths rewrite this file, the choice is re-applied on every resume rather than only on the
     /// launch that made it.
+    ///
+    /// `fastMode` follows the same precedence rule. It is present for both terminal and Native
+    /// Claude launches when Threading chose Standard or Fast, and absent when speed belongs to
+    /// the account's own settings.
     static func writeHookSettings(
         for sessionID: SessionID,
         brokersPermissions: Bool,
         reportsLifecycle: Bool,
         remoteControl: Bool? = nil,
+        fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
         listenerPort: UInt16? = MCPServer.shared.port
     ) -> String? {
@@ -172,12 +177,11 @@ enum MCPSessionRegistry {
                 "reportsLifecycle": reportsLifecycle ? "yes" : "no"
             ])
 
-            // A settings file is still written when the session has a Remote Control choice or
-            // a status-line override to state. Losing the hooks costs accurate activity;
-            // dropping either of these would silently undo a choice the user made, which is a
-            // different order of wrong and must not depend on whether an unrelated listener
-            // came up.
-            if remoteControl == nil, statusLineOverride == nil {
+            // A settings file is still written when the session has a launch override to state.
+            // Losing the hooks costs accurate activity; dropping one of these would silently
+            // undo a choice the user made, which is a different order of wrong and must not
+            // depend on whether an unrelated listener came up.
+            if remoteControl == nil, fastMode == nil, statusLineOverride == nil {
                 removeSettingsFile(for: sessionID)
                 return nil
             }
@@ -185,7 +189,7 @@ enum MCPSessionRegistry {
 
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
-        if !needsListener, remoteControl == nil, statusLineOverride == nil {
+        if !needsListener, remoteControl == nil, fastMode == nil, statusLineOverride == nil {
             removeSettingsFile(for: sessionID)
             return nil
         }
@@ -211,6 +215,9 @@ enum MCPSessionRegistry {
         }
         if let remoteControl {
             settings[AgentDefaults.claudeRemoteControlKey] = remoteControl
+        }
+        if let fastMode {
+            settings[AgentDefaults.claudeFastModeKey] = fastMode
         }
         if let statusLineOverride {
             // Must stay `type: "command"`: the CLI schema-validates this file and rejects it
@@ -246,6 +253,12 @@ enum MCPSessionRegistry {
         brokersPermissions: Bool,
         reportsLifecycle: Bool
     ) {
+        // Accumulated per hook name rather than assigned, because one name can carry entries
+        // from both halves of this function: `PreToolUse` is how a native session brokers
+        // permission *and* how a terminal session learns that a question tool opened. Assigning
+        // would silently drop whichever was written first.
+        var groups: [String: [[String: Any]]] = [:]
+
         if brokersPermissions {
             let url = "\(base)\(MCPDefaults.permissionPathPrefix)\(token)"
             let command = "curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
@@ -253,31 +266,53 @@ enum MCPSessionRegistry {
 
             // No matcher: every tool is offered, and `PermissionPolicy` decides which are
             // worth interrupting for. Policy in Swift beats policy in a glob.
-            hooks["PreToolUse"] = [["hooks": [["type": "command", "command": command]]]]
+            groups["PreToolUse", default: []].append(group(command: command, matcher: nil))
         }
 
-        guard reportsLifecycle else { return }
+        if reportsLifecycle {
+            for event in HookLifecycleEvent.allCases {
+                let registration = event.claudeRegistration
+                guard registration.isSupported else { continue }
 
-        for event in HookLifecycleEvent.allCases {
-            let url = "\(base)\(MCPDefaults.lifecyclePathPrefix)\(token)"
-                + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
+                let url = "\(base)\(MCPDefaults.lifecyclePathPrefix)\(token)"
+                    + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
 
-            // Output is discarded and failure is swallowed, which is load-bearing rather than
-            // tidy. Claude feeds a `UserPromptSubmit` hook's stdout back to the model as extra
-            // context and treats a non-zero `Stop` hook as a reason to keep going — so a
-            // lifecycle report that leaked either would change the conversation it is only
-            // supposed to observe.
-            let timeout = event == .turnStarted
-                ? MCPDefaults.turnStartLifecycleTimeout
-                : MCPDefaults.lifecycleTimeout
-            let command = "curl -s --max-time \(Int(timeout))"
-                + " -H 'Content-Type: application/json' --data-binary @- \(url)"
-                + " >/dev/null 2>&1 || true"
+                // Output is discarded and failure is swallowed, which is load-bearing rather
+                // than tidy. Claude feeds a `UserPromptSubmit` hook's stdout back to the model
+                // as extra context, treats a non-zero `Stop` hook as a reason to keep going, and
+                // reads a `PreToolUse` hook's exit status as a permission decision — so a
+                // lifecycle report that leaked any of them would change the conversation it is
+                // only supposed to observe. This is what keeps the ask hooks *observational*:
+                // they sit on the same event a broker would, and say nothing back.
+                let timeout = event == .turnStarted
+                    ? MCPDefaults.turnStartLifecycleTimeout
+                    : MCPDefaults.lifecycleTimeout
+                let command = "curl -s --max-time \(Int(timeout))"
+                    + " -H 'Content-Type: application/json' --data-binary @- \(url)"
+                    + " >/dev/null 2>&1 || true"
 
-            hooks[event.claudeEventName] = [
-                ["hooks": [["type": "command", "command": command]]]
-            ]
+                for name in registration.eventNames {
+                    groups[name, default: []].append(
+                        group(command: command, matcher: registration.toolMatcher)
+                    )
+                }
+            }
         }
+
+        for (name, entries) in groups {
+            hooks[name] = entries
+        }
+    }
+
+    /// One `hooks` entry: the command, and the tools it is limited to when it is limited at all.
+    private static func group(command: String, matcher: String?) -> [String: Any] {
+        var group: [String: Any] = [
+            "hooks": [["type": "command", "command": command]]
+        ]
+        if let matcher {
+            group[HookRegistrationDefaults.matcherKey] = matcher
+        }
+        return group
     }
 
     /// Revokes the endpoints of every session not in the given set.
