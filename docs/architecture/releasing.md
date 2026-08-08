@@ -370,9 +370,17 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
   Sparkle replaces the bundle, so the SQLite store and settings survive, but the extension
   helpers' quarantine state is worth checking against a real upgrade — that is the one piece of
   this app's state that lives outside the usual containers.
-- Whether Threading is distributed publicly at all, or only to a handful of machines. A private
-  feed changes nothing technically, but the Homebrew cask and any website step wait on this —
-  claudex's `publish-homebrew-cask.sh` is the template if the answer is public.
+- ~~Whether Threading is distributed publicly at all.~~ Decided (2026-08-08): **public**,
+  GPLv3 (root `LICENSE`; the vendored SwiftTerm and the submodule forks stay MIT under their
+  own files). The model is Blink Shell's: the Mac app is free through the Sparkle feed, the
+  iOS companion is a paid App Store build that anyone may also build from source — the store
+  price buys the signed, updating convenience. The App Store build ships under the copyright
+  holder's own terms, which the GPL cannot grant, so outside contributions require the grant
+  in `CLA.md` (`CONTRIBUTING.md` says why; wire the CLA-Assistant GitHub app when the first
+  real PR arrives). Public was also structurally forced: release assets on a private GitHub
+  repo are not anonymously downloadable, so a private repo could never have served
+  `SUFeedURL`. The Homebrew cask is now unblocked as a future step — claudex's
+  `publish-homebrew-cask.sh` is the template.
 - The repository itself has no `origin` remote yet; the workflows and `publish_release.sh` are
   dormant until it does, and each fails with a sentence saying so rather than half-working.
 - The iOS companion's pipeline (TestFlight first, the App Store later) is not built. The
