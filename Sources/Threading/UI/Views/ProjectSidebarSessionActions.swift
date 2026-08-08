@@ -640,16 +640,29 @@ extension ProjectSidebarViewController {
     /// conversation that has actually started. A fork of nothing is an ordinary new session,
     /// which the composer already offers.
     private func sideChatEntries(for session: AgentSession) -> [ThemedMenuEntry] {
-        guard session.kind.supportsForking, session.resumeState.isResumable else { return [] }
+        var entries: [ThemedMenuEntry] = []
 
-        return [
-            action(L10n.string("New Side Chat")) { [weak self] in
-                self?.newSideChatClicked()
-            },
-            action(L10n.string("Ask on the Side…")) { [weak self] in
-                self?.askOnTheSideClicked()
-            }
-        ]
+        // The other end of the fork: a side chat that has done its work sends the conclusion
+        // to the session it was forked from. Absent rather than disabled when it cannot —
+        // not a side chat, parent archived, agent mid-turn or dormant, workspace tools off —
+        // for the same reason Rename with Agent is: none of those reasons fits a greyed row.
+        if SessionCoordinator.canAskForReportBack(session.id) {
+            entries.append(action(L10n.string("Send Result to Parent")) { [weak self] in
+                self?.sendResultToParentClicked()
+            })
+        }
+
+        guard session.kind.supportsForking, session.resumeState.isResumable else {
+            return entries
+        }
+
+        entries.append(action(L10n.string("New Side Chat")) { [weak self] in
+            self?.newSideChatClicked()
+        })
+        entries.append(action(L10n.string("Ask on the Side…")) { [weak self] in
+            self?.askOnTheSideClicked()
+        })
+        return entries
     }
 
     /// The surface switch for an agent that has both — Threading's own conversation view or
@@ -883,6 +896,12 @@ extension ProjectSidebarViewController {
     @objc private func askAgentToRenameClicked() {
         guard let sessionID = actionSessionID else { return }
         delegate?.projectSidebar(self, askAgentToRename: sessionID)
+    }
+
+    /// Hands the summarizing to the one thing that already holds the side chat's answer.
+    @objc private func sendResultToParentClicked() {
+        guard let sessionID = actionSessionID else { return }
+        delegate?.projectSidebar(self, sendResultToParentOf: sessionID)
     }
 
     @objc private func renameSessionClicked() {

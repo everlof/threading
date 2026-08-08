@@ -2374,6 +2374,15 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         sessionCoordinator.askAgentToRename(sessionID)
     }
 
+    /// Report-back is a lifecycle decision like the rename request: one line into the side
+    /// chat, asking its agent to send the conclusion to the session it was forked from.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        sendResultToParentOf sessionID: SessionID
+    ) {
+        sessionCoordinator.askAgentToReportBack(sessionID)
+    }
+
     /// Switches a session between the terminal and the native conversation, and reopens it
     /// there.
     ///

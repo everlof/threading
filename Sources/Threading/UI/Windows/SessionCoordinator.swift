@@ -255,6 +255,45 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
     }
 
+    // MARK: - Reporting Back
+
+    /// Whether this side chat can be asked to send its conclusion to the session it was forked
+    /// from — which decides whether the menu offers it at all, absent rather than greyed.
+    ///
+    /// The rename gate's conditions, plus lineage: this is a side chat, its parent is still an
+    /// unarchived row to deliver to, and the workspace tool group is on — with it off the agent
+    /// has no `send_to_session` to call, and the request would spend a turn on an instruction
+    /// it cannot carry out. Readiness is `SessionMessageDelivery`'s own answer, so the item
+    /// cannot offer a send the delivery would then refuse (a booting terminal, most narrowly).
+    static func canAskForReportBack(_ sessionID: SessionID) -> Bool {
+        SessionReportBackRequest.hasReportableParent(
+            of: ProjectStore.shared.session(withID: sessionID),
+            parent: { ProjectStore.shared.session(withID: $0) }
+        )
+            && !AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+            && SessionMessageDelivery.isReadyForDelivery(sessionID)
+            && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace)
+    }
+
+    /// Asks the side chat's own agent to report its conclusion to its parent, by sending it
+    /// one line naming `send_to_session` and the parent's id.
+    ///
+    /// The same reasoning as `askAgentToRename`: the agent holding the conversation is the
+    /// cheapest thing that can summarize it, and the request goes through the ordinary input
+    /// path so it is echoed into the transcript as a user turn — visible, correctable, and
+    /// openly spending the user's usage. The delivery itself then carries Threading's
+    /// provenance header into the parent, exactly as any cross-session message does.
+    func askAgentToReportBack(_ sessionID: SessionID) {
+        guard Self.canAskForReportBack(sessionID),
+              let parentID = ProjectStore.shared.session(withID: sessionID)?.forkedFrom
+        else { return }
+
+        _ = SessionMessageDelivery.deliver(
+            SessionReportBackRequest.prompt(parentID: parentID),
+            to: sessionID
+        )
+    }
+
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
         guard confirmSurfaceSwitchIfRunning(sessionID: sessionID, toNative: usesNative) else {
             return
@@ -738,6 +777,41 @@ enum SessionRenameRequest {
     /// needs to clear that heuristic's window — milliseconds — so it is a beat no one waits
     /// on, far above any burst the PTY could still coalesce.
     static let submitDelay: TimeInterval = 0.3
+}
+
+// MARK: - Session Report-Back Request
+
+/// The one line the app sends a side chat when the user asks it to report its conclusion to
+/// the session it was forked from.
+///
+/// `SessionRenameRequest`'s twin, for `SessionRenameRequest`'s reason: it names the tool and
+/// the target id outright rather than describing the wish, because an agent asked in prose to
+/// "tell your parent" answers in prose, in its own transcript, and the parent hears nothing.
+enum SessionReportBackRequest {
+    /// English source copy, and the key it is looked up by. `%@` is the parent's Threading id.
+    static let promptKey = """
+        Call send_to_session with session_id %@ — the session this side chat was forked \
+        from — and report your conclusion: what was found or decided, in a few sentences, \
+        not the transcript. Then reply here with one line saying what you sent.
+        """
+
+    static func prompt(parentID: SessionID) -> String {
+        L10n.format(promptKey, parentID.uuidString.lowercased())
+    }
+
+    /// The lineage half of the offer's gate, pure so a test can hold it without a store: a
+    /// side chat, whose parent is still an unarchived row to deliver to.
+    static func hasReportableParent(
+        of session: AgentSession?,
+        parent lookup: (SessionID) -> AgentSession?
+    ) -> Bool {
+        guard let session,
+              let parentID = session.forkedFrom,
+              let parent = lookup(parentID),
+              !parent.isArchived
+        else { return false }
+        return true
+    }
 }
 
 // MARK: - New Chat Opening Message

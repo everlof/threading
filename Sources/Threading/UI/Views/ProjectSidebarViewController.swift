@@ -2410,6 +2410,10 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     )
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
+        sendResultToParentOf sessionID: SessionID
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
         setUsesNativeUI usesNative: Bool,
         for sessionID: SessionID
     )
