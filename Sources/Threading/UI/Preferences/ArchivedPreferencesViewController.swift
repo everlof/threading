@@ -169,8 +169,20 @@ final class ArchivedPreferencesViewController: NSViewController {
     /// Puts the session back on the sidebar, where selecting it resumes the conversation.
     @objc private func restoreSession(_ sender: ThemedButton) {
         guard let entry = session(for: sender) else { return }
-        ProjectStore.shared.setArchived(false, for: entry.session.id)
-        reload()
+        sender.isEnabled = false
+        ProviderArchiveSync.shared.setArchived(false, for: entry.session.id) { [weak self, weak sender] result in
+            switch result {
+            case .success:
+                self?.reload()
+            case .failure(let failure):
+                sender?.isEnabled = true
+                NoticeAlert.show(NoticeRequest(
+                    title: L10n.format("Couldn’t restore “%@”", entry.session.displayTitle),
+                    message: failure.localizedDescription,
+                    style: .critical
+                ), in: self?.view.window)
+            }
+        }
     }
 
     /// Deletes the session for good, after confirming — its conversation cannot be recovered

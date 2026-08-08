@@ -527,8 +527,23 @@ is stopped first rather than left running with nothing listing it. Neither touch
 conversation itself. Closing a running session asks first, and that question can be switched
 off — see [Confirmations](#confirmations).
 
+For a **Codex** conversation, Archive and Restore also perform Codex's own reversible archive
+or unarchive operation. Threading checks the matching Codex account when it launches and whenever
+it becomes active, so filing the thread from another Codex client using that account is reflected
+here too, in both directions. On the first check after upgrading, an archive on either side wins;
+this avoids unexpectedly bringing filed conversations back into an active list. If Codex rejects
+the operation, Threading leaves the row where it was and reports the error.
+
+For **Claude Code, Grok, and OpenCode**, Archive is local to Threading. Claude Code and Grok
+expose resume and permanent deletion but no archive. OpenCode does have an archive action, but its
+current public interface has no matching unarchive/restore operation; mirroring only half of
+Threading's Archive/Undo pair would leave the two apps disagreeing as soon as you restored. So
+Threading hides or restores only its own row and never turns Archive into Delete. This sync
+concerns provider coding sessions, not the archive for ordinary ChatGPT chats.
+
 **Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar
-immediately, and a small band appears at the bottom of the sidebar naming the session, saying
+(after Codex accepts the provider action, where applicable), and a small band appears at the
+bottom of the sidebar naming the session, saying
 whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
 six seconds, and a thin line along its lower edge shows how much of that is left. Rest the
 pointer on the band and both stop, so it will not disappear while you are reaching for it; move

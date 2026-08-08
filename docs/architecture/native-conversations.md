@@ -96,6 +96,16 @@ markdown, command/MCP/dynamic/file/plan items become the same collapsible tool r
 for `exec --json` fixtures and one-shot surfaces, but it is not the native conversation
 transport.
 
+Codex is also the only current runtime whose retained-conversation surface has reversible
+archive semantics. `ProviderArchiveSync` uses the installed CLI's `archive` / `unarchive`
+commands rather than borrowing a live `CodexStreamSession`, because a filed conversation is
+normally dormant and may have no app-server process. The filesystem placement that app-server's
+`thread/archive`, `thread/unarchive`, and `thread/list(archived:)` contract defines is the read
+side of synchronization. This keeps Threading and another Codex client on the same account in
+agreement without inventing reversible archive semantics for Claude, Grok, or OpenCode; the
+complete provider distinctions, merge, and failure rules live in
+[`sessions.md`](sessions.md#the-provider-archive-boundary).
+
 Grok native rendering uses the public **Agent Client Protocol** exposed by
 `grok agent stdio`, verified against Grok 0.2.118 and ACP protocol version 1. A fresh chat sends
 `session/new`; a resumable one sends `session/load`, whose standard replay notifications rebuild

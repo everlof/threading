@@ -177,6 +177,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // each login's usage rather than filling in only on a second look.
         AccountUsageMenu.prefetch()
 
+        // Codex is the one runtime with a reversible provider archive. Reconcile before the
+        // startup restore is released where possible, then again whenever Threading regains
+        // focus after an archive or restore performed in another client.
+        ProviderArchiveSync.shared.start()
+
         // The same idea for *who* each login is. Only accounts whose address is not already on
         // disk are asked, and the answer is cached across launches, so this is normally a
         // no-op — the default Claude login is the one it exists for.

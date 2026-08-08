@@ -146,6 +146,14 @@ struct AgentCapabilities: OptionSet {
   /// transcript. Codex only: terminal sessions persist it in `session_index.jsonl`, while the
   /// app-server returns `Thread.name` and emits `thread/name/updated`.
   static let providerTitleMetadata = Self(rawValue: 1 << 20)
+
+  /// The runtime exposes a reversible archive operation for its retained conversations, and
+  /// moves their records between active and archived stores in a way Threading can observe.
+  /// Codex only. Claude Code and Grok expose no archive; OpenCode can set an archive timestamp,
+  /// but its current public CLI/HTTP contract cannot clear it again. None therefore satisfies
+  /// Threading's reversible Archive/Restore contract, so their filing stays local rather than
+  /// losing Undo or being misrepresented as the destructive delete they also expose.
+  static let providerArchive = Self(rawValue: 1 << 21)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -207,7 +215,7 @@ enum AgentKind: String, Codable, CaseIterable {
       return [
         .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
-        .headlessResearch, .providerTitleMetadata
+        .headlessResearch, .providerTitleMetadata, .providerArchive
       ]
     case .grok:
       return [
@@ -860,6 +868,15 @@ struct AgentSession: Codable, Identifiable {
   /// untouched, so an archived session resumes exactly as it would have.
   var isArchived: Bool
 
+  /// The archive value on which Threading and a capable provider last agreed.
+  ///
+  /// Nil means the session predates synchronization, has no provider conversation yet, or uses
+  /// a runtime with no reversible provider archive. It is a three-way-sync base rather than a
+  /// duplicate of `isArchived`: if only one side later differs from this value, that side is the
+  /// one the user changed. On the first observation the safe merge is archive-if-either, so an
+  /// existing filing choice is never silently resurfaced in the other application.
+  private(set) var lastSynchronizedArchiveState: Bool?
+
   /// Pinned conversations sort ahead of the ordinary project order on every surface.
   /// This is shared session state rather than a phone-only preference: pinning from either
   /// side should mean the same thing everywhere the conversation is listed.
@@ -933,6 +950,7 @@ struct AgentSession: Codable, Identifiable {
     self.permissionMode = nil
     self.branch = nil
     self.isArchived = false
+    self.lastSynchronizedArchiveState = nil
     self.isPinned = false
     self.usesNativeUI = usesNativeUI && configuration.kind.supportsNativeUI
     self.themeID = nil
@@ -944,7 +962,8 @@ struct AgentSession: Codable, Identifiable {
     case agentTitle = "terminalTitle"
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
-    case fastMode, remoteControl, permissionMode, archived, pinned, nativeUI, forkParent
+    case fastMode, remoteControl, permissionMode, archived, providerArchiveState, pinned, nativeUI
+    case forkParent
     case continuationSource, continuationSourceKind
     case handoff
     case themeID, themeName, notificationsMuted
@@ -995,6 +1014,10 @@ struct AgentSession: Codable, Identifiable {
     )
     branch = try container.decodeIfPresent(String.self, forKey: .branch)
     isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    lastSynchronizedArchiveState = try container.decodeIfPresent(
+      Bool.self,
+      forKey: .providerArchiveState
+    )
     isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
     usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
     let decodedForkParent = try container.decodeIfPresent(
@@ -1233,6 +1256,10 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(permissionMode, forKey: .permissionMode)
     try container.encodeIfPresent(branch, forKey: .branch)
     try container.encode(isArchived, forKey: .archived)
+    try container.encodeIfPresent(
+      lastSynchronizedArchiveState,
+      forKey: .providerArchiveState
+    )
     try container.encode(isPinned, forKey: .pinned)
     try container.encode(usesNativeUI, forKey: .nativeUI)
     try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
@@ -1287,6 +1314,18 @@ struct AgentSession: Codable, Identifiable {
   /// Whether a previous conversation exists that can be resumed.
   var isResumable: Bool {
     resumeState.isResumable
+  }
+
+  /// Records one archive state as the value both Threading and the provider now hold.
+  /// Returns whether either persisted field changed, so a batch reconciliation writes once.
+  @discardableResult
+  mutating func synchronizeArchiveState(_ archived: Bool) -> Bool {
+    guard isArchived != archived || lastSynchronizedArchiveState != archived else {
+      return false
+    }
+    isArchived = archived
+    lastSynchronizedArchiveState = archived
+    return true
   }
 
   /// The name shown in the sidebar.

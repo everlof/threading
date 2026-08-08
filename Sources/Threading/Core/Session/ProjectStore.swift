@@ -313,9 +313,30 @@ final class ProjectStore {
         return adopted
     }
 
-    /// Files a session away, or restores it. Its conversation is untouched either way.
+    /// Changes Threading's filing state only.
+    ///
+    /// User-facing archive routes go through `ProviderArchiveSync`, which calls this primitive
+    /// only for runtimes without a reversible provider archive. Keeping the primitive local is
+    /// intentional: a capability-less runtime must never turn Archive into its destructive
+    /// Delete command, and tests/import migrations sometimes need to construct local state.
     func setArchived(_ archived: Bool, for sessionID: SessionID) {
         update(sessionID: sessionID) { $0.isArchived = archived }
+        notifyChanged()
+    }
+
+    /// Commits values that have been observed or applied on both sides of provider archive sync.
+    /// One save and notification for a launch reconciliation, however many retained sessions it
+    /// initializes, rather than rewriting the whole project graph once per conversation.
+    func synchronizeArchiveStates(_ states: [SessionID: Bool]) {
+        var changed = false
+        for (sessionID, archived) in states {
+            guard let location = locate(sessionID: sessionID) else { continue }
+            changed = projects[location.projectIndex].sessions[location.sessionIndex]
+                .synchronizeArchiveState(archived) || changed
+        }
+
+        guard changed else { return }
+        save()
         notifyChanged()
     }
 

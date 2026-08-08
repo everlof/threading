@@ -960,13 +960,53 @@ rather than naming a value it would be guessing.
 Two row actions that read as near-synonyms and are near-opposites. **Close** acts on the
 process: the agent stops, the terminal is released, and the row stays in the sidebar to be
 resumed. **Archive** acts on the record: the row moves out of the sidebar into
-Settings ▸ Archived, and the conversation is untouched either way.
+Settings ▸ Archived, and the conversation content is untouched either way.
+
+### The provider archive boundary
+
+Archive is provider-backed only where the capability matrix says the runtime exposes a
+**reversible** retained-conversation archive. `AgentCapabilities.providerArchive` belongs to Codex:
+its `archive` / `unarchive` commands move rollout files between the account's `sessions/` and
+`archived_sessions/` stores. Claude Code and Grok expose resume and destructive delete surfaces,
+but no archive operation. OpenCode is the subtler non-capability: its UI and session PATCH can set
+`time.archived`, while the current public CLI has only list/delete and the PATCH schema offers no
+way to clear that timestamp again. A one-way archive is not Threading's Archive/Restore contract;
+its record therefore stays local too. Archive must never be translated into Delete, and Undo must
+never claim to restore a provider state it cannot reach. The capability check is the seam —
+lifecycle code does not rediscover provider identity.
+
+`ProviderArchiveSync` owns all four mutation routes: sidebar/Undo, Settings ▸ Archived, remote
+access, and an agent-requested archive. A Codex action is atomic from the user's perspective: the
+agent is stopped first when needed, the account-routed provider command runs, and only success
+commits `isArchived`. Failure leaves the retained flag unchanged and is surfaced to the initiating
+UI or remote caller. Local-only runtimes pass through the same service and commit immediately.
+`AgentAccountRouting` is shared with `AgentLauncher`, so both the default account's explicit
+`env -u CODEX_HOME` and an alternate account's `CODEX_HOME=<path>` remain identical for launch and
+lifecycle commands.
+
+Changes from another Codex client are reconciled at launch and each
+`NSApplication.didBecomeActiveNotification`. The synchronizer batches filesystem reads per
+account, locates the recorded UUID in the active and archived rollout trees without opening
+transcript bodies, and ignores missing or ambiguous observations rather than guessing. Each
+session persists `lastSynchronizedArchiveState` as the base of a three-way merge:
+
+- when only the provider differs from the base, its external action is mirrored into Threading;
+- when only Threading differs, its retained action is pushed to Codex;
+- when both already agree, that value simply becomes the new base;
+- on the first observation, where chronology is unknowable, archive-if-either wins. Archive is
+  reversible, while silently resurfacing a conversation is the surprising migration.
+
+Successful background changes emit `SessionArchivedStateDidChange`, which refreshes every window
+and clears a pane whose current session was filed elsewhere. The synchronized write is batched in
+`ProjectStore.synchronizeArchiveStates` so one activation produces one save and one store change
+notification rather than one of each per session.
 
 **Archiving implies closing.** The sidebar lists only unarchived sessions, so an archived
 session that kept its agent would be a process nothing lists and nothing can stop — the bug
 this rule closed: the sidebar's Archive once flipped the flag and left the agent running
 invisibly, while the remote archive route had discarded the process from the start. Both
-routes now stop the agent first. Restoring implies nothing; a session comes back dormant.
+routes now enter the same synchronizer, which stops the agent first. Restoring implies nothing;
+a session comes back dormant.
 
 **Archiving does not ask. It acts, says so, and offers the way back.** It carried a registered
 confirmation for as long as the interruption was the only thing that could be said about it,
@@ -1047,12 +1087,12 @@ of these land close together, the second band waits for the first rather than re
 agent that files two sessions away in one turn owes the user two ways back, not the later one;
 the queue and its bound are `ToastPresenter`'s (see [`design-system.md`](design-system.md)).
 
-Nothing about the archive itself differs — `SessionCoordinator.archiveAtAgentRequest` and the
-row's own Archive go through one private `archive(_:receipt:)`, so the agent's route cannot
-quietly grow a second set of rules about stopping the process or emptying the pane. The scheduler
-stays in Core and knows nothing about sidebars: it announces `SessionArchiveRequestDidBecomeDue`,
-and the coordinator that already owns every other lifecycle decision observes it directly rather
-than having the window controller relay it back down.
+Nothing about the archive itself differs — `SessionCoordinator.archiveAtAgentRequest`, the row,
+Settings, and remote access all hand the state change to `ProviderArchiveSync`, so the agent's
+route cannot quietly grow a second set of rules about provider state, stopping the process, or
+emptying the pane. The scheduler stays in Core and knows nothing about sidebars: it announces
+`SessionArchiveRequestDidBecomeDue`, and the coordinator that already owns every other lifecycle
+decision observes it directly rather than having the window controller relay it back down.
 
 **Continuation lineage is a durable path, not a launch-mode bit.** A side chat's `forkedFrom`
 points at a provider-native child that can resume the same transcript semantics. A cross-provider

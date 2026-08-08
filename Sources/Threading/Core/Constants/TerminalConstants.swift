@@ -868,6 +868,17 @@ struct SessionArchiveRequestDidBecomeDue: AppEvent {
     let reason: String?
 }
 
+/// A local archive flag changed through provider synchronization.
+///
+/// `ProjectsDidChange` rebuilds lists, but it deliberately says nothing about the pane currently
+/// showing a row that just disappeared. The window observes this narrower lifecycle event to put
+/// an externally archived conversation away as completely as one archived from its own menu.
+struct SessionArchivedStateDidChange: AppEvent {
+    static let name = Notification.Name("sessionArchivedStateDidChange")
+    let sessionID: SessionID
+    let isArchived: Bool
+}
+
 /// A macOS notification about this session was clicked; the window should show it.
 struct SessionNotificationOpened: AppEvent {
     static let name = Notification.Name("sessionNotificationOpened")

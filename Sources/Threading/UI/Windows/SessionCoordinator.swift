@@ -109,8 +109,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// See `archiveToast(for:wasRunning:undo:)`.
     func setArchived(_ archived: Bool, for sessionID: SessionID) {
         guard archived else {
-            ProjectStore.shared.setArchived(false, for: sessionID)
-            sidebar.reload()
+            restore(sessionID, reselecting: false)
             return
         }
 
@@ -130,35 +129,39 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Arriving here at all means the request already waited for the turn to end
     /// (`SessionArchiveScheduler`); this is only the archive.
     func archiveAtAgentRequest(_ sessionID: SessionID, reason: String?) {
-        let archived = archive(sessionID) { session, wasRunning, undo in
-            Self.agentArchiveToast(
-                for: session,
-                reason: reason,
-                wasRunning: wasRunning,
-                undo: undo
-            )
-        }
-
-        // The band is on screen for fourteen seconds and then the row is simply gone. A session
-        // filed away by something other than a click is exactly the change the durable journal
-        // exists to answer for afterwards.
-        guard archived else { return }
-        EventLog.shared.record(.session, "Session archived by its agent", [
-            "session": sessionID.uuidString,
-            "reason": reason ?? "none"
-        ])
+        archive(
+            sessionID,
+            receipt: { session, wasRunning, undo in
+                Self.agentArchiveToast(
+                    for: session,
+                    reason: reason,
+                    wasRunning: wasRunning,
+                    undo: undo
+                )
+            },
+            onArchived: {
+                // The band is on screen for fourteen seconds and then the row is simply gone. A
+                // session filed away by something other than a click is exactly the change the
+                // durable journal exists to answer for afterwards.
+                EventLog.shared.record(.session, "Session archived by its agent", [
+                    "session": sessionID.uuidString,
+                    "reason": reason ?? "none"
+                ])
+            }
+        )
     }
 
     /// Archiving, with the receipt left to the caller.
     ///
-    /// The order is load-bearing and shared by both routes: the agent stops first, because the
-    /// sidebar lists no archived session and a process nothing lists is a process nothing can
-    /// stop; and the pane is emptied before the reload, so the row and what it was showing leave
-    /// together.
+    /// The order is load-bearing and shared by both routes: the agent stops first, because a
+    /// provider must not move a rollout while Threading's process is writing it. The local row
+    /// does not leave until the provider accepts the same change; on failure it stays available
+    /// and a receipt says why. The pane and row leave together only after that commit.
     @discardableResult
     private func archive(
         _ sessionID: SessionID,
-        receipt: (AgentSession, Bool, @escaping () -> Void) -> ToastRequest
+        receipt: @escaping (AgentSession, Bool, @escaping () -> Void) -> ToastRequest,
+        onArchived: @escaping () -> Void = {}
     ) -> Bool {
         guard let session = ProjectStore.shared.session(withID: sessionID),
               !session.isArchived else { return false }
@@ -167,16 +170,22 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let wasShowing = sessionID == container.currentSessionID
 
         container.closeTerminal(for: sessionID)
-        ProjectStore.shared.setArchived(true, for: sessionID)
-
-        if wasShowing {
-            container.show(sessionID: nil)
+        ProviderArchiveSync.shared.setArchived(true, for: sessionID) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
+                    self?.restore(sessionID, reselecting: wasShowing)
+                })
+                onArchived()
+            case .failure(let failure):
+                sidebar.presentToast(Self.archiveFailureToast(
+                    for: session,
+                    failure: failure,
+                    wasRunning: wasRunning
+                ))
+            }
         }
-        sidebar.reload()
-
-        sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
-            self?.restore(sessionID, reselecting: wasShowing)
-        })
         return true
     }
 
@@ -192,11 +201,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// the session opens on its dormant placeholder with Resume on it; relaunching a process
     /// behind an undo would be a heavier thing than the click being taken back.
     private func restore(_ sessionID: SessionID, reselecting: Bool) {
-        ProjectStore.shared.setArchived(false, for: sessionID)
-        sidebar.reload()
-
-        guard reselecting else { return }
-        sidebar.select(sessionID: sessionID)
+        let session = ProjectStore.shared.session(withID: sessionID)
+        ProviderArchiveSync.shared.setArchived(false, for: sessionID) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                guard reselecting else { return }
+                sidebar.select(sessionID: sessionID)
+            case .failure(let failure):
+                sidebar.presentToast(Self.restoreFailureToast(
+                    for: session,
+                    failure: failure
+                ))
+            }
+        }
     }
 
     // MARK: - Naming
@@ -597,6 +615,31 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     ///
     /// Built separately from being shown, for the reason the confirmations are: this is where a
     /// test can hold the wording to what the action actually did.
+    static func archiveFailureToast(
+        for session: AgentSession,
+        failure: ProviderArchiveFailure,
+        wasRunning: Bool
+    ) -> ToastRequest {
+        let stopped = wasRunning ? L10n.string("The agent stopped.") : nil
+        return ToastRequest(
+            message: L10n.format("Couldn’t archive “%@”", session.displayTitle),
+            detail: [failure.localizedDescription, stopped].compactMap { $0 }.joined(separator: " "),
+            identifier: "sidebar.toast.archive.failed"
+        )
+    }
+
+    static func restoreFailureToast(
+        for session: AgentSession?,
+        failure: ProviderArchiveFailure
+    ) -> ToastRequest {
+        ToastRequest(
+            message: session.map { L10n.format("Couldn’t restore “%@”", $0.displayTitle) }
+                ?? L10n.string("Couldn’t restore this conversation"),
+            detail: failure.localizedDescription,
+            identifier: "sidebar.toast.restore.failed"
+        )
+    }
+
     static func archiveToast(
         for session: AgentSession,
         wasRunning: Bool,

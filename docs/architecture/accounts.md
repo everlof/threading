@@ -60,6 +60,12 @@ Two invariants matter:
 - **The default account launches with `env -u`**, not a bare command. A login shell may export
   an override, which would otherwise silently route to the wrong account.
 
+`AgentAccountRouting` is the single implementation of those invariants for both launches and
+provider lifecycle commands. In particular, Codex archive/unarchive must address the recorded
+session account: using a bare `codex archive` would file a matching id under whichever
+`CODEX_HOME` happened to leak from the login shell, while Threading changed a different account's
+record. See [the provider archive boundary](sessions.md#the-provider-archive-boundary).
+
 These are Claude/Codex capabilities, not assumptions about every runtime. Grok supports a
 redirectable `GROK_HOME`, but multiple-login discovery and session movement have not been
 measured, so its login remains inside the TUI. OpenCode provider
@@ -422,4 +428,3 @@ say how much is left.
 travel is also the accessibility branch — and it lands the value synchronously rather than
 costing a frame to arrive at what the caller is entitled to have now. A bar outside a window,
 or one leaving it mid-travel, lands for the same reason: the display link retains the view.
-

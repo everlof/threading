@@ -1021,23 +1021,31 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            if choice.isArchived {
-                AgentRuntime.shared.discard(sessionID: sessionID)
+            ProviderArchiveSync.shared.setArchived(
+                choice.isArchived,
+                for: sessionID
+            ) { result in
+                switch result {
+                case .success:
+                    EventLog.shared.record(.remote, choice.isArchived
+                        ? "Session archived remotely"
+                        : "Session restored remotely", [
+                            "session": sessionID.uuidString,
+                            "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                        ])
+                    respond(.respond(RemoteRouter.json(
+                        RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                    )))
+                case .failure(let failure):
+                    let status: Int
+                    if case .alreadyChanging = failure {
+                        status = 409
+                    } else {
+                        status = 500
+                    }
+                    respond(.respond(RemoteRouter.error(status, failure.localizedDescription)))
+                }
             }
-            ProjectStore.shared.setArchived(choice.isArchived, for: sessionID)
-            AppDelegate.shared?.refreshAfterRemoteSessionMutation(
-                sessionID: sessionID,
-                archived: choice.isArchived
-            )
-            EventLog.shared.record(.remote, choice.isArchived
-                ? "Session archived remotely"
-                : "Session restored remotely", [
-                    "session": sessionID.uuidString,
-                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
-                ])
-            respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
-            )))
         }
     }
 

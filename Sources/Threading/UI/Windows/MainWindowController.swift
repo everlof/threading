@@ -361,6 +361,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.delegate = self
 
         containerViewController.composerViewController.delegate = sessionCoordinator
+        // Provider archive can change while Threading is not frontmost. The store notification
+        // rebuilds the tree; this lifecycle event also empties a pane whose row was filed away,
+        // matching the local and remote archive paths instead of leaving an invisible session on
+        // screen until another row is selected.
+        appEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
+            self?.refreshAfterRemoteSessionMutation(
+                sessionID: event.sessionID,
+                archived: event.isArchived
+            )
+        }
+
         pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
         pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
         // The header shows exactly one page, and it is always the current one.

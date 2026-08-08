@@ -1,6 +1,42 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ could not archive this conversation: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kunde inte arkivera den här konversationen: %@" } } }
+    },
+    "%@ could not find the account that owns this conversation.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kunde inte hitta kontot som äger den här konversationen." } } }
+    },
+    "%@ could not restore this conversation: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kunde inte återställa den här konversationen: %@" } } }
+    },
+    "%@ could not start its archive command: %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ kunde inte starta sitt arkiveringskommando: %@" } } }
+    },
+    "Couldn’t archive “%@”": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte arkivera ”%@”" } } }
+    },
+    "Couldn’t restore “%@”": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte återställa ”%@”" } } }
+    },
+    "Couldn’t restore this conversation": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte återställa den här konversationen" } } }
+    },
+    "the command exited with status %lld": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "kommandot avslutades med status %lld" } } }
+    },
+    "This conversation’s archive state is already changing.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationens arkivstatus ändras redan." } } }
+    },
     "Watch a session": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bevaka en session" } } }

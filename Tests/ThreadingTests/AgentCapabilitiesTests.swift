@@ -40,7 +40,8 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("terminalThreadingBridge", .terminalThreadingBridge),
             ("openingFileAttachments", .openingFileAttachments),
             ("headlessResearch", .headlessResearch),
-            ("providerTitleMetadata", .providerTitleMetadata)
+            ("providerTitleMetadata", .providerTitleMetadata),
+            ("providerArchive", .providerArchive)
         ]
 
         var seen: [Int: String] = [:]
@@ -64,6 +65,17 @@ final class AgentCapabilitiesTests: XCTestCase {
         for kind in AgentKind.allCases {
             XCTAssertTrue(kind.supports(.resume), "\(kind) must resume")
         }
+    }
+
+    /// Only Codex exposes both halves of a reversible archive. Delete is not treated as archive
+    /// for Claude Code or Grok, and OpenCode's archive-only timestamp is not treated as the
+    /// Archive/Restore pair: Threading must neither destroy a provider conversation nor lose Undo
+    /// merely to make two lists look alike.
+    func testOnlyCodexSynchronizesProviderArchiveState() {
+        XCTAssertTrue(AgentKind.codex.supports(.providerArchive))
+        XCTAssertFalse(AgentKind.claude.supports(.providerArchive))
+        XCTAssertFalse(AgentKind.grok.supports(.providerArchive))
+        XCTAssertFalse(AgentKind.openCode.supports(.providerArchive))
     }
 
     /// The two Fast mechanisms answer "what does unset mean" differently — off for a live

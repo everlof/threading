@@ -613,7 +613,6 @@ enum AgentLauncher {
             return routed
         }
 
-        let environmentKey = session.kind.accountEnvironmentKey
         guard let account = AgentAccountDiscovery.account(
                   for: session.kind,
                   handle: session.accountHandle
@@ -629,12 +628,7 @@ enum AgentLauncher {
             return routed
         }
 
-        routed.append(word: "env")
-        if account.isDefault {
-            routed.append(flag: "-u", value: environmentKey)
-        } else {
-            routed.append(word: "\(environmentKey)=\(account.configPath)")
-        }
+        routed = AgentAccountRouting.prefix(for: session.kind, account: account)
         appendHookEnvironment(
             for: session,
             brokersPermissions: brokersPermissions,
