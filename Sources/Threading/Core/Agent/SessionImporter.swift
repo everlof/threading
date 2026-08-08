@@ -188,6 +188,11 @@ enum SessionImporter {
         accounts: [AgentAccount]
     ) -> [ImportableSession] {
         return accounts.flatMap { account -> [ImportableSession] in
+            // One small account-wide read before the rollout walk. A retained Codex name lives
+            // here rather than in the rollout, and using it during import avoids making a
+            // dormant conversation wait for its first resume (or the next app launch) before
+            // the sidebar learns the name the provider already knows.
+            let providerTitles = CodexTranscript.titles(account: account)
             let root = URL(fileURLWithPath: account.configPath)
                 .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)
 
@@ -215,13 +220,13 @@ enum SessionImporter {
                 // sub-sessions here too — the approval assessor writes a rollout per review,
                 // in the same directory, with the project as its working directory — and
                 // those are machine turns the user never had and cannot meaningfully reopen.
-                guard let title = codexTitle(at: url) else { return nil }
+                guard let promptTitle = codexTitle(at: url) else { return nil }
 
                 return ImportableSession(
                     agentSessionID: header.id,
                     kind: .codex,
                     accountHandle: account.handle,
-                    title: title,
+                    title: providerTitles[header.id] ?? promptTitle,
                     lastActiveAt: modificationDate(of: url)
                 )
             }

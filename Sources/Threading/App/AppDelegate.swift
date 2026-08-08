@@ -215,9 +215,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         CodeStatsService.shared.startPassiveScanning()
 
         // Replaces names the old agent-name scheme left behind ("Claude Code 2") with what
-        // the transcripts still hold. Idempotent: a backfilled session no longer carries a
-        // placeholder title, so later launches skip it without reading anything.
+        // transcripts still hold, then reconciles Codex rows with its canonical session index.
+        // The latter also catches a rename made while Threading was closed.
         SessionNaming.backfillLegacyNames()
+        SessionNaming.refreshProviderTitlesAtLaunch()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

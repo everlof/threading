@@ -141,6 +141,11 @@ struct AgentCapabilities: OptionSet {
   /// features (icon lookups, drafted messages) predate the flag and still gate on a Codex
   /// login directly.
   static let headlessResearch = Self(rawValue: 1 << 19)
+
+  /// The runtime publishes the current conversation name as provider metadata outside its
+  /// transcript. Codex only: terminal sessions persist it in `session_index.jsonl`, while the
+  /// app-server returns `Thread.name` and emits `thread/name/updated`.
+  static let providerTitleMetadata = Self(rawValue: 1 << 20)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -202,7 +207,7 @@ enum AgentKind: String, Codable, CaseIterable {
       return [
         .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
-        .headlessResearch
+        .headlessResearch, .providerTitleMetadata
       ]
     case .grok:
       return [
@@ -602,10 +607,25 @@ enum AgentTitleSource: String, Codable {
   /// Reported by a transport on its own — the terminal title while a PTY is attached, or
   /// the transcript's title records read when a turn ends. Follows whatever comes next.
   case reported
+  /// Read from the provider's authoritative conversation metadata. It outranks a transient
+  /// terminal caption but remains below a name deliberately chosen through Threading.
+  case provider
   /// Asked for — `set_session_name`, which the user requested via Rename with Agent or the
   /// agent judged worth calling. Only another chosen name or the user's own rename outranks
   /// it; the transports re-reporting the CLI's old idea of a title do not.
   case chosen
+
+  var authority: Int {
+    switch self {
+    case .reported: return 0
+    case .provider: return 1
+    case .chosen: return 2
+    }
+  }
+
+  func canReplace(_ existing: AgentTitleSource?) -> Bool {
+    authority >= (existing?.authority ?? -1)
+  }
 }
 
 // MARK: - Agent Session
@@ -636,19 +656,18 @@ struct AgentSession: Codable, Identifiable {
   /// so a deliberate name is never overwritten by agent activity.
   var customTitle: String?
 
-  /// The agent's own name for the conversation, by whichever transport last reported it:
-  /// the terminal title while a PTY is attached, or the transcript's title records read
-  /// when a turn ends — which is what names a native session, and what survives a surface
-  /// switch. Retained after the agent exits so a dormant session still shows what it was.
+  /// The agent's own name for the conversation, by whichever source last authoritatively
+  /// reported it: terminal presentation, transcript records, or canonical provider metadata.
+  /// This is what names a native session and what survives a surface switch. Retained after the
+  /// agent exits so a dormant session still shows what it was.
   ///
   /// Stored under the `terminalTitle` key it had when the terminal was the only transport,
   /// so existing records decode unchanged.
   var agentTitle: String?
 
-  /// How the current `agentTitle` arrived, which decides what may replace it: a name the
-  /// session was asked for stays until another is asked for, while a merely reported one
-  /// follows whatever the transports say next. Nil — every record from before the
-  /// distinction — reads as reported.
+  /// How the current `agentTitle` arrived, which decides what may replace it: transient report,
+  /// canonical provider metadata, or an explicitly chosen name, in increasing authority. Nil —
+  /// every record from before the distinction — reads as reported.
   var agentTitleSource: AgentTitleSource?
 
   let createdAt: Date

@@ -54,6 +54,39 @@ enum CodexTranscript {
         return nil
     }
 
+    /// Reads Codex's current user-facing name for a conversation.
+    ///
+    /// The rollout itself carries no title. Current Codex releases keep the canonical name in
+    /// `<CODEX_HOME>/session_index.jsonl`, one bounded record per thread, and rewrite that index
+    /// when `/rename` or `thread/name/set` succeeds. Read the whole small index rather than
+    /// guessing from terminal output; the latter is presentation copy and may be localized.
+    static func title(sessionID: TranscriptID, account: AgentAccount) -> String? {
+        titles(account: account)[sessionID]
+    }
+
+    /// Reads the account index once, used at launch to refresh every retained Codex session
+    /// without paying one full scan per sidebar row.
+    static func titles(account: AgentAccount) -> [TranscriptID: String] {
+        let index = URL(fileURLWithPath: account.configPath)
+            .appendingPathComponent(CodexDiscoveryDefaults.sessionIndexFile)
+        var titles: [TranscriptID: String] = [:]
+
+        JSONLReader.forEachRecord(
+            at: index,
+            limit: CodexDiscoveryDefaults.sessionIndexScanLimit
+        ) { record in
+            guard let rawID = record["id"] as? String else { return true }
+            let candidate = (record["thread_name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let candidate, !candidate.isEmpty {
+                titles[TranscriptID(rawID)] = candidate
+            }
+            return true
+        }
+
+        return titles
+    }
+
     static func invalidateCache() {
         cachedURLs.withLock { $0.removeAll() }
     }

@@ -481,6 +481,12 @@ enum CodexDiscoveryDefaults {
     static let rolloutPrefix = "rollout-"
     static let rolloutExtension = "jsonl"
     static let sessionMetaType = "session_meta"
+    static let sessionIndexFile = "session_index.jsonl"
+
+    /// Bound for Codex's one-record-per-thread title index. The real index is a few hundred
+    /// kilobytes for thousands of conversations; this leaves ample growth without letting a
+    /// corrupt file turn one title refresh into an unbounded read.
+    static let sessionIndexScanLimit = 64 * 1024 * 1024
 
     /// Event recording a turn the user typed, as opposed to the copy replayed into the
     /// conversation behind the CLI's instruction blocks.

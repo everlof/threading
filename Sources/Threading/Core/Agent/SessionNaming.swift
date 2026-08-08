@@ -22,7 +22,8 @@ import Foundation
 /// - After a mid-conversation `/rename` both records keep being re-appended, interleaved, so
 ///   presence decides: any custom title outranks any AI title, regardless of order.
 ///
-/// Codex records no title at all; its sessions are named from the first prompt.
+/// Codex rollouts record no title, but current releases publish the canonical thread name in
+/// `session_index.jsonl` and through app-server metadata.
 enum SessionNaming {
 
     // MARK: - Prompt Titles
@@ -209,27 +210,123 @@ enum SessionNaming {
 
     // MARK: - Refresh
 
-    /// Re-reads a Claude session's transcript title, called when the session stops working —
-    /// the same edge that re-reads the branch, and for the same reason: the turn that just
+    /// Re-reads the provider's durable conversation title, called when a session stops working
+    /// — the same edge that re-reads the branch, and for the same reason: the turn that just
     /// ended is when the name is most likely to have moved.
     ///
-    /// This is what names a *native* session, which has no terminal to report a title over,
-    /// and what carries a title across a surface switch. Codex has no transcript title to
-    /// read, so its sessions keep their prompt-derived name.
+    /// Claude stores the title in its transcript. Codex keeps it in the account's session
+    /// index; that value is canonical provider metadata, so it must outrank the TUI's stale OSC
+    /// caption while remaining below a name deliberately chosen through Threading.
     @MainActor
     static func refreshAgentTitle(forSessionID sessionID: SessionID) {
         guard let session = ProjectStore.shared.session(withID: sessionID),
-              session.kind.supports(.transcriptTitles),
-              let transcriptID = session.resumeState.transcriptID,
-              let project = ProjectStore.shared.project(forSessionID: sessionID),
-              let url = ClaudeTranscript.url(sessionID: transcriptID, for: session, in: project)
-        else { return }
+              let transcriptID = session.resumeState.transcriptID else { return }
+
+        enum Reading: Sendable {
+            case claude(URL)
+            case codex(TranscriptID, AgentAccount)
+        }
+
+        let reading: Reading
+        switch session.kind {
+        case .claude:
+            guard session.kind.supports(.transcriptTitles),
+                  let project = ProjectStore.shared.project(forSessionID: sessionID),
+                  let url = ClaudeTranscript.url(
+                      sessionID: transcriptID,
+                      for: session,
+                      in: project
+                  ) else { return }
+            reading = .claude(url)
+        case .codex:
+            guard session.kind.supports(.providerTitleMetadata),
+                  let account = AgentAccountDiscovery.account(
+                      for: session.kind,
+                      handle: session.accountHandle
+                  ) else { return }
+            reading = .codex(transcriptID, account)
+        case .grok, .openCode:
+            return
+        }
 
         DispatchQueue.global(qos: .utility).async {
-            guard let title = claudeTranscriptTitle(at: url) else { return }
+            let result: (title: String?, source: AgentTitleSource)
+            switch reading {
+            case .claude(let url):
+                result = (claudeTranscriptTitle(at: url), .reported)
+            case .codex(let transcriptID, let account):
+                result = (CodexTranscript.title(sessionID: transcriptID, account: account), .provider)
+            }
+            guard let title = result.title else { return }
 
             DispatchQueue.main.async {
-                ProjectStore.shared.updateAgentTitle(title, for: sessionID)
+                ProjectStore.shared.updateAgentTitle(
+                    title,
+                    for: sessionID,
+                    source: result.source
+                )
+            }
+        }
+    }
+
+    /// Reconciles retained Codex rows with the provider's own title index once per app launch.
+    ///
+    /// A rename can happen in Codex while Threading is closed. Reading one index per account
+    /// makes that name visible before the session is resumed, and keeps dormant rows honest.
+    @MainActor
+    static func refreshProviderTitlesAtLaunch() {
+        struct Batch: Sendable {
+            let account: AgentAccount
+            var sessions: [(SessionID, TranscriptID)]
+        }
+
+        var batches: [String: Batch] = [:]
+        for project in ProjectStore.shared.projects {
+            for session in project.sessions where session.kind.supports(.providerTitleMetadata) {
+                switch session.kind {
+                case .codex:
+                    break
+                case .claude, .grok, .openCode:
+                    continue
+                }
+                guard let transcriptID = session.resumeState.transcriptID,
+                      let account = AgentAccountDiscovery.account(
+                          for: session.kind,
+                          handle: session.accountHandle
+                      ) else { continue }
+
+                if var batch = batches[account.configPath] {
+                    batch.sessions.append((session.id, transcriptID))
+                    batches[account.configPath] = batch
+                } else {
+                    batches[account.configPath] = Batch(
+                        account: account,
+                        sessions: [(session.id, transcriptID)]
+                    )
+                }
+            }
+        }
+
+        let providerBatches = Array(batches.values)
+        guard !providerBatches.isEmpty else { return }
+
+        DispatchQueue.global(qos: .utility).async {
+            for batch in providerBatches {
+                let titles = CodexTranscript.titles(account: batch.account)
+                let updates = batch.sessions.compactMap { sessionID, transcriptID in
+                    titles[transcriptID].map { (sessionID, $0) }
+                }
+                guard !updates.isEmpty else { continue }
+
+                DispatchQueue.main.async {
+                    for (sessionID, title) in updates {
+                        ProjectStore.shared.updateAgentTitle(
+                            title,
+                            for: sessionID,
+                            source: .provider
+                        )
+                    }
+                }
             }
         }
     }
@@ -284,7 +381,10 @@ enum SessionNaming {
                     projectName: project.name,
                     folderBasename: folderBasename
                 ) {
-                    ProjectStore.shared.update(sessionID: session.id) { $0.agentTitle = nil }
+                    ProjectStore.shared.update(sessionID: session.id) {
+                        $0.agentTitle = nil
+                        $0.agentTitleSource = nil
+                    }
                 }
 
                 // An explicit rename wins over everything a backfill could derive.
@@ -392,4 +492,5 @@ enum SessionNamingDefaults {
 
     static let claudeAITitleType = "ai-title"
     static let claudeCustomTitleType = "custom-title"
+    static let providerTitleRefreshDelay: TimeInterval = 0.25
 }

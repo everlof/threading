@@ -141,6 +141,39 @@ final class StreamSessionLifecycleTests: XCTestCase {
         session.terminate()
     }
 
+    func testCodexReportsTheOpenedAndRenamedThreadTitlesAsProviderMetadata() {
+        let reported = expectation(description: "Codex thread titles reported")
+        reported.expectedFulfillmentCount = 2
+        var titles: [String] = []
+
+        let session = CodexStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; "
+                    + "read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\","
+                    + "\"name\":\"Opening Name\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"thread/name/updated\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"threadName\":\"WINAMP\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        XCTAssertEqual(session.sessionTitleSource, .provider)
+        session.onSessionTitleChange = { title in
+            XCTAssertTrue(Thread.isMainThread)
+            titles.append(title)
+            reported.fulfill()
+        }
+
+        session.start()
+
+        wait(for: [reported], timeout: 2)
+        XCTAssertEqual(titles, ["Opening Name", "WINAMP"])
+        session.terminate()
+    }
+
     func testSetModelSendsControlRequestAndResolvesOnSuccessResponse() {
         let resolved = expectation(description: "control response resolved")
 

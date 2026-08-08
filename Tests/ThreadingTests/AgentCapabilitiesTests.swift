@@ -39,7 +39,8 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("transcriptUsageIndex", .transcriptUsageIndex),
             ("terminalThreadingBridge", .terminalThreadingBridge),
             ("openingFileAttachments", .openingFileAttachments),
-            ("headlessResearch", .headlessResearch)
+            ("headlessResearch", .headlessResearch),
+            ("providerTitleMetadata", .providerTitleMetadata)
         ]
 
         var seen: [Int: String] = [:]

@@ -84,9 +84,18 @@ extension ConversationStreamSession {
 
 /// Optional provider-owned conversation metadata reported outside the transcript.
 ///
-/// ACP exposes this as `session_info_update`; keeping it separate from the transport contract
-/// lets providers that have no live title channel remain honest about that limitation.
+/// ACP exposes this as `session_info_update`; Codex app-server exposes `Thread.name` and
+/// `thread/name/updated`. Keeping it separate from the transport contract lets providers that
+/// have no live title channel remain honest about that limitation.
 @MainActor
 protocol SessionTitleReportingConversation: AnyObject {
     var onSessionTitleChange: ((String) -> Void)? { get set }
+
+    /// Authority of every title this transport reports. Most are transient observations;
+    /// transports backed by canonical provider metadata opt into the stronger source.
+    var sessionTitleSource: AgentTitleSource { get }
+}
+
+extension SessionTitleReportingConversation {
+    var sessionTitleSource: AgentTitleSource { .reported }
 }

@@ -31,7 +31,8 @@ final class CodexStreamSession:
     ProviderExecutionReportingConversation,
     ComposerCapabilityProviding,
     ReasoningEffortConfigurableConversation,
-    SubagentReportingConversation {
+    SubagentReportingConversation,
+    SessionTitleReportingConversation {
 
     // MARK: - Properties
 
@@ -40,10 +41,12 @@ final class CodexStreamSession:
     var onEvent: ((StreamEvent) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
     var onSubagentEvent: ((SubagentEvent) -> Void)?
+    var onSessionTitleChange: ((String) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onSendAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
+    var sessionTitleSource: AgentTitleSource { .provider }
 
     private(set) var isRunning = false
     var canSend: Bool {
@@ -411,6 +414,7 @@ final class CodexStreamSession:
         guard let threadID = thread["id"] as? String else { return }
 
         rootThreadID = threadID
+        reportSessionTitle(thread["name"])
         replaceComposerCapabilities(CodexComposerCatalog.builtIns)
         if !didReportThread {
             didReportThread = true
@@ -697,6 +701,11 @@ final class CodexStreamSession:
             reportRootThread(thread)
         }
 
+        if method == "thread/name/updated",
+           parameters["threadId"] as? String == rootThreadID {
+            reportSessionTitle(parameters["threadName"])
+        }
+
         if method == "thread/tokenUsage/updated",
            let turnID = parameters["turnId"] as? String,
            let usage = parameters["tokenUsage"] as? [String: Any] {
@@ -776,6 +785,13 @@ final class CodexStreamSession:
             }
             onEvent?(completed)
         }
+    }
+
+    private func reportSessionTitle(_ value: Any?) {
+        guard let title = (value as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return }
+        onSessionTitleChange?(title)
     }
 
     // MARK: - Approval Requests

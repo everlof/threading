@@ -872,9 +872,14 @@ final class ConversationViewController: NSViewController {
             }
         }
         if let reporting = stream as? SessionTitleReportingConversation {
+            let source = reporting.sessionTitleSource
             reporting.onSessionTitleChange = { [weak self] title in
                 guard let self else { return }
-                ProjectStore.shared.updateAgentTitle(title, for: self.sessionID)
+                ProjectStore.shared.updateAgentTitle(
+                    title,
+                    for: self.sessionID,
+                    source: source
+                )
             }
         }
 

@@ -192,6 +192,12 @@ A selected skill sends both the literal
 `$name task` text and the recommended structured `{type: "skill", name, path}` turn input. The
 private path is retained only inside `CodexStreamSession`.
 
+The opened thread's `Thread.name` and subsequent `thread/name/updated` notifications are the
+native surface's canonical conversation-name channel. `CodexStreamSession` reports both through
+the same title seam ACP uses, but marks them as provider metadata rather than transient transport
+output. That authority distinction is load-bearing: it lets a Codex `/rename` replace an older
+terminal caption without replacing a name the user deliberately chose through Threading.
+
 Codex's documented TUI vocabulary is retained separately as an **expectation catalog**, pinned
 to the locally verified CLI/docs version. Known commands such as `/model`, `/permissions`,
 `/diff`, `/usage`, `/goal`, `/fork`, `/archive`, `/mcp`, `/apps`, `/plugins`, `/hooks` and the

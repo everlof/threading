@@ -78,6 +78,36 @@ final class HotPathCacheTests: XCTestCase {
         XCTAssertNil(CodexTranscript.url(sessionID: transcriptID, account: account))
     }
 
+    func testCodexTitleComesFromTheAccountSessionIndex() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingCodexTitle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let target = TranscriptID("019fe021-f8f4-7161-9ef3-c6e4fee3cc95")
+        let other = TranscriptID("019fe033-1a7f-7e80-88d7-8a9c42b201af")
+        let records = [
+            #"{"id":"019fe033-1a7f-7e80-88d7-8a9c42b201af","thread_name":"Other","updated_at":"2026-08-08T08:00:00Z"}"#,
+            "not-json",
+            #"{"id":"019fe021-f8f4-7161-9ef3-c6e4fee3cc95","thread_name":"  WINAMP  ","updated_at":"2026-08-08T08:25:17Z"}"#
+        ].joined(separator: "\n") + "\n"
+        try Data(records.utf8).write(
+            to: root.appendingPathComponent(CodexDiscoveryDefaults.sessionIndexFile)
+        )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .named("title-test"),
+            configPath: root.path
+        )
+
+        XCTAssertEqual(CodexTranscript.title(sessionID: target, account: account), "WINAMP")
+        XCTAssertEqual(CodexTranscript.title(sessionID: other, account: account), "Other")
+        XCTAssertNil(CodexTranscript.title(
+            sessionID: TranscriptID("missing"),
+            account: account
+        ))
+    }
+
     func testGitLocationMemoPersistsUntilCheckoutRefresh() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingGitCache-\(UUID().uuidString)")

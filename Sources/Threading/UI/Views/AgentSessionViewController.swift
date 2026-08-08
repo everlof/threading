@@ -48,6 +48,7 @@ final class AgentSessionViewController: NSViewController {
     private var selectedSubagentID: String?
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
+    private var agentTitleRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -419,7 +420,32 @@ final class AgentSessionViewController: NSViewController {
             discoverAssignedSessionID()
         }
 
+        if agentKind.supports(.providerTitleMetadata) {
+            SessionNaming.refreshAgentTitle(forSessionID: sessionID)
+        }
+
         delegate?.agentSessionDidChangeState(self)
+    }
+
+    /// Re-reads provider metadata on the quiet edge of a TUI repaint.
+    ///
+    /// Codex writes `session_index.jsonl` before confirming `/rename` in the terminal. Waiting
+    /// for the output burst to settle gives that write time to finish and coalesces ordinary
+    /// screen repaints to one small index scan.
+    private func scheduleProviderTitleRefresh() {
+        guard agentKind.supports(.providerTitleMetadata) else { return }
+
+        agentTitleRefreshWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.agentTitleRefreshWorkItem = nil
+            SessionNaming.refreshAgentTitle(forSessionID: self.sessionID)
+        }
+        agentTitleRefreshWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + SessionNamingDefaults.providerTitleRefreshDelay,
+            execute: item
+        )
     }
 
     /// Tells the delegate this session's stored record changed underneath it.
@@ -477,6 +503,8 @@ final class AgentSessionViewController: NSViewController {
             ProjectStore.shared.update(sessionID: self.sessionID) { stored in
                 stored.resumeState = .resumable(discoveredID)
             }
+
+            SessionNaming.refreshAgentTitle(forSessionID: self.sessionID)
 
             ThreadingLogger.agent.info("Discovered Codex session \(discoveredID, privacy: .public)")
             self.delegate?.agentSessionDidChangeState(self)
@@ -582,6 +610,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
         activityTracker.recordOutput(byteCount: byteCount)
         attachmentObserver?.noteOutput()
+        scheduleProviderTitleRefresh()
 
         // Grok and OpenCode do not create a record for a blank TUI. Output after the initial
         // discovery window may mean the first prompt landed; retry at a bounded cadence until
@@ -603,6 +632,11 @@ extension AgentSessionViewController: TerminalSessionDelegate {
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
         attachmentObserver?.scanNow()
+        agentTitleRefreshWorkItem?.cancel()
+        agentTitleRefreshWorkItem = nil
+        if agentKind.supports(.providerTitleMetadata) {
+            SessionNaming.refreshAgentTitle(forSessionID: sessionID)
+        }
         isRunning = false
         activityTracker.markDormant()
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)

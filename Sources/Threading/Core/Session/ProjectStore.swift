@@ -509,28 +509,26 @@ final class ProjectStore {
         notifyChanged()
     }
 
-    /// Records the agent's own name for a conversation, from either transport — the terminal
-    /// title while a PTY is attached, or the transcript's title records read at turn end —
-    /// or from `set_session_name`, which passes `.chosen`.
+    /// Records the agent's own name for a conversation: a transient transport report, canonical
+    /// provider metadata, or `set_session_name`, which passes `.chosen`.
     ///
     /// A title that is really the product, account or project name is ignored rather than
     /// stored: Claude's TUI titles itself "Claude Code" until it has an AI title, and Codex
     /// titles itself after the working directory. Neither names the conversation, and neither
     /// is worth displacing a real title that arrived earlier.
     ///
-    /// A *chosen* name is not displaced by a *reported* one. The terminal title re-asserts
-    /// the CLI's own `ai-title` constantly and the turn-end transcript read re-reads the same
-    /// record, so without this a rename the user just asked for is silently put back within
-    /// seconds by the very transports that made asking necessary. Only another chosen name
-    /// replaces a chosen name; the user's own rename outranks both in `displayTitle`.
+    /// The replacement order is reported < provider < chosen. In particular, a Codex `/rename`
+    /// read from its session index must survive the TUI re-asserting an older OSC caption, while
+    /// a name deliberately selected through Threading must survive both automatic sources. The
+    /// user's direct row rename still outranks all three in `displayTitle`.
     ///
     /// Agents update this frequently, so the write is coalesced rather than hitting disk on
     /// every change.
     ///
     /// Returns whether the session's agent title now reads as `title` — true when it was
     /// stored and when it already said so, false when the session is gone, the name was
-    /// refused as noise, or a reported title lost to a chosen one. The two title transports
-    /// ignore the answer, because a terminal that reports "Claude Code" every second is not
+    /// refused as noise, or a weaker title lost to a stronger one. Automatic transports ignore
+    /// the answer, because a terminal that reports "Claude Code" every second is not
     /// asking a question. `set_session_name` is, and an agent told its call succeeded when
     /// the name was dropped would go on to tell the user the same thing.
     @discardableResult
@@ -546,17 +544,20 @@ final class ProjectStore {
 
         let cleaned = Self.strippingDecoration(from: title)
         guard session.agentTitle != cleaned else {
-            // The name already reads right, but asking for it is what pins it — a transport
-            // happening to have reported the same words first must not leave it displaceable.
-            if source == .chosen, session.agentTitleSource != .chosen, cleaned != nil {
+            // The words already read right, but their authority may have moved: a canonical
+            // provider name must stop a stale OSC caption replacing it, and asking for those
+            // same words through Threading must still pin them.
+            if source.canReplace(session.agentTitleSource),
+               source != session.agentTitleSource,
+               cleaned != nil {
                 projects[location.projectIndex].sessions[location.sessionIndex]
-                    .agentTitleSource = .chosen
+                    .agentTitleSource = source
                 scheduleSave()
             }
             return cleaned != nil
         }
 
-        guard source == .chosen || session.agentTitleSource != .chosen else { return false }
+        guard source.canReplace(session.agentTitleSource) else { return false }
 
         if let cleaned {
             let account = AgentAccountDiscovery.account(

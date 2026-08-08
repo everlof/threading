@@ -206,6 +206,39 @@ final class SessionNameToolTests: XCTestCase {
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "what it became")
     }
 
+    /// Codex's persisted thread name is the conversation's canonical provider metadata. Its
+    /// TUI may continue emitting an older OSC caption after `/rename`; that transient report
+    /// must not put the old words back in either title surface.
+    func testAProviderNameSurvivesWhatTheTerminalKeepsReporting() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+        store.updateAgentTitle("Action Required | app", for: session.id)
+
+        XCTAssertTrue(store.updateAgentTitle(
+            "WINAMP",
+            for: session.id,
+            source: .provider
+        ))
+
+        XCTAssertFalse(store.updateAgentTitle("Action Required | app", for: session.id))
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "WINAMP")
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitleSource, .provider)
+    }
+
+    /// The provider's own metadata is stronger than presentation output, but it is still not
+    /// stronger than a name deliberately selected through Threading's rename tool.
+    func testAThreadingChosenNameSurvivesProviderMetadata() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+        store.updateAgentTitle("Threading's name", for: session.id, source: .chosen)
+
+        XCTAssertFalse(store.updateAgentTitle(
+            "Provider's name",
+            for: session.id,
+            source: .provider
+        ))
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "Threading's name")
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitleSource, .chosen)
+    }
+
     /// Choosing the words a transport already reported must still pin them: the store answers
     /// "already so" either way, but only the pin stops the next report from moving the name.
     func testChoosingTheNameATransportAlreadyReportedStillPinsIt() throws {
