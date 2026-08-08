@@ -2350,22 +2350,28 @@ without leaving the terminal. You can stage and commit from it; **discarding is 
 not offered** — everything the pane can do is reversible by the control beside it, and
 throwing away a change an agent just made is not.
 
-### Pull requests
+### Pull and merge requests
 
-For a checkout whose `origin` is on GitHub, Git Review also shows the current branch's pull
-request, draft/review state and checks. Its main button always takes one explicit step: push the
-branch, create its pull request, push a newer head, or open the existing pull request. Uncommitted
-changes are named and stay local.
+For a checkout whose `origin` is on GitHub.com or GitLab.com, Git Review also shows the current
+branch's pull or merge request, draft/review state and checks. Its main button always takes one
+explicit step: push the branch, create its change request, push a newer head, or open the existing
+request. Uncommitted changes are named and stay local. GitLab nested groups are supported;
+self-hosted GitLab is not yet supported and is reported as unavailable rather than being mistaken
+for GitLab.com.
 
 The creation rule belongs to the repository. Choose it from the project's secondary-click menu
-under **Pull Requests**, or from the policy chip in Git Review; linked worktrees share the same
-setting. **Review before publishing** is the default and opens an editable title/description
-sheet. **Draft with Codex** can fill that sheet, but Codex cannot submit it — only pressing
-**Publish pull request** does. Repositories can instead make an explicit Create press publish a
-draft or ready pull request directly, or allow pushes without ever creating one.
+under **Pull Requests** or **Merge Requests**, or from the policy chip in Git Review; linked
+worktrees share the same setting. **Review before publishing** is the default and opens an
+editable title/description sheet. **Draft with Codex** can fill that sheet, but Codex cannot
+submit it — only pressing the provider-named **Publish** button does. Repositories can instead
+make an explicit Create press publish a draft or ready request directly, or allow pushes without
+ever creating one.
 
-Threading uses the GitHub sign-in chain shown in **Settings ▸ GitHub**. Without an API sign-in it
-opens GitHub's prefilled compare form in the browser; it does not attempt an anonymous write.
+For GitHub, Threading uses the sign-in chain shown in **Settings ▸ GitHub**. Without an API sign-in
+an interactive create opens GitHub's prefilled compare form in the browser; it does not attempt an
+anonymous write. For GitLab, install the official `glab` CLI and run `glab auth login` for
+GitLab.com. Threading asks `glab` to make authenticated API requests without reading or copying its
+token, and does not offer an unauthenticated browser fallback.
 
 ### The status card
 

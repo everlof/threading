@@ -532,7 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // focus after an archive or restore performed in another client.
         ProviderArchiveSync.shared.start()
 
-        // A published managed session owns its opaque remote branch until the pull request is
+        // A published managed session owns its opaque remote branch until the change request is
         // merged or closed. Reconcile that provider lifecycle independently of the archived
         // conversation: deletion is lease-protected and never needs the disposed worktree.
         ManagedWorkspaceRemoteCleanupCoordinator.shared.start()

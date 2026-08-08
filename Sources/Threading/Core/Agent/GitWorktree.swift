@@ -177,7 +177,7 @@ enum ManagedGitWorkspace {
             case .publicationNotReady:
                 return L10n.string("The managed workspace has no recorded change request to finish.")
             case .unsupportedChangeRequestRemote:
-                return L10n.string("Automatic review publishing currently requires a GitHub origin remote.")
+                return L10n.string("Automatic review publishing requires a supported GitHub.com or GitLab.com origin remote.")
             case .publishedRevisionChanged:
                 return L10n.string("The managed workspace changed after its review was published.")
             case .targetBranchChanged(let expected, let actual):
@@ -661,23 +661,22 @@ struct ManagedWorkspacePublicationResult: Sendable {
     let finalCommit: String
     let changeRequest: ManagedWorkspaceChangeRequest
     let wasCreated: Bool
-    let credentialTier: GitHubCredential.Tier?
+    let credentialSource: ChangeRequestCredentialSource?
 }
 
 /// Turns an explicitly opted-in managed commit into a review without ever creating a local
-/// branch. GitHub is the first adapter, while the inputs and durable receipt remain
-/// provider-neutral for the next forge implementation.
+/// branch. Forge API work is routed through the provider boundary while local refs remain here.
 struct ManagedWorkspacePublisher: Sendable {
     enum Failure: LocalizedError {
-        case automaticCredentialRequired
+        case automaticCredentialRequired(String)
         case discoveryFailed(String)
         case interactiveFallback(String)
         case creationFailed(String)
 
         var errorDescription: String? {
             switch self {
-            case .automaticCredentialRequired:
-                return L10n.string("Automatic review publishing requires a GitHub sign-in in Threading, gh, or Git.")
+            case .automaticCredentialRequired(let message):
+                return message
             case .discoveryFailed(let message),
                  .interactiveFallback(let message),
                  .creationFailed(let message):
@@ -686,25 +685,29 @@ struct ManagedWorkspacePublisher: Sendable {
         }
     }
 
-    private let github: GitHubPullRequestClient
+    private let providers: ChangeRequestProviderRegistry
 
-    init(github: GitHubPullRequestClient) {
-        self.github = github
+    init(providers: ChangeRequestProviderRegistry) {
+        self.providers = providers
     }
 
     @MainActor
     static func live() -> ManagedWorkspacePublisher {
-        ManagedWorkspacePublisher(github: .live())
+        ManagedWorkspacePublisher(providers: .live())
     }
 
     func publish(_ workspace: ManagedWorkspace) async throws -> ManagedWorkspacePublicationResult {
-        guard await github.supportsAutomaticCreation() else {
-            throw Failure.automaticCredentialRequired
-        }
         let snapshot = try ManagedGitWorkspace.publicationSnapshot(for: workspace)
+        switch await providers.automaticCreationReadiness(repository: snapshot.repository) {
+        case .ready:
+            break
+        case .unavailable(let message):
+            throw Failure.automaticCredentialRequired(message)
+        }
         let seed = try await ChangeRequestGit.proposalSeed(
             in: snapshot.root,
-            baseRevision: workspace.baseCommit
+            baseRevision: workspace.baseCommit,
+            provider: snapshot.repository.provider
         )
 
         try await ChangeRequestGit.pushDetached(
@@ -714,28 +717,28 @@ struct ManagedWorkspacePublisher: Sendable {
             in: snapshot.root
         )
 
-        let discovered = await github.discover(
+        let discovered = await providers.discover(
             repository: snapshot.repository,
             branch: snapshot.branch,
             headRevision: snapshot.finalCommit
         )
         let summary: ChangeRequestSummary
         let wasCreated: Bool
-        let credentialTier: GitHubCredential.Tier?
+        let credentialSource: ChangeRequestCredentialSource?
         switch discovered {
         case .failed(let message):
             throw Failure.discoveryFailed(message)
 
         case .loaded(let status):
-            if let existing = status.pullRequest {
+            if let existing = status.changeRequest {
                 summary = existing
                 wasCreated = false
-                credentialTier = nil
+                credentialSource = nil
             } else {
                 guard let publication = workspace.publication else {
                     throw ManagedGitWorkspace.Failure.publicationNotConfigured
                 }
-                let outcome = await github.create(
+                let outcome = await providers.create(
                     repository: snapshot.repository,
                     proposal: ChangeRequestProposal(
                         title: seed.title,
@@ -746,10 +749,10 @@ struct ManagedWorkspacePublisher: Sendable {
                     )
                 )
                 switch outcome {
-                case .created(let created, let tier):
+                case .created(let created, let credential):
                     summary = created
                     wasCreated = true
-                    credentialTier = tier
+                    credentialSource = credential
                 case .webForm(_, let message):
                     // A final-turn automation has nobody present to complete a browser form.
                     // Preserve the pushed branch and local worktree for an explicit retry.
@@ -763,7 +766,7 @@ struct ManagedWorkspacePublisher: Sendable {
         return ManagedWorkspacePublicationResult(
             finalCommit: snapshot.finalCommit,
             changeRequest: ManagedWorkspaceChangeRequest(
-                provider: snapshot.repository.provider,
+                provider: snapshot.repository.provider.rawValue,
                 repository: snapshot.repository.slug,
                 remote: snapshot.remote,
                 branch: snapshot.branch,
@@ -772,7 +775,7 @@ struct ManagedWorkspacePublisher: Sendable {
                 isDraft: summary.isDraft
             ),
             wasCreated: wasCreated,
-            credentialTier: credentialTier
+            credentialSource: credentialSource
         )
     }
 }

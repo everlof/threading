@@ -3,7 +3,8 @@
 The credential chain, the GitHub App connection, native pull requests, and the brokered network
 fetch that lets a safe extension read from the internet without ever holding a socket or a token.
 
-Part of the [CLAUDE.md](../../CLAUDE.md) index.
+Part of the [CLAUDE.md](../../CLAUDE.md) index. The provider-neutral review workflow and GitLab
+adapter are in [source-control.md](source-control.md).
 
 ## Why this exists
 
@@ -105,13 +106,15 @@ fallback at 6,000, and labels have explicit count and length budgets. Truncation
 marker inside the budget. An accepted POST with an unreadable response still counts as created:
 retrying would risk filing a duplicate.
 
-## Native pull requests (`GitHubPullRequestClient`)
+## GitHub pull-request adapter (`GitHubPullRequestClient`)
 
 Pull-request state belongs in Git Review rather than in an extension card. The controller joins
 local branch/upstream state with a provider-neutral `ChangeRequestRepositoryStatus`: the open pull
 request, draft state, latest decision from each reviewer, requested reviewers, and check runs for
-the remote head. GitHub is the first provider implementation; the UI and durable policy do not use
-GitHub wire types.
+the remote head. GitHub and GitLab now both implement `ChangeRequestProviderClient`; the UI and
+durable policy do not use either provider's wire types. The shared boundary, GitLab adapter,
+capability flags and managed-ref safety are documented in
+[source-control.md](source-control.md).
 
 The publish policy is **repository scoped** and keyed by `git rev-parse --git-common-dir`, so all
 linked worktrees share one answer. It is exposed from each project's sidebar menu because that is
@@ -139,6 +142,8 @@ oversized bytes are preserved before replacement, policy is capped by repository
 size, and a receipt accepts only a bounded repository/branch plus an authority-safe HTTPS result
 URL. A mutation becomes visible in memory only after the encoded candidate has been written and
 read back successfully.
+receipts naming the repository, branch, resulting URL, and provider credential source where one
+was used.
 
 Reads use the normal credential-tier walk because they are idempotent. Creation may walk after an
 explicit 401/403/404 refusal, but it **never retries after a transport failure**: GitHub may have

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Durable evidence for a publish transition. The UI shows the immediate notice; this bounded
-/// ledger survives it and records which repository, branch, account tier and URL were involved.
+/// ledger survives it and records which repository, branch, credential source and URL were involved.
 struct ChangeRequestReceipt: Codable, Equatable, Sendable {
     enum Action: String, Codable, Sendable {
         case pushed
@@ -14,7 +14,54 @@ struct ChangeRequestReceipt: Codable, Equatable, Sendable {
     let repository: String
     let branch: String
     let url: URL?
-    let credentialTier: GitHubCredential.Tier?
+    let credentialSource: ChangeRequestCredentialSource?
+
+    init(
+        date: Date,
+        action: Action,
+        repository: String,
+        branch: String,
+        url: URL?,
+        credentialSource: ChangeRequestCredentialSource?
+    ) {
+        self.date = date
+        self.action = action
+        self.repository = repository
+        self.branch = branch
+        self.url = url
+        self.credentialSource = credentialSource
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case date, action, repository, branch, url, credentialSource
+        case legacyCredentialTier = "credentialTier"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(Date.self, forKey: .date)
+        action = try container.decode(Action.self, forKey: .action)
+        repository = try container.decode(String.self, forKey: .repository)
+        branch = try container.decode(String.self, forKey: .branch)
+        url = try container.decodeIfPresent(URL.self, forKey: .url)
+        credentialSource = try container.decodeIfPresent(
+            ChangeRequestCredentialSource.self,
+            forKey: .credentialSource
+        ) ?? container.decodeIfPresent(
+            ChangeRequestCredentialSource.self,
+            forKey: .legacyCredentialTier
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(date, forKey: .date)
+        try container.encode(action, forKey: .action)
+        try container.encode(repository, forKey: .repository)
+        try container.encode(branch, forKey: .branch)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(credentialSource, forKey: .credentialSource)
+    }
 }
 
 @MainActor

@@ -416,16 +416,16 @@ final class ControlRowTests: XCTestCase {
     @MainActor
     func testDefaultBranchIsCopyRatherThanADisabledPrimaryAction() throws {
         let repository = ChangeRequestRepository(
-            provider: "github",
+            provider: .github,
             host: "github.com",
-            owner: "threading",
+            namespace: "threading",
             name: "threading"
         )
         let controller = GitReviewViewController(
             sessionID: SessionID(),
             folderPath: NSTemporaryDirectory(),
             mode: .uncommitted,
-            changeRequestClient: GitHubPullRequestClient(resolver: nil)
+            changeRequestProviders: .githubFixture(GitHubPullRequestClient(resolver: nil))
         )
         _ = controller.view
         controller.changeRequestLocalState = ChangeRequestLocalState(
@@ -442,7 +442,7 @@ final class ControlRowTests: XCTestCase {
             repository: repository,
             defaultBranch: "master",
             branch: "master",
-            pullRequest: nil,
+            changeRequest: nil,
             checks: .unavailable
         )
 

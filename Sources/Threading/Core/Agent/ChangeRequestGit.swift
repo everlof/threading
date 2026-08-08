@@ -11,7 +11,7 @@ struct ChangeRequestLocalState: Equatable, Sendable {
     let hasUncommittedChanges: Bool
 
     var repository: ChangeRequestRepository? {
-        ChangeRequestRepository.github(remote: remote)
+        ChangeRequestRepository.supported(remote: remote)
     }
 
     var needsPush: Bool { upstream == nil || ahead > 0 }
@@ -37,7 +37,7 @@ enum ChangeRequestGit {
         try await perform {
             guard let branch = GitInfo.currentBranch(for: root.path),
                   let head = GitInfo.headRevision(for: root.path) else {
-                throw GitFailure.gitFailed(L10n.string("Pull requests need a checked-out branch."))
+                throw GitFailure.gitFailed(L10n.string("Change requests need a checked-out branch."))
             }
             guard let remote = GitInfo.remoteOriginURL(for: root.path) else {
                 throw GitFailure.gitFailed(L10n.string("This repository has no origin remote."))
@@ -170,23 +170,30 @@ enum ChangeRequestGit {
 
     static func proposalSeed(
         in root: URL,
-        baseBranch: String
+        baseBranch: String,
+        provider: SourceControlProvider = .github
     ) async throws -> ChangeRequestProposalSeed {
-        try await proposalSeed(in: root, comparisonBase: "origin/\(baseBranch)")
+        try await proposalSeed(
+            in: root,
+            comparisonBase: "origin/\(baseBranch)",
+            provider: provider
+        )
     }
 
     /// Builds review text against the immutable commit a managed workspace recorded at launch,
     /// so a moving or locally absent `origin/<branch>` cannot change what its review describes.
     static func proposalSeed(
         in root: URL,
-        baseRevision: String
+        baseRevision: String,
+        provider: SourceControlProvider = .github
     ) async throws -> ChangeRequestProposalSeed {
-        try await proposalSeed(in: root, comparisonBase: baseRevision)
+        try await proposalSeed(in: root, comparisonBase: baseRevision, provider: provider)
     }
 
     private static func proposalSeed(
         in root: URL,
-        comparisonBase: String
+        comparisonBase: String,
+        provider: SourceControlProvider
     ) async throws -> ChangeRequestProposalSeed {
         try await perform {
             let subjectsText = trimmed(try GitProcess.run(
@@ -219,7 +226,7 @@ enum ChangeRequestGit {
                 in: root
             )
             let diff = String(decoding: diffData, as: UTF8.self)
-            let template = pullRequestTemplate(in: root)
+            let template = changeRequestTemplate(in: root, provider: provider)
             let body = template ?? defaultBody(subjects: subjects)
             return ChangeRequestProposalSeed(
                 title: title,
@@ -236,12 +243,24 @@ enum ChangeRequestGit {
         return "## Summary\n\n" + subjects.map { "- \($0)" }.joined(separator: "\n")
     }
 
-    private static func pullRequestTemplate(in root: URL) -> String? {
-        let candidates = [
-            ".github/pull_request_template.md",
-            "pull_request_template.md",
-            "docs/pull_request_template.md"
-        ]
+    private static func changeRequestTemplate(
+        in root: URL,
+        provider: SourceControlProvider
+    ) -> String? {
+        let candidates: [String]
+        switch provider {
+        case .github:
+            candidates = [
+                ".github/pull_request_template.md",
+                "pull_request_template.md",
+                "docs/pull_request_template.md"
+            ]
+        case .gitlab:
+            candidates = [
+                ".gitlab/merge_request_templates/Default.md",
+                ".gitlab/merge_request_templates/default.md"
+            ]
+        }
         for path in candidates {
             let url = root.appendingPathComponent(path)
             guard let data = try? BoundedFileReader.read(

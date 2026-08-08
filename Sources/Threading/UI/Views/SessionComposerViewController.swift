@@ -49,7 +49,7 @@ final class SessionComposerViewController: NSViewController {
     )
     private let managedWorkspaceDeliveryChip = ChipView()
     private lazy var managedWorkspacePublicationCheckbox = ThemedCheckbox(
-        title: L10n.string("Open a pull request when finished"),
+        title: L10n.string("Open a change request when finished"),
         changed: { [weak self] state in
             self?.setManagedWorkspacePublicationEnabled(state == .on)
         }
@@ -1020,6 +1020,7 @@ final class SessionComposerViewController: NSViewController {
         let isAvailable = isGitProject && supportsFinish
         let supportsPublication = isAvailable
             && (resolvedProject.map(ManagedWorkspaceEligibility.supportsPublication(from:)) ?? false)
+        let changeRequestProvider = changeRequestProvider(for: resolvedProject)
 
         managedWorkspaceCheckbox.isEnabled = isAvailable
         if !isGitProject {
@@ -1055,7 +1056,10 @@ final class SessionComposerViewController: NSViewController {
         managedWorkspacePublicationCheckbox.state = publication == nil ? .off : .on
         managedWorkspacePublicationChip.configure(
             symbolName: ComposerDefaults.managedWorkspacePublicationSymbol,
-            title: ComposerDefaults.managedWorkspacePublicationTitle(publication ?? .draft)
+            title: ComposerDefaults.managedWorkspacePublicationTitle(
+                publication ?? .draft,
+                provider: changeRequestProvider ?? .github
+            )
         )
         setManagedWorkspacePublicationOfferAttached(supportsPublication)
         setManagedWorkspaceOutcome(isPublication: publication != nil)
@@ -1063,7 +1067,8 @@ final class SessionComposerViewController: NSViewController {
     }
 
     /// Local delivery and remote publication are two different outcomes. Only the chosen one's
-    /// settings belong to the hierarchy; showing both would falsely promise a merge before a PR.
+    /// settings belong to the hierarchy; showing both would falsely promise a local merge before
+    /// a provider change request.
     private func setManagedWorkspaceOutcome(isPublication: Bool) {
         let desired = isPublication
             ? managedWorkspacePublicationChip
@@ -1123,13 +1128,26 @@ final class SessionComposerViewController: NSViewController {
 
     private func managedWorkspacePublicationItems() -> [ThemedMenuEntry] {
         let selected = selectedManagedWorkspacePlan?.publication ?? .draft
+        let project = projectID.flatMap { ProjectStore.shared.project(withID: $0) }
+        let provider = changeRequestProvider(for: project) ?? .github
         return ManagedWorkspacePublication.allCases.map { publication in
             .item(ThemedMenuItem(
-                title: ComposerDefaults.managedWorkspacePublicationTitle(publication),
+                title: ComposerDefaults.managedWorkspacePublicationTitle(
+                    publication,
+                    provider: provider
+                ),
                 representedValue: publication,
                 isSelected: publication == selected
             ))
         }
+    }
+
+    private func changeRequestProvider(for project: Project?) -> SourceControlProvider? {
+        guard let project,
+              let remote = GitInfo.remoteOriginURL(for: project.folderPath),
+              case .supported(let repository) = ChangeRequestRepository.detect(remote: remote)
+        else { return nil }
+        return repository.provider
     }
 
     /// The logins this agent offers, and none at all for a runtime without account routing
@@ -1840,11 +1858,14 @@ enum ComposerDefaults {
     }
 
     static func managedWorkspacePublicationTitle(
-        _ publication: ManagedWorkspacePublication
+        _ publication: ManagedWorkspacePublication,
+        provider: SourceControlProvider = .github
     ) -> String {
         switch publication {
-        case .draft: return L10n.string("Review: Draft pull request")
-        case .ready: return L10n.string("Review: Ready pull request")
+        case .draft:
+            return L10n.format("Review: Draft %@", provider.changeRequestName)
+        case .ready:
+            return L10n.format("Review: Ready %@", provider.changeRequestName)
         }
     }
 

@@ -12,9 +12,12 @@ extension ProjectSidebarViewController {
             ))
         }
 
-        guard GitInfo.repositoryIdentity(for: project.folderPath) != nil else {
+        guard GitInfo.repositoryIdentity(for: project.folderPath) != nil,
+              let remote = GitInfo.remoteOriginURL(for: project.folderPath),
+              case .supported(let repository) = ChangeRequestRepository.detect(remote: remote)
+        else {
             return .item(ThemedMenuItem(
-                title: L10n.string("Pull Requests"),
+                title: L10n.string("Change Requests"),
                 isEnabled: false
             ))
         }
@@ -24,8 +27,8 @@ extension ProjectSidebarViewController {
             .publishPolicy
         let choices = ChangeRequestPublishPolicy.allCases.map { policy in
             ThemedMenuEntry.item(ThemedMenuItem(
-                title: policy.title,
-                subtitle: policy.explanation,
+                title: policy.title(for: repository.provider),
+                subtitle: policy.explanation(for: repository.provider),
                 representedValue: policy.rawValue,
                 isSelected: policy == selected,
                 onChoose: {
@@ -38,7 +41,9 @@ extension ProjectSidebarViewController {
         }
 
         return .item(ThemedMenuItem(
-            title: L10n.string("Pull Requests"),
+            title: repository.provider == .github
+                ? L10n.string("Pull Requests")
+                : L10n.string("Merge Requests"),
             submenu: choices
         ))
     }

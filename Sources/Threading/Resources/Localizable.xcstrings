@@ -1,6 +1,90 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Git Review creates a draft %@ when you press Create." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Git Review skapar ett utkast till %@ när du trycker på Skapa."
+          }
+        }
+      }
+    },
+    "Git Review creates a ready %@ when you press Create." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Git Review skapar ett färdigt %@ när du trycker på Skapa."
+          }
+        }
+      }
+    },
+    "Git Review lets you edit the %@ title and description first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Git Review låter dig redigera titel och beskrivning för %@ först."
+          }
+        }
+      }
+    },
+    "Automatic review publishing requires a supported GitHub.com or GitLab.com origin remote.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Automatisk publicering för granskning kräver en origin-fjärr på GitHub.com eller GitLab.com som stöds." } } }
+    },
+    "%@ description": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@-beskrivning"}}}},
+    "%@ title": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@-titel"}}}},
+    "Automatic review publishing requires an authenticated provider tool.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Automatisk granskningspublicering kräver ett autentiserat leverantörsverktyg."}}}},
+    "Automatic review publishing supports GitLab.com repositories, not this GitLab host.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Automatisk granskningspublicering stöder GitLab.com-kodförråd, inte denna GitLab-värd."}}}},
+    "Change Requests": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändringsbegäranden"}}}},
+    "Change request": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändringsbegäran"}}}},
+    "Change requests need a checked-out branch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändringsbegäranden kräver en utcheckad gren."}}}},
+    "Create %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa %@"}}}},
+    "Create %@…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa %@…"}}}},
+    "Create draft %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa utkast till %@"}}}},
+    "Create ready %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa %@ redo för granskning"}}}},
+    "Created %@ #%lld.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapade %@ #%lld."}}}},
+    "Git Review may push this project's branch, but never creates a %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Git Review får pusha projektets gren, men skapar aldrig en %@."}}}},
+    "GitLab created the merge request, but Threading could not read its response. Discover it before retrying.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab skapade merge requesten, men Threading kunde inte läsa svaret. Sök efter den innan du försöker igen."}}}},
+    "GitLab did not accept the request.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab accepterade inte begäran."}}}},
+    "GitLab did not accept the request: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab accepterade inte begäran: %@"}}}},
+    "GitLab merge-request creation requires glab to be installed and signed in to GitLab.com.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "För att skapa merge requests i GitLab måste glab vara installerat och inloggat på GitLab.com."}}}},
+    "GitLab publishing requires glab to be installed and signed in to GitLab.com.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "För GitLab-publicering måste glab vara installerat och inloggat på GitLab.com."}}}},
+    "GitLab returned a merge-request state Threading does not understand.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab returnerade ett tillstånd för merge request som Threading inte förstår."}}}},
+    "GitLab returned a response Threading could not read.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab returnerade ett svar som Threading inte kunde läsa."}}}},
+    "GitLab returned too much data.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "GitLab returnerade för mycket data."}}}},
+    "Merge Requests": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Merge requests"}}}},
+    "Merge request": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Merge request"}}}},
+    "Never create %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa aldrig %@"}}}},
+    "Open %@ on %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna %@ på %@"}}}},
+    "Open change request": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna ändringsbegäran"}}}},
+    "Pressing Create publishes a draft %@ with the proposed title and description.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "När du trycker på Skapa publiceras ett utkast till %@ med den föreslagna titeln och beskrivningen."}}}},
+    "Pressing Create publishes a ready-for-review %@ with the proposed title and description.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "När du trycker på Skapa publiceras en %@ redo för granskning med den föreslagna titeln och beskrivningen."}}}},
+    "Reading %@…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser %@…"}}}},
+    "Reading provider…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser leverantör…"}}}},
+    "Self-hosted GitLab repositories are not supported yet. Threading supports GitLab.com explicitly.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Egenhostade GitLab-kodförråd stöds inte ännu. Threading stöder uttryckligen GitLab.com."}}}},
+    "The origin remote has no supported change-request provider.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Origin-fjärren har ingen ändringsbegäransleverantör som stöds."}}}},
+    "Threading could not prepare the merge request.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte förbereda merge requesten."}}}},
+    "Threading supports GitLab change requests on GitLab.com only.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading stöder ändringsbegäranden för GitLab endast på GitLab.com."}}}},
+    "glab is not installed or could not be launched.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "glab är inte installerat eller kunde inte startas."}}}},
+    "glab took too long to answer.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "glab tog för lång tid på sig att svara."}}}},
+    "merge request": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "merge request"}}}},
+    "merge requests": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "merge requests"}}}},
+    "pull request": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "pull request"}}}},
+    "pull requests": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "pull requests"}}}},
+    "A %@ draft is already being written.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett utkast till %@ skrivs redan."}}}},
+    "Codex returned no %@ draft.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Codex returnerade inget utkast till %@."}}}},
+    "Drafting the %@ timed out.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tidsgränsen nåddes när %@ skulle skrivas."}}}},
+    "Its checkout no longer has a supported change-request remote.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dess checkout har inte längre en fjärr för ändringsbegäranden som stöds."}}}},
+    "Open a change request when finished": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna en ändringsbegäran när arbetet är klart"}}}},
+    "Review: Draft %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Granskning: Utkast till %@"}}}},
+    "Review: Ready %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Granskning: %@ redo"}}}},
     "An update check is already running.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En uppdateringskontroll pågår redan." } } }

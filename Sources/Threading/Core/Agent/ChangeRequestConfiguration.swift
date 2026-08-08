@@ -12,24 +12,47 @@ enum ChangeRequestPublishPolicy: String, Codable, CaseIterable, Sendable {
     case pushOnly
 
     var title: String {
+        title(for: .github)
+    }
+
+    func title(for provider: SourceControlProvider) -> String {
         switch self {
         case .reviewBeforePublishing: return L10n.string("Review before publishing")
-        case .createDraft: return L10n.string("Create draft pull request")
-        case .createReady: return L10n.string("Create ready pull request")
-        case .pushOnly: return L10n.string("Never create pull requests")
+        case .createDraft:
+            return L10n.format("Create draft %@", provider.changeRequestName)
+        case .createReady:
+            return L10n.format("Create ready %@", provider.changeRequestName)
+        case .pushOnly:
+            return L10n.format("Never create %@", provider.changeRequestPluralName)
         }
     }
 
     var explanation: String {
+        explanation(for: .github)
+    }
+
+    func explanation(for provider: SourceControlProvider) -> String {
         switch self {
         case .reviewBeforePublishing:
-            return L10n.string("Git Review lets you edit the pull request title and description first.")
+            return L10n.format(
+                "Git Review lets you edit the %@ title and description first.",
+                provider.changeRequestName
+            )
         case .createDraft:
-            return L10n.string("Git Review creates a draft pull request when you press Create.")
+            return L10n.format(
+                "Git Review creates a draft %@ when you press Create.",
+                provider.changeRequestName
+            )
         case .createReady:
-            return L10n.string("Git Review creates a ready pull request when you press Create.")
+            return L10n.format(
+                "Git Review creates a ready %@ when you press Create.",
+                provider.changeRequestName
+            )
         case .pushOnly:
-            return L10n.string("Git Review may push the branch, then stops there.")
+            return L10n.format(
+                "Git Review may push this project's branch, but never creates a %@.",
+                provider.changeRequestName
+            )
         }
     }
 }

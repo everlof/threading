@@ -5,7 +5,7 @@ struct ChangeRequestDraftText: Equatable, Sendable, Codable {
     var body: String
 }
 
-/// Writes title/body copy for the pull-request editor with a read-only Codex run.
+/// Writes title/body copy for the change-request editor with a read-only Codex run.
 ///
 /// Its output is only text. The type has no provider client and no publish method, which makes
 /// "AI drafts; a person publishes" an architectural boundary rather than a promise in copy.
@@ -17,14 +17,26 @@ enum ChangeRequestTextComposer {
         case exitedAbnormally(Int32)
         case noAnswer
 
-        var message: String {
+        func message(for provider: SourceControlProvider) -> String {
             switch self {
-            case .alreadyRunning: return L10n.string("A pull request draft is already being written.")
+            case .alreadyRunning:
+                return L10n.format(
+                    "A %@ draft is already being written.",
+                    provider.changeRequestName
+                )
             case .launchFailed: return L10n.string("Codex could not be launched.")
-            case .timedOut: return L10n.string("Drafting the pull request timed out.")
+            case .timedOut:
+                return L10n.format(
+                    "Drafting the %@ timed out.",
+                    provider.changeRequestName
+                )
             case .exitedAbnormally(let status):
                 return L10n.format("Codex exited with status %lld.", Int64(status))
-            case .noAnswer: return L10n.string("Codex returned no pull request draft.")
+            case .noAnswer:
+                return L10n.format(
+                    "Codex returned no %@ draft.",
+                    provider.changeRequestName
+                )
             }
         }
 
@@ -49,6 +61,7 @@ enum ChangeRequestTextComposer {
     static func run(
         seed: ChangeRequestProposalSeed,
         in root: URL,
+        provider: SourceControlProvider,
         completion: @escaping @MainActor @Sendable (
             Result<ChangeRequestDraftText, ComposeError>
         ) -> Void
@@ -67,7 +80,7 @@ enum ChangeRequestTextComposer {
         runningRoots.insert(root.path)
         let plan = AgentLauncher.codexResearchPlan(
             in: root.path,
-            prompt: prompt(seed: seed)
+            prompt: prompt(seed: seed, provider: provider)
         )
 
         queue.async {
@@ -100,9 +113,12 @@ enum ChangeRequestTextComposer {
         }
     }
 
-    static func prompt(seed: ChangeRequestProposalSeed) -> String {
+    static func prompt(
+        seed: ChangeRequestProposalSeed,
+        provider: SourceControlProvider = .github
+    ) -> String {
         var sections = [
-            "Draft a pull request title and body for the committed branch diff below.",
+            "Draft a \(provider.changeRequestName) title and body for the committed branch diff below.",
             "Return JSON only in this exact shape: {\"title\":\"...\",\"body\":\"...\"}. "
                 + "Do not publish anything. Keep the title concise and make the body useful to a reviewer."
         ]
@@ -136,8 +152,8 @@ enum ChangeRequestTextComposer {
         draft.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.title.isEmpty else { return nil }
-        draft.title = String(draft.title.prefix(GitHubPullRequestDefaults.titleLimit))
-        draft.body = String(draft.body.prefix(GitHubPullRequestDefaults.bodyLimit))
+        draft.title = String(draft.title.prefix(ChangeRequestDefaults.titleLimit))
+        draft.body = String(draft.body.prefix(ChangeRequestDefaults.bodyLimit))
         return draft
     }
 

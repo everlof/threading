@@ -50,13 +50,14 @@ final class ManagedWorkspaceGitHubE2ETests: XCTestCase {
         )).trimmingCharacters(in: .whitespacesAndNewlines)
 
         let github = GitHubPullRequestClient.live()
-        let result = try await ManagedWorkspacePublisher(github: github).publish(workspace)
+        let providers = ChangeRequestProviderRegistry.githubFixture(github)
+        let result = try await ManagedWorkspacePublisher(providers: providers).publish(workspace)
         XCTAssertTrue(result.wasCreated)
         XCTAssertEqual(result.finalCommit, fixture.headRevision)
         XCTAssertEqual(result.changeRequest.repository, GitHubE2EDefaults.repository)
         XCTAssertEqual(result.changeRequest.branch, fixture.headBranch)
         XCTAssertTrue(result.changeRequest.isDraft)
-        XCTAssertNotNil(result.credentialTier)
+        XCTAssertNotNil(result.credentialSource)
         fixture.pullNumber = result.changeRequest.number
 
         var recorded = workspace
@@ -83,7 +84,7 @@ final class ManagedWorkspaceGitHubE2ETests: XCTestCase {
         )
         XCTAssertEqual(publishedRevision, result.finalCommit)
 
-        let cleaner = ManagedWorkspaceRemoteCleaner(github: github)
+        let cleaner = ManagedWorkspaceRemoteCleaner(providers: providers)
         let openOutcome = await cleaner.reconcile(sessionID: sessionID, workspace: completed)
         XCTAssertEqual(openOutcome, .waiting)
         let openRevision = try await ChangeRequestGit.remoteRevision(

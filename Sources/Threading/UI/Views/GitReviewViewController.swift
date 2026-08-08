@@ -281,9 +281,9 @@ final class GitReviewViewController: NSViewController {
     /// it, so it never outlives the thing it is about.
     var notice: (text: String, isError: Bool)?
 
-    /// Pull-request state is loaded beside the diff, but has its own generation and task: a
+    /// Change-request state is loaded beside the diff, but has its own generation and task: a
     /// network answer from the old branch must not repaint the newly checked-out one.
-    let changeRequestClient: GitHubPullRequestClient
+    let changeRequestProviders: ChangeRequestProviderRegistry
     var changeRequestLocalState: ChangeRequestLocalState?
     var changeRequestRepositoryStatus: ChangeRequestRepositoryStatus?
     var changeRequestFailureMessage: String?
@@ -303,18 +303,20 @@ final class GitReviewViewController: NSViewController {
 
     // MARK: - Initialization
 
+    /// One initializer: the turn selection the durable-checkpoint work introduced, and the
+    /// provider registry the GitLab work introduced, are independent injections and both default.
     init(
         sessionID: SessionID,
         folderPath: String,
         mode: GitReviewMode,
         selectedTurnID: GitTurnCheckpointID? = nil,
-        changeRequestClient: GitHubPullRequestClient? = nil
+        changeRequestProviders: ChangeRequestProviderRegistry? = nil
     ) {
         self.sessionID = sessionID
         self.folderPath = folderPath
         self.mode = mode
         self.selectedTurnID = selectedTurnID
-        self.changeRequestClient = changeRequestClient ?? .live()
+        self.changeRequestProviders = changeRequestProviders ?? .live()
         super.init(nibName: nil, bundle: nil)
     }
 

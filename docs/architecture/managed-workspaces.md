@@ -4,7 +4,8 @@ The opt-in session checkout: progressive disclosure in the composer, detached Gi
 execution-directory routing, and safe local delivery.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index. Also read
-[git.md](git.md), [sessions.md](sessions.md), and [mcp-and-display.md](mcp-and-display.md).
+[git.md](git.md), [source-control.md](source-control.md), [sessions.md](sessions.md), and
+[mcp-and-display.md](mcp-and-display.md).
 
 ## Product contract
 
@@ -27,12 +28,13 @@ Publishing is a separate, nested decision. The local delivery modes are:
 - **Keep workspace for review** — archive the session but deliberately retain the checkout.
 
 When the selected repository has a supported review provider, enabling the workspace reveals a
-second **Open a pull request when finished** checkbox. That checkbox is off by default;
+second **Open a change request when finished** checkbox. That checkbox is off by default;
 while it is off, its draft/ready setting is absent from the view hierarchy just like the local
 delivery controls are while isolation is off. Enabling publication replaces the local delivery
 choice with a Draft/Ready choice because the remote review, rather than the source checkout, is
-the delivery target. GitHub is the first adapter, while the stored receipt and lifecycle types
-remain provider-neutral for a future GitLab merge-request adapter.
+the delivery target. GitHub pull requests and GitLab.com merge requests both travel through the
+same provider boundary. The stored receipt and lifecycle types remain provider-neutral; a
+recognisable self-hosted GitLab remote is refused explicitly rather than treated as GitLab.com.
 
 ## Lifecycle
 
@@ -148,9 +150,10 @@ needed: the publication opt-in authorized this one opaque app-owned ref, and cle
 after its review finishes is the disposal half of the same promise.
 
 The reconciler reads the review by its durable number so closed reviews remain visible. Only a
-closed or merged review advances to Git. That lifecycle request bypasses the local URL cache:
-GitHub marks it cacheable for 60 seconds, and a cached closed response must not authorize
-deletion after a review was reopened. `ls-remote` must still report the exact published commit.
+closed or merged review advances to Git. The provider lifecycle read must be fresh: GitHub's
+transport bypasses its normal URL cache, and GitLab asks `glab api` directly. A cached closed
+response must not authorize deletion after a review was reopened. `ls-remote` must still report
+the exact published commit.
 Deletion uses `--force-with-lease=<ref>:<published commit>` and verifies absence
 afterwards, so a ref moved between the read and write is preserved. Provider-side automatic
 deletion records `alreadyAbsent`; a branch or review whose identity changed records
@@ -187,7 +190,9 @@ shipping provider merely to make its transport deterministic in tests.
 The suite covers the durable local states (`active`, `integrated`, `kept`, `needsAttention` and
 `published`) and the remote cleanup outcomes (`waiting`, `deleted`, `alreadyAbsent` and
 `ownershipLost`). Publication uses production Git commands against a local bare remote plus a
-fixed GitHub HTTP responder, including an exact-revision lease check before branch deletion.
+fixed provider responder: GitHub's HTTP fixture preserves its existing path, while the GitLab
+fixture records authenticated CLI requests and proves one merge-request POST. The cleanup
+scenarios separately prove the shared exact-revision lease check before branch deletion.
 
 Most scenarios prove provisioning, the process working directory, Git handoff, local delivery,
 publication and disposal directly. Their final output line models the fixture asking to archive,
@@ -201,9 +206,11 @@ lifecycle relay, turn-end scheduler and `SessionCoordinator` then integrate the 
 the session and dispose the worktree. The override cannot replace an existing controller and is
 removed on discard, so it cannot become an agent identity, capability, or Draft setting.
 
-These local tests deliberately stop at the provider boundary. The live test below proves the
-real GitHub transport and credentials; a local bare remote or fixed responder cannot prove that
-GitHub accepted a pull request or enforced its review lifecycle.
+These local tests deliberately stop at real hosted accounts. The live test below proves the real
+GitHub transport and credentials; a local bare remote or fixed adapter cannot prove that a forge
+accepted a change request or enforced its review lifecycle. GitLab coverage exercises the real
+`glab api` invocation contract through an injected process boundary without reading or spending a
+developer's GitLab credentials.
 
 ## Live GitHub proof
 

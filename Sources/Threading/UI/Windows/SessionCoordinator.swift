@@ -251,7 +251,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                         repository: result.changeRequest.repository,
                         branch: result.changeRequest.branch,
                         url: result.changeRequest.url,
-                        credentialTier: result.credentialTier
+                        credentialSource: result.credentialSource
                     ))
                 }
 

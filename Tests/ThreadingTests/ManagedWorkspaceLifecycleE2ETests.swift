@@ -335,7 +335,9 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
         )
         XCTAssertEqual(publishedRevision, published.finalCommit)
 
-        let cleaner = ManagedWorkspaceRemoteCleaner(github: published.github(state: "open"))
+        let cleaner = ManagedWorkspaceRemoteCleaner(
+            providers: .githubFixture(published.github(state: "open"))
+        )
         let outcome = await cleaner.reconcile(
             sessionID: published.sessionID,
             workspace: published.workspace
@@ -347,11 +349,96 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
         XCTAssertEqual(retainedRevision, published.finalCommit)
     }
 
+    func testGitLabManagedPublicationPushesDeterministicallyAndCreatesOneMergeRequest() async throws {
+        let gitlabRemote = "git@gitlab.com:fixture/managed-workspace.git"
+        let repository = try ManagedWorkspaceScenarioRepository(
+            withRemote: true,
+            remoteIdentity: gitlabRemote
+        )
+        defer { repository.remove() }
+
+        let sessionID = SessionID()
+        let workspace = try repository.provision(
+            sessionID: sessionID,
+            plan: ManagedWorkspacePlan(publication: .draft)
+        )
+        _ = try ManagedWorkspaceFixtureAgent.run(.commit, in: workspace.executionURL)
+        let snapshot = try ManagedGitWorkspace.publicationSnapshot(for: workspace)
+        XCTAssertEqual(snapshot.repository.provider, .gitlab)
+
+        let recorder = GitLabInvocationRecorder()
+        let gitlab = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            if invocation.arguments.first == "auth" {
+                return GitLabCLIResult(status: 0, output: Data(), diagnostic: "")
+            }
+            let endpoint = invocation.arguments.last ?? ""
+            let methodIndex = invocation.arguments.firstIndex(of: "--method")
+            let method = methodIndex.flatMap { index in
+                invocation.arguments.indices.contains(index + 1)
+                    ? invocation.arguments[index + 1]
+                    : nil
+            } ?? ""
+            let output: Data
+            switch (method, endpoint) {
+            case ("GET", "projects/fixture%2Fmanaged-workspace"):
+                output = Data(#"{"default_branch":"main","http_url_to_repo":"https://gitlab.com/fixture/managed-workspace.git","ssh_url_to_repo":"git@gitlab.com:fixture/managed-workspace.git"}"#.utf8)
+            case ("GET", "projects/fixture%2Fmanaged-workspace/merge_requests"):
+                output = Data("[]".utf8)
+            case ("GET", "projects/fixture%2Fmanaged-workspace/repository/commits/\(snapshot.finalCommit)/statuses"):
+                output = Data("[]".utf8)
+            case ("POST", "projects/fixture%2Fmanaged-workspace/merge_requests"):
+                output = Data("""
+                {
+                  "iid": 42,
+                  "title": "Draft: Fixture agent change",
+                  "description": "Deterministic managed-workspace fixture",
+                  "web_url": "https://gitlab.com/fixture/managed-workspace/-/merge_requests/42",
+                  "state": "opened",
+                  "draft": true,
+                  "source_branch": "\(snapshot.branch)",
+                  "target_branch": "main",
+                  "sha": "\(snapshot.finalCommit)",
+                  "merged_at": null,
+                  "reviewers": []
+                }
+                """.utf8)
+            default:
+                return GitLabCLIResult(status: 1, output: Data(), diagnostic: "missing fixture")
+            }
+            return GitLabCLIResult(status: 0, output: output, diagnostic: "")
+        }
+        let github = Self.github(
+            branch: snapshot.branch,
+            revision: snapshot.finalCommit,
+            state: "open"
+        )
+        let providers = ChangeRequestProviderRegistry(github: github, gitlab: gitlab)
+
+        let result = try await ManagedWorkspacePublisher(providers: providers).publish(workspace)
+
+        XCTAssertTrue(result.wasCreated)
+        XCTAssertEqual(result.finalCommit, snapshot.finalCommit)
+        XCTAssertEqual(result.changeRequest.provider, "gitlab")
+        XCTAssertEqual(result.changeRequest.repository, "fixture/managed-workspace")
+        XCTAssertEqual(result.changeRequest.branch, snapshot.branch)
+        XCTAssertEqual(result.changeRequest.number, 42)
+        XCTAssertEqual(result.credentialSource, .glabCLI)
+        XCTAssertEqual(
+            recorder.snapshot().filter { $0.arguments.contains("POST") }.count,
+            1
+        )
+        let remoteRevision = try await repository.remoteRevision(of: snapshot.branch)
+        XCTAssertEqual(remoteRevision, snapshot.finalCommit)
+    }
+
     func testClosedReviewLeaseDeletesItsExactGeneratedBranch() async throws {
         let published = try await makePublishedFixture()
         defer { published.repository.remove() }
 
-        let cleaner = ManagedWorkspaceRemoteCleaner(github: published.github(state: "closed"))
+        let cleaner = ManagedWorkspaceRemoteCleaner(
+            providers: .githubFixture(published.github(state: "closed"))
+        )
         let outcome = await cleaner.reconcile(
             sessionID: published.sessionID,
             workspace: published.workspace
@@ -373,7 +460,9 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             ifRevisionIs: published.finalCommit,
             in: published.repository.source
         )
-        let cleaner = ManagedWorkspaceRemoteCleaner(github: published.github(state: "closed"))
+        let cleaner = ManagedWorkspaceRemoteCleaner(
+            providers: .githubFixture(published.github(state: "closed"))
+        )
         let outcome = await cleaner.reconcile(
             sessionID: published.sessionID,
             workspace: published.workspace
@@ -400,10 +489,12 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
             "push", "origin", "\(advanced):refs/heads/\(published.branch)"
         )
 
-        let cleaner = ManagedWorkspaceRemoteCleaner(github: published.github(
-            state: "closed",
-            reportedRevision: published.finalCommit
-        ))
+        let cleaner = ManagedWorkspaceRemoteCleaner(
+            providers: .githubFixture(published.github(
+                state: "closed",
+                reportedRevision: published.finalCommit
+            ))
+        )
         let outcome = await cleaner.reconcile(
             sessionID: published.sessionID,
             workspace: published.workspace
@@ -435,7 +526,9 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
                 revision: snapshot.finalCommit,
                 state: "open"
             )
-            let result = try await ManagedWorkspacePublisher(github: github).publish(workspace)
+            let result = try await ManagedWorkspacePublisher(
+                providers: .githubFixture(github)
+            ).publish(workspace)
 
             var recorded = workspace
             recorded.finalCommit = result.finalCommit
@@ -569,7 +662,10 @@ private final class ManagedWorkspaceScenarioRepository {
     let workspaces: URL
     let remote: URL
 
-    init(withRemote: Bool = false) throws {
+    init(
+        withRemote: Bool = false,
+        remoteIdentity: String = ManagedWorkspaceScenarioRepository.remoteIdentity
+    ) throws {
         container = FileManager.default.temporaryDirectory.appendingPathComponent(
             "ThreadingManagedLifecycle-\(UUID().uuidString)",
             isDirectory: true
@@ -597,11 +693,11 @@ private final class ManagedWorkspaceScenarioRepository {
 
         if withRemote {
             _ = try GitProcess.run(["init", "--quiet", "--bare", remote.path], in: container)
-            _ = try GitProcess.run(["remote", "add", "origin", Self.remoteIdentity], in: source)
+            _ = try GitProcess.run(["remote", "add", "origin", remoteIdentity], in: source)
             _ = try GitProcess.run([
                 "config",
                 "url.\(remote.absoluteString).insteadOf",
-                Self.remoteIdentity
+                remoteIdentity
             ], in: source)
             _ = try GitProcess.run(["push", "--quiet", "-u", "origin", "main"], in: source)
         }

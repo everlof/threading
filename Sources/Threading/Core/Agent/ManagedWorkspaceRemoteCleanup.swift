@@ -12,15 +12,15 @@ enum ManagedWorkspaceRemoteCleanupOutcome: Equatable, Sendable {
 /// repository root supplies Git's remote configuration, while the durable publication receipt
 /// supplies every identity that must agree before the generated ref can be touched.
 struct ManagedWorkspaceRemoteCleaner: Sendable {
-    private let github: GitHubPullRequestClient
+    private let providers: ChangeRequestProviderRegistry
 
-    init(github: GitHubPullRequestClient) {
-        self.github = github
+    init(providers: ChangeRequestProviderRegistry) {
+        self.providers = providers
     }
 
     @MainActor
     static func live() -> Self {
-        Self(github: .live())
+        Self(providers: .live())
     }
 
     func reconcile(
@@ -40,7 +40,7 @@ struct ManagedWorkspaceRemoteCleaner: Sendable {
 
         guard let remote = GitInfo.remoteOriginURL(for: workspace.repositoryRoot),
               let repository = ChangeRequestRepository.supported(remote: remote),
-              repository.provider == receipt.provider,
+              repository.provider.rawValue == receipt.provider,
               repository.slug.caseInsensitiveCompare(receipt.repository) == .orderedSame else {
             return .failed(L10n.string(
                 "Threading could not match the published review to this repository’s origin remote."
@@ -48,7 +48,7 @@ struct ManagedWorkspaceRemoteCleaner: Sendable {
         }
 
         let review: ChangeRequestLifecycle
-        switch await github.lifecycle(repository: repository, number: receipt.number) {
+        switch await providers.lifecycle(repository: repository, number: receipt.number) {
         case .loaded(let lifecycle):
             review = lifecycle
         case .failed(let message):

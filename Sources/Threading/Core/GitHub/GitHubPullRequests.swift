@@ -1,124 +1,5 @@
 import Foundation
 
-// MARK: - Provider-neutral change-request model
-
-struct ChangeRequestRepository: Equatable, Sendable {
-    let provider: String
-    let host: String
-    let owner: String
-    let name: String
-
-    var slug: String { "\(owner)/\(name)" }
-
-    /// The provider adapters Threading can publish through today. Callers use this entry point
-    /// rather than reaching for the GitHub parser, so adding GitLab does not change their model
-    /// or their capability check.
-    static func supported(remote: String) -> ChangeRequestRepository? {
-        github(remote: remote)
-    }
-
-    static func github(remote: String) -> ChangeRequestRepository? {
-        guard let identity = GitRemoteIdentity(remote: remote),
-              identity.host == GitHubDefaults.webHost else { return nil }
-        let components = identity.path.split(separator: "/", omittingEmptySubsequences: true)
-        guard components.count == 2 else { return nil }
-        return ChangeRequestRepository(
-            provider: "github",
-            host: identity.host,
-            owner: String(components[0]),
-            name: String(components[1])
-        )
-    }
-}
-
-struct ChangeRequestProposal: Equatable, Sendable {
-    var title: String
-    var body: String
-    var baseBranch: String
-    var headBranch: String
-    var isDraft: Bool
-}
-
-struct ChangeRequestChecks: Equatable, Sendable {
-    enum State: String, Sendable {
-        case unavailable
-        case none
-        case pending
-        case passing
-        case failing
-    }
-
-    var state: State
-    var passed: Int
-    var pending: Int
-    var failed: Int
-
-    static let unavailable = ChangeRequestChecks(
-        state: .unavailable,
-        passed: 0,
-        pending: 0,
-        failed: 0
-    )
-}
-
-struct ChangeRequestReviews: Equatable, Sendable {
-    var approvals: Int
-    var changesRequested: Int
-    var requested: Int
-
-    static let empty = ChangeRequestReviews(approvals: 0, changesRequested: 0, requested: 0)
-}
-
-struct ChangeRequestSummary: Equatable, Sendable {
-    let number: Int
-    var title: String
-    var body: String
-    let url: URL
-    var isDraft: Bool
-    var isMerged: Bool
-    var baseBranch: String
-    var headBranch: String
-    var headRevision: String
-    var checks: ChangeRequestChecks
-    var reviews: ChangeRequestReviews
-}
-
-struct ChangeRequestRepositoryStatus: Equatable, Sendable {
-    let repository: ChangeRequestRepository
-    let defaultBranch: String
-    let branch: String
-    let pullRequest: ChangeRequestSummary?
-    let checks: ChangeRequestChecks
-}
-
-enum ChangeRequestReadOutcome: Equatable, Sendable {
-    case loaded(ChangeRequestRepositoryStatus)
-    case failed(message: String)
-}
-
-enum ChangeRequestLifecycleState: Equatable, Sendable {
-    case open
-    case closed(merged: Bool)
-}
-
-struct ChangeRequestLifecycle: Equatable, Sendable {
-    let number: Int
-    let state: ChangeRequestLifecycleState
-    let headBranch: String
-    let headRevision: String
-}
-
-enum ChangeRequestLifecycleOutcome: Equatable, Sendable {
-    case loaded(ChangeRequestLifecycle)
-    case failed(message: String)
-}
-
-enum ChangeRequestWriteOutcome: Equatable, Sendable {
-    case created(ChangeRequestSummary, tier: GitHubCredential.Tier)
-    case webForm(URL, message: String)
-    case failed(message: String)
-}
-
 // MARK: - GitHub provider
 
 /// Native GitHub pull-request discovery and creation.
@@ -127,13 +8,15 @@ enum ChangeRequestWriteOutcome: Equatable, Sendable {
 /// a transport failure: GitHub may have received it, and duplicating a pull request is worse than
 /// asking the user to inspect the repository. Credential refusals may still walk to the next
 /// tier, exactly like issue submission.
-struct GitHubPullRequestClient: Sendable {
+struct GitHubPullRequestClient: ChangeRequestProviderClient {
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
     private static let tierWalkStatuses: Set<Int> = [401, 403, 404]
 
     private let resolver: GitHubCredentialResolver?
     private let transport: Transport
+
+    let provider = SourceControlProvider.github
 
     init(
         resolver: GitHubCredentialResolver?,
@@ -148,12 +31,16 @@ struct GitHubPullRequestClient: Sendable {
         GitHubPullRequestClient(resolver: .live())
     }
 
-    /// Automatic workflows cannot spend the browser fallback. Check before pushing their
-    /// generated branch so a signed-out Mac does not gain remote state it cannot turn into the
-    /// review object the user opted into.
-    func supportsAutomaticCreation() async -> Bool {
+    func automaticCreationReadiness(
+        repository: ChangeRequestRepository
+    ) async -> ChangeRequestProviderReadiness {
         let credentials = await resolver?.orderedCredentials() ?? [.anonymous]
-        return credentials.contains { $0.token != nil }
+        guard let credential = credentials.first(where: { $0.token != nil }) else {
+            return .unavailable(message: L10n.string(
+                "Automatic review publishing requires a GitHub sign-in in Threading, gh, or Git."
+            ))
+        }
+        return .ready(credential: ChangeRequestCredentialSource(credential.tier))
     }
 
     func discover(
@@ -231,8 +118,12 @@ struct GitHubPullRequestClient: Sendable {
             repository: repository,
             defaultBranch: metadata.defaultBranch,
             branch: branch,
-            pullRequest: summary,
-            checks: resolvedChecks
+            changeRequest: summary,
+            checks: resolvedChecks,
+            cloneURLs: ChangeRequestCloneURLs(
+                https: metadata.cloneURL.flatMap(URL.init(string:)),
+                ssh: metadata.sshURL
+            )
         ))
     }
 
@@ -303,8 +194,8 @@ struct GitHubPullRequestClient: Sendable {
         }
 
         guard let body = try? JSONEncoder().encode(CreateRequest(
-            title: String(proposal.title.prefix(GitHubPullRequestDefaults.titleLimit)),
-            body: String(proposal.body.prefix(GitHubPullRequestDefaults.bodyLimit)),
+            title: String(proposal.title.prefix(ChangeRequestDefaults.titleLimit)),
+            body: String(proposal.body.prefix(ChangeRequestDefaults.bodyLimit)),
             head: proposal.headBranch,
             base: proposal.baseBranch,
             draft: proposal.isDraft
@@ -327,7 +218,7 @@ struct GitHubPullRequestClient: Sendable {
                         message: L10n.string("GitHub created the pull request, but Threading could not read its response.")
                     )
                 }
-                return .created(summary, tier: credential.tier)
+                return .created(summary, credential: ChangeRequestCredentialSource(credential.tier))
 
             case .refused(let status, let data):
                 if status == 401 { await resolver?.invalidate(credential.tier) }
@@ -501,7 +392,7 @@ struct GitHubPullRequestClient: Sendable {
         var components = URLComponents()
         components.scheme = "https"
         components.host = GitHubDefaults.apiHost
-        components.path = "/repos/\(repository.owner)/\(repository.name)\(suffix)"
+        components.path = "/repos/\(repository.namespace)/\(repository.name)\(suffix)"
         components.queryItems = query.isEmpty ? nil : query
         return components.url
     }
@@ -549,7 +440,13 @@ struct GitHubPullRequestClient: Sendable {
 
     private struct RepositoryResponse: Decodable {
         let defaultBranch: String
-        enum CodingKeys: String, CodingKey { case defaultBranch = "default_branch" }
+        let cloneURL: String?
+        let sshURL: String?
+        enum CodingKeys: String, CodingKey {
+            case defaultBranch = "default_branch"
+            case cloneURL = "clone_url"
+            case sshURL = "ssh_url"
+        }
     }
 
     private struct CreateRequest: Encodable {
@@ -624,7 +521,5 @@ struct GitHubPullRequestClient: Sendable {
 }
 
 enum GitHubPullRequestDefaults {
-    static let titleLimit = 256
-    static let bodyLimit = 60_000
     static let webBodyLimit = 6_000
 }

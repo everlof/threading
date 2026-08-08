@@ -161,6 +161,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Opening a checkout or a file in another app: the registry, LaunchServices detection, line numbers, the header's split control | [`external-apps.md`](docs/architecture/external-apps.md) |
 | Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings, the usage-window poke | [`accounts.md`](docs/architecture/accounts.md) |
 | Local transcript cost/token reporting, runtime/billing provenance, scan caching, durable limit/reset history and the Usage dashboard | [`usage-dashboard.md`](docs/architecture/usage-dashboard.md) |
+| The source-control provider boundary, GitHub pull requests, GitLab merge requests, remote detection, forge capabilities and managed publication safety | [`source-control.md`](docs/architecture/source-control.md) |
 | The GitHub credential chain (app connection, `gh`, credential helper), the device-flow sign-in, filing issues from the inspector and Help ▸ Report a Problem, the `network.brokered` extension fetch and its grant rules | [`github.md`](docs/architecture/github.md) |
 | The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts, where state lives on disk and the Advanced page's resets | [`persistence.md`](docs/architecture/persistence.md) |
 | A launch that did not come back: the marker, the launch ledger and its two-step open, the crash-loop policy, held-back restoration, Recovery Mode and its one-shot launch flags | [`crash-recovery.md`](docs/architecture/crash-recovery.md) |

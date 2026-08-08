@@ -2,7 +2,9 @@
 
 Reading git metadata off disk, and the per-session review pane.
 
-Part of the [CLAUDE.md](../../CLAUDE.md) index.
+Part of the [CLAUDE.md](../../CLAUDE.md) index. Forge detection, pull/merge requests, credentials
+and managed publication live behind the separate
+[source-control provider boundary](source-control.md); this file owns local Git only.
 
 `GitInfo` reads git metadata from disk rather than shelling out. Three layouts matter, and
 only the first has a `.git` *directory*:

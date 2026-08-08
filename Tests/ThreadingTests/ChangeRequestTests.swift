@@ -22,6 +22,43 @@ final class ChangeRequestTests: XCTestCase {
         )
     }
 
+    func testProviderDetectionSupportsGitLabNamespacesAndRefusesRecognizableSelfHostedGitLab() throws {
+        let https = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(
+                remote: "https://gitlab.com/platform/mobile/client.git"
+            )
+        )
+        XCTAssertEqual(https.provider, .gitlab)
+        XCTAssertEqual(https.host, "gitlab.com")
+        XCTAssertEqual(https.namespace, "platform/mobile")
+        XCTAssertEqual(https.name, "client")
+        XCTAssertEqual(https.slug, "platform/mobile/client")
+        XCTAssertEqual(
+            ChangeRequestRepository.gitlab(
+                remote: "ssh://git@gitlab.com/platform/mobile/client.git"
+            ),
+            https
+        )
+        XCTAssertEqual(
+            ChangeRequestRepository.gitlab(
+                remote: "git@gitlab.com:platform/mobile/client.git"
+            ),
+            https
+        )
+
+        guard case .unsupported(let message) = ChangeRequestRepository.detect(
+            remote: "git@gitlab.company.test:platform/client.git"
+        ) else { return XCTFail("a recognizable self-hosted GitLab remote must be refused explicitly") }
+        XCTAssertTrue(message.contains("Self-hosted GitLab"))
+        XCTAssertEqual(
+            ChangeRequestRepository.detect(remote: "git@code.company.test:platform/client.git"),
+            .unrecognized,
+            "an arbitrary Git host must not be guessed to be GitLab"
+        )
+        XCTAssertFalse(https.capabilities.supportsSelfHosted)
+        XCTAssertFalse(https.capabilities.reportsChangesRequested)
+    }
+
     @MainActor
     func testProjectPolicyIsSharedAcrossWorktreesAndPersists() throws {
         let fixture = try repositoryWithLinkedWorktree()
@@ -78,7 +115,7 @@ final class ChangeRequestTests: XCTestCase {
     }
 
     @MainActor
-    func testPublishReceiptsAreBoundedDurableAndNameTheCredentialTier() throws {
+    func testPublishReceiptsAreBoundedDurableAndNameTheCredentialSource() throws {
         let suite = "ChangeRequestReceipts.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -90,7 +127,7 @@ final class ChangeRequestTests: XCTestCase {
             repository: "team/app",
             branch: "feature",
             url: URL(string: "https://github.com/team/app/pull/7"),
-            credentialTier: .ghCLI
+            credentialSource: .ghCLI
         ))
 
         let restored = try XCTUnwrap(
@@ -98,7 +135,7 @@ final class ChangeRequestTests: XCTestCase {
         )
         XCTAssertEqual(restored.repository, "team/app")
         XCTAssertEqual(restored.branch, "feature")
-        XCTAssertEqual(restored.credentialTier, .ghCLI)
+        XCTAssertEqual(restored.credentialSource, .ghCLI)
         XCTAssertEqual(restored.action, .createdDraft)
     }
 
@@ -123,9 +160,32 @@ final class ChangeRequestTests: XCTestCase {
             repository: "team/app",
             branch: "feature",
             url: URL(fileURLWithPath: "/private/pull-request"),
-            credentialTier: .ghCLI
+            credentialSource: .ghCLI
         )))
         XCTAssertEqual(store.receipts, [])
+    }
+
+    @MainActor
+    func testLegacyGitHubReceiptCredentialTierDecodesAsProviderCredentialSource() throws {
+        let suite = "LegacyChangeRequestReceipts.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = Data("""
+        [{
+          "date": 0,
+          "action": "createdReady",
+          "repository": "team/app",
+          "branch": "feature",
+          "credentialTier": "gh-cli"
+        }]
+        """.utf8)
+        defaults.set(legacy, forKey: "changeRequest.publishReceipts.v1")
+
+        let restored = try XCTUnwrap(
+            ChangeRequestReceiptStore(userDefaults: defaults).receipts.first
+        )
+        XCTAssertEqual(restored.credentialSource, .ghCLI)
+        XCTAssertEqual(restored.action, .createdReady)
     }
 
     // MARK: - GitHub discovery
@@ -166,7 +226,7 @@ final class ChangeRequestTests: XCTestCase {
         guard case .loaded(let status) = outcome else {
             return XCTFail("expected native pull-request state, got \(outcome)")
         }
-        let pull = try XCTUnwrap(status.pullRequest)
+        let pull = try XCTUnwrap(status.changeRequest)
         XCTAssertEqual(status.defaultBranch, "main")
         XCTAssertEqual(pull.number, 12)
         XCTAssertEqual(pull.checks.state, .passing)
@@ -277,12 +337,88 @@ final class ChangeRequestTests: XCTestCase {
             lastError: nil
         )
 
-        let outcome = await ManagedWorkspaceRemoteCleaner(github: client).reconcile(
+        let outcome = await ManagedWorkspaceRemoteCleaner(
+            providers: .githubFixture(client)
+        ).reconcile(
             sessionID: sessionID,
             workspace: workspace
         )
         XCTAssertEqual(outcome, .waiting)
         XCTAssertEqual(recorder.requests.count, 1, "an open review requires no Git write")
+    }
+
+    func testManagedRemoteCleanerRoutesAGitLabReceiptThroughTheProviderBoundary() async throws {
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-gitlab-review-cleaner-\(UUID().uuidString)")
+        let root = container.appendingPathComponent("repo")
+        let git = root.appendingPathComponent(".git")
+        try FileManager.default.createDirectory(at: git, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: container) }
+        try """
+        [remote "origin"]
+            url = git@gitlab.com:team/app.git
+        """.write(
+            to: git.appendingPathComponent("config"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sessionID = SessionID()
+        let branch = ManagedGitWorkspace.publicationBranch(for: sessionID)
+        let finalCommit = String(repeating: "a", count: 40)
+        let recorder = GitLabInvocationRecorder()
+        let gitlab = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            return GitLabCLIResult(
+                status: 0,
+                output: Self.gitlabMergeRequestBody(
+                    headBranch: branch,
+                    headRevision: finalCommit
+                ),
+                diagnostic: ""
+            )
+        }
+        let providers = ChangeRequestProviderRegistry(
+            github: GitHubPullRequestClient(resolver: resolver()),
+            gitlab: gitlab
+        )
+        let workspace = ManagedWorkspace(
+            repositoryRoot: root.path,
+            sourceCheckoutPath: root.path,
+            worktreeRoot: container.appendingPathComponent("disposed").path,
+            executionPath: container.appendingPathComponent("disposed").path,
+            targetBranch: "main",
+            baseCommit: String(repeating: "b", count: 40),
+            delivery: .mergeAndCleanUp,
+            publication: .draft,
+            remoteBranch: branch,
+            finalCommit: finalCommit,
+            changeRequest: ManagedWorkspaceChangeRequest(
+                provider: "gitlab",
+                repository: "team/app",
+                remote: "origin",
+                branch: branch,
+                number: 31,
+                url: try XCTUnwrap(
+                    URL(string: "https://gitlab.com/team/app/-/merge_requests/31")
+                ),
+                isDraft: true
+            ),
+            remoteBranchState: .awaitingReviewCompletion,
+            state: .published,
+            lastError: nil
+        )
+
+        let outcome = await ManagedWorkspaceRemoteCleaner(providers: providers).reconcile(
+            sessionID: sessionID,
+            workspace: workspace
+        )
+        XCTAssertEqual(outcome, .waiting)
+        XCTAssertEqual(recorder.snapshot().count, 1, "an open review requires no Git write")
+        XCTAssertEqual(
+            recorder.snapshot().first?.arguments.last,
+            "projects/team%2Fapp/merge_requests/31"
+        )
     }
 
     func testCreatingAPullRequestIsOneAuthenticatedPOST() async throws {
@@ -383,14 +519,225 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertTrue(recorder.requests.isEmpty, "anonymous creation is a guaranteed 401")
     }
 
-    func testAutomaticCreationRequiresANativeCredentialBeforeAnyWrite() async {
+    func testAutomaticCreationRequiresANativeCredentialBeforeAnyWrite() async throws {
         let signedOut = GitHubPullRequestClient(resolver: resolver())
         let signedIn = GitHubPullRequestClient(resolver: resolver(git: "git-token"))
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.github(remote: "git@github.com:team/app.git")
+        )
 
-        let signedOutSupported = await signedOut.supportsAutomaticCreation()
-        let signedInSupported = await signedIn.supportsAutomaticCreation()
-        XCTAssertFalse(signedOutSupported)
-        XCTAssertTrue(signedInSupported)
+        let signedOutReadiness = await signedOut.automaticCreationReadiness(
+            repository: repository
+        )
+        let signedInReadiness = await signedIn.automaticCreationReadiness(
+            repository: repository
+        )
+        guard case .unavailable = signedOutReadiness else {
+            return XCTFail("signed-out GitHub must refuse unattended publication")
+        }
+        XCTAssertEqual(signedInReadiness, .ready(credential: .gitCredential))
+    }
+
+    // MARK: - GitLab discovery and creation
+
+    func testGitLabReadinessUsesAuthenticatedCLIWithoutReadingAToken() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            return GitLabCLIResult(status: 0, output: Data(), diagnostic: "")
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+
+        let readiness = await subject.automaticCreationReadiness(repository: repository)
+        XCTAssertEqual(readiness, .ready(credential: .glabCLI))
+        XCTAssertEqual(
+            recorder.snapshot().map(\.arguments),
+            [["auth", "status", "--hostname", "gitlab.com"]]
+        )
+    }
+
+    func testGitLabReadinessFailurePreventsMergeRequestPOST() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            return GitLabCLIResult(status: 1, output: Data(), diagnostic: "not authenticated")
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+        let outcome = await subject.create(
+            repository: repository,
+            proposal: ChangeRequestProposal(
+                title: "Title",
+                body: "Body",
+                baseBranch: "main",
+                headBranch: "feature",
+                isDraft: false
+            )
+        )
+
+        guard case .failed(let message) = outcome else {
+            return XCTFail("signed-out GitLab creation must fail before a write")
+        }
+        XCTAssertTrue(message.contains("signed in"))
+        XCTAssertFalse(recorder.snapshot().contains { $0.arguments.contains("POST") })
+    }
+
+    func testGitLabDiscoveryCombinesRepositoryMergeRequestChecksAndApprovals() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            let endpoint = invocation.arguments.last ?? ""
+            let output: Data
+            switch endpoint {
+            case "projects/team%2Fapp":
+                output = Data(#"{"default_branch":"trunk","http_url_to_repo":"https://gitlab.com/team/app.git","ssh_url_to_repo":"git@gitlab.com:team/app.git"}"#.utf8)
+            case "projects/team%2Fapp/merge_requests":
+                output = Self.gitlabMergeRequestsBody()
+            case "projects/team%2Fapp/repository/commits/remote-sha/statuses":
+                output = Data(#"[{"status":"success"},{"status":"running"},{"status":"failed"}]"#.utf8)
+            case "projects/team%2Fapp/merge_requests/31/approvals":
+                output = Data(#"{"approved_by":[{"user":{"id":1}},{"user":{"id":2}}]}"#.utf8)
+            default:
+                return GitLabCLIResult(status: 1, output: Data(), diagnostic: "missing fixture")
+            }
+            return GitLabCLIResult(status: 0, output: output, diagnostic: "")
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+
+        let outcome = await subject.discover(
+            repository: repository,
+            branch: "feature",
+            headRevision: "local-sha"
+        )
+        guard case .loaded(let status) = outcome else {
+            return XCTFail("expected GitLab merge-request state, got \(outcome)")
+        }
+        let request = try XCTUnwrap(status.changeRequest)
+        XCTAssertEqual(status.defaultBranch, "trunk")
+        XCTAssertEqual(status.cloneURLs.https?.absoluteString, "https://gitlab.com/team/app.git")
+        XCTAssertEqual(status.cloneURLs.ssh, "git@gitlab.com:team/app.git")
+        XCTAssertEqual(request.number, 31)
+        XCTAssertTrue(request.isDraft)
+        XCTAssertEqual(request.headRevision, "remote-sha")
+        XCTAssertEqual(request.checks.state, .failing)
+        XCTAssertEqual(request.checks.passed, 1)
+        XCTAssertEqual(request.checks.pending, 1)
+        XCTAssertEqual(request.checks.failed, 1)
+        XCTAssertEqual(request.reviews.approvals, 2)
+        XCTAssertEqual(request.reviews.requested, 1)
+        XCTAssertEqual(request.reviews.changesRequested, 0)
+        XCTAssertTrue(recorder.snapshot().allSatisfy {
+            $0.arguments.contains("--hostname") && $0.arguments.contains("gitlab.com")
+        })
+    }
+
+    func testCreatingADraftGitLabMergeRequestUsesOneJSONPOST() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            if invocation.arguments.first == "auth" {
+                return GitLabCLIResult(status: 0, output: Data(), diagnostic: "")
+            }
+            return GitLabCLIResult(
+                status: 0,
+                output: Self.gitlabMergeRequestBody(),
+                diagnostic: ""
+            )
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "https://gitlab.com/team/app.git")
+        )
+        let outcome = await subject.create(
+            repository: repository,
+            proposal: ChangeRequestProposal(
+                title: "Add provider boundary",
+                body: "## Summary\n\n- Add GitLab",
+                baseBranch: "trunk",
+                headBranch: "feature",
+                isDraft: true
+            )
+        )
+
+        guard case .created(let request, let credential) = outcome else {
+            return XCTFail("expected GitLab to create a merge request, got \(outcome)")
+        }
+        XCTAssertEqual(request.number, 31)
+        XCTAssertEqual(credential, .glabCLI)
+        let posts = recorder.snapshot().filter { $0.arguments.contains("POST") }
+        XCTAssertEqual(posts.count, 1, "an ambiguous retry could create a duplicate MR")
+        let post = try XCTUnwrap(posts.first)
+        XCTAssertEqual(post.arguments.last, "projects/team%2Fapp/merge_requests")
+        XCTAssertTrue(post.arguments.contains("--input"))
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try XCTUnwrap(post.input)) as? [String: Any]
+        )
+        XCTAssertEqual(json["source_branch"] as? String, "feature")
+        XCTAssertEqual(json["target_branch"] as? String, "trunk")
+        XCTAssertEqual(json["title"] as? String, "Draft: Add provider boundary")
+        XCTAssertEqual(json["description"] as? String, "## Summary\n\n- Add GitLab")
+    }
+
+    func testFailedGitLabPOSTIsNeverRetried() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            if invocation.arguments.first == "auth" {
+                return GitLabCLIResult(status: 0, output: Data(), diagnostic: "")
+            }
+            return GitLabCLIResult(status: 1, output: Data(), diagnostic: "connection lost")
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+        let outcome = await subject.create(
+            repository: repository,
+            proposal: ChangeRequestProposal(
+                title: "Title",
+                body: "Body",
+                baseBranch: "main",
+                headBranch: "feature",
+                isDraft: false
+            )
+        )
+
+        guard case .failed = outcome else { return XCTFail("the ambiguous write must stop") }
+        XCTAssertEqual(
+            recorder.snapshot().filter { $0.arguments.contains("POST") }.count,
+            1
+        )
+    }
+
+    func testGitLabLifecycleUsesDurableIIDAndReportsMergedState() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            return GitLabCLIResult(
+                status: 0,
+                output: Self.gitlabMergeRequestBody(state: "merged"),
+                diagnostic: ""
+            )
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+
+        let outcome = await subject.lifecycle(repository: repository, number: 31)
+        guard case .loaded(let lifecycle) = outcome else {
+            return XCTFail("expected GitLab lifecycle, got \(outcome)")
+        }
+        XCTAssertEqual(lifecycle.number, 31)
+        XCTAssertEqual(lifecycle.state, .closed(merged: true))
+        XCTAssertEqual(lifecycle.headBranch, "feature")
+        XCTAssertEqual(lifecycle.headRevision, "remote-sha")
+        XCTAssertEqual(
+            recorder.snapshot().first?.arguments.last,
+            "projects/team%2Fapp/merge_requests/31"
+        )
     }
 
     // MARK: - AI boundary
@@ -419,6 +766,22 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Do not publish anything"))
         XCTAssertTrue(prompt.contains("Preserve and complete this repository template"))
         XCTAssertTrue(prompt.contains("diff --git"))
+    }
+
+    func testCodexPromptUsesGitLabMergeRequestTerminology() {
+        let prompt = ChangeRequestTextComposer.prompt(
+            seed: ChangeRequestProposalSeed(
+                title: "Native MRs",
+                body: "",
+                commitSubjects: [],
+                diff: "",
+                template: nil
+            ),
+            provider: .gitlab
+        )
+        XCTAssertTrue(prompt.contains("Draft a merge request title and body"))
+        XCTAssertFalse(prompt.contains("pull request"))
+        XCTAssertTrue(prompt.contains("Do not publish anything"))
     }
 
     // MARK: - Helpers
@@ -468,6 +831,32 @@ final class ChangeRequestTests: XCTestCase {
         """.utf8)
     }
 
+    private static func gitlabMergeRequestsBody() -> Data {
+        Data("[\(String(decoding: gitlabMergeRequestBody(), as: UTF8.self))]".utf8)
+    }
+
+    private static func gitlabMergeRequestBody(
+        state: String = "opened",
+        headBranch: String = "feature",
+        headRevision: String = "remote-sha"
+    ) -> Data {
+        Data("""
+        {
+          "iid": 31,
+          "title": "Draft: Native merge requests",
+          "description": "Body",
+          "web_url": "https://gitlab.com/team/app/-/merge_requests/31",
+          "state": "\(state)",
+          "draft": true,
+          "source_branch": "\(headBranch)",
+          "target_branch": "trunk",
+          "sha": "\(headRevision)",
+          "merged_at": \(state == "merged" ? "\"2026-08-08T12:00:00Z\"" : "null"),
+          "reviewers": [{"id": 7}]
+        }
+        """.utf8)
+    }
+
     private func repositoryWithLinkedWorktree() throws -> (
         container: URL,
         main: URL,
@@ -487,5 +876,33 @@ final class ChangeRequestTests: XCTestCase {
             encoding: .utf8
         )
         return (container, main, linked)
+    }
+}
+
+final class GitLabInvocationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var invocations: [GitLabCLIInvocation] = []
+
+    func record(_ invocation: GitLabCLIInvocation) {
+        lock.lock()
+        invocations.append(invocation)
+        lock.unlock()
+    }
+
+    func snapshot() -> [GitLabCLIInvocation] {
+        lock.lock()
+        defer { lock.unlock() }
+        return invocations
+    }
+}
+
+extension ChangeRequestProviderRegistry {
+    static func githubFixture(_ github: GitHubPullRequestClient) -> Self {
+        Self(
+            github: github,
+            gitlab: GitLabChangeRequestClient { _ in
+                GitLabCLIResult(status: 1, output: Data(), diagnostic: "unused GitLab fixture")
+            }
+        )
     }
 }

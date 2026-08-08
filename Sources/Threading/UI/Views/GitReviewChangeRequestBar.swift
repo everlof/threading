@@ -1,8 +1,8 @@
 import AppKit
 
-/// The native pull-request strip in Git Review: one current state, one next transition, and the
-/// repository policy beside it. It does not know GitHub or git; the controller supplies the
-/// provider-neutral reading and owns every effect.
+/// The native change-request strip in Git Review: one current state, one next transition, and the
+/// repository policy beside it. The controller supplies the provider-neutral reading and owns
+/// every effect.
 final class GitReviewChangeRequestBar: NSView {
     private let surface = ThemedSurfaceView()
     private let titleLabel = NSTextField(labelWithString: "")
@@ -10,6 +10,7 @@ final class GitReviewChangeRequestBar: NSView {
     private let statusLabel = NSTextField(labelWithString: "")
     private let policyChip = ChipView()
     private var policy: ChangeRequestPublishPolicy = .reviewBeforePublishing
+    private var provider: SourceControlProvider?
     private lazy var actionButton = ThemedButton(
         title: "",
         target: self,
@@ -18,12 +19,12 @@ final class GitReviewChangeRequestBar: NSView {
     private lazy var openButton: ThemedButton = {
         let button = ThemedButton(
             symbol: "arrow.up.right.square",
-            accessibility: L10n.string("Open pull request on GitHub"),
+            accessibility: L10n.string("Open change request"),
             target: self,
             action: #selector(openPullRequest)
         )
         button.emphasis = .tertiary
-        button.toolTip = L10n.string("Open pull request on GitHub")
+        button.toolTip = L10n.string("Open change request")
         return button
     }()
 
@@ -40,11 +41,24 @@ final class GitReviewChangeRequestBar: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func setProvider(_ provider: SourceControlProvider) {
+        self.provider = provider
+        let label = L10n.format(
+            "Open %@ on %@",
+            provider.changeRequestName,
+            provider.displayName
+        )
+        openButton.setAccessibilityLabel(label)
+        openButton.toolTip = label
+        configurePolicy(policy)
+    }
+
     func showLoading(branch: String?) {
         isHidden = false
-        titleLabel.stringValue = branch.map { L10n.format("Pull request · %@", $0) }
-            ?? L10n.string("Pull request")
-        detailLabel.stringValue = L10n.string("Reading GitHub…")
+        let requestTitle = provider?.changeRequestTitle ?? L10n.string("Change request")
+        titleLabel.stringValue = branch.map { "\(requestTitle) · \($0)" } ?? requestTitle
+        detailLabel.stringValue = provider.map { L10n.format("Reading %@…", $0.displayName) }
+            ?? L10n.string("Reading provider…")
         statusLabel.stringValue = ""
         actionButton.title = L10n.string("Loading…")
         actionButton.isEnabled = false
@@ -76,7 +90,7 @@ final class GitReviewChangeRequestBar: NSView {
 
     func showFailure(_ message: String, policy: ChangeRequestPublishPolicy) {
         configure(
-            title: L10n.string("Pull request"),
+            title: provider?.changeRequestTitle ?? L10n.string("Change request"),
             detail: message,
             status: "",
             statusColor: Design.Text.tertiary,
@@ -152,16 +166,21 @@ final class GitReviewChangeRequestBar: NSView {
 
     private func configurePolicy(_ policy: ChangeRequestPublishPolicy) {
         self.policy = policy
-        policyChip.configure(symbolName: "slider.horizontal.3", title: policy.title)
-        policyChip.toolTip = policy.explanation
-        policyChip.setAccessibilityHelp(policy.explanation)
+        let resolvedProvider = provider ?? .github
+        policyChip.configure(
+            symbolName: "slider.horizontal.3",
+            title: policy.title(for: resolvedProvider)
+        )
+        let explanation = policy.explanation(for: resolvedProvider)
+        policyChip.toolTip = explanation
+        policyChip.setAccessibilityHelp(explanation)
     }
 
     private func policyEntries() -> [ThemedMenuEntry] {
         ChangeRequestPublishPolicy.allCases.map { policy in
             .item(ThemedMenuItem(
-                title: policy.title,
-                subtitle: policy.explanation,
+                title: policy.title(for: provider ?? .github),
+                subtitle: policy.explanation(for: provider ?? .github),
                 representedValue: policy.rawValue,
                 isSelected: policy == self.policy
             ))

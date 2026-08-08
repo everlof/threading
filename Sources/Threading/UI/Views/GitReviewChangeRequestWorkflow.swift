@@ -10,7 +10,7 @@ enum GitReviewChangeRequestPrimaryAction: Equatable {
 
 /// The adaptive publish loop beside Git Review's diff: local git state, provider state, and one
 /// explicit transition at a time. The AI composer is reachable only in `.create`; it returns
-/// text to this controller and owns no route to GitHub itself.
+/// text to this controller and owns no route to a forge itself.
 extension GitReviewViewController {
 
     func setChangeRequestBarVisible(_ visible: Bool) {
@@ -39,14 +39,23 @@ extension GitReviewViewController {
                 guard !Task.isCancelled, expected == self.changeRequestGeneration else { return }
                 self.changeRequestLocalState = local
 
-                guard let repository = local.repository else {
+                let remoteDetection = ChangeRequestRepository.detect(remote: local.remote)
+                guard case .supported(let repository) = remoteDetection else {
                     self.changeRequestRepositoryStatus = nil
                     self.changeRequestFailureMessage = nil
                     self.changeRequestPrimaryAction = .none
                     self.setChangeRequestBarVisible(true)
+                    let detail: String
+                    if case .unsupported(let message) = remoteDetection {
+                        detail = message
+                    } else {
+                        detail = L10n.string(
+                            "The origin remote has no supported change-request provider."
+                        )
+                    }
                     self.changeRequestBar.configure(
-                        title: L10n.string("Pull request"),
-                        detail: L10n.string("The origin remote is not a github.com repository."),
+                        title: L10n.string("Change request"),
+                        detail: detail,
                         status: L10n.string("Unavailable"),
                         statusColor: Design.Text.tertiary,
                         actionTitle: nil,
@@ -56,6 +65,8 @@ extension GitReviewViewController {
                     )
                     return
                 }
+                self.changeRequestBar.setProvider(repository.provider)
+                self.changeRequestBar.showLoading(branch: local.branch)
 
                 let signature = "\(local.branch):\(local.headRevision)"
                 if !forceRemote,
@@ -74,7 +85,7 @@ extension GitReviewViewController {
                     return
                 }
 
-                let outcome = await self.changeRequestClient.discover(
+                let outcome = await self.changeRequestProviders.discover(
                     repository: repository,
                     branch: local.branch,
                     headRevision: local.headRevision
@@ -120,26 +131,27 @@ extension GitReviewViewController {
         setChangeRequestBarVisible(true)
 
         let policy = changeRequestConfiguration.publishPolicy
-        let pullRequest = status.pullRequest
-        let title = pullRequest.map { "#\($0.number) · \($0.title)" }
+        let request = status.changeRequest
+        let title = request.map { "#\($0.number) · \($0.title)" }
             ?? L10n.format("Publish %@", local.branch)
         var details = ["\(local.branch) → \(status.defaultBranch)"]
-        if let pullRequest {
-            if pullRequest.isDraft { details.append(L10n.string("Draft")) }
-            if pullRequest.reviews.changesRequested > 0 {
+        if let request {
+            if request.isDraft { details.append(L10n.string("Draft")) }
+            if status.capabilities.reportsChangesRequested,
+               request.reviews.changesRequested > 0 {
                 details.append(L10n.format(
                     "%lld requested changes",
-                    Int64(pullRequest.reviews.changesRequested)
+                    Int64(request.reviews.changesRequested)
                 ))
-            } else if pullRequest.reviews.approvals > 0 {
+            } else if status.capabilities.reportsApprovals, request.reviews.approvals > 0 {
                 details.append(L10n.format(
                     "%lld approvals",
-                    Int64(pullRequest.reviews.approvals)
+                    Int64(request.reviews.approvals)
                 ))
-            } else if pullRequest.reviews.requested > 0 {
+            } else if request.reviews.requested > 0 {
                 details.append(L10n.format(
                     "%lld reviewers requested",
-                    Int64(pullRequest.reviews.requested)
+                    Int64(request.reviews.requested)
                 ))
             }
         }
@@ -147,7 +159,7 @@ extension GitReviewViewController {
             details.append(L10n.string("uncommitted changes stay local"))
         }
 
-        let checkSummary = pullRequest?.checks ?? status.checks
+        let checkSummary = request?.checks ?? status.checks
         let (checkText, checkColor) = checkPresentation(checkSummary)
         let action: GitReviewChangeRequestPrimaryAction
         let actionTitle: String?
@@ -156,13 +168,13 @@ extension GitReviewViewController {
             action = .none
             actionTitle = L10n.string("Working…")
             actionEnabled = false
-        } else if pullRequest != nil, local.needsPush {
+        } else if request != nil, local.needsPush {
             action = .push
             actionTitle = L10n.string("Push update")
             actionEnabled = true
-        } else if pullRequest != nil {
+        } else if request != nil {
             action = .open
-            actionTitle = L10n.string("Open pull request")
+            actionTitle = L10n.format("Open %@", status.repository.provider.changeRequestName)
             actionEnabled = true
         } else if local.branch == status.defaultBranch {
             action = .none
@@ -182,11 +194,20 @@ extension GitReviewViewController {
             action = .create
             switch policy {
             case .reviewBeforePublishing:
-                actionTitle = L10n.string("Create pull request…")
+                actionTitle = L10n.format(
+                    "Create %@…",
+                    status.repository.provider.changeRequestName
+                )
             case .createDraft:
-                actionTitle = L10n.string("Create draft pull request")
+                actionTitle = L10n.format(
+                    "Create draft %@",
+                    status.repository.provider.changeRequestName
+                )
             case .createReady:
-                actionTitle = L10n.string("Create pull request")
+                actionTitle = L10n.format(
+                    "Create %@",
+                    status.repository.provider.changeRequestName
+                )
             case .pushOnly:
                 actionTitle = nil
                 details.append(L10n.string("Branch pushed"))
@@ -201,7 +222,7 @@ extension GitReviewViewController {
             statusColor: checkColor,
             actionTitle: actionTitle,
             actionEnabled: actionEnabled,
-            showsOpen: pullRequest != nil && action != .open,
+            showsOpen: request != nil && action != .open,
             policy: policy
         )
     }
@@ -247,7 +268,7 @@ extension GitReviewViewController {
     }
 
     func openCurrentPullRequest() {
-        guard let url = changeRequestRepositoryStatus?.pullRequest?.url else { return }
+        guard let url = changeRequestRepositoryStatus?.changeRequest?.url else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -267,7 +288,7 @@ extension GitReviewViewController {
                     repository: repository.slug,
                     branch: local.branch,
                     url: nil,
-                    credentialTier: nil
+                    credentialSource: nil
                 ))
                 self.notice = (L10n.format("Pushed %@.", local.branch), false)
                 self.show(self.phase)
@@ -286,7 +307,7 @@ extension GitReviewViewController {
     private func createCurrentPullRequest() {
         guard let local = changeRequestLocalState,
               let status = changeRequestRepositoryStatus,
-              status.pullRequest == nil,
+              status.changeRequest == nil,
               !local.needsPush,
               !isChangingRequest else { return }
         let policy = changeRequestConfiguration.publishPolicy
@@ -299,7 +320,8 @@ extension GitReviewViewController {
             do {
                 let seed = try await ChangeRequestGit.proposalSeed(
                     in: local.root,
-                    baseBranch: status.defaultBranch
+                    baseBranch: status.defaultBranch,
+                    provider: status.repository.provider
                 )
                 let proposal: ChangeRequestProposal?
                 switch policy {
@@ -309,7 +331,8 @@ extension GitReviewViewController {
                         root: local.root,
                         baseBranch: status.defaultBranch,
                         headBranch: local.branch,
-                        isDraft: true
+                        isDraft: true,
+                        provider: status.repository.provider
                     )
                 case .createDraft, .createReady:
                     proposal = ChangeRequestProposal(
@@ -327,7 +350,7 @@ extension GitReviewViewController {
                     self.renderChangeRequestBar()
                     return
                 }
-                let outcome = await self.changeRequestClient.create(
+                let outcome = await self.changeRequestProviders.create(
                     repository: status.repository,
                     proposal: proposal
                 )
@@ -352,17 +375,21 @@ extension GitReviewViewController {
     ) {
         isChangingRequest = false
         switch outcome {
-        case .created(let pullRequest, let tier):
+        case .created(let request, let credential):
             ChangeRequestReceiptStore.shared.append(ChangeRequestReceipt(
                 date: Date(),
                 action: proposal.isDraft ? .createdDraft : .createdReady,
                 repository: repository.slug,
                 branch: proposal.headBranch,
-                url: pullRequest.url,
-                credentialTier: tier
+                url: request.url,
+                credentialSource: credential
             ))
             notice = (
-                L10n.format("Created pull request #%lld.", Int64(pullRequest.number)),
+                L10n.format(
+                    "Created %@ #%lld.",
+                    repository.provider.changeRequestName,
+                    Int64(request.number)
+                ),
                 false
             )
             lastChangeRequestRead = nil

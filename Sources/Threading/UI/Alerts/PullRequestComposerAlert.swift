@@ -1,6 +1,6 @@
 import AppKit
 
-/// The editable boundary between generated pull-request copy and a GitHub write. Codex can update
+/// The editable boundary between generated change-request copy and a provider write. Codex can update
 /// the fields through `ChangeRequestTextComposer`; only the first dialog button returns a proposal
 /// to the caller that owns the provider client.
 @MainActor
@@ -10,13 +10,19 @@ enum PullRequestComposerAlert {
         root: URL,
         baseBranch: String,
         headBranch: String,
-        isDraft: Bool
+        isDraft: Bool,
+        provider: SourceControlProvider
     ) -> ChangeRequestProposal? {
-        let editor = PullRequestComposerAccessory(seed: seed, root: root, isDraft: isDraft)
+        let editor = PullRequestComposerAccessory(
+            seed: seed,
+            root: root,
+            isDraft: isDraft,
+            provider: provider
+        )
         let alert = ThemedAlert()
         alert.messageText = isDraft
-            ? L10n.string("Create draft pull request")
-            : L10n.string("Create pull request")
+            ? L10n.format("Create draft %@", provider.changeRequestName)
+            : L10n.format("Create %@", provider.changeRequestName)
         alert.informativeText = L10n.format(
             "Review what will be published from %@ into %@. Codex can edit these fields but cannot publish them.",
             headBranch,
@@ -25,7 +31,7 @@ enum PullRequestComposerAlert {
         alert.alertStyle = .informational
         alert.accessoryView = editor
         alert.initialFirstResponder = editor.titleField
-        alert.addButton(withTitle: L10n.string("Publish pull request"))
+        alert.addButton(withTitle: L10n.format("Publish %@", provider.changeRequestName))
         alert.addButton(withTitle: L10n.string("Cancel"))
 
         guard ConfirmationAlert.chosenIndex(alert.runModal(), optionCount: 1) == 0 else {
@@ -57,6 +63,7 @@ private final class PullRequestComposerAccessory: NSView {
 
     private let seed: ChangeRequestProposalSeed
     private let root: URL
+    private let provider: SourceControlProvider
 
     var title: String { titleField.stringValue }
     var body: String { bodyView.string }
@@ -64,9 +71,15 @@ private final class PullRequestComposerAccessory: NSView {
 
     private var bodyView: ThemedTextView { bodyScroll.textView }
 
-    init(seed: ChangeRequestProposalSeed, root: URL, isDraft: Bool) {
+    init(
+        seed: ChangeRequestProposalSeed,
+        root: URL,
+        isDraft: Bool,
+        provider: SourceControlProvider
+    ) {
         self.seed = seed
         self.root = root
+        self.provider = provider
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         draftToggle.state = isDraft ? .on : .off
@@ -78,12 +91,16 @@ private final class PullRequestComposerAccessory: NSView {
 
     private func setup() {
         titleField.stringValue = seed.title
-        titleField.placeholderString = L10n.string("Pull request title")
-        titleField.setAccessibilityLabel(L10n.string("Pull request title"))
+        let titleAccessibilityLabel = L10n.format("%@ title", provider.changeRequestTitle)
+        titleField.placeholderString = titleAccessibilityLabel
+        titleField.setAccessibilityLabel(titleAccessibilityLabel)
 
         bodyView.string = seed.body
         bodyView.applyFont(.body)
-        bodyView.setAccessibilityLabel(L10n.string("Pull request description"))
+        bodyView.setAccessibilityLabel(L10n.format(
+            "%@ description",
+            provider.changeRequestTitle
+        ))
         bodyScroll.applySurface(
             fill: Design.Surface.controlResting,
             radius: .control,
@@ -142,7 +159,11 @@ private final class PullRequestComposerAccessory: NSView {
     @objc private func draftWithCodex() {
         draftButton.isEnabled = false
         statusLabel.stringValue = L10n.string("Codex is drafting…")
-        ChangeRequestTextComposer.run(seed: seed, in: root) { [weak self] outcome in
+        ChangeRequestTextComposer.run(
+            seed: seed,
+            in: root,
+            provider: provider
+        ) { [weak self] outcome in
             guard let self else { return }
             self.draftButton.isEnabled = true
             switch outcome {
@@ -151,7 +172,7 @@ private final class PullRequestComposerAccessory: NSView {
                 self.bodyView.string = draft.body
                 self.statusLabel.stringValue = L10n.string("Draft ready — review it before publishing.")
             case .failure(let failure):
-                self.statusLabel.stringValue = failure.message
+                self.statusLabel.stringValue = failure.message(for: self.provider)
                 self.statusLabel.textColor = Design.Status.negative
             }
         }

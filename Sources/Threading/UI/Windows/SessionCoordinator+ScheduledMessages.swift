@@ -226,7 +226,7 @@ extension SessionCoordinator {
             guard let targetProject = ProjectStore.shared.project(withID: targetProjectID),
                   ManagedWorkspaceEligibility.supportsPublication(from: targetProject) else {
                 return finish(message, failedBecause: L10n.string(
-                    "Its checkout no longer has a supported pull-request remote."
+                    "Its checkout no longer has a supported change-request remote."
                 ))
             }
         }

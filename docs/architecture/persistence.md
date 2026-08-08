@@ -171,6 +171,15 @@ same streaming one-byte-past-limit boundary; encoded values over the declared po
 before replacement. Criticality still decides whether an unreadable predecessor is quarantined or
 a cache is discarded. Size and recovery value are separate facts, so adding a store cannot make it
 unbounded merely by choosing the right preservation behaviour.
+Change-request publication evidence is another intentionally small defaults-backed store.
+`ChangeRequestReceiptStore` keeps at most 100 newest receipts under the versioned
+`changeRequest.publishReceipts.v1` key. Its record is provider-neutral: repository, branch, URL,
+action and `ChangeRequestCredentialSource`, not a GitHub token type or provider response. The
+decoder accepts the original `credentialTier` key and maps its existing values before all new
+writes use `credentialSource`; adding GitLab therefore does not erase or strand earlier GitHub
+receipts. Managed-workspace publication also persists its richer provider-neutral receipt inside
+the session model before local worktree disposal; see
+[source-control.md](source-control.md) and [managed-workspaces.md](managed-workspaces.md).
 
 A related ordering trap lives one layer up. `AppSettings`'s **`nonisolated static` readers go
 straight to `UserDefaults.standard`**, while the seeded defaults were registered only in its
