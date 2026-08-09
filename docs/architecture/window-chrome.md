@@ -261,10 +261,21 @@ workspace at once, so `syncDisplayPane` and the drawer's session swap pass `anim
 a change of state.
 
 The panel's reveal keeps its width choreography on this route: the stored width is read while
-the pane is still shut, the reveal animates the item out, and the completion makes the width
-the divider's own answer through `applyDisplayPaneWidth` — the only holder that survives the
-next layout pass — with `isRestoringDisplayPaneWidth` now held for exactly the transition
-instead of a guessed two turns.
+the pane is still shut, then `geometryChanges` makes that width the divider's own answer inside
+the same animation group that reveals the item. That is the only holder that survives the next
+layout pass, and it avoids a reveal to the chrome floor followed by a second transition to the
+remembered width. `isRestoringDisplayPaneWidth` is held for exactly that one transition instead
+of a guessed two turns.
+
+**The terminal's pixel frame moves; its character grid does not chase the animation.** A split
+animation beside a full-screen Codex or Claude TUI used to turn each intermediate width into an
+emulator reflow, PTY resize, SIGWINCH and process repaint. For a visible animated pane,
+`MainWindowController` brackets the motion with
+`EmojiFixedTerminalView.beginDeferringFrameGridChanges()` / `endDeferringFrameGridChanges()`.
+The terminal remembers only the final natural grid and applies it once after the split settles.
+The hold nests when the user reverses the pane before the first motion completes, and a remote
+grid remains authoritative if phone control begins in the middle. Immediate, off-screen and
+session-switch routes still resize once without a hold.
 
 ### How a sidebar row arrives, leaves and moves
 

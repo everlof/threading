@@ -154,13 +154,16 @@ final class SidebarSplitViewController: NSSplitViewController {
     /// is what lets every `isCollapsed` read stay ignorant of whether a transition is in
     /// flight.
     ///
-    /// `completion` runs with `paneTransitionDidComplete`, after the split view has committed
-    /// its final frames — `PaneTransition.run`'s deferred-turn contract plus one explicit
-    /// layout pass, because the animation's own completion fires a frame too early to measure.
+    /// `geometryChanges` lets a caller place the revealed pane at its stable divider position
+    /// inside the same group as the collapse state. `completion` runs with
+    /// `paneTransitionDidComplete`, after the split view has committed its final frames —
+    /// `PaneTransition.run`'s deferred-turn contract plus one explicit layout pass, because the
+    /// animation's own completion fires a frame too early to measure.
     func setCollapsed(
         _ collapsed: Bool,
         on item: NSSplitViewItem,
         animated: Bool = true,
+        geometryChanges: (() -> Void)? = nil,
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
         PaneTransition.run(
@@ -169,9 +172,13 @@ final class SidebarSplitViewController: NSSplitViewController {
             changes: {
                 item.isCollapsed = collapsed
                 paneCollapseStateDidChange?(item, collapsed)
+                geometryChanges?()
             },
             completion: { [weak self] in
-                guard let self else { return }
+                guard let self else {
+                    completion?()
+                    return
+                }
                 self.splitView.layoutSubtreeIfNeeded()
                 self.paneTransitionDidComplete?(item, collapsed)
                 completion?()

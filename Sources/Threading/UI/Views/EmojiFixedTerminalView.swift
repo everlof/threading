@@ -27,6 +27,13 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     private(set) var remoteGrid: (cols: Int, rows: Int)?
     private var localGridBeforeRemoteControl: (cols: Int, rows: Int)?
     private var deferredLocalGrid: (cols: Int, rows: Int)?
+    private var frameGridDeferralDepth = 0
+    private var deferredFrameGrid: (cols: Int, rows: Int)?
+
+    /// Diagnostic seam for the CLI resize fixtures. Called only when the view's pixel frame
+    /// implies a different character grid, with whether that resize will reach the emulator.
+    /// Nil in production, so ordinary terminal layout pays one predictable branch.
+    var onFrameGridChangeDecision: ((Int, Int, Bool) -> Void)?
 
     /// Holds the terminal's context menu while it is up; released from its own dismissal.
     private var contextMenuSession: AnyObject?
@@ -288,13 +295,63 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// frame, wiped the scrolling region out from under a full-screen agent and left its status
     /// footer drawn twice at two different widths.
     override func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
-        guard remoteGrid != nil else { return true }
-        if newCols > 0, newRows > 0 {
-            // Remember what the Mac would have chosen while the phone owned the process. This
-            // means resizing the window during remote control restores the *new* desktop grid.
-            deferredLocalGrid = (newCols, newRows)
+        if remoteGrid != nil {
+            if newCols > 0, newRows > 0 {
+                // Remember what the Mac would have chosen while the phone owned the process. This
+                // means resizing the window during remote control restores the *new* desktop grid.
+                deferredLocalGrid = (newCols, newRows)
+            }
+            onFrameGridChangeDecision?(newCols, newRows, false)
+            return false
         }
-        return false
+
+        if frameGridDeferralDepth > 0 {
+            if newCols > 0, newRows > 0 {
+                // Keep only the final frame. A pane animation can propose a dozen widths; the
+                // child process only needs the stable one that remains when the motion ends.
+                deferredFrameGrid = (newCols, newRows)
+            }
+            onFrameGridChangeDecision?(newCols, newRows, false)
+            return false
+        }
+
+        onFrameGridChangeDecision?(newCols, newRows, true)
+        return true
+    }
+
+    /// Holds a known geometry transition on the terminal's current character grid.
+    ///
+    /// AppKit still animates the view's pixel frame, but SwiftTerm does not reflow, soft-reset,
+    /// send SIGWINCH, and provoke a full-screen TUI repaint at every intermediate frame. The
+    /// final natural grid is applied exactly once by `endDeferringFrameGridChanges()`.
+    /// Nesting matters when a quick second pane action begins before the first completion drains.
+    func beginDeferringFrameGridChanges() {
+        frameGridDeferralDepth += 1
+    }
+
+    func endDeferringFrameGridChanges() {
+        guard frameGridDeferralDepth > 0 else { return }
+        frameGridDeferralDepth -= 1
+        guard frameGridDeferralDepth == 0, let deferredFrameGrid else { return }
+        self.deferredFrameGrid = nil
+
+        // A phone may have taken ownership while the pane was moving. Its grid remains in force;
+        // remember the Mac's stable answer for when that lease ends instead of overriding it.
+        if remoteGrid != nil {
+            deferredLocalGrid = deferredFrameGrid
+            return
+        }
+
+        let current = getTerminal().getDims()
+        guard current.cols != deferredFrameGrid.cols || current.rows != deferredFrameGrid.rows else {
+            return
+        }
+
+        // Re-enter SwiftTerm through its frame-derived route at the frame already on screen.
+        // Besides the emulator and PTY, that route invalidates search/accessibility state and
+        // updates its scroller; calling `resize` directly would quietly skip those owners.
+        let stableFrame = frame
+        frame = stableFrame
     }
 
     /// The second gate, on the PTY rather than the renderer: a grid that reaches the child

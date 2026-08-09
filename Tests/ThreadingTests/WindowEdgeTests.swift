@@ -26,6 +26,12 @@ final class WindowEdgeTests: XCTestCase {
         let gridChanges: Int
     }
 
+    private struct PaneTransitionSweepResult {
+        let elapsed: UInt64
+        let acceptedGridChanges: Int
+        let refusedGridChanges: Int
+    }
+
     private enum Fixture {
         static let size = NSSize(width: 400, height: 200)
         /// The panes fill themselves, so "is this pixel a pane or the seam" has one answer.
@@ -35,6 +41,8 @@ final class WindowEdgeTests: XCTestCase {
         /// Wide enough that an open trailing pane is genuinely on screen, so the seam this
         /// test looks for is *between* the panes rather than at the window's edge again.
         static let openTrailingWidth: CGFloat = 120
+        /// A 200 ms transition at 60 Hz proposes roughly this many intermediate frames.
+        static let paneTransitionTicks = 12
     }
 
     private final class FilledPane: NSViewController {
@@ -281,6 +289,153 @@ final class WindowEdgeTests: XCTestCase {
         XCTAssertFalse(terminal.getTerminal().isCurrentBufferAlternate)
     }
 
+    /// Opens and closes the production trailing pane beside a synthetic Codex alternate-screen
+    /// terminal. Every accepted grid change queues the full-screen repaint a TUI sends after
+    /// SIGWINCH, so this catches a visually short pane transition that makes the terminal reflow
+    /// and repaint at every animation frame.
+    func testStressDisplayPaneTransitionBesideCodexWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_DISPLAY_PANE_STRESS"] == "1",
+            "Set THREADING_DISPLAY_PANE_STRESS=1 to run the display-pane transition sweep."
+        )
+
+        let cycles = ProcessInfo.processInfo.environment["THREADING_DISPLAY_PANE_STRESS_CYCLES"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 3
+        let store = ProjectStore.shared
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-display-pane-stress-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let project = store.addProject(folderURL: folder)
+        let agentSession = try XCTUnwrap(
+            store.addSession(to: project.id, kind: .codex, title: "Display pane stress")
+        )
+        let terminalController = AgentRuntime.shared.makeController(for: agentSession)
+        defer {
+            AgentRuntime.shared.discard(sessionID: agentSession.id)
+            store.removeProject(id: project.id)
+        }
+
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 1_400, height: 800))
+        controller.projectSidebar(
+            ProjectSidebarViewController(),
+            didSelectSession: agentSession.id
+        )
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let terminal = terminalController.session.terminalView
+        Self.seedClaudeScreen(terminal, historyLines: 0)
+        window.orderFront(nil)
+        window.contentView?.displayIfNeeded()
+
+        let natural = displayPaneSweep(
+            controller: controller,
+            terminal: terminal,
+            cycles: cycles,
+            freezesGrid: false
+        )
+        Self.printPaneTransitionResult(natural, grid: "natural", cycles: cycles)
+
+        let frozen = displayPaneSweep(
+            controller: controller,
+            terminal: terminal,
+            cycles: cycles,
+            freezesGrid: true
+        )
+        Self.printPaneTransitionResult(frozen, grid: "frozen", cycles: cycles)
+
+        terminal.feed(text: "\u{1b}[?1049l")
+        XCTAssertGreaterThan(natural.acceptedGridChanges, 0)
+        XCTAssertLessThanOrEqual(natural.acceptedGridChanges, cycles * 2)
+        XCTAssertGreaterThan(natural.refusedGridChanges, 0)
+        XCTAssertEqual(frozen.acceptedGridChanges, 0)
+        XCTAssertGreaterThan(frozen.refusedGridChanges, 0)
+        XCTAssertFalse(terminal.getTerminal().isCurrentBufferAlternate)
+    }
+
+    private func displayPaneSweep(
+        controller: MainWindowController,
+        terminal: EmojiFixedTerminalView,
+        cycles: Int,
+        freezesGrid: Bool
+    ) -> PaneTransitionSweepResult {
+        if freezesGrid {
+            let grid = terminal.getTerminal().getDims()
+            terminal.setRemoteGrid(cols: grid.cols, rows: grid.rows)
+        }
+
+        var accepted = 0
+        var refused = 0
+        var pendingRepaints = 0
+        let repaint = Self.claudeLikeRepaint()
+        terminal.onFrameGridChangeDecision = { _, _, applies in
+            if applies {
+                accepted += 1
+                pendingRepaints += 1
+            } else {
+                refused += 1
+            }
+        }
+
+        let repaintAcceptedGrids = {
+            // A real Codex process receives SIGWINCH after the emulator resize and answers on its
+            // PTY. Feed after the frame setter returns so the synthetic process paints the new
+            // grid, not the one `shouldApplyFrameSizeChange` was called to replace.
+            for _ in 0..<pendingRepaints { terminal.feed(text: repaint) }
+            pendingRepaints = 0
+        }
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<cycles {
+            waitForDisplayPane(controller, terminal: terminal, visible: true)
+            repaintAcceptedGrids()
+            waitForDisplayPane(controller, terminal: terminal, visible: false)
+            repaintAcceptedGrids()
+        }
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started
+        terminal.onFrameGridChangeDecision = nil
+
+        if freezesGrid {
+            terminal.clearRemoteGrid()
+        }
+        return PaneTransitionSweepResult(
+            elapsed: elapsed,
+            acceptedGridChanges: accepted,
+            refusedGridChanges: refused
+        )
+    }
+
+    private func waitForDisplayPane(
+        _ controller: MainWindowController,
+        terminal: EmojiFixedTerminalView,
+        visible: Bool
+    ) {
+        controller.setDisplayPaneVisible(visible)
+
+        // A hosted xctest process changes the split item's model state but never commits its
+        // implicit animation frames or completion. Propose the same twelve terminal widths a
+        // 200 ms transition would generate at 60 Hz, then release the production grid hold.
+        // This keeps the real controller route and Claude-like repaint workload while making the
+        // expensive part deterministic instead of timing a headless AppKit omission.
+        let initialFrame = terminal.frame
+        let travel = min(360, max(120, initialFrame.width * 0.3))
+        let finalWidth = visible
+            ? max(320, initialFrame.width - travel)
+            : initialFrame.width + travel
+        for tick in 1...Fixture.paneTransitionTicks {
+            let progress = CGFloat(tick) / CGFloat(Fixture.paneTransitionTicks)
+            var proposedFrame = initialFrame
+            proposedFrame.size.width += (finalWidth - initialFrame.width) * progress
+            terminal.frame = proposedFrame
+        }
+        terminal.endDeferringFrameGridChanges()
+    }
+
     private func resizeSweep(
         window: NSWindow,
         sizes: [NSSize],
@@ -385,6 +540,22 @@ final class WindowEdgeTests: XCTestCase {
                 + "p95_ms=\(milliseconds(percentile(0.95, in: ordered))) "
                 + "max_ms=\(milliseconds(ordered.last ?? 0)) "
                 + "over_16_7_ms=\(missed60Hz) over_33_3_ms=\(missed30Hz)"
+        )
+    }
+
+    private static func printPaneTransitionResult(
+        _ result: PaneTransitionSweepResult,
+        grid: String,
+        cycles: Int
+    ) {
+        print(
+            "THREADING_PERF display-pane-transition "
+                + "surface=codex grid=\(grid) repaint=1 cycles=\(cycles) "
+                + "ticks_per_transition=\(Fixture.paneTransitionTicks) "
+                + "accepted_grid_changes=\(result.acceptedGridChanges) "
+                + "refused_grid_changes=\(result.refusedGridChanges) "
+                + "total_ms=\(milliseconds(result.elapsed)) "
+                + "per_cycle_ms=\(milliseconds(result.elapsed / UInt64(max(cycles, 1))))"
         )
     }
 

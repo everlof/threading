@@ -966,14 +966,35 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// toggle, the pane's own ✕, a surface command. A session switch passes `animated: false`:
     /// it swaps the whole workspace, and a panel sliding during the swap would animate a change
     /// of subject as if it were a change of state.
-    func setDisplayPaneVisible(_ visible: Bool, animated: Bool = true) {
+    func setDisplayPaneVisible(
+        _ visible: Bool,
+        animated: Bool = true
+    ) {
         if !visible {
             displayPaneController.hideCurrentTheme()
         }
-        guard displayItem.isCollapsed == visible else { return }
+        guard displayItem.isCollapsed == visible else {
+            return
+        }
+
+        // A split-view animation otherwise turns every intermediate terminal width into an
+        // emulator reflow, PTY resize, SIGWINCH, and full-screen Codex/Claude repaint. Keep the
+        // current grid for the 200 ms motion and commit the stable width once at its completion.
+        // Immediate/offscreen routes already make one grid change and need no hold.
+        let terminal = animated && Design.Motion.standard > 0 && splitView.window?.isVisible == true
+            ? containerViewController.activeTerminalSession?.terminalView
+            : nil
+        terminal?.beginDeferringFrameGridChanges()
 
         guard visible else {
-            splitViewController.setCollapsed(true, on: displayItem, animated: animated)
+            splitViewController.setCollapsed(
+                true,
+                on: displayItem,
+                animated: animated,
+                completion: {
+                    terminal?.endDeferringFrameGridChanges()
+                }
+            )
             updateToolbarControlStates()
             return
         }
@@ -985,27 +1006,31 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // therefore still the full content width.
         let target = DisplayPaneWidth.opening(in: splitView.bounds.width)
         isRestoringDisplayPaneWidth = true
-        splitViewController.setCollapsed(false, on: displayItem, animated: animated) { [weak self] in
-            guard let self else { return }
+        splitViewController.setCollapsed(
+            false,
+            on: displayItem,
+            animated: animated,
+            geometryChanges: { [weak self] in
+                self?.applyDisplayPaneWidth(target)
+            }
+        ) { [weak self] in
+            guard let self else {
+                terminal?.endDeferringFrameGridChanges()
+                return
+            }
             guard !self.displayItem.isCollapsed else {
                 // Closed again mid-reveal: there is no width to restore, and the flag must not
                 // outlive the reveal it was guarding or no width is ever recorded again.
                 self.isRestoringDisplayPaneWidth = false
+                terminal?.endDeferringFrameGridChanges()
                 return
             }
 
-            // The reveal animates the pane out to the width its item last held — the chrome
-            // floor, on a launch's first reveal. The stored width then becomes the divider's
-            // own answer (see `applyDisplayPaneWidth` for why nothing weaker survives),
-            // through the same transition, so a first reveal reads as one motion opening out
-            // rather than a slide and a snap.
-            PaneTransition.run(in: self.splitView, animated: animated) {
-                self.applyDisplayPaneWidth(target)
-            } completion: {
-                // Cleared a turn after the layout this produced has drained and the
-                // notifications it raised have been ignored.
-                self.isRestoringDisplayPaneWidth = false
-            }
+            // The remembered divider position was installed inside the uncollapse's animation
+            // group, so there is one motion from shut to target rather than a reveal to the
+            // chrome floor followed by a second 200 ms width restoration.
+            self.isRestoringDisplayPaneWidth = false
+            terminal?.endDeferringFrameGridChanges()
         }
         updateToolbarControlStates()
     }
