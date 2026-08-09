@@ -157,6 +157,8 @@ external data reaches eager AppKit work.
 | Medium | Git Review during live resize | Each meaningful width change calls `noteHeightOfRows` for the complete file table so offscreen wrapping estimates and scrollbar extent stay correct. That is correctness-preserving but total-row work at resize frequency; add a large-index live-resize phase before changing it. |
 | Medium | Account settings cold discovery | `AgentAccountDiscovery` is `@MainActor`; an expired cache reads the home directory, login markers and shell aliases synchronously, then Accounts constructs every row. Account counts are normally small, but cold filesystem latency is externally controlled. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
+| High | Attachment preview cold open | The pane constructs image, PDFKit, Quick Look, WebKit and TextKit preview surfaces before it knows the selected file's format. One file costs the same ~209–243 ms cold construction as the 64-file cap; install handlers on first use. |
+| Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
 search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
@@ -168,9 +170,11 @@ and cell hosts removing old subviews during reuse is the intended ownership boun
 The stress sweep below replaced that risk-only ordering with measurements. Extension settings were
 the first repair, followed in the outstanding queue by the changed-files card and browser baseline
 library; maximum-contract extension panels are measurable but smaller. Archived settings remains
-the smallest proof case for the cosmetic-laziness rule. Git Review resize and Account discovery
-still need a focused measurement before a rewrite; their correctness/caching constraints make an
-unmeasured "optimization" more likely to move the cost or show stale data than remove it.
+the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open is the newest
+measured high-priority case and already has a specific boundary: install only the selected format's
+handler. Git Review resize and Account discovery still need a focused measurement before a rewrite;
+their correctness/caching constraints make an unmeasured "optimization" more likely to move the
+cost or show stale data than remove it.
 
 ### Scaling-audit stress baselines
 
@@ -291,6 +295,9 @@ budget and the other is damage.
 # Deterministic Git Review file-index workloads, including 9k expanded generated files.
 scripts/profile_threading.sh git-stress
 
+# Maximum-contract agent charts: decode/model, cold pane, updates, and rendered frames.
+scripts/profile_threading.sh chart-stress
+
 # Deterministic Tools settings cold open, disclosure, full expansion, and rendered scroll.
 scripts/profile_threading.sh tools-settings-stress
 
@@ -327,6 +334,9 @@ scripts/profile_threading.sh file-tree-stress
 # Deterministic attachment scan over terminal-sized buffers, under both attachment scopes.
 scripts/profile_threading.sh attachment-stress
 
+# Capped cold mount and all-row switching for every attachment preview family.
+scripts/profile_threading.sh attachment-format-stress
+
 # Deterministic whole-window drag with chrome, terminal-grid and Claude-repaint phases.
 scripts/profile_threading.sh window-resize-stress
 
@@ -354,8 +364,8 @@ scripts/profile_threading.sh ios-device-trace "Time Profiler" 15 DEVICE_UDID
 # Run the routine iOS templates against that connected device.
 scripts/profile_threading.sh ios-device-full 15 DEVICE_UDID
 
-# Routine sweep: Git, conversation, subagent, sidebar, file-tree and window-resize fixtures, sample,
-# Time Profiler, Animation Hitches, and Allocations.
+# Routine sweep: Git, charts, conversation, subagent, sidebar, file-tree, attachment scan/preview
+# and window-resize fixtures, sample, Time Profiler, Animation Hitches, and Allocations.
 scripts/profile_threading.sh full 15 Threading
 
 # Release/investigation sweep: full plus the three scaling-audit sweeps above, massive,
@@ -598,6 +608,47 @@ whatever the buffer holds: the `absent` row does no filesystem work at all and s
 That is the next target if this ever needs one — the pass is bounded and debounced, but it is
 still tens of milliseconds on the queue the window draws on, which is why `attachments.scan` is a
 recorded span rather than something a stall snapshot has to guess at.
+
+## Attachment preview-format stress target
+
+Detection is only the first half of an attachment feature. Once a file is in the pane, its row
+thumbnail and selected preview can enter ImageIO/AppKit, PDFKit, WebKit, Quick Look or TextKit.
+`SessionAttachmentsLayoutTests.testStressAttachmentFormatPipelineWhenEnabled` creates its files
+before the clock, admits the product cap of 64, mounts the production pane, then selects every row
+forwards and backwards. The phases keep controller construction, first layout/draw, cold selection
+dispatch, warm selection dispatch and footprint separate. The system renderers remain asynchronous;
+the switching figures are main-thread interaction cost, not time until Quick Look or WebKit has
+finished painting remote-process content.
+
+The default fixtures are 1,600 × 1,000 PNGs, twelve-page PDFs, 300-row HTML files, archive metadata
+cards, 800-paragraph RTF documents, and Mermaid source immediately below the 512 KB source-preview
+cap. `mixed` rotates through all six families. Set
+`THREADING_ATTACHMENT_FORMAT_STRESS_KIND` or `..._FILES` for a focused point. Quick Look activates
+its display bundle asynchronously, so each fresh-process workload retains its offscreen test window
+until process exit; immediately destroying or closing an activation-pending `QLPreviewView` tests
+an unsupported XCTest teardown race rather than the pane.
+
+A Debug sweep on 2026-08-09 measured:
+
+| Format | Source bytes, 64 files | Cold pane construction | First all-row pass | Reverse warm pass | Footprint delta |
+|---|---:|---:|---:|---:|---:|
+| Image | 1.8 MB | 209.7 ms | 47.3 ms | 47.8 ms | 15.4 MB |
+| PDF | 0.4 MB | 219.1 ms | 250.9 ms | 126.1 ms | 13.3 MB |
+| HTML | 1.0 MB | 206.8 ms | 16.2 ms | 12.5 ms | 13.0 MB |
+| Archive | 0.1 MB | 207.3 ms | 19.0 ms | 15.1 ms | 12.3 MB |
+| Document | 2.2 MB | 200.8 ms | 19.5 ms | 14.8 ms | 12.3 MB |
+| Diagram | 32.0 MB | 230.8 ms | 90.1 ms | 101.3 ms | 12.9 MB |
+| Mixed | 5.9 MB | 188.0 ms | 82.3 ms | 49.7 ms | 12.9 MB |
+
+The scaling bounds work: even the 32 MB aggregate diagram edge is roughly 1.5 ms per selection,
+and the PDF decoder is the only 64-file pass over 100 ms. The cold result exposes a different
+problem. One-file controls measured the same 209–243 ms construction band as 64 files, independent
+of whether the selected file was an image, PDF, HTML document or diagram. `setupPreview()` eagerly
+constructs all five hidden preview surfaces — including PDFKit, Quick Look and WebKit — before it
+knows which handler the selected file needs. Hidden content is not lazy merely because it is
+hidden. The next attachment optimization is to install the selected handler on demand and retain
+only handlers that have actually been used; file-count virtualization or faster format detection
+will not move this cold cost.
 
 ## Whole-window resize stress target
 
@@ -1033,6 +1084,40 @@ aggregate, 986 ms for all session/project directory indexes, 58 ms for the detai
 projection, and 1,095 ms for 100,000 bounded live updates (about 10.95 µs per event). The live
 loop performs the same session entry, project entry, ancestor-directory updates, and bin update as
 the live path. It does not include notification delivery or drawing.
+
+## Agent chart stress target
+
+Agent-authored charts have a different pipeline from the Usage dashboard even though both finish
+in `ThemedTimeSeriesChartView`: JSON becomes `ChartSpec`, validation enforces the semantic contract,
+the spec maps to categorical prepared geometry, and a `ChartCardView` is mounted in a display pane.
+`UsageDashboardPerformanceTests.testStressAgentChartPipelineWhenEnabled` keeps those phases together
+without hiding one behind a time-series-only fixture. It uses the largest valid product contract:
+eight series × thirty categories = `ChartSpec.Limits.maximumMarks` (240), not the independently
+valid but product-invalid eight × sixty axes.
+
+Each fresh process decodes, validates and maps the 7 KB spec 250 times, mounts one cold pane, applies
+250 stable-shape updates to the retained card, then synchronously renders sixty animation samples.
+The five default workloads are grouped bars, stacked bars, ranking, line and area. Set
+`THREADING_CHART_STRESS_KIND`, `..._STACKED`, `..._CATEGORIES` or `..._SERIES` for a focused point;
+the fixture clamps overrides to the mark product cap rather than benchmarking an input validation
+failure.
+
+A current-source Debug sweep on 2026-08-09 measured:
+
+| Shape | Decode + model, 250× | Cold pane | Updates, 250× | Draw, 60 frames | Draw / frame | Footprint delta |
+|---|---:|---:|---:|---:|---:|---:|
+| Grouped bar | 88.0 ms | 44.8 ms | 90.8 ms | 300.9 ms | 5.02 ms | 12.8 MB |
+| Stacked bar | 91.0 ms | 42.3 ms | 82.2 ms | 145.6 ms | 2.43 ms | 12.6 MB |
+| Ranking | 89.0 ms | 47.2 ms | 83.4 ms | 247.0 ms | 4.12 ms | 12.8 MB |
+| Line | 90.0 ms | 43.7 ms | 108.4 ms | 243.6 ms | 4.06 ms | 12.8 MB |
+| Area | 94.4 ms | 43.4 ms | 100.7 ms | 327.3 ms | 5.45 ms | 12.7 MB |
+
+Decode/model and stable updates stay below roughly 0.45 ms per spec, and synchronous drawing stays
+below 5.5 ms per sampled frame at the product cap. The card has six live descendants, not one view
+per mark: the renderer owns bounded prepared geometry. Cold mount is the only phase above one 60 Hz
+frame, at 42–47 ms. That is a contained open-time target rather than a scrolling or live-update
+scaling failure; optimize it only against a trace of an actual pane-open hitch. `cacheDisplay` is a
+deliberately synchronous paint stress and must not be presented as compositor frame timing.
 
 ## Project sidebar stress target
 

@@ -1505,12 +1505,14 @@ case "${command}" in
     output_directory="$(new_run_directory "${command}")"
 
     run_git_stress "${output_directory}"
+    run_chart_stress "${output_directory}"
     run_tools_settings_stress "${output_directory}"
     run_conversation_stress "${output_directory}"
     run_subagent_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"
     run_file_tree_stress "${output_directory}"
     run_attachment_stress "${output_directory}"
+    run_attachment_format_stress "${output_directory}"
     run_window_resize_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
