@@ -33,7 +33,11 @@ def add(text, filename):
     file_ref = object_id("ref:" + filename)
     build_file = object_id("build:" + filename)
 
-    if filename in text:
+    # Matched against the whole `path = …;` token rather than as a bare substring: every name
+    # that is the tail of another one — ChartTests.swift inside ThemedTimeSeriesChartTests.swift —
+    # otherwise reports "already present" and is silently left out of the target, which is the
+    # exact failure this script exists to prevent.
+    if f"path = {filename};" in text:
         print(f"  {filename}: already present")
         return text
 
