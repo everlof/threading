@@ -1851,6 +1851,17 @@ final class DisplayPaneController: NSViewController {
         imageView.isHidden = true
         webView.isHidden = false
         webView.loadHTMLString(Self.themed(html), baseURL: nil)
+      case .chart(let spec):
+        // The chart draws its own caption, so the panel's is stood down — but the content menu
+        // stays: copying the numbers out is the one thing a chart tab owes the reader.
+        imageView.image = nil
+        imageView.isHidden = true
+        hideHTML()
+        captionLabel.isHidden = true
+        contentMenuButton.isHidden = false
+        installHosted(ChartPaneViewController(spec: spec, subtitle: content.subtitle))
+        return
+
       case .semanticScene(let scene):
         imageView.image = nil
         imageView.isHidden = true
@@ -2064,6 +2075,7 @@ final class DisplayPaneController: NSViewController {
       case .image: return "image"
       case .html: return "html"
       case .semanticScene: return "semantic-scene"
+      case .chart: return "chart"
       }
     case .browser: return "browser"
     case .audit: return "audit"
@@ -2144,6 +2156,17 @@ final class DisplayPaneController: NSViewController {
         let tab = DisplayTab(id: id, body: .content(content))
         tab.cacheFile = cacheFile
         tabs.append(tab)
+
+      case .chart:
+        // Validated again on the way back in: the file is user-writable, and a spec whose
+        // series no longer line up with its categories would draw a chart that lies.
+        guard let spec = try? persisted.chart?.validated() else { continue }
+        let content = DisplayContent(
+          body: .chart(spec),
+          title: persisted.title,
+          subtitle: persisted.subtitle
+        )
+        tabs.append(DisplayTab(id: id, body: .content(content)))
 
       case .semanticScene:
         guard let scene = persisted.semanticScene else { continue }
@@ -2399,6 +2422,17 @@ final class DisplayPaneController: NSViewController {
         html: nil,
         cacheFile: nil,
         semanticScene: scene
+      )
+    case .chart(let spec):
+      return PersistedTab(
+        id: tab.id.uuidString,
+        kind: .chart,
+        title: content.title,
+        subtitle: content.subtitle,
+        url: nil,
+        html: nil,
+        cacheFile: nil,
+        chart: spec
       )
     }
   }

@@ -489,6 +489,8 @@ final class AgentToolCoordinator: AgentCommandHandling {
     switch call {
     case .displayImage(let arguments):
       return displayImage(arguments, for: sessionID)
+    case .displayChart(let arguments):
+      return displayChart(arguments, for: sessionID)
     case .displayScene(let arguments):
       return displayScene(arguments, for: sessionID)
     case .displayHTML(let arguments):

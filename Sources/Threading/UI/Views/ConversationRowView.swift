@@ -70,6 +70,12 @@ enum ConversationRowView {
             return (notice(text, kind: kind), false)
 
         case .toolCall(let call):
+            // A chart call draws its chart rather than a line saying a chart was drawn. The
+            // result still matters when it failed, so a refused call falls back to the ordinary
+            // tool row and shows what the panel said about it.
+            if let spec = call.chart, call.result?.outcome != .failed {
+                return (ChartCardView(spec: spec), false)
+            }
             let view = ToolCallView(tool: call.tool, summary: call.summary, diff: call.diff)
             if let result = call.result {
                 view.setResult(result.text, outcome: result.outcome)

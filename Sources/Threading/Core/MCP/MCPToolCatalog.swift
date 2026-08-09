@@ -170,6 +170,12 @@ enum MCPToolCatalog {
         symbol: "photo"
       ),
       MCPToolInfo(
+        tool: .displayChart,
+        title: "Chart numbers",
+        detail: "Plot measured values natively — comparisons, rankings, breakdowns, trends.",
+        symbol: "chart.bar"
+      ),
+      MCPToolInfo(
         tool: .displayScene,
         title: "Show native scene",
         detail: "Render a bounded semantic visualization using Threading’s native UI.",
@@ -189,6 +195,15 @@ enum MCPToolCatalog {
       ),
     ],
     instruction: """
+      Use display_chart when an answer turns on numbers the reader has to compare: before \
+      against after, one implementation against another, a duration or cost broken down by \
+      part, a measurement across runs or files. Send the values and the words for them; \
+      Threading owns the scale, axes, legend, theme and accessibility, so a chart costs you \
+      one call and comes out native. Chart the comparison and then say what it means — do not \
+      print the same numbers as an ASCII table as well, and do not ask the user to run a \
+      plotting script for something this tool draws. Skip it for a single number, two numbers \
+      a sentence can carry, or values whose units are not comparable.
+
       Use display_image whenever an image is the point: a screenshot you just captured, a \
       chart or diagram you generated, a design asset you were asked to inspect, or a visual \
       diff. Prefer showing the image over describing it or printing its path — the user is \
@@ -202,7 +217,9 @@ enum MCPToolCatalog {
       Use display_scene when another tool returns normalized semantic geometry for a \
       treemap, heatmap, timeline, scatter plot, or similar bounded visualization. Pass \
       that scene through as structured data. Threading renders it with native AppKit, \
-      accessibility, and the active theme; do not convert it to HTML.
+      accessibility, and the active theme; do not convert it to HTML. It takes geometry you \
+      already have — for measured values, display_chart computes the geometry for you and \
+      is the one to reach for.
 
       Use display_html when structure is the point and ASCII would mangle it: tables with \
       more than a few columns, charts, Mermaid or graphviz diagrams, side-by-side diffs, \

@@ -64,6 +64,42 @@ struct DisplaySceneArguments: Decodable, Sendable {
   let subtitle: String?
 }
 
+/// The wire form of a chart request.
+///
+/// Every field is optional at the transport so a malformed call reaches the handler and is
+/// answered with a sentence the model can act on, rather than failing as an undecodable blob
+/// whose complaint names a Swift key path.
+struct DisplayChartArguments: Decodable, Sendable {
+  struct Series: Decodable, Sendable {
+    let name: String?
+    let values: [Double]?
+    let details: [String]?
+    let emphasis: String?
+  }
+
+  let title: String?
+  let summary: String?
+  let kind: String?
+  let categories: [String]?
+  let series: [Series]?
+  let stacked: Bool?
+  let valueFormat: String?
+  let unit: String?
+  let maximumValue: Double?
+
+  private enum CodingKeys: String, CodingKey {
+    case title
+    case summary
+    case kind
+    case categories
+    case series
+    case stacked
+    case valueFormat = "value_format"
+    case unit
+    case maximumValue = "maximum_value"
+  }
+}
+
 struct DisplayHTMLArguments: Decodable, Sendable {
   let html: String?
   let title: String?
@@ -1462,6 +1498,7 @@ struct ExtensionProposeInstallArguments: Decodable, Sendable {
 /// switches on wire names or raw JSON for built-ins.
 enum AgentCommand: Sendable {
   case displayImage(DisplayImageArguments)
+  case displayChart(DisplayChartArguments)
   case displayScene(DisplaySceneArguments)
   case displayHTML(DisplayHTMLArguments)
   case displayCompareFiles(DisplayCompareFilesArguments)
@@ -1535,6 +1572,7 @@ enum AgentCommand: Sendable {
   var builtInTool: MCPBuiltInTool? {
     switch self {
     case .displayImage: return .displayImage
+    case .displayChart: return .displayChart
     case .displayScene: return .displayScene
     case .displayHTML: return .displayHTML
     case .displayCompareFiles: return .displayCompareFiles
@@ -1643,6 +1681,21 @@ struct MCPToolCallParameters: Decodable, Sendable {
       call = .displayImage(
         try container.decodeIfPresent(DisplayImageArguments.self, forKey: .arguments)
           ?? DisplayImageArguments(path: nil, title: nil)
+      )
+    case .displayChart:
+      call = .displayChart(
+        try container.decodeIfPresent(DisplayChartArguments.self, forKey: .arguments)
+          ?? DisplayChartArguments(
+            title: nil,
+            summary: nil,
+            kind: nil,
+            categories: nil,
+            series: nil,
+            stacked: nil,
+            valueFormat: nil,
+            unit: nil,
+            maximumValue: nil
+          )
       )
     case .displayScene:
       call = .displayScene(
@@ -2629,13 +2682,119 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .displayChart,
+      description: """
+        Chart numbers you are reporting, natively. Give values and the words for them — \
+        Threading owns the scale, axes, ticks, legend, colours, hover and the accessibility \
+        summary, and draws it in the user's theme. Reach for this whenever an answer turns \
+        on a comparison the reader has to hold in their head: before against after, one \
+        implementation against another, a cost or duration broken down by part, a measurement \
+        across runs. Prefer it over an ASCII table of numbers, over asking the user to run a \
+        plotting script, and over display_html for anything that is simply a chart. Every \
+        series carries one value per category, in the same order.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "title": MCPPropertySchema(
+            type: .string,
+            description: "What the chart shows, as a sentence fragment a reader can act on."
+          ),
+          "kind": MCPPropertySchema(
+            type: .string,
+            description: """
+              bar for comparison across categories (the default), ranking for horizontal bars \
+              ordered best to worst, line for a progression, area for a filled progression.
+              """
+          ),
+          "categories": MCPPropertySchema(
+            type: .array,
+            description: """
+              The names being compared, in the order they should read — up to \
+              \(ChartSpec.Limits.maximumCategories).
+              """,
+            items: MCPArrayItemSchema(type: .string, description: "One category name.")
+          ),
+          "series": MCPPropertySchema(
+            type: .array,
+            description: """
+              One to \(ChartSpec.Limits.maximumSeries) measured series. Two series over the \
+              same categories is how a before/after comparison is expressed.
+              """,
+            items: MCPArrayItemSchema(
+              type: .object,
+              description: "One measured series.",
+              properties: [
+                "name": MCPPropertySchema(
+                  type: .string,
+                  description: "Series name, shown in the legend and read aloud."
+                ),
+                "values": MCPPropertySchema(
+                  type: .array,
+                  description: "One finite number per category, in the same order.",
+                  items: MCPArrayItemSchema(type: .number, description: "A measured value.")
+                ),
+                "details": MCPPropertySchema(
+                  type: .array,
+                  description: "Optional per-value note shown on hover, in the same order.",
+                  items: MCPArrayItemSchema(type: .string, description: "A note.")
+                ),
+                "emphasis": MCPPropertySchema(
+                  type: .string,
+                  description: """
+                    positive, warning, or negative when the series carries a verdict. Omit \
+                    when series are merely different, so they get distinct categorical hues.
+                    """
+                ),
+              ],
+              required: ["name", "values"]
+            )
+          ),
+          "stacked": MCPPropertySchema(
+            type: .boolean,
+            description: """
+              Stack the series into one bar per category, so each bar's height is the total. \
+              Use for composition; leave false to compare series side by side.
+              """
+          ),
+          "value_format": MCPPropertySchema(
+            type: .string,
+            description: "number (default), percent, currency, or tokens."
+          ),
+          "unit": MCPPropertySchema(
+            type: .string,
+            description: """
+              A short suffix for the numbers, such as ms, MB, or req/s. Threading puts it on \
+              the ticks and the value labels so the title does not have to carry it.
+              """
+          ),
+          "maximum_value": MCPPropertySchema(
+            type: .number,
+            description: """
+              Pin the top of the value axis, so two charts of the same measurement can be \
+              read against each other. Omit to fit the data.
+              """
+          ),
+          "summary": MCPPropertySchema(
+            type: .string,
+            description: """
+              One sentence stating what the chart shows. Read aloud as the chart's \
+              accessible value; derived from the data when omitted.
+              """
+          ),
+        ],
+        required: ["title", "categories", "series"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .displayScene,
       description: """
         Render a bounded semantic visualization in Threading's side panel using native \
         AppKit. Use this when another MCP tool returns a normalized scene for a treemap, \
-        heatmap, timeline, bar chart, scatter plot, bubble plot, or dependency map. Pass \
-        the scene through as structured data instead of converting it to HTML. Threading \
-        owns theme colours, typography, focus, hover, and accessibility.
+        heatmap, timeline, scatter plot, bubble plot, or dependency map — geometry you \
+        already hold in normalized form. For a chart of measured numbers, call display_chart \
+        instead, which owns its own scale and axes rather than trusting yours. Pass the \
+        scene through as structured data instead of converting it to HTML. Threading owns \
+        theme colours, typography, focus, hover, and accessibility.
         """,
       inputSchema: MCPInputSchema(
         properties: [

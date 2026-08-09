@@ -310,6 +310,7 @@
 		B35C01B9A82E32AC1BDC0EF1 /* UsageDashboardPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */; };
 		341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */; };
 		60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */; };
+		8C709959439ACFD5BB55FB9D /* ChartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9876F9C389CEB602F4DCF632 /* ChartTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -668,6 +669,7 @@
 		DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardPerformanceTests.swift; sourceTree = "<group>"; };
 		718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardRenderTests.swift; sourceTree = "<group>"; };
 		935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeTurnRefusalTests.swift; sourceTree = "<group>"; };
+		9876F9C389CEB602F4DCF632 /* ChartTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChartTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1095,6 +1097,7 @@
 				DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */,
 				718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */,
 				935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */,
+				9876F9C389CEB602F4DCF632 /* ChartTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1800,6 +1803,7 @@
 				B35C01B9A82E32AC1BDC0EF1 /* UsageDashboardPerformanceTests.swift in Sources */,
 				341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */,
 				60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */,
+				8C709959439ACFD5BB55FB9D /* ChartTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

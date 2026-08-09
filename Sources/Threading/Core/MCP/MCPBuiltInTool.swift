@@ -7,6 +7,7 @@ import Foundation
 /// tools remain open-ended and use `MCPJSONValue` through `.unknown`.
 enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case displayImage = "display_image"
+  case displayChart = "display_chart"
   case displayScene = "display_scene"
   case displayHTML = "display_html"
   case displayCompareFiles = "display_compare_files"
@@ -93,7 +94,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
   var family: Family {
     switch self {
     case .conversationHistory: return .continuation
-    case .displayImage, .displayScene, .displayHTML, .displayCompareFiles: return .display
+    case .displayImage, .displayChart, .displayScene, .displayHTML, .displayCompareFiles:
+      return .display
     case .browserNavigate, .browserHistory, .browserStop, .browserTabs, .browserStorage,
       .browserTrace, .browserUpload, .browserDownload, .browserResize, .browserEmulate,
       .browserCapabilities, .browserRunIsolated, .browserAttachChrome, .browserSnapshot,
@@ -164,7 +166,8 @@ enum MCPBuiltInTool: String, CaseIterable, Sendable {
         openWorldHint: false
       )
 
-    case .displayImage, .displayScene, .displayHTML, .displayCompareFiles, .browserNavigate,
+    case .displayImage, .displayChart, .displayScene, .displayHTML, .displayCompareFiles,
+      .browserNavigate,
       .browserHistory, .browserStop, .browserTabs, .browserUpload, .browserDownload,
       .browserResize, .browserEmulate, .browserRunIsolated, .browserAttachChrome,
       .browserClick, .browserHover,

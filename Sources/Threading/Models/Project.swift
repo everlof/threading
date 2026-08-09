@@ -1936,6 +1936,7 @@ struct PersistedTab: Codable {
     case html
     case image
     case semanticScene
+    case chart
     case review
     case info
     case terminal
@@ -1953,6 +1954,10 @@ struct PersistedTab: Codable {
   var html: String?
   var cacheFile: String?
   var semanticScene: ExtensionScene? = nil
+  /// The values behind a chart tab. Small enough to keep whole — a chart is capped at
+  /// `ChartSpec.Limits.maximumMarks` numbers — and the only form that survives a theme change
+  /// between sessions, since nothing about its appearance was stored.
+  var chart: ChartSpec? = nil
   var mode: String? = nil
   var extensionIdentifier: String? = nil
   var extensionPanelID: String? = nil

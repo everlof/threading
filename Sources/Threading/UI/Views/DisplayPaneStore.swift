@@ -15,6 +15,10 @@ extension PersistedPanel {
       case .html: return "h:\(tab.title ?? "")·\(tab.subtitle)"
       case .image: return "i:\(tab.title ?? tab.url ?? "")"
       case .semanticScene: return "s:\(tab.title ?? "")"
+      // The values, not just the title: a chart regenerated with new numbers under the same
+      // caption is a different panel, and the agent must be re-told rather than assume its
+      // last chart is what the user is looking at.
+      case .chart: return "g:\(tab.chart?.fingerprint ?? tab.title ?? "")"
       case .review: return "r:\(tab.mode ?? "")"
       case .info: return "n"
       case .terminal: return "t"
@@ -51,6 +55,8 @@ extension PersistedPanel {
         detail = "image \"\(name)\""
       case .semanticScene:
         detail = "native semantic visualization \"\(tab.title ?? "Scene")\""
+      case .chart:
+        detail = "native chart \"\(tab.title ?? "Chart")\" (\(tab.subtitle))"
       case .review:
         detail = "git review panel (the user's diff view; they may stage and commit from it)"
       case .info:

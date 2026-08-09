@@ -36,6 +36,12 @@ struct DisplayContent {
 
     /// A bounded semantic visualization rendered entirely by Threading's native design system.
     case semanticScene(ExtensionScene)
+
+    /// Measured values an agent asked Threading to chart. The tab keeps the *values*: the
+    /// scale, the axes and every colour are resolved by the design system when it is shown,
+    /// so a restored chart follows the theme it is restored into rather than the one it was
+    /// drawn in.
+    case chart(ChartSpec)
   }
 
   let body: Body
@@ -205,6 +211,7 @@ final class PaneTab {
     case .content(let content):
       if case .image = content.body { return "photo" }
       if case .semanticScene = content.body { return "square.grid.3x3" }
+      if case .chart = content.body { return "chart.bar" }
       return "doc.richtext"
     case .browser(let browser):
       return browser.contextKind == .private ? "hand.raised.fill" : "globe"
@@ -242,6 +249,9 @@ final class PaneTab {
       if let title = content.title, !title.isEmpty { return title }
       if case .image(_, let url) = content.body { return url.lastPathComponent }
       if case .semanticScene = content.body { return "Scene" }
+      if case .chart(let spec) = content.body {
+        return spec.title.isEmpty ? L10n.string("Chart") : spec.title
+      }
       return "Document"
     case .browser(let browser):
       if let title = browser.currentTitle, !title.isEmpty { return title }

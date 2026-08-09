@@ -61,6 +61,14 @@ struct ConversationTimeline {
         /// it is known before the tool runs and the result merely confirms it landed.
         let diff: [DiffLine]?
 
+        /// Present only when this call *is* a chart Threading was asked to draw.
+        ///
+        /// Read from the call's own arguments rather than from its result, for the same reason
+        /// the diff is: the values are what the agent sent, and the result only confirms the
+        /// panel took them. It rides on the call so the row stays one row — the record of what
+        /// was done and the picture it produced are the same event to a reader.
+        var chart: ChartSpec? = nil
+
         var result: Result?
 
         struct Result: Equatable {
@@ -440,6 +448,7 @@ struct ConversationTimeline {
                 tool: tool,
                 summary: request.oneLineSummary,
                 diff: EditDiff.lines(forTool: tool.rawName, input: foundationInput),
+                chart: ChartSpec.decoded(fromToolNamed: tool.rawName, input: foundationInput),
                 result: nil
             )
             let change = append(.toolCall(call))

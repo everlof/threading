@@ -50,6 +50,41 @@ enum ThemedChartComposition: Equatable, Sendable {
     case stackedBands
 }
 
+/// The mark a series draws.
+///
+/// A bar is not a second chart: it occupies the same normalized space a line already does,
+/// from `baselineY` to `y`. That is why grouped and stacked bars need no geometry of their
+/// own — `.independent` puts every bar's foot on zero, `.stackedBands` puts it on the running
+/// total, and both were already computed for the curve grammar.
+enum ThemedChartMark: Equatable, Sendable {
+    case line
+    case bar
+}
+
+/// How the x domain is *named*.
+///
+/// Geometry normalizes a `Date` and nothing else. A categorical axis carries its ordinal in
+/// that same slot — category *i* is second *i* — and this enum supplies the words. Encoding
+/// the ordinal as a time keeps one downsampler, one stacking rule and one interpolator for
+/// both domains; a parallel scale type would have duplicated all three and let them drift.
+enum ThemedChartXAxis: Equatable, Sendable {
+    case time
+    case categories([String])
+
+    var categories: [String]? {
+        if case .categories(let names) = self { return names }
+        return nil
+    }
+}
+
+/// Which way the value axis runs. Horizontal is for ranking, where the category names read
+/// down the leading edge and have room to be words rather than truncated stubs. It applies to
+/// bars only: a line's x is time, and time does not read down a page.
+enum ThemedChartOrientation: Equatable, Sendable {
+    case vertical
+    case horizontal
+}
+
 struct ThemedChartSeries: Equatable, Sendable, Identifiable {
     let id: String
     let title: String
@@ -57,6 +92,7 @@ struct ThemedChartSeries: Equatable, Sendable, Identifiable {
     let style: ThemedChartSeriesStyle
     let fillsArea: Bool
     let curve: ThemedChartCurve
+    let mark: ThemedChartMark
 
     init(
         id: String,
@@ -64,7 +100,8 @@ struct ThemedChartSeries: Equatable, Sendable, Identifiable {
         points: [ThemedChartPoint],
         style: ThemedChartSeriesStyle = .primary,
         fillsArea: Bool = false,
-        curve: ThemedChartCurve = .smooth
+        curve: ThemedChartCurve = .smooth,
+        mark: ThemedChartMark = .line
     ) {
         self.id = id
         self.title = title
@@ -72,6 +109,36 @@ struct ThemedChartSeries: Equatable, Sendable, Identifiable {
         self.style = style
         self.fillsArea = fillsArea
         self.curve = curve
+        self.mark = mark
+    }
+
+    /// A bar series over category positions: value *i* belongs to category *i*.
+    ///
+    /// The category name becomes the point's label, which is what the tooltip and the
+    /// accessibility description already read — so a bar announces "Cold start, 42 ms" without
+    /// either surface learning that categories exist.
+    init(
+        id: String,
+        title: String,
+        values: [Double],
+        categories: [String] = [],
+        details: [String] = [],
+        style: ThemedChartSeriesStyle = .primary
+    ) {
+        self.init(
+            id: id,
+            title: title,
+            points: values.enumerated().map { index, value in
+                ThemedChartPoint(
+                    at: ThemedChartModel.categoryPosition(index),
+                    value: value,
+                    label: index < categories.count ? categories[index] : nil,
+                    detail: index < details.count ? details[index] : nil
+                )
+            },
+            style: style,
+            mark: .bar
+        )
     }
 }
 
@@ -94,6 +161,10 @@ enum ThemedChartValueFormat: Equatable, Sendable {
     case currency
     case tokens
     case number
+    /// A number with the caller's own suffix — `ms`, `MB`, `req/s`. The unit belongs on the
+    /// ticks and the bar labels rather than in the title, where it has to be carried by the
+    /// reader from one end of the chart to the other.
+    case unit(String)
 }
 
 struct ThemedChartModel: Equatable, Sendable {
@@ -105,6 +176,9 @@ struct ThemedChartModel: Equatable, Sendable {
     let yRange: ClosedRange<Double>?
     let valueFormat: ThemedChartValueFormat
     let emptyMessage: String
+    let xAxis: ThemedChartXAxis
+    let orientation: ThemedChartOrientation
+    let showsLegend: Bool
 
     init(
         title: String,
@@ -114,8 +188,14 @@ struct ThemedChartModel: Equatable, Sendable {
         xRange: ClosedRange<Date>? = nil,
         yRange: ClosedRange<Double>? = nil,
         valueFormat: ThemedChartValueFormat = .number,
-        emptyMessage: String = L10n.string("No data in this range")
+        emptyMessage: String = L10n.string("No data in this range"),
+        xAxis: ThemedChartXAxis = .time,
+        orientation: ThemedChartOrientation = .vertical,
+        showsLegend: Bool = false
     ) {
+        self.xAxis = xAxis
+        self.orientation = orientation
+        self.showsLegend = showsLegend
         self.title = title
         self.accessibilitySummary = accessibilitySummary
         self.series = series
@@ -127,6 +207,48 @@ struct ThemedChartModel: Equatable, Sendable {
     }
 
     static let empty = Self(title: "", accessibilitySummary: "", series: [])
+
+    /// Where category *i* sits in the domain geometry normalizes.
+    static func categoryPosition(_ index: Int) -> Date {
+        Date(timeIntervalSinceReferenceDate: Double(index))
+    }
+
+    /// A comparison over named categories.
+    ///
+    /// The half-step padding is the whole trick: a bar is drawn *around* its position, so a
+    /// domain of exactly `0...n-1` would cut the first and last bar in half against the plot
+    /// edges. Widening it to `-0.5...n-0.5` makes every band the same width and centres each
+    /// bar in its own — a band scale, expressed entirely as the range the existing geometry
+    /// already accepts.
+    static func categorical(
+        title: String,
+        accessibilitySummary: String,
+        categories: [String],
+        series: [ThemedChartSeries],
+        orientation: ThemedChartOrientation = .vertical,
+        valueFormat: ThemedChartValueFormat = .number,
+        yRange: ClosedRange<Double>? = nil,
+        showsLegend: Bool? = nil,
+        emptyMessage: String = L10n.string("No data to compare")
+    ) -> Self {
+        let count = max(categories.count, 1)
+        let first = categoryPosition(0).addingTimeInterval(-0.5)
+        let last = categoryPosition(count - 1).addingTimeInterval(0.5)
+        return Self(
+            title: title,
+            accessibilitySummary: accessibilitySummary,
+            series: series,
+            xRange: first...last,
+            yRange: yRange,
+            valueFormat: valueFormat,
+            emptyMessage: emptyMessage,
+            xAxis: .categories(categories),
+            orientation: orientation,
+            // One series needs no key: the title already says what the bars are, and a legend
+            // repeating it is chrome that earns nothing.
+            showsLegend: showsLegend ?? (series.count > 1)
+        )
+    }
 }
 
 // MARK: - Geometry and transition
@@ -682,51 +804,88 @@ class ThemedTimeSeriesChartView: ThemedControl {
         }
 
         if isSpectrum {
+            // A bar stays a bar in every material. The spectrum analyzer is a rendering of a
+            // *filled band*, and running a comparison through it would answer a question about
+            // three categories with a column of cells.
             let spectrumIndices = displayedGeometry.indices.filter { index in
                 model.series.indices.contains(index)
                     && model.series[index].style != .projection
+                    && model.series[index].mark != .bar
                     && (composition == .stackedBands || model.series[index].fillsArea)
             }
             drawSpectrum(seriesIndices: spectrumIndices, in: plot)
             for index in displayedGeometry.indices where !spectrumIndices.contains(index) {
                 guard model.series.indices.contains(index) else { continue }
-                draw(series: model.series[index], geometry: displayedGeometry[index], in: plot)
+                draw(
+                    series: model.series[index],
+                    geometry: displayedGeometry[index],
+                    at: index,
+                    in: plot
+                )
             }
         } else {
             for (index, geometry) in displayedGeometry.enumerated() {
                 guard model.series.indices.contains(index) else { continue }
-                draw(series: model.series[index], geometry: geometry, in: plot)
+                draw(series: model.series[index], geometry: geometry, at: index, in: plot)
             }
         }
         drawMarkers(in: plot)
+        drawLegend()
         if let selected { drawSelection(selected, in: plot) }
     }
 
     private var plotRect: NSRect {
-        NSRect(
-            x: bounds.minX + Design.Chart.axisLeading,
+        // A ranking chart spends its leading gutter on category names rather than on values, and
+        // a legend takes its band off the top before anything else is positioned against it.
+        let leading = model.orientation == .horizontal
+            ? Design.Chart.categoryAxisLeading
+            : Design.Chart.axisLeading
+        let top = Design.Chart.axisTop + (model.showsLegend ? Design.Chart.legendHeight : 0)
+        return NSRect(
+            x: bounds.minX + leading,
             y: bounds.minY + Design.Chart.axisBottom,
-            width: max(0, bounds.width - Design.Chart.axisLeading - Design.Chart.axisTrailing),
-            height: max(0, bounds.height - Design.Chart.axisBottom - Design.Chart.axisTop)
+            width: max(0, bounds.width - leading - Design.Chart.axisTrailing),
+            height: max(0, bounds.height - Design.Chart.axisBottom - top)
         )
+    }
+
+    private var axisTextColor: NSColor {
+        Design.Chart.style == .spectrum
+            ? Design.Surface.accent.withAlphaComponent(0.62)
+            : Design.Text.tertiary
     }
 
     private func drawGrid(in plot: NSRect) {
         let grid = NSBezierPath()
+        let isRanking = model.orientation == .horizontal
         for index in 0..<Design.Chart.gridLineCount {
             let phase = CGFloat(index) / CGFloat(Design.Chart.gridLineCount - 1)
-            let y = plot.minY + phase * plot.height
-            grid.move(to: NSPoint(x: plot.minX, y: y))
-            grid.line(to: NSPoint(x: plot.maxX, y: y))
-            let value = yValue(at: Double(phase))
-            draw(
-                valueString(value),
-                at: NSPoint(x: bounds.minX + Design.Spacing.inset, y: y - Design.Spacing.small),
-                color: Design.Chart.style == .spectrum
-                    ? Design.Surface.accent.withAlphaComponent(0.62)
-                    : Design.Text.tertiary,
-                alignment: .left
-            )
+            let value = valueString(yValue(at: Double(phase)))
+            if isRanking {
+                // The value axis runs along the bottom, so the rules stand up and the numbers
+                // sit under them — the same grid, read a quarter turn round.
+                let x = plot.minX + phase * plot.width
+                grid.move(to: NSPoint(x: x, y: plot.minY))
+                grid.line(to: NSPoint(x: x, y: plot.maxY))
+                draw(
+                    value,
+                    at: NSPoint(x: x, y: bounds.minY + Design.Spacing.small),
+                    color: axisTextColor,
+                    alignment: index == 0
+                        ? .left
+                        : (index == Design.Chart.gridLineCount - 1 ? .right : .center)
+                )
+            } else {
+                let y = plot.minY + phase * plot.height
+                grid.move(to: NSPoint(x: plot.minX, y: y))
+                grid.line(to: NSPoint(x: plot.maxX, y: y))
+                draw(
+                    value,
+                    at: NSPoint(x: bounds.minX + Design.Spacing.inset, y: y - Design.Spacing.small),
+                    color: axisTextColor,
+                    alignment: .left
+                )
+            }
         }
         let gridColor: NSColor
         if Design.Chart.style == .spectrum {
@@ -740,6 +899,11 @@ class ThemedTimeSeriesChartView: ThemedControl {
         grid.lineWidth = Design.Radius.border
         grid.stroke()
 
+        if let categories = model.xAxis.categories {
+            drawCategoryLabels(categories, in: plot)
+            return
+        }
+
         guard let range = xDomain else { return }
         for index in 0..<Design.Chart.xLabelCount {
             let phase = Double(index) / Double(Design.Chart.xLabelCount - 1)
@@ -750,20 +914,298 @@ class ThemedTimeSeriesChartView: ThemedControl {
             draw(
                 dateFormatter.string(from: date),
                 at: NSPoint(x: x, y: bounds.minY + Design.Spacing.small),
-                color: Design.Chart.style == .spectrum
-                    ? Design.Surface.accent.withAlphaComponent(0.62)
-                    : Design.Text.tertiary,
+                color: axisTextColor,
                 alignment: index == 0 ? .left : (index == Design.Chart.xLabelCount - 1 ? .right : .center)
             )
         }
     }
 
-    private func draw(series: ThemedChartSeries, geometry: ThemedChartRenderedSeries, in plot: NSRect) {
-        if composition == .stackedBands, series.style != .projection {
+    /// One label per band, dropped in whole steps when they will not fit.
+    ///
+    /// Thinning by a stride keeps the labels on the same categories as the chart resizes; picking
+    /// "every label that happens to fit" made names appear and disappear under a drag, which reads
+    /// as the data changing rather than the window.
+    private func drawCategoryLabels(_ categories: [String], in plot: NSRect) {
+        guard !categories.isEmpty else { return }
+        let band = bandExtent(count: categories.count, in: plot)
+        guard band > 0 else { return }
+
+        if model.orientation == .horizontal {
+            let stride = max(1, Int(ceil(Design.Chart.minimumCategoryBand / band)))
+            for index in Swift.stride(from: 0, to: categories.count, by: stride) {
+                let centre = plot.maxY - (CGFloat(index) + 0.5) * band
+                draw(
+                    categories[index],
+                    at: NSPoint(
+                        x: bounds.minX + Design.Spacing.inset,
+                        y: centre - Design.Spacing.medium
+                    ),
+                    color: axisTextColor,
+                    alignment: .left,
+                    width: Design.Chart.categoryAxisLeading - Design.Spacing.inset * 2,
+                    font: Design.Typography.detail()
+                )
+            }
+            return
+        }
+
+        let stride = max(1, Int(ceil(Design.Chart.minimumCategoryLabelWidth / band)))
+        for index in Swift.stride(from: 0, to: categories.count, by: stride) {
+            let centre = plot.minX + (CGFloat(index) + 0.5) * band
+            draw(
+                categories[index],
+                at: NSPoint(x: centre, y: bounds.minY + Design.Spacing.small),
+                color: axisTextColor,
+                alignment: .center,
+                width: max(band, Design.Chart.minimumCategoryLabelWidth),
+                font: Design.Typography.detail()
+            )
+        }
+    }
+
+    /// The width of one category band along the axis it is laid out on.
+    private func bandExtent(count: Int, in plot: NSRect) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let along = model.orientation == .horizontal ? plot.height : plot.width
+        return along / CGFloat(count)
+    }
+
+    private func drawLegend() {
+        let keys = model.series.filter { !$0.title.isEmpty }
+        guard model.showsLegend, !keys.isEmpty else { return }
+        let font = Design.Typography.detail()
+        var x = bounds.minX + Design.Chart.axisLeading
+        let y = bounds.maxY - Design.Chart.legendHeight
+        let swatch = Design.Chart.legendSwatch
+
+        for series in keys {
+            let title = NSAttributedString(
+                string: series.title,
+                attributes: [.font: font, .foregroundColor: Design.Text.secondary]
+            )
+            let width = swatch + Design.Spacing.small + ceil(title.size().width)
+            // A key that would run off the edge is dropped rather than clipped: half a word
+            // beside a colour is a legend that lies about which series it names.
+            guard x + width <= bounds.maxX - Design.Spacing.inset else { return }
+
+            let dot = NSRect(
+                x: x,
+                y: y + (Design.Chart.legendHeight - swatch) / 2,
+                width: swatch,
+                height: swatch
+            )
+            color(for: series.style).setFill()
+            let radius = Design.Radius.control(fitting: dot.size)
+            NSBezierPath(roundedRect: dot, xRadius: radius, yRadius: radius).fill()
+            title.draw(at: NSPoint(x: dot.maxX + Design.Spacing.small, y: y))
+            x += width + Design.Spacing.medium
+        }
+    }
+
+    private func draw(
+        series: ThemedChartSeries,
+        geometry: ThemedChartRenderedSeries,
+        at index: Int,
+        in plot: NSRect
+    ) {
+        if series.mark == .bar {
+            drawBars(series: series, geometry: geometry, at: index, in: plot)
+        } else if composition == .stackedBands, series.style != .projection {
             drawStackedBand(series: series, geometry: geometry, in: plot)
         } else {
             drawIndependentSeries(series: series, geometry: geometry, in: plot)
         }
+    }
+
+    /// Bars over the geometry the curve grammar already produced.
+    ///
+    /// Each rendered point carries the two edges a bar needs: `baselineY` is zero for an
+    /// independent series and the running total for a stacked band, so grouping and stacking are
+    /// the *same* drawing code reading a different composition — no second layout pass, and a
+    /// stacked total cannot disagree with the band boundary drawn beside it.
+    private func drawBars(
+        series: ThemedChartSeries,
+        geometry: ThemedChartRenderedSeries,
+        at index: Int,
+        in plot: NSRect
+    ) {
+        let categories = model.xAxis.categories?.count ?? max(geometry.points.count, 1)
+        let band = bandExtent(count: categories, in: plot)
+        guard band > 0 else { return }
+
+        let grouped = composition == .independent ? barSeriesIndices : []
+        let slot = grouped.count > 1 ? band * Design.Chart.barBandFraction / CGFloat(grouped.count) : band * Design.Chart.barBandFraction
+        let position = grouped.firstIndex(of: index) ?? 0
+        let offset = grouped.count > 1
+            ? (CGFloat(position) - CGFloat(grouped.count - 1) / 2) * slot
+            : 0
+        let thickness = max(1, slot - Design.Chart.barGap)
+        let fill = color(for: series.style)
+        let isRanking = model.orientation == .horizontal
+
+        for value in geometry.points {
+            let rect = barRect(for: value, thickness: thickness, offset: offset, in: plot)
+            guard rect.width > 0, rect.height > 0 else { continue }
+            fill.withAlphaComponent(Design.Chart.barFillOpacity).setFill()
+            let path = barPath(rect, stacked: composition == .stackedBands)
+            path.fill()
+            fill.setStroke()
+            path.lineWidth = Design.Radius.border
+            path.stroke()
+
+            // A stacked bar's segments carry no printed number. The chart's claim is the total
+            // and the split, and a figure at each boundary answers neither — it reads as a
+            // running total, sits on the segment's own grid line, and needs a plate that
+            // punches a hole in the rule behind it. Hover still names every part.
+            guard composition != .stackedBands,
+                  thickness >= Design.Chart.barValueLabelThickness,
+                  model.series.indices.contains(index),
+                  model.series[index].points.indices.contains(value.sourceIndex) else { continue }
+            let text = valueString(model.series[index].points[value.sourceIndex].value)
+            if isRanking {
+                drawBarValue(
+                    text,
+                    at: NSPoint(
+                        x: rect.maxX + Design.Spacing.small,
+                        y: rect.midY - Design.Spacing.medium
+                    ),
+                    alignment: .left,
+                    width: Design.Chart.axisLeading
+                )
+            } else {
+                drawBarValue(
+                    text,
+                    at: NSPoint(x: rect.midX, y: rect.maxY + Design.Spacing.hairline),
+                    alignment: .center,
+                    width: max(thickness, Design.Chart.minimumCategoryLabelWidth)
+                )
+            }
+        }
+    }
+
+    /// A bar rounded at the end it grows towards, and square where it meets its baseline.
+    ///
+    /// A stacked segment is square at both ends: its top is a boundary with the segment above,
+    /// not the end of anything, and rounding it leaves a notch of background inside the total.
+    private func barPath(_ rect: NSRect, stacked: Bool) -> NSBezierPath {
+        let radius = min(
+            Design.Chart.barRadius,
+            min(rect.width, rect.height) / 2
+        )
+        guard radius > 0, !stacked else { return NSBezierPath(rect: rect) }
+
+        let path = NSBezierPath()
+        if model.orientation == .horizontal {
+            path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+            path.line(to: NSPoint(x: rect.maxX - radius, y: rect.minY))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.maxX - radius, y: rect.minY + radius),
+                radius: radius,
+                startAngle: -90,
+                endAngle: 0
+            )
+            path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - radius))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+                radius: radius,
+                startAngle: 0,
+                endAngle: 90
+            )
+            path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+        } else {
+            path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+            path.line(to: NSPoint(x: rect.minX, y: rect.maxY - radius))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.minX + radius, y: rect.maxY - radius),
+                radius: radius,
+                startAngle: 180,
+                endAngle: 90,
+                clockwise: true
+            )
+            path.line(to: NSPoint(x: rect.maxX - radius, y: rect.maxY))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+                radius: radius,
+                startAngle: 90,
+                endAngle: 0,
+                clockwise: true
+            )
+            path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        }
+        path.close()
+        return path
+    }
+
+    /// A bar's own number, on a plate of the chart's background.
+    ///
+    /// Without the plate the grid rule behind it runs straight through the digits — which is
+    /// exactly where a tall bar's label lands, since the top of a tall bar is near a gridline
+    /// by construction.
+    private func drawBarValue(
+        _ text: String,
+        at point: NSPoint,
+        alignment: NSTextAlignment,
+        width: CGFloat
+    ) {
+        let font = Design.Typography.numericDetail()
+        let measured = (text as NSString).size(withAttributes: [.font: font])
+        let origin: CGFloat
+        switch alignment {
+        case .right: origin = point.x - measured.width
+        case .center: origin = point.x - measured.width / 2
+        default: origin = point.x
+        }
+        // The label is drawn into a slot one `large` tall and lands at the *top* of it, so a
+        // plate placed at the slot's origin sits half a line below the glyphs it is meant to
+        // clear — which is why the ranking chart still had a rule running through its numbers.
+        let plate = NSRect(
+            x: origin - Design.Spacing.hairline,
+            y: point.y + Design.Spacing.large - measured.height,
+            width: measured.width + Design.Spacing.tight,
+            height: measured.height
+        )
+        plotBackground.setFill()
+        NSBezierPath(rect: plate).fill()
+        draw(text, at: point, color: axisTextColor, alignment: alignment, width: width)
+    }
+
+    /// The colour the chart paints itself with, which is what a label plate has to match.
+    private var plotBackground: NSColor {
+        if Design.Chart.style == .spectrum { return Design.Surface.field }
+        return AppThemePalette.current.isSystem ? Design.Surface.ground : Design.Surface.panel
+    }
+
+    /// The paint order positions of the bar series, which is what decides a grouped bar's slot.
+    /// A chart mixing a line with bars must not leave a gap where the line "would" have stood.
+    private var barSeriesIndices: [Int] {
+        model.series.indices.filter { model.series[$0].mark == .bar }
+    }
+
+    private func barRect(
+        for value: ThemedChartRenderedPoint,
+        thickness: CGFloat,
+        offset: CGFloat,
+        in plot: NSRect
+    ) -> NSRect {
+        let lower = CGFloat(min(value.baselineY, value.y))
+        let upper = CGFloat(max(value.baselineY, value.y))
+        if model.orientation == .horizontal {
+            // Category zero reads at the top, because a ranking is read down a page.
+            let centre = plot.maxY - CGFloat(value.x) * plot.height + offset
+            return NSRect(
+                x: plot.minX + lower * plot.width,
+                y: centre - thickness / 2,
+                width: (upper - lower) * plot.width,
+                height: thickness
+            )
+        }
+        let centre = plot.minX + CGFloat(value.x) * plot.width + offset
+        return NSRect(
+            x: centre - thickness / 2,
+            y: plot.minY + lower * plot.height,
+            width: thickness,
+            height: (upper - lower) * plot.height
+        )
     }
 
     private func drawIndependentSeries(
@@ -1258,11 +1700,15 @@ class ThemedTimeSeriesChartView: ThemedControl {
         _ text: String,
         at point: NSPoint,
         color: NSColor,
-        alignment: NSTextAlignment
+        alignment: NSTextAlignment,
+        width: CGFloat = Design.Chart.axisLeading,
+        font: NSFont? = nil
     ) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = alignment
-        let width = Design.Chart.axisLeading
+        // An axis label is a fixed-width slot. A category name is a word rather than a formatted
+        // number, so it must end in an ellipsis instead of overrunning the bar beside it.
+        paragraph.lineBreakMode = .byTruncatingTail
         let x: CGFloat
         switch alignment {
         case .right: x = point.x - width
@@ -1272,7 +1718,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         NSAttributedString(
             string: text,
             attributes: [
-                .font: Design.Typography.numericDetail(),
+                .font: font ?? Design.Typography.numericDetail(),
                 .foregroundColor: color,
                 .paragraphStyle: paragraph
             ]
@@ -1284,9 +1730,18 @@ class ThemedTimeSeriesChartView: ThemedControl {
         in plot: NSRect,
         y overrideY: Double? = nil
     ) -> NSPoint {
-        NSPoint(
+        let ordinate = CGFloat(overrideY ?? value.y)
+        // Selection, tooltips and curves all resolve a rendered point through here, so a ranking
+        // chart transposes once, in one place, rather than in each of them.
+        if model.orientation == .horizontal {
+            return NSPoint(
+                x: plot.minX + ordinate * plot.width,
+                y: plot.maxY - CGFloat(value.x) * plot.height
+            )
+        }
+        return NSPoint(
             x: plot.minX + CGFloat(value.x) * plot.width,
-            y: plot.minY + CGFloat(overrideY ?? value.y) * plot.height
+            y: plot.minY + ordinate * plot.height
         )
     }
 
@@ -1317,6 +1772,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
         case .currency: return value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
         case .tokens: return UsageFormat.tokens(Int64(value.rounded()))
         case .number: return value.formatted(.number.precision(.fractionLength(0...1)))
+        case .unit(let suffix):
+            let number = value.formatted(.number.precision(.fractionLength(0...1)))
+            return suffix.isEmpty ? number : "\(number) \(suffix)"
         }
     }
 
@@ -1339,7 +1797,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
             needsDisplay = true
             return
         }
-        let targetX = Double((location.x - plot.minX) / plot.width)
+        let targetX = model.orientation == .horizontal
+            ? Double((plot.maxY - location.y) / plot.height)
+            : Double((location.x - plot.minX) / plot.width)
         var best: (distance: Double, series: Int, point: Int)?
         for (seriesIndex, series) in displayedGeometry.enumerated() {
             guard model.series.indices.contains(seriesIndex) else { continue }

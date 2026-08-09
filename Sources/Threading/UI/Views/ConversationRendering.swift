@@ -59,6 +59,15 @@ extension ConversationViewController {
             // after the turn ends, and it should land on the row rather than be lost.
             if result.outcome != .interrupted { pendingToolViews[index] = nil }
             noteTimelineRowHeightChanged(index)
+            // A chart row draws the chart, not a `ToolCallView`, so there is no pending view to
+            // hand the result to. It only matters when the call failed: the row has to stop
+            // showing a picture the panel refused and say what happened instead, which means
+            // rebuilding it rather than updating it in place.
+            if case .toolCall(let failed) = timeline.rows[index],
+               failed.chart != nil,
+               result.outcome == .failed {
+                reloadConversationRows()
+            }
             scrollToBottom()
 
         case .streaming(let text):
@@ -147,7 +156,15 @@ extension ConversationViewController {
               }) else { return }
 
         let turnIndices = turn.rowIndex + 1 ... turn.endIndex
-        let hiddenIndices = turnIndices.filter { $0 != turn.finalAssistantIndex }
+        // A chart stays through the fold for the same reason a decided permission card does:
+        // it is not the record of work done on the way to the answer, it is part of the answer.
+        // Folding the picture and keeping the sentence about it leaves a claim with nothing
+        // behind it.
+        let hiddenIndices = turnIndices.filter { index in
+            guard index != turn.finalAssistantIndex else { return false }
+            if case .toolCall(let call) = timeline.rows[index], call.chart != nil { return false }
+            return true
+        }
         guard !hiddenIndices.isEmpty else { return }
 
         foldedTurnStarts.insert(startIndex)

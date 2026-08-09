@@ -47,9 +47,22 @@ extension DisplayPaneController {
         item(L10n.string("Reload")) { [weak self] in self?.reloadHTML() }
       ]
 
+    case .chart(let spec):
+      // A chart is the one content kind whose source is small enough to hand back whole, and
+      // the numbers are what a reader wants next — into a spreadsheet, or into a message.
+      return [
+        item(L10n.string("Copy Chart Data")) { [weak self] in self?.copyChartData(spec) }
+      ]
+
     case .semanticScene, nil:
       return []
     }
+  }
+
+  private func copyChartData(_ spec: ChartSpec) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(spec.tabSeparatedValues, forType: .string)
   }
 
   private func item(_ title: String, action: @escaping () -> Void) -> ThemedMenuEntry {

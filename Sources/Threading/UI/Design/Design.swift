@@ -712,6 +712,34 @@ enum Design {
         static let spectrumPeakHeight: CGFloat = 2
         static let pointRadius: CGFloat = 3
         static let selectedPointRadius: CGFloat = 5
+
+        /// A ranking chart's leading gutter holds words rather than formatted numbers, so it is
+        /// wider than the value axis it replaces.
+        static let categoryAxisLeading: CGFloat = 108
+        /// The floor a chart is still readable at, and the ceiling a ranking may grow to before
+        /// its bands compress instead. Sixty categories at a comfortable row height would be a
+        /// two-thousand-point row in a conversation, which is a scroll, not a chart.
+        static let minimumCardHeight: CGFloat = 160
+        static let maximumCardHeight: CGFloat = 720
+        static let rankingRowHeight: CGFloat = 32
+        static let legendHeight: CGFloat = 16
+        static let legendSwatch: CGFloat = 8
+        /// The share of a category band a bar group occupies. The remainder is the gap that says
+        /// the bands are separate categories rather than one continuous run.
+        static let barBandFraction: CGFloat = 0.72
+        static let barGap: CGFloat = 2
+        static let barFillOpacity: CGFloat = 0.22
+        /// Bars round at the growing end only, and barely. A fully rounded bar reads as a pill
+        /// floating above the axis rather than as a quantity measured from it, and the control
+        /// radius — sized for a button — is far too generous at a bar's width.
+        static let barRadius: CGFloat = 3
+        /// A bar thinner than this has no room for its own number, and printing one anyway
+        /// overlaps the bar beside it.
+        static let barValueLabelThickness: CGFloat = 26
+        /// Axis labels are thinned in whole steps below these widths, so a resize drops whole
+        /// categories rather than shuffling which names happen to fit.
+        static let minimumCategoryLabelWidth: CGFloat = 48
+        static let minimumCategoryBand: CGFloat = 16
         static let tooltipInset = Spacing.medium
         static let tooltipOffset = Spacing.inset
         static let tooltipMaxWidth: CGFloat = 180

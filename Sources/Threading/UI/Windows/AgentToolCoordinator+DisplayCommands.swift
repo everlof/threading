@@ -71,6 +71,94 @@ extension AgentToolCoordinator {
     )
   }
 
+  func displayChart(
+    _ arguments: DisplayChartArguments,
+    for sessionID: SessionID
+  ) -> MCPToolResult {
+    guard let title = arguments.title, !title.isEmpty else {
+      return .failure("Missing required argument: title")
+    }
+    guard let categories = arguments.categories, !categories.isEmpty else {
+      return .failure("Missing required argument: categories")
+    }
+    guard let series = arguments.series, !series.isEmpty else {
+      return .failure("Missing required argument: series")
+    }
+
+    let kind = arguments.kind.flatMap(ChartSpec.Kind.init(rawValue:))
+    if arguments.kind != nil, kind == nil {
+      return .failure(
+        "Unknown chart kind \"\(arguments.kind ?? "")\". Use bar, ranking, line, or area."
+      )
+    }
+    let format = arguments.valueFormat.flatMap(ChartSpec.ValueFormat.init(rawValue:))
+    if arguments.valueFormat != nil, format == nil {
+      return .failure(
+        """
+        Unknown value_format "\(arguments.valueFormat ?? "")". Use number, percent, currency, \
+        or tokens.
+        """)
+    }
+
+    var measured: [ChartSpec.Series] = []
+    measured.reserveCapacity(series.count)
+    for (index, entry) in series.enumerated() {
+      guard let name = entry.name, !name.isEmpty else {
+        return .failure("Series \(index + 1) is missing its name.")
+      }
+      guard let values = entry.values else {
+        return .failure("Series \"\(name)\" is missing its values.")
+      }
+      let emphasis = entry.emphasis.flatMap(ChartSpec.Emphasis.init(rawValue:))
+      if entry.emphasis != nil, emphasis == nil {
+        return .failure(
+          """
+          Unknown emphasis "\(entry.emphasis ?? "")" on series "\(name)". Use positive, \
+          warning, negative, or omit it.
+          """)
+      }
+      measured.append(
+        ChartSpec.Series(
+          name: name,
+          values: values,
+          details: entry.details,
+          emphasis: emphasis
+        )
+      )
+    }
+
+    let requested = ChartSpec(
+      title: title,
+      summary: arguments.summary,
+      kind: kind ?? .bar,
+      categories: categories,
+      series: measured,
+      stacked: arguments.stacked ?? false,
+      valueFormat: format ?? .number,
+      unit: arguments.unit,
+      maximumValue: arguments.maximumValue
+    )
+
+    let spec: ChartSpec
+    do {
+      spec = try requested.validated()
+    } catch {
+      // The caller is a model holding the data, so the refusal says what is wrong with the
+      // call rather than that the call failed.
+      return .failure(error.localizedDescription)
+    }
+
+    return present(
+      DisplayContent(
+        body: .chart(spec),
+        title: spec.title,
+        subtitle: spec.subtitle
+      ),
+      for: sessionID,
+      describedAs: "a native chart of \(spec.subtitle)"
+    )
+  }
+
   func displayScene(
     _ arguments: DisplaySceneArguments,
     for sessionID: SessionID

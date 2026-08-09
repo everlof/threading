@@ -417,8 +417,194 @@ final class UsageDashboardPerformanceTests: XCTestCase {
         _ = window
     }
 
+    /// Opt-in coverage for the complete agent-chart path at `ChartSpec`'s product limits.
+    ///
+    /// The Usage fixtures above deliberately exceed the reusable renderer's point budget, but
+    /// agent charts have a different contract and a different owner: JSON is restored into a
+    /// `ChartSpec`, validated, mapped into categorical geometry, mounted in a display-pane card,
+    /// and then updated in place. Keeping this workload separate stops a fast time-series curve
+    /// from hiding a slow 8-series grouped bar chart (or vice versa).
+    func testStressAgentChartPipelineWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_CHART_STRESS"] == "1",
+            "Set THREADING_CHART_STRESS=1 to run the agent-chart sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let kind = ChartSpec.Kind(
+            rawValue: environment["THREADING_CHART_STRESS_KIND"] ?? "bar"
+        ) ?? .bar
+        let seriesCount = max(
+            1,
+            min(
+                ChartSpec.Limits.maximumSeries,
+                environment["THREADING_CHART_STRESS_SERIES"].flatMap(Int.init)
+                    ?? ChartSpec.Limits.maximumSeries
+            )
+        )
+        // The product cap is lower than the two independent axis caps. Exercise the largest
+        // valid contract instead of manufacturing an input validation is required to reject.
+        let maximumCategoriesForSeries = ChartSpec.Limits.maximumMarks / seriesCount
+        let categoryCount = max(
+            1,
+            min(
+                ChartSpec.Limits.maximumCategories,
+                maximumCategoriesForSeries,
+                environment["THREADING_CHART_STRESS_CATEGORIES"].flatMap(Int.init)
+                    ?? ChartSpec.Limits.maximumCategories
+            )
+        )
+        let stacked = environment["THREADING_CHART_STRESS_STACKED"] == "1"
+        let decodeIterations = environment["THREADING_CHART_STRESS_DECODES"]
+            .flatMap(Int.init) ?? 250
+        let updateCount = environment["THREADING_CHART_STRESS_UPDATES"]
+            .flatMap(Int.init) ?? 250
+        let frameCount = environment["THREADING_CHART_STRESS_FRAMES"]
+            .flatMap(Int.init) ?? 60
+
+        let initial = agentChartSpec(
+            kind: kind,
+            categoryCount: categoryCount,
+            seriesCount: seriesCount,
+            seed: 0,
+            stacked: stacked
+        )
+        let encoded = try JSONEncoder().encode(initial)
+        let baselineMemory = Self.physicalFootprintBytes()
+
+        var decodedMarks = 0
+        let decodeStarted = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<decodeIterations {
+            let decoded = try JSONDecoder().decode(ChartSpec.self, from: encoded)
+            let validated = try decoded.validated()
+            decodedMarks += validated.themedModel.series.reduce(0) { $0 + $1.points.count }
+        }
+        let decodeEnded = DispatchTime.now().uptimeNanoseconds
+
+        let paneStarted = DispatchTime.now().uptimeNanoseconds
+        let pane = ChartPaneViewController(spec: initial, subtitle: initial.subtitle)
+        let paneWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 520),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        paneWindow.contentViewController = pane
+        pane.view.layoutSubtreeIfNeeded()
+        let paneEnded = DispatchTime.now().uptimeNanoseconds
+        let card = try XCTUnwrap(
+            Self.descendants(of: pane.view).compactMap { $0 as? ChartCardView }.first
+        )
+        let chart = try XCTUnwrap(
+            Self.descendants(of: card).compactMap { $0 as? ThemedTimeSeriesChartView }.first
+        )
+
+        // Build the incoming values before timing the UI. This phase asks whether stable-shape
+        // updates touch only the existing card/renderer, not how quickly this test makes Strings.
+        let updates = (1...max(updateCount, 1)).map {
+            agentChartSpec(
+                kind: kind,
+                categoryCount: categoryCount,
+                seriesCount: seriesCount,
+                seed: $0,
+                stacked: stacked
+            )
+        }
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        for update in updates {
+            card.setSpec(update, animated: false)
+        }
+        card.layoutSubtreeIfNeeded()
+        let updateEnded = DispatchTime.now().uptimeNanoseconds
+
+        // One real transition, sampled across a display's worth of frames. The renderer owns a
+        // bounded prepared geometry; draw must not re-map all source values every frame.
+        card.setSpec(initial, animated: false)
+        card.setSpec(updates[0], animated: true)
+        let bitmap = try XCTUnwrap(card.bitmapImageRepForCachingDisplay(in: card.bounds))
+        let animationBase = CACurrentMediaTime()
+        let drawStarted = DispatchTime.now().uptimeNanoseconds
+        for frame in 0..<max(frameCount, 1) {
+            let phase = Double(frame) / Double(max(frameCount - 1, 1))
+            chart.advanceAnimation(now: animationBase + Design.Motion.standard * phase)
+            card.cacheDisplay(in: card.bounds, to: bitmap)
+        }
+        let drawEnded = DispatchTime.now().uptimeNanoseconds
+
+        let marks = categoryCount * seriesCount
+        XCTAssertLessThanOrEqual(marks, ChartSpec.Limits.maximumMarks)
+        XCTAssertEqual(decodedMarks, decodeIterations * marks)
+        XCTAssertEqual(chart.renderedPointCount, marks)
+
+        let finalMemory = Self.physicalFootprintBytes()
+        let footprint = finalMemory >= baselineMemory ? finalMemory - baselineMemory : 0
+        print(
+            "THREADING_PERF agent-chart "
+                + "kind=\(kind.rawValue) stacked=\(stacked ? 1 : 0) "
+                + "categories=\(categoryCount) series=\(seriesCount) marks=\(marks) "
+                + "json_kb=\(encoded.count / 1024) decode_iterations=\(decodeIterations) "
+                + "decode_model_ms=\(Self.milliseconds(decodeEnded - decodeStarted)) "
+                + "cold_pane_ms=\(Self.milliseconds(paneEnded - paneStarted)) "
+                + "updates=\(updateCount) update_ms=\(Self.milliseconds(updateEnded - updateStarted)) "
+                + "frames=\(frameCount) draw_ms=\(Self.milliseconds(drawEnded - drawStarted)) "
+                + "descendants=\(Self.descendants(of: pane.view).count) "
+                + "footprint_delta_mb=\(Self.megabytes(footprint))"
+        )
+        _ = paneWindow
+    }
+
     private var isStressRun: Bool {
         ProcessInfo.processInfo.environment["THREADING_USAGE_STRESS"] == "1"
+    }
+
+    private func agentChartSpec(
+        kind: ChartSpec.Kind,
+        categoryCount: Int,
+        seriesCount: Int,
+        seed: Int,
+        stacked: Bool
+    ) -> ChartSpec {
+        let categories = (0..<categoryCount).map { "Category \($0 + 1)" }
+        let series = (0..<seriesCount).map { seriesIndex in
+            ChartSpec.Series(
+                name: "Series \(seriesIndex + 1)",
+                values: (0..<categoryCount).map { categoryIndex in
+                    Double(((categoryIndex + 3) * (seriesIndex + 5) + seed * 7) % 101) + 1
+                },
+                details: (0..<categoryCount).map {
+                    "Sample \($0 + 1), revision \(seed)"
+                },
+                emphasis: nil
+            )
+        }
+        return ChartSpec(
+            title: "Agent chart revision \(seed)",
+            summary: "A maximum-contract chart generated by the performance fixture.",
+            kind: kind,
+            categories: categories,
+            series: series,
+            stacked: stacked,
+            valueFormat: .number,
+            unit: "ms",
+            maximumValue: stacked ? Double(seriesCount * 102) : 102
+        )
+    }
+
+    private static func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
     }
 
     private var fixedCalendar: Calendar {

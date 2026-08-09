@@ -6060,6 +6060,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedSplitView",
                 "ThemedStackedBandChartView",
                 "ThemedTimeSeriesChartView",
+                "ChartCardView",
                 "ListSelectionStrength",
                 "ThemedTableHeaderView",
                 "ThemedTableRowView",

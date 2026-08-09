@@ -148,6 +148,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSplitView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
+        "ChartCardView",
         "ListSelectionStrength",
         "ThemedTableHeaderView",
         "ThemedTableRowView",
@@ -1579,6 +1580,11 @@ final class ComponentGalleryViewController: NSViewController {
                     stackedChartSample
                 ),
                 story(
+                    "ChartCardView",
+                    "What an agent's display_chart call draws: grouped bars, a stacked breakdown, and a horizontal ranking, all on the same renderer.",
+                    galleryChartCards()
+                ),
+                story(
                     "UsageDashboardView",
                     "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.",
                     dashboard
@@ -1667,6 +1673,87 @@ final class ComponentGalleryViewController: NSViewController {
             xRange: start...today,
             valueFormat: .number
         )
+    }
+
+    /// The three shapes an agent's chart takes, side by side, because they share one renderer
+    /// and the only way to see that they agree is to see them together.
+    private func galleryChartCards() -> NSView {
+        let specs = [
+            ChartSpec(
+                title: L10n.string("Cold start by phase"),
+                summary: nil,
+                kind: .bar,
+                categories: ["parse", "layout", "first paint"],
+                series: [
+                    ChartSpec.Series(
+                        name: L10n.string("Before"),
+                        values: [42, 31, 68],
+                        details: nil,
+                        emphasis: .negative
+                    ),
+                    ChartSpec.Series(
+                        name: L10n.string("After"),
+                        values: [26, 24, 39],
+                        details: nil,
+                        emphasis: .positive
+                    )
+                ],
+                stacked: false,
+                valueFormat: .number,
+                unit: "ms",
+                maximumValue: nil
+            ),
+            ChartSpec(
+                title: L10n.string("Turn cost by part"),
+                summary: nil,
+                kind: .bar,
+                categories: ["plan", "edit", "review"],
+                series: [
+                    ChartSpec.Series(
+                        name: L10n.string("Input"), values: [0.4, 1.1, 0.6],
+                        details: nil, emphasis: nil
+                    ),
+                    ChartSpec.Series(
+                        name: L10n.string("Output"), values: [0.2, 0.9, 0.3],
+                        details: nil, emphasis: nil
+                    ),
+                    ChartSpec.Series(
+                        name: L10n.string("Cache"), values: [0.1, 0.2, 0.1],
+                        details: nil, emphasis: nil
+                    )
+                ],
+                stacked: true,
+                valueFormat: .currency,
+                unit: nil,
+                maximumValue: nil
+            ),
+            ChartSpec(
+                title: L10n.string("Slowest tests"),
+                summary: nil,
+                kind: .ranking,
+                categories: [
+                    "ReflowTests", "ConversationRenderTests", "GitReviewTests", "ThemeTests"
+                ],
+                series: [
+                    ChartSpec.Series(
+                        name: L10n.string("Duration"), values: [12.4, 9.1, 4.6, 1.2],
+                        details: nil, emphasis: nil
+                    )
+                ],
+                stacked: false,
+                valueFormat: .number,
+                unit: "s",
+                maximumValue: nil
+            )
+        ]
+
+        let stack = NSStackView(views: specs.map(ChartCardView.init(spec:)))
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.large
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: 520).isActive = true
+        return stack
     }
 
     private func galleryStackedChartModel(alternate: Bool) -> ThemedChartModel {
