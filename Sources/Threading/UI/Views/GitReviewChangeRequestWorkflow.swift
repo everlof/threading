@@ -16,6 +16,11 @@ extension GitReviewViewController {
     func setChangeRequestBarVisible(_ visible: Bool) {
         changeRequestBar.isHidden = !visible
         changeRequestBarHeight.constant = visible ? GitReviewChangeRequestDefaults.barHeight : 0
+        // The collapsed bar is already the header-to-list margin: its top sits one inset below
+        // the mode chip and its zero-height bottom is the scroll view's top. A visible surface
+        // needs that same margin again below it, or its rounded bottom edge and the first file
+        // card become one joined slab.
+        scrollViewTop.constant = visible ? Design.Spacing.inset : 0
     }
 
     func refreshChangeRequest(in root: URL, forceRemote: Bool) {

@@ -406,6 +406,55 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    /// The publish strip is optional, so its lower margin has to arrive and leave with it. A
+    /// constant on the scroll view would either join a visible strip to the first file card or
+    /// double the ordinary chip-to-card gap while the strip is collapsed.
+    func testChangeRequestBarVisibilityKeepsPaneMarginsAroundFileList() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 520, height: 700)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        // The GitHub read completes after the diff has already mounted in the running app.
+        controller.setChangeRequestBarVisible(true)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let host = try XCTUnwrap(
+            controller.fileTableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        )
+        let card = try XCTUnwrap(host.subviews.first as? GitReviewFileRow)
+        let cardFrame = card.convert(card.bounds, to: controller.view)
+        let barFrame = controller.changeRequestBar.convert(
+            controller.changeRequestBar.bounds,
+            to: controller.view
+        )
+
+        XCTAssertEqual(
+            barFrame.minY - cardFrame.maxY,
+            Design.Spacing.inset,
+            accuracy: 0.5,
+            "the publish strip should not touch the first file card"
+        )
+
+        controller.setChangeRequestBarVisible(false)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let collapsedCardFrame = card.convert(card.bounds, to: controller.view)
+        let chipFrame = controller.modeChip.convert(controller.modeChip.bounds, to: controller.view)
+        XCTAssertEqual(
+            chipFrame.minY - collapsedCardFrame.maxY,
+            Design.Spacing.inset,
+            accuracy: 0.5,
+            "collapsing the publish strip should restore the ordinary header-to-card margin"
+        )
+    }
+
     /// The other half of moving the row gap out of `intercellSpacing` and into the row: cards
     /// still have to be separated by exactly one gap, not two and not none.
     func testCardsAreSeparatedByOneRowGap() throws {

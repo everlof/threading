@@ -291,6 +291,10 @@ state with no transition — **Default branch**, **Branch pushed**, or an unavai
 copy, not a disabled primary button. The distinction is semantic and visible: hard-print themes
 remove a disabled button's action depth while a live chooser keeps its shadow, so presenting a
 fact as a button put neighbouring surfaces on two different elevation rules.
+The strip also owns a pane inset below it while visible. When collapsed, its zero-height bottom
+already marks the ordinary chip-to-list inset; keeping a permanent second inset would double that
+gap, while omitting the conditional one joins the visible strip and the first file card into one
+slab.
 
 A file row's **right-click opens it in an editor at the first line the diff changes** — the
 primary click still belongs to the row's own job, opening and closing the body. This is the
