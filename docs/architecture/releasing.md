@@ -7,8 +7,8 @@ built — every update stage renders as Threading's own sheets; see
 [The UI is ours](#the-ui-is-ours-with-one-documented-exception). So is everything after the
 stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
 nightly workflows under `.github/workflows/`. What remains before the first tag is one manual
-`generate_keys` run ([Keys](#keys--threadings-own-one-manual-step-from-real)) and a GitHub
-remote for this repository.
+`generate_keys` run ([Keys](#keys--threadings-own-one-manual-step-from-real)) and installing the
+five signing/notarization secrets named at the top of `.github/workflows/release.yml`.
 
 ## Distribution signing is not a build setting
 
@@ -133,10 +133,12 @@ nightly install would permanently outrank stable and stop seeing updates the mom
 should return there. A separate `SUFeedURL` — a rolling `nightly` pre-release tag serving its
 own `appcast.xml` — sidesteps the comparison entirely, and date-dotted versions satisfy both
 the dotted-digits guard and Sparkle's ordering within the feed. The nightly pipeline is
-`.github/workflows/nightly.yml`: scheduled, skips an unmoved `master` by comparing HEAD to the
-rolling `nightly` tag, builds `--channel nightly` with the date version through the same
-`release.sh` (whose quality gate is `ci.sh`), embeds a commits-since-last-nightly notes file,
-and republishes the rolling prerelease with its own `appcast.xml`. The app side is
+`.github/workflows/nightly.yml`: manually dispatchable until its required repository secrets
+are installed, skips an unmoved `master` by comparing HEAD to the rolling `nightly` tag, builds
+`--channel nightly` with the date version through the same `release.sh` (whose quality gate is
+`ci.sh`), embeds a commits-since-last-nightly notes file, and republishes the rolling prerelease
+with its own `appcast.xml`. Re-enable its daily schedule only after all five secrets exist. The
+app side is
 `UpdateFeedPolicy`: a nightly-channel build's `SPUUpdaterDelegate` routes to
 `releases/download/nightly/appcast.xml`, and the stable `SUFeedURL` in the plist stays the
 single source of truth for everyone else. A dev build (`0.0.0`) additionally never checks on a
@@ -381,8 +383,9 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
   repo are not anonymously downloadable, so a private repo could never have served
   `SUFeedURL`. The Homebrew cask is now unblocked as a future step — claudex's
   `publish-homebrew-cask.sh` is the template.
-- The repository itself has no `origin` remote yet; the workflows and `publish_release.sh` are
-  dormant until it does, and each fails with a sentence saying so rather than half-working.
+- The repository now has its public-distribution `origin`. The release and nightly workflows
+  remain dormant until the five GitHub Actions secrets named in `release.yml` are installed;
+  the nightly schedule is deliberately disabled until then.
 - The iOS companion's pipeline (TestFlight first, the App Store later) is not built. The
   review-context problem — App Review runs the app with no Mac reachable — is answered: the
   welcome screen's **Try the demo** enters a canned Mac (`DemoExperience`,

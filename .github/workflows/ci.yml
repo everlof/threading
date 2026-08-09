@@ -5,26 +5,33 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 60
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Select the newest Xcode 26
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
 
-      - name: Install policy tools
-        run: brew install swiftlint
+      - name: Prepare policy tools
+        run: |
+          # SwiftLint is part of the macOS 15 runner image; ripgrep is not guaranteed.
+          swiftlint version
+          brew install ripgrep
 
       - name: Run the quality gate
         run: scripts/ci.sh

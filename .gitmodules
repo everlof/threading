@@ -6,4 +6,4 @@
 	url = https://github.com/everlof/LabelMorph.git
 [submodule "BorderBeamKit"]
 	path = Packages/Vendor/BorderBeamKit
-	url = ./BorderBeamKit
+	url = https://github.com/everlof/BorderBeamKit.git
