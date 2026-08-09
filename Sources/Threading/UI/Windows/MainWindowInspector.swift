@@ -49,13 +49,14 @@ extension MainWindowController {
         let indicator = InspectorIndicator.element(levels: report.levels, layers: layers)
 
         let capture = captureScreenshot(of: window, annotating: indicator)
-        report.screenshotPath = capture.path
+        report.screenshotPath = capture.url?.path
 
         presentReport(
             heading: InspectorStrings.elementHeading,
             subheading: report.target.className,
             markdown: report.markdown,
-            screenshot: capture.image
+            screenshot: capture.image,
+            screenshotURL: capture.url
         )
     }
 
@@ -73,13 +74,14 @@ extension MainWindowController {
         )
 
         let capture = captureScreenshot(of: window, annotating: indicator)
-        report.screenshotPath = capture.path
+        report.screenshotPath = capture.url?.path
 
         presentReport(
             heading: InspectorStrings.pointHeading,
             subheading: InspectorGeometry.describe(point),
             markdown: report.markdown,
-            screenshot: capture.image
+            screenshot: capture.image,
+            screenshotURL: capture.url
         )
     }
 
@@ -97,20 +99,21 @@ extension MainWindowController {
         )
 
         let capture = captureScreenshot(of: window, annotating: indicator)
-        report.screenshotPath = capture.path
+        report.screenshotPath = capture.url?.path
 
         presentReport(
             heading: InspectorStrings.regionHeading,
             subheading: InspectorGeometry.describe(rect),
             markdown: report.markdown,
-            screenshot: capture.image
+            screenshot: capture.image,
+            screenshotURL: capture.url
         )
     }
 
     private func captureScreenshot(
         of window: NSWindow,
         annotating indicator: InspectorIndicator
-    ) -> (image: NSImage?, path: String?) {
+    ) -> (image: NSImage?, url: URL?) {
         guard let rep = WindowSnapshot.capture(window: window, annotating: indicator) else {
             return (nil, nil)
         }
@@ -119,7 +122,7 @@ extension MainWindowController {
         image.addRepresentation(rep)
 
         // A failed write costs the report its path line, never the sheet.
-        return (image, WindowSnapshot.writePNG(rep)?.path)
+        return (image, WindowSnapshot.writePNG(rep))
     }
 
     /// The environment is read here rather than by each report, because it is the same reading
@@ -129,7 +132,8 @@ extension MainWindowController {
         heading: String,
         subheading: String,
         markdown: String,
-        screenshot: NSImage?
+        screenshot: NSImage?,
+        screenshotURL: URL?
     ) {
         let environment = InspectorEnvironment.capture(
             window: window,
@@ -141,7 +145,8 @@ extension MainWindowController {
             subheading: subheading,
             markdown: markdown,
             environment: environment.markdown,
-            screenshot: screenshot
+            screenshot: screenshot,
+            screenshotURL: screenshotURL
         )
         sheet.onDone = { [weak self, weak sheet] in
             guard let self, let sheet else { return }

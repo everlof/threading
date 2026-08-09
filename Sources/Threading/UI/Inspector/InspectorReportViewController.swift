@@ -32,6 +32,9 @@ final class InspectorReportViewController: NSViewController {
     private let environment: String
 
     private let screenshot: NSImage?
+    /// The temporary PNG behind `screenshot`. Keeping the value beside the decoded image lets
+    /// the shared media inspector offer zoom and file actions without parsing prose for a path.
+    private let screenshotURL: URL?
 
     private let noteField = PromptView()
     private let copyButton = ThemedButton()
@@ -65,13 +68,15 @@ final class InspectorReportViewController: NSViewController {
         subheading: String,
         markdown: String,
         environment: String,
-        screenshot: NSImage?
+        screenshot: NSImage?,
+        screenshotURL: URL? = nil
     ) {
         self.heading = heading
         self.subheading = subheading
         self.markdown = markdown
         self.environment = environment
         self.screenshot = screenshot
+        self.screenshotURL = screenshotURL
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -164,30 +169,27 @@ final class InspectorReportViewController: NSViewController {
     private func makePreview() -> NSView? {
         guard let screenshot else { return nil }
 
-        let imageView = NSImageView()
-        imageView.image = screenshot
-        imageView.imageScaling = .scaleProportionallyDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
+        let preview = ThemedImagePreview()
+        preview.image = screenshot
+        preview.fileURL = screenshotURL
 
-        // An image view's intrinsic size is the image's own, and a window screenshot is a
-        // window wide — floored, or the preview drives the sheet. The display pane learned
-        // this the hard way.
-        imageView.setContentHuggingPriority(.init(1), for: .horizontal)
-        imageView.setContentHuggingPriority(.init(1), for: .vertical)
-        imageView.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        imageView.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        // Exactly one already-decoded window capture lives here (ordinary 2–8 MP; a maximized
+        // high-density display is the stress case). `ThemedImagePreview` has no intrinsic size,
+        // so those pixels cannot drive the sheet's width, and opening it hands the same image to
+        // a one-item inspector. Zoom and pan mutate scalar state rather than decoding or building
+        // anything proportional to the image in their event callbacks.
 
-        imageView.heightAnchor
+        preview.heightAnchor
             .constraint(equalToConstant: InspectorReportLayout.previewHeight)
             .isActive = true
 
-        imageView.applySurface(
+        preview.applySurface(
             fill: Design.Surface.panel,
             radius: .panel,
             border: Design.Surface.border
         )
 
-        return imageView
+        return preview
     }
 
     /// The surface goes on a container, not on the scroll view.

@@ -74,6 +74,43 @@ final class IssueReportingRenderTests: XCTestCase {
     }
 
     @MainActor
+    func testTheScreenshotPreviewOpensTheZoomableInspector() throws {
+        let screenshotURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-inspector-preview-\(UUID().uuidString).png")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            data: try XCTUnwrap(swatch().tiffRepresentation)
+        ))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: screenshotURL)
+        defer { try? FileManager.default.removeItem(at: screenshotURL) }
+
+        let sheet = makeInspectorSheet(screenshotURL: screenshotURL)
+        let host = laidOut(sheet)
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+
+        let preview = try XCTUnwrap(firstSubview(of: ThemedImagePreview.self, under: host))
+        XCTAssertEqual(preview.fileURL, screenshotURL)
+        XCTAssertNotNil(preview.accessibilityHelp(), "the preview does not advertise inspection")
+        XCTAssertTrue(preview.performPrimaryAction(), "the report image did not open")
+        host.layoutSubtreeIfNeeded()
+
+        let canvas = try XCTUnwrap(firstSubview(of: MediaInspectorCanvas.self, under: host))
+        let fittedScale = canvas.displayedScale
+        canvas.zoomIn()
+        XCTAssertGreaterThan(
+            canvas.displayedScale,
+            fittedScale,
+            "the opened report image cannot zoom"
+        )
+    }
+
+    @MainActor
     func testARefusedIssueSaysSoAndKeepsTheSheetOpen() {
         let sheet = makeInspectorSheet()
         _ = laidOut(sheet)
@@ -257,7 +294,9 @@ final class IssueReportingRenderTests: XCTestCase {
     /// between runs, and a block carrying this machine's window size and theme would differ in
     /// every one of them.
     @MainActor
-    private func makeInspectorSheet() -> InspectorReportViewController {
+    private func makeInspectorSheet(
+        screenshotURL: URL? = nil
+    ) -> InspectorReportViewController {
         InspectorReportViewController(
             heading: InspectorStrings.elementHeading,
             subheading: "SidebarRowView",
@@ -273,7 +312,8 @@ final class IssueReportingRenderTests: XCTestCase {
             - Window: 1440×900 at 2×
             - Text size: standard
             """,
-            screenshot: swatch()
+            screenshot: swatch(),
+            screenshotURL: screenshotURL
         )
     }
 
@@ -339,6 +379,15 @@ final class IssueReportingRenderTests: XCTestCase {
         if root.accessibilityIdentifier() == identifier { return root }
         for child in root.subviews {
             if let found = view(withIdentifier: identifier, under: child) { return found }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func firstSubview<View: NSView>(of type: View.Type, under root: NSView) -> View? {
+        if let match = root as? View { return match }
+        for child in root.subviews {
+            if let match = firstSubview(of: type, under: child) { return match }
         }
         return nil
     }
