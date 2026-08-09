@@ -326,7 +326,17 @@ not touched. Two consequences worth knowing before changing either:
   of their own**: `.independent` puts every foot on zero and `.stackedBands` puts it on the running
   total, both already computed for the curve grammar.
 
-Three rules here were arrived at by rendering the fixtures and looking at them, and every
+**A chart's words are text, and were measured as such.** Drawn in `Design.Text.tertiary` — the
+right role for chrome — the axis ticks and category names came out at **3.03:1** against a light
+ground, and the grid rules at 1.88:1: correct by the design system's vocabulary and too faint to
+read. Axis text is now `secondary` (7.8:1), a bar's own number is full `label` strength (14.9:1)
+because it is the content rather than the chrome, and the system grid alpha went 0.42 → 0.68
+(3.95:1). `ChartTests` renders the card in both appearances and measures the dominant text colour
+against its own background, so a role change that dims the axis again fails rather than merely
+looking wrong. This is shared with the Usage dashboard, deliberately: its axis had the same
+problem.
+
+Three more rules here were arrived at by rendering the fixtures and looking at them, and every
 assertion passed while each was wrong. A chart whose view is left on its autoresizing mask keeps
 the zero frame it was built with and draws a perfect title over an empty rectangle. A bar's own
 number lands next to a grid rule by construction — the top of a tall bar is near a gridline — so
@@ -335,6 +345,22 @@ number at all**: the figure reads as a running total, and its plate punches a ho
 behind it. Finally the value axis is rounded up to a *nice* ceiling (`ChartCardView.axisCeiling`)
 rather than fitted to the data, because a true axis labelled 73.4 ms and 55.1 ms tells nobody
 anything; the step ladder is fine-grained because a coarse one leaves a third of the plot empty.
+
+**A tab that holds a value builds its own controller, and the pane has to own it.**
+`installedController` is weak on purpose — it points at controllers the *tab* keeps alive, like a
+browser or a review — so a controller the pane constructs from data (a chart, a semantic scene)
+has no other owner: it deallocates the instant it is installed, the weak reference empties, and
+the next `installHosted` finds nothing to unparent. The orphaned view then stays in the panel for
+the life of the session with every later tab drawing on top of it. `ownedController` holds those,
+and the assignment happens *after* the outgoing view is unparented — releasing first reproduces
+the original bug exactly. Reported from the running app as "the tabs overlap", and the scene path
+had been doing it since it shipped.
+
+**Pane content states height as a preference.** A required height constraint inside the panel
+becomes the window's own minimum size, so a chart in the side pane stopped the window being made
+shorter until its tab was closed. The card's minimum is `.defaultHigh` and the chart's vertical
+compression resistance is low, so a short pane compresses the plot instead of pinning the window
+open. `ChartTests` asserts there is no required height constraint anywhere in the card.
 
 The same `ChartCardView` serves both surfaces, so the panel and the transcript cannot disagree
 about what a chart looks like. In a natively rendered conversation the chart is drawn **inline, on

@@ -728,7 +728,10 @@ enum Design {
         /// the bands are separate categories rather than one continuous run.
         static let barBandFraction: CGFloat = 0.72
         static let barGap: CGFloat = 2
-        static let barFillOpacity: CGFloat = 0.22
+        /// Enough tint that a bar reads as a measured quantity rather than as an outline. Below
+        /// roughly a quarter it washes out on a light ground, where the fill is competing with
+        /// white rather than sitting on black.
+        static let barFillOpacity: CGFloat = 0.3
         /// Bars round at the growing end only, and barely. A fully rounded bar reads as a pill
         /// floating above the axis rather than as a quantity measured from it, and the control
         /// radius — sized for a button — is far too generous at a bar's width.

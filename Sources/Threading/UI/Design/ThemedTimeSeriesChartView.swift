@@ -849,10 +849,21 @@ class ThemedTimeSeriesChartView: ThemedControl {
         )
     }
 
+    /// Axis ticks and category names.
+    ///
+    /// `secondary`, not `tertiary`: measured against a light ground, tertiary label text comes
+    /// out at 3.03:1, and an axis is not decoration — it is the only thing that says what the
+    /// marks beside it mean. The chart's own numbers are stronger again; see `barValueColor`.
     private var axisTextColor: NSColor {
         Design.Chart.style == .spectrum
             ? Design.Surface.accent.withAlphaComponent(0.62)
-            : Design.Text.tertiary
+            : Design.Text.secondary
+    }
+
+    /// A bar's printed value, which is the content of the chart rather than its chrome and is
+    /// therefore drawn at full label strength.
+    private var barValueColor: NSColor {
+        Design.Chart.style == .spectrum ? Design.Surface.accent : Design.Text.label
     }
 
     private func drawGrid(in plot: NSRect) {
@@ -891,7 +902,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
         if Design.Chart.style == .spectrum {
             gridColor = Design.Surface.accent.withAlphaComponent(0.16)
         } else if AppThemePalette.current.isSystem {
-            gridColor = Design.Surface.divider.withAlphaComponent(0.42)
+            // 0.42 measured 1.88:1 on a light ground — a rule that faint stops being a scale to
+            // read a bar against and becomes a smudge behind it.
+            gridColor = Design.Surface.divider.withAlphaComponent(0.68)
         } else {
             gridColor = Design.Surface.divider
         }
@@ -1159,14 +1172,16 @@ class ThemedTimeSeriesChartView: ThemedControl {
         // plate placed at the slot's origin sits half a line below the glyphs it is meant to
         // clear — which is why the ranking chart still had a rule running through its numbers.
         let plate = NSRect(
-            x: origin - Design.Spacing.hairline,
+            x: origin - Design.Spacing.small,
             y: point.y + Design.Spacing.large - measured.height,
-            width: measured.width + Design.Spacing.tight,
+            // A hairline of clearance still reads as a rule touching the digits. The knockout
+            // has to be wide enough to look deliberate, or it looks like a rendering fault.
+            width: measured.width + Design.Spacing.small * 2,
             height: measured.height
         )
         plotBackground.setFill()
         NSBezierPath(rect: plate).fill()
-        draw(text, at: point, color: axisTextColor, alignment: alignment, width: width)
+        draw(text, at: point, color: barValueColor, alignment: alignment, width: width)
     }
 
     /// The colour the chart paints itself with, which is what a label plate has to match.

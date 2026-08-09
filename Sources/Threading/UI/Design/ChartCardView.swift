@@ -177,22 +177,12 @@ final class ChartCardView: NSView, ThemedComponent {
         setAccessibilityIdentifier("chart-card")
 
         addSubview(titleLabel)
-        addSubview(chart)
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            chart.topAnchor.constraint(
-                equalTo: titleLabel.bottomAnchor,
-                constant: Layout.titleSpacing
-            ),
-            chart.leadingAnchor.constraint(equalTo: leadingAnchor),
-            chart.trailingAnchor.constraint(equalTo: trailingAnchor),
-            chart.bottomAnchor.constraint(equalTo: bottomAnchor),
-            chart.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: Design.Chart.minimumCardHeight
-            )
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor)
         ])
+        attach(chart)
         chart.setModel(spec.themedModel, animated: false)
     }
 
@@ -217,21 +207,41 @@ final class ChartCardView: NSView, ThemedComponent {
             replacement.frame = chart.frame
             chart.removeFromSuperview()
             chart = replacement
-            addSubview(replacement)
-            NSLayoutConstraint.activate([
-                replacement.topAnchor.constraint(
-                    equalTo: titleLabel.bottomAnchor,
-                    constant: Layout.titleSpacing
-                ),
-                replacement.leadingAnchor.constraint(equalTo: leadingAnchor),
-                replacement.trailingAnchor.constraint(equalTo: trailingAnchor),
-                replacement.bottomAnchor.constraint(equalTo: bottomAnchor),
-                replacement.heightAnchor.constraint(
-                    greaterThanOrEqualToConstant: Design.Chart.minimumCardHeight
-                )
-            ])
+            attach(replacement)
         }
         chart.setModel(newSpec.themedModel, animated: animated && !rebuilds)
+    }
+
+    /// Parents a chart under the title and states how it may be sized.
+    ///
+    /// One method rather than two constraint lists, because the rebuild path had drifted from
+    /// the initial one already — and the difference that matters here is a priority, which is
+    /// exactly the kind of detail a duplicated list loses.
+    private func attach(_ chart: ThemedTimeSeriesChartView) {
+        addSubview(chart)
+
+        // A chart states a *preference* for its height and never a requirement. A required
+        // constraint inside pane content becomes the window's own minimum size, which is how a
+        // chart in the side panel stopped the window being made shorter until its tab was
+        // closed. Its intrinsic height is treated the same way: squeezed, it compresses instead
+        // of pinning the pane open.
+        let minimumHeight = chart.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: Design.Chart.minimumCardHeight
+        )
+        minimumHeight.priority = .defaultHigh
+        chart.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        chart.setContentHuggingPriority(.defaultLow, for: .vertical)
+
+        NSLayoutConstraint.activate([
+            minimumHeight,
+            chart.topAnchor.constraint(
+                equalTo: titleLabel.bottomAnchor,
+                constant: Layout.titleSpacing
+            ),
+            chart.leadingAnchor.constraint(equalTo: leadingAnchor),
+            chart.trailingAnchor.constraint(equalTo: trailingAnchor),
+            chart.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
     }
 
     func applyTheme() {

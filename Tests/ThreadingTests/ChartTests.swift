@@ -350,6 +350,191 @@ final class ChartTests: XCTestCase {
         )
     }
 
+    // MARK: - In the panel
+
+    /// Switching off a chart tab has to leave the pane holding one thing.
+    ///
+    /// Reported from the running app: selecting Attachments drew its list over a chart that was
+    /// still there underneath, title and axis and all.
+    func testSwitchingAwayFromAChartLeavesNothingOfItBehind() throws {
+        let pane = DisplayPaneController()
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 520)
+        pane.view.layoutSubtreeIfNeeded()
+
+        pane.addContentTab(
+            DisplayContent(body: .chart(comparison()), title: "Chart", subtitle: "2 series"),
+            for: sessionID
+        )
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(chartCards(in: pane.view).count, 1, "the chart should be shown")
+
+        _ = pane.activateBrowser(for: sessionID)
+        pane.view.layoutSubtreeIfNeeded()
+        for card in chartCards(in: pane.view) {
+            var chain: [String] = []
+            var node: NSView? = card
+            while let current = node, current !== pane.view {
+                chain.append("\(type(of: current)) hidden=\(current.isHidden)")
+                node = current.superview
+            }
+            print("LEFTOVER CHART PATH: \(chain.joined(separator: " ← "))")
+        }
+        XCTAssertEqual(
+            chartCards(in: pane.view).count, 0,
+            "the chart is still in the pane behind the tab that replaced it"
+        )
+    }
+
+    /// The pane must stay resizable while a chart is in it.
+    ///
+    /// Reported from the running app: with a chart open the window could not be made shorter
+    /// until the tab was closed. A required height inside pane content becomes the window's own
+    /// minimum, so the card states a *preference* and lets the pane scroll instead.
+    func testAChartImposesNoRequiredHeightOnThePaneThatHoldsIt() throws {
+        let card = ChartCardView(spec: comparison())
+        let required = requiredHeightConstraints(in: card)
+        XCTAssertEqual(
+            required, [],
+            "a required height in pane content raises the window's minimum size"
+        )
+
+        // And it must actually survive being squeezed to a fraction of what it prefers. The host
+        // states its size with anchors: a detached fixture with only a frame constrains nothing,
+        // and lays its content out at the size that content would prefer.
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 120))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(card)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 420),
+            host.heightAnchor.constraint(equalToConstant: 120),
+            card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            card.topAnchor.constraint(equalTo: host.topAnchor),
+            card.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(card.frame.height, 120, accuracy: 1)
+    }
+
+    private func chartCards(in view: NSView) -> [ChartCardView] {
+        var found: [ChartCardView] = []
+        if let card = view as? ChartCardView { found.append(card) }
+        for subview in view.subviews { found.append(contentsOf: chartCards(in: subview)) }
+        return found
+    }
+
+    private func requiredHeightConstraints(in view: NSView) -> [String] {
+        var found: [String] = []
+        for constraint in view.constraints
+        where constraint.priority == .required
+            && (constraint.firstAttribute == .height || constraint.secondAttribute == .height) {
+            found.append(constraint.description)
+        }
+        for subview in view.subviews {
+            found.append(contentsOf: requiredHeightConstraints(in: subview))
+        }
+        return found
+    }
+
+    // MARK: - Contrast
+
+    /// The chart's words have to be readable on the ground they are drawn on.
+    ///
+    /// Measured rather than asserted against a role name, because the role is only half the
+    /// answer — the other half is what the surface under it resolves to in that appearance. The
+    /// first version of this chart drew its axis in `tertiary`, which comes out at 3.03:1 on
+    /// white: correct by the design system's vocabulary and too faint to read.
+    func testChartTextClearsTheContrastFloorInBothAppearances() throws {
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+            let bitmap = try render(comparison(), appearance: appearanceName)
+            let measured = try XCTUnwrap(
+                dominantTextContrast(in: bitmap),
+                "no text found in the rendered chart"
+            )
+            XCTAssertGreaterThanOrEqual(
+                measured, 3.5,
+                "chart text is \(measured):1 against its own ground in \(appearanceName.rawValue)"
+            )
+        }
+    }
+
+    /// The most common grey that is not the background — the core of the axis glyphs — against
+    /// the background, as a WCAG contrast ratio.
+    private func dominantTextContrast(in bitmap: NSBitmapImageRep) -> Double? {
+        var counts: [NSColor: Int] = [:]
+        var background: NSColor?
+        var backgroundCount = 0
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 1) {
+            for x in stride(from: 0, to: bitmap.pixelsWide, by: 1) {
+                guard let colour = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.deviceRGB) else { continue }
+                let count = (counts[colour] ?? 0) + 1
+                counts[colour] = count
+                if count > backgroundCount {
+                    backgroundCount = count
+                    background = colour
+                }
+            }
+        }
+        guard let background else { return nil }
+
+        // Greys only: a coloured pixel is a bar, and a bar is not text.
+        let text = counts
+            .filter { colour, _ in
+                colour != background
+                    && abs(colour.redComponent - colour.greenComponent) < 0.03
+                    && abs(colour.greenComponent - colour.blueComponent) < 0.03
+                    && contrast(colour, background) > 1.5
+            }
+            .max { $0.value < $1.value }?
+            .key
+        return text.map { contrast($0, background) }
+    }
+
+    private func contrast(_ one: NSColor, _ other: NSColor) -> Double {
+        func luminance(_ colour: NSColor) -> Double {
+            func channel(_ value: CGFloat) -> Double {
+                let value = Double(value)
+                return value <= 0.03928
+                    ? value / 12.92
+                    : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channel(colour.redComponent)
+                + 0.7152 * channel(colour.greenComponent)
+                + 0.0722 * channel(colour.blueComponent)
+        }
+        let first = luminance(one)
+        let second = luminance(other)
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+    }
+
+    private func render(
+        _ spec: ChartSpec,
+        appearance appearanceName: NSAppearance.Name
+    ) throws -> NSBitmapImageRep {
+        let appearance = NSAppearance(named: appearanceName)
+        var bitmap: NSBitmapImageRep?
+        let draw = {
+            let card = self.laidOut(ChartCardView(spec: spec))
+            card.appearance = appearance
+            AppThemeRefresh.repaint(card)
+            card.layoutSubtreeIfNeeded()
+            card.wantsLayer = true
+            card.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+            guard let rep = card.bitmapImageRepForCachingDisplay(in: card.bounds) else { return }
+            card.cacheDisplay(in: card.bounds, to: rep)
+            bitmap = rep
+        }
+        if #available(macOS 11.0, *) {
+            appearance?.performAsCurrentDrawingAppearance(draw)
+        } else {
+            draw()
+        }
+        return try XCTUnwrap(bitmap)
+    }
+
     // MARK: - Rendered state
 
     /// Appearance is reviewed here by looking at it: several bugs in this codebase were visible

@@ -151,6 +151,17 @@ final class DisplayPaneController: NSViewController {
   /// review — so switching tabs can swap it out without rebuilding its state.
   private weak var installedController: NSViewController?
 
+  /// The hosted controller *this pane* built, when the tab holds a value rather than a
+  /// controller.
+  ///
+  /// A chart and a semantic scene are rendered from data the tab owns, so their controller is
+  /// constructed here and owned by nobody else. `installedController` is deliberately weak —
+  /// it points at controllers the tab keeps alive — so without this strong reference such a
+  /// controller deallocates the moment it is installed, its weak entry becomes nil, and the
+  /// next `installHosted` finds nothing to remove: the view stays parented forever and the
+  /// tab that replaced it draws on top of it. That is exactly what a chart tab did.
+  private var ownedController: NSViewController?
+
   /// One app-wide document that temporarily occupies the panel without joining any session's
   /// tab list. It is deliberately not persisted or transferable: changing chats must not clone,
   /// close, or retarget the theme being inspected.
@@ -1858,7 +1869,10 @@ final class DisplayPaneController: NSViewController {
         hideHTML()
         captionLabel.isHidden = true
         contentMenuButton.isHidden = false
-        installHosted(ChartPaneViewController(spec: spec, subtitle: content.subtitle))
+        installHosted(
+          ChartPaneViewController(spec: spec, subtitle: content.subtitle),
+          owned: true
+        )
         return
 
       case .semanticScene(let scene):
@@ -1879,7 +1893,8 @@ final class DisplayPaneController: NSViewController {
               spacing: .medium,
               children: children
             )
-          )
+          ),
+          owned: true
         )
         return
       }
@@ -2023,7 +2038,8 @@ final class DisplayPaneController: NSViewController {
 
   /// Parents (or clears) a live tab's view controller into the host, reusing the installed one
   /// so switching tabs never rebuilds its state.
-  private func installHosted(_ controller: NSViewController?) {
+  /// - Parameter owned: `true` when this pane built the controller and nothing else retains it.
+  private func installHosted(_ controller: NSViewController?, owned: Bool = false) {
     let performanceSpan = PerformanceRecorder.shared.begin(
       "display-pane.install-hosted",
       category: "display-pane.ui",
@@ -2036,8 +2052,12 @@ final class DisplayPaneController: NSViewController {
       return
     }
 
+    // Order matters: releasing the outgoing owned controller before its view is unparented
+    // deallocates it, which empties the weak `installedController` and leaves the view behind —
+    // the very bug this ownership exists to prevent.
     installedController?.view.removeFromSuperview()
     installedController = controller
+    ownedController = owned ? controller : nil
 
     guard let controller else {
       hostedView.isHidden = true
