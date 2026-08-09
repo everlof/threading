@@ -1,5 +1,5 @@
 {
-  "originHash" : "ae6a5419c34072b8b721bb23874550568c7bec30f8008151d30ad6ae0e05a5a1",
+  "originHash" : "be3d6902dbad6b987a369eaf67d824dbb760a3df1510891c7bb9f5b8e6fa3158",
   "pins" : [
     {
       "identity" : "nativediffkit",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser",
       "state" : {
-        "revision" : "cdd0ef3755280949551dc26dee5de9ddeda89f54",
-        "version" : "1.6.2"
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
       }
     },
     {
