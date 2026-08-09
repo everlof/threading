@@ -159,6 +159,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// outline was handed. Rebuilt with the other indexes.
     private var nodesByKey: [SidebarNodeKey: NSObject] = [:]
 
+    /// The latest insertion fade scheduled for each identity. macOS 26 can leave an off-screen
+    /// `.effectFade` row at alpha zero; one batched callback per structural pass repairs only the
+    /// identities whose fade has not since been superseded by another insertion.
+    private var pendingInsertFadeFinalizations: [SidebarNodeKey: UUID] = [:]
+
     /// A reload arriving while one is in flight, held until it is over.
     ///
     /// Nothing reaches here today: store events are delivered synchronously, but no path inside
@@ -575,6 +580,11 @@ extension ProjectSidebarViewController {
     private func applyStructure(steps: [SidebarOutlineStep], wholesale: Bool) {
         let animated = !Design.Motion.reducesMotion && !wholesale
         let animation: NSTableView.AnimationOptions = animated ? [.effectFade] : []
+        let insertedKeys = steps.flatMap { step -> [SidebarNodeKey] in
+            guard case let .insert(parent, indexes) = step else { return [] }
+            let children = renderedShape.children(of: parent)
+            return indexes.compactMap { children.indices.contains($0) ? children[$0] : nil }
+        }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animated ? Design.Motion.standard : Design.Motion.immediate
@@ -609,6 +619,24 @@ extension ProjectSidebarViewController {
             }
 
             expandStandingRows(animated: animated)
+        }
+
+        if animated, !insertedKeys.isEmpty {
+            // AppKit owns this fade, including its presentation frames. On macOS 26 an unshown
+            // outline can retire those frames without restoring the row view's model alpha from
+            // zero. Its animation-group completion is withheld in the same state, so normalize
+            // one frame after the measured duration. A per-key token prevents an older pass from
+            // cutting short a newer fade if the same identity is removed and reinserted quickly.
+            let token = UUID()
+            for key in insertedKeys { pendingInsertFadeFinalizations[key] = token }
+            let delay = Design.Motion.standard + (1.0 / 60.0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                for key in insertedKeys where self.pendingInsertFadeFinalizations[key] == token {
+                    self.pendingInsertFadeFinalizations.removeValue(forKey: key)
+                    self.presentedRowView(of: key)?.alphaValue = 1
+                }
+            }
         }
 
         // A move can change which root stands first, and a moved row keeps its view — so the

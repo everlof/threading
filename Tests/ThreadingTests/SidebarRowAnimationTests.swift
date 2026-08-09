@@ -31,11 +31,16 @@ final class SidebarRowAnimationTests: XCTestCase {
     private var windows: [NSWindow] = []
 
     override func tearDown() {
+        for window in windows {
+            window.orderOut(nil)
+            window.contentViewController = nil
+            window.close()
+        }
+        windows = []
         for directory in directories {
             try? FileManager.default.removeItem(at: directory)
         }
         directories = []
-        windows = []
         Design.Motion.reduceMotionOverrideForTesting = nil
         super.tearDown()
     }

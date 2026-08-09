@@ -296,10 +296,14 @@ row that just arrived runs through `animator().expandItem` so its children come 
 
 Unlike [a pane](#how-a-pane-moves), this does **not** stand down for a window nobody can see.
 That rule exists because a pane's completion carries real work and AppKit withholds it
-off-screen; nothing here waits on a completion, row animations were measured running *and
-settling* in an unshown window, and standing down would leave every hosted fixture asserting a
-motion the app does not perform. Reduce Motion still collapses the duration to zero and drops
-the fade — the update stays incremental, because a reduced sidebar should not blink either.
+off-screen; the structural update waits on no completion, and standing down would replace the
+incremental update with a visible blink when the sidebar returns. Reduce Motion still collapses
+the duration to zero and drops the fade — the update stays incremental, because a reduced sidebar
+should not blink either. On macOS 26 an unshown outline can retire `.effectFade` without restoring
+the inserted row's model alpha from zero, and its animation-group completion is withheld there too.
+One batched callback per structural pass normalizes the inserted identities one frame after the
+measured duration; per-key tokens keep an older pass from cutting short a newer insertion of the
+same row. Removing the fade or reusing its view can therefore no longer make an arrived row vanish.
 
 **Animation is testable here, and `SidebarRowAnimationTests` tests it.** A row animation leaves
 two marks: the arriving row's `alphaValue` ramps from zero, and each displaced row keeps a
@@ -310,7 +314,8 @@ frame, so `frame` alone reports the destination), and nothing may be drawn **bet
 and the assertion, since the change lands in microseconds and the motion lasts a fifth of a
 second. Lag alone is not proof: a layer whose frame was set with no animation also reads as
 behind until the next commit, so the animation object is what separates a row that is moving
-from one that has just been put down.
+from one that has just been put down. The fade assertion reads `NSView.alphaValue` at both ends:
+zero while AppKit is presenting the arrival, and the durable one after the normalization beat.
 
 ### Dragging a pane shut
 
