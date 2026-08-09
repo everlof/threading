@@ -123,26 +123,33 @@ that every Claude product feature exists behind that endpoint.
 
 - `AgentKind` correctly describes runtimes, not model providers.
 - `AgentAccount` and `AgentAccountDiscovery` model config-directory logins.
-- `AgentLauncher` builds direct `claude` commands and `AgentAccountRouting` prefixes a selected
-  `CLAUDE_CONFIG_DIR`.
+- `AgentLauncher` builds direct `claude` commands and `AgentAccountRouting` prefixes the runtime's
+  `accountEnvironmentKey` (`CLAUDE_CONFIG_DIR` for Claude) — and deliberately `env -u`s that key for
+  the default account, because Threading itself may inherit an exported alternate home.
 - `AgentSession.accountHandle` approximates account and history lane for direct profiles, but CCS
   shared context groups prove those are different axes; no session field pins a launch wrapper.
 - `AgentAccountDiscovery.account(for:handle:)` currently falls back to a preferred/default account
   when an exact handle is missing. A routed launch must not pass through that behavior, and this
   feature should replace launch-time account lookup with a typed exact/missing result for direct
-  non-default accounts too.
-- Claude Native Chat adds Threading's hook/permission settings with `--settings`.
-- the composer chooses runtime plus account as one `ComposerIdentity`.
+  non-default accounts too. The exact lookup must still search disabled logins, as the current code
+  deliberately does: a resume has to route back to the account that owns its conversation.
+- Both Claude launch paths append a per-session `--settings` hooks file written by
+  `MCPSessionRegistry.writeHookSettings` — terminal sessions carry lifecycle/status hooks only,
+  and Native Chat additionally brokers permissions through it.
+- the composer chooses runtime plus account as one `ComposerIdentity` (currently `private` to
+  `SessionComposerViewController`; carrying a route means promoting or replacing it).
 - runtime capabilities currently assume direct provider behavior in several places: Claude Remote
-  Control, Fast, model aliases, live account usage, and usage attribution.
+  Control, Fast, model aliases, live account usage, the usage-window poke launch, and usage
+  attribution.
 - `UsageOrigin` already has the correct shape: runtime and billing provider are separate.
 
 ## Product contract
 
 ### Onboarding
 
-The existing Accounts & CLI page first performs **only** the same login-shell `command -v ccs`
-probe as the launch path, with a short timeout and generation guard. It must not run `ccs`, inspect
+The existing **Accounts** onboarding page (`OnboardingDiscoveryPageViewController`) first performs
+**only** a login-shell `command -v ccs` probe beside the `AgentCLIProbe` checks it already runs for
+the agent CLIs, with a short timeout and generation guard. It must not run `ccs`, inspect
 `~/.ccs`, delay opening the page, or block completion of onboarding.
 
 When `ccs` is executable and consent is still undecided, show one fixed-size card:
@@ -178,8 +185,10 @@ sessions and asks for consent again before they can launch.
 The identity control remains one decision, but the existing `ThemedMenu` is an eager retained-row
 surface and cannot own an unbounded CCS collection. Keep direct identities and a bounded recent
 CCS set in the chip menu, followed by **Choose CCS Profile…**; that action opens a searchable,
-value-backed virtualized chooser from `UI/Design`. A choice still resolves to one combined
-execution identity. Example rows:
+value-backed virtualized chooser built from the `UI/Design` primitives (`ThemedSearchField`,
+`ThemedTableView`, `ThemedVirtualTableCell`), modeled on `ScheduledFinishPickerViewController`'s
+off-main search over a value model — no ready-made chooser component exists in `UI/Design` today.
+A choice still resolves to one combined execution identity. Example rows:
 
 - `Claude Code · Default` — direct;
 - `Claude Code · Work via CCS` — CCS account profile;
@@ -208,7 +217,8 @@ ccs <persisted-profile-name> <the Claude arguments Threading already builds>
 ```
 
 The wrapper is resolved through the login shell. Each argument still passes through
-`ShellCommand`; profile names and prompts are operands, not interpolated shell fragments.
+`ShellCommand`'s quoting — the profile name as an appended word, the prompt as the single trailing
+operand — never as interpolated shell fragments.
 
 Before a resumable session starts, Threading refreshes redacted metadata for that exact profile:
 
@@ -315,36 +325,49 @@ credentials; direct Claude and GLM can likewise share `~/.claude/projects`. Resu
 
 Store the route alongside the provider-neutral fields on `AgentSession`, and thread it beside
 `AgentSessionConfiguration` through every construction path: composer, scheduled start, side chat,
-import when known, continuation, remote start, and paired-device DTOs. Forks inherit the parent's
-route. A new continuation chooses its destination route explicitly.
+import when known, continuation, and the remote start used by paired devices (one path, not two),
+plus the wire DTOs that carry it. Forks inherit the parent's route. A new continuation chooses its
+destination route explicitly.
 
 Adding an optional/defaulted field to `AgentSession` costs no `ProjectsStateVersion` migration in
 the current SQLite thin-row/JSON-payload architecture; the legacy document version remains 2 and an
-absent route decodes as `.direct`. Merely bumping that legacy number would not protect the live
-database, and merely increasing SQLite `user_version` is also insufficient because the current
-older `SQLiteDatabase.migrate(to:)` does not refuse a newer version.
+absent route decodes as `.direct` — through `AgentSession`'s hand-written `CodingKeys`,
+`init(from:)`, and `encode(to:)`, all three of which change together, and past its decoder's
+cross-field invariants, which throw into the all-or-nothing load, so the strictness of route
+validation there is a deliberate choice, not a free default. Merely bumping that legacy number
+would not protect the live database, and merely increasing SQLite `user_version` (currently 3) is
+also insufficient because `SQLiteDatabase.migrate(to:step:)` returns without error when the on-disk
+version is newer.
 
 Downgrade safety therefore needs an explicit database design before any routed session can ship:
 
 - add schema v4 with a `routed_session` table mirroring the indexed session columns and JSON
   payload; routed sessions live only there, while direct sessions remain in `session`. Do not give
-  the new table an old-schema foreign-key cascade: a downgraded build deleting what looks like an
-  empty project must not silently delete the routed rows it cannot display;
+  the new table the current `session` table's project cascade (`ON DELETE CASCADE`): a downgraded
+  build deleting what looks like an empty project must not silently delete the routed rows it
+  cannot display. Without a cascade the table also has no reaper, so pair it with an explicit
+  retain/prune pass the way the auxiliary tables do;
 - load/save the two tables as one model graph, reject duplicate IDs across them, and move a row
   transactionally if an explicit migration changes route class;
 - a pre-route build sees no routed row and therefore cannot launch it as direct, while leaving the
   unknown table untouched during ordinary saves;
-- also change `SQLiteDatabase.migrate(to:)` to refuse future `user_version` values for protection
-  from the next schema change, without pretending that change retroactively protects old builds;
-- have the new reader surface an orphaned routed row for recovery rather than pruning it, and test
-  delete, reorder/save, quarantine, orphan recovery, and downgrade-reader behavior against a v4
-  fixture.
+- also change `SQLiteDatabase.migrate(to:step:)` to refuse future `user_version` values for
+  protection from the next schema change, without pretending that change retroactively protects old
+  builds;
+- have the new reader surface an orphaned routed row for recovery rather than pruning it. That is a
+  new disposition for copy-of-record data — today an orphaned session row fails the load and
+  quarantines the whole store, and per-row tolerance exists only for auxiliary tables — so it must
+  be designed and tested as such. Test delete, reorder/save, quarantine, orphan recovery, and
+  downgrade-reader behavior against a v4 fixture.
 
 Remote compatibility is separate. Add optional route/profile IDs and display metadata to wire DTOs
-without local paths or secrets. Old clients omit the selection and can create only `.direct`;
-the current host still enforces effective capabilities on every surface/reroute request. Per the
-remote architecture, an additive DTO change does not itself bump `RemoteProtocol.current`; bump it
-only if implementation proves the wire change breaking.
+without local paths or secrets. Old clients omit the selection and can create only `.direct`. The
+host already authorizes every session-management request server-side, per message; route and
+surface admission must be enforced at that same boundary — today's `RemoteCapability` is only
+`view`/`interact` and no reroute request exists, so both checks are new host work, not existing
+behavior. Per the releasing checklist (`docs/architecture/releasing.md`, pinned by
+`RemoteProtocolTests`), an additive DTO change does not itself bump `RemoteProtocol.current`; bump
+it only if implementation proves the wire change breaking.
 
 ### Discovery boundary
 
@@ -388,7 +411,7 @@ configuration. A user-driven refresh can run it again. Do not:
 - invoke `ccs env`;
 - read `*.settings.json`;
 - parse credentials and then promise to discard them;
-- parse ANSI/human tables from `ccs api list`; or
+- parse ANSI/human tables from `ccs api list`;
 - rely on `__complete` as a production schema;
 - set `CCS_NO_PRE_DISPATCH=1` and assume root commands still route normally; or
 - call `auth show --json` per row during discovery (it walks history/settings diagnostics and would
@@ -428,7 +451,9 @@ runtime invocation -> direct exact-account routing OR exact CCS wrapper -> host 
   now requires an exact lookup; missing no longer falls back to the preferred/default login.
 - `.ccs` does **not** also prefix `CLAUDE_CONFIG_DIR`; CCS is authoritative for profile setup. The
   observed lane is for transcript resolution and drift detection, not a second source of launch
-  environment.
+  environment. Whether the wrapper must still be shielded from an ambient `CLAUDE_CONFIG_DIR` the
+  way the direct default path `env -u`s it — or CCS's own inherited-environment scrubbing covers
+  it — is a fixture-pinned question, not an assumption.
 - the wrapper receives the inner Claude argument vector without a duplicated `claude` executable
   word.
 - Threading's hook environment and MCP arguments remain launch-scoped and may be passed through
@@ -564,20 +589,24 @@ currently stamps them as direct Anthropic before it knows a Threading session. T
 - scan each canonical lane once, then enrich route-neutral parsed records from that map;
 - an imported/externally-created transcript in a lane shared by several routes is **unknown biller**
   until the user assigns it; transcript shape or model name is not evidence of destination;
-- include the route-classification revision in cache validity, or cache route-neutral token records,
-  so a route assignment/provider correction reclassifies an unchanged file; and
-- key account breakdowns by biller-scoped execution identity, not bare `.standard`, so direct
-  Anthropic and GLM do not collapse into a misleading “Default” account row.
+- include the route-classification revision in cache validity (the scan cache already keys on
+  `parserID` and a schema version — a natural seam), or cache route-neutral token records, so a
+  route assignment/provider correction reclassifies an unchanged file; and
+- key account breakdowns by biller-scoped execution identity, not the runtime-scoped `AccountID`
+  (runtime + account handle) alone, so direct Anthropic and GLM sharing the standard Claude handle
+  do not collapse into a misleading “Default” account row.
 
-The usage ledger may count tokens from the Claude-format transcript for every classified route. Monetary cost
-uses `.providerReported`, an exact versioned provider rate, or `.unpriced` — never Anthropic prices
-for GLM-shaped token records.
+The usage ledger may count tokens from the Claude-format transcript for every classified route.
+Monetary cost uses `UsageCostSource.providerReported`, `.catalogPriced` only from an exact
+versioned provider rate, or `.unpriced` — never Anthropic prices for GLM-shaped token records.
 
 `AccountUsageService` must become route-aware at its caller boundary. It must not read the default
 Claude OAuth/Keychain usage and display it beside a GLM session merely because both share
 `.standard`. For routes without a quota API, show no pressure ring and an explanatory “Usage not
 available from this CCS profile” row. Never ask CCS for secret environment output to implement a
-quota fetcher.
+quota fetcher. The usage-window poke is itself a direct `claude` launch
+(`AgentLauncher.usageWindowPokeCommand`) with hard-coded account routing; it must be gated by route
+the same way and never run for a route whose subscription usage is unavailable.
 
 ### Process lifecycle
 
@@ -671,6 +700,8 @@ Files centered on:
 - `Sources/Threading/Models/Identifiers.swift`
 - `Sources/Threading/Core/Storage/ProjectDatabase.swift`
 - `Sources/Threading/Core/Storage/SQLiteDatabase.swift`
+- `Sources/Threading/Core/Session/StateManager.swift` (quarantine, the migration chain, and the
+  unreadable-row policy live here)
 - `Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift`
 - `Sources/Threading/Core/Session/ProjectStore.swift`
 
@@ -706,8 +737,9 @@ Grant only each capability that passes.
 
 ### 4. Add onboarding, Settings, and composer selection
 
-Use existing `UI/Design` components, `ThemedAlert`/registered confirmation flows, localization,
-keyboard/accessibility contracts, and the scaling bounds above. Update:
+Use existing `UI/Design` components, `ThemedAlert` and the registered
+`ConfirmationAlert`/`ConfirmationPrompt` flows, localization, keyboard/accessibility contracts, and
+the scaling bounds above. Update:
 
 - onboarding discovery page and render/flow tests;
 - Accounts settings and profile enablement;
