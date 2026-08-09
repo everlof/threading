@@ -170,6 +170,24 @@ were diffs would guess wrong on somebody's progress bar. Foregrounds are never o
 transform — a program's syntax highlighting is its own — and indexed colours never reach it,
 being the palette already. `TerminalBackgroundHarmonyTests` pins the three guarantees.
 
+**A program-selected foreground is diagnosed, never corrected.** An ANSI or 24-bit foreground
+can still equal the final background — `SGR 97` over System Light is the concrete failure, where
+bright white and the page are both `#FFFFFF`. Rewriting it would corrupt program output and hide
+the actual configuration error, so SwiftTerm measures the final rendered pair only while a
+meaningful run is visible and reports ratios below 1.25:1. Default foreground is excluded: ANSI
+39 is the safe way for a prompt to delegate legibility to the terminal. Whitespace, ornament and
+SGR concealment are excluded too, and both renderer caches are bounded against arbitrary
+truecolor output.
+
+`TerminalTextVisibilityIssue` carries the exact source roles, resolved RGB values, ratio,
+terminal identity and theme. The pane names the program/theme conflict, says Threading shows the
+colour as sent, offers ANSI 39 and a direct route to Theme Settings, and can be dismissed. A
+dismissal is durable for that exact theme/source/RGB signature rather than for the terminal
+instance, so the same prompt does not nag once per tab while a different palette remains a new
+context. Applying a profile invalidates the old finding before SwiftTerm clears its measurements:
+if the new palette is still bad the next visible draw reports it again; if it fixed the pair, no
+stale explanation survives.
+
 A live app-theme switch is a terminal-theme switch for any chat or standalone terminal
 following it, which is why `AgentSessionViewController` and `ProjectTerminalViewController`
 observe `AppThemeDidChange` alongside the assignment events.

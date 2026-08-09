@@ -22,6 +22,10 @@ final class TerminalSession: NSObject {
     var onRawOutput: ((Data) -> Void)?
 
     private var profile: TerminalProfile
+    /// Identifies the palette/font application that renderer findings belong to. The callback
+    /// is delivered one main-queue turn later; a profile can change during that turn, and a
+    /// finding from the page just left must not repopulate the notice after its invalidation.
+    private var profileApplicationGeneration = 0
 
     /// A launch requested after SIGTERM but before SwiftTerm has reaped the old child.
     ///
@@ -135,6 +139,23 @@ final class TerminalSession: NSObject {
             onRawOutput(Data(slice))
         }
 
+        terminalView.onLowContrastText = { [weak self] conflict in
+            guard let self else { return }
+            let generation = self.profileApplicationGeneration
+            let themeID = self.profile.theme.id.rawValue
+            // The callback arrives while SwiftTerm is assembling a visible row for drawing.
+            // Defer the app event one turn so a notice never changes the view hierarchy from
+            // inside that draw pass.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.profileApplicationGeneration == generation else { return }
+                NotificationCenter.default.post(TerminalTextVisibilityIssueDetected(issue: .init(
+                    identity: self.identity,
+                    themeID: themeID,
+                    conflict: conflict
+                )))
+            }
+        }
+
         applyProfile()
 
         // Deliberately *not* an observer of `ProfileDidChange`.
@@ -147,6 +168,15 @@ final class TerminalSession: NSObject {
     }
 
     private func applyProfile() {
+        profileApplicationGeneration &+= 1
+        // The renderer clears its measured pairs when the palette lands below. Clear the app's
+        // corresponding finding first: if the new theme fixes the collision there will be no
+        // replacement callback, so retaining the old one would explain colours no longer on
+        // screen. A still-bad pair is reported again by the next visible draw.
+        NotificationCenter.default.post(TerminalTextVisibilityIssuesInvalidated(
+            identity: identity
+        ))
+
         // Sampled before the palette lands so the announcement below can tell a re-apply from
         // an actual change of page.
         let previousBackground = terminalView.getTerminal().backgroundColor

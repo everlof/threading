@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 import XCTest
 @testable import Threading
 
@@ -117,6 +118,48 @@ final class PaneNoticeRenderTests: XCTestCase {
         }
     }
 
+    /// The reported failure in context: System Light's ANSI bright white and terminal
+    /// background are both #FFFFFF. The blank inside the prompt is intentional evidence in the
+    /// picture; the band above it has to explain that evidence without pretending the emulator
+    /// may rewrite a program's colour choice.
+    func testRendersTheTerminalTextVisibilityWarningInItsPane() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+
+        let issue = TerminalTextVisibilityIssue(
+            identity: .ephemeral(UUID()),
+            themeID: TerminalTheme.systemLight.id.rawValue,
+            conflict: TerminalTextColorConflict(
+                foregroundSource: .ansi256(index: 15),
+                backgroundSource: .defaultBackground,
+                foreground: .init(red: 255, green: 255, blue: 255),
+                background: .init(red: 255, green: 255, blue: 255),
+                contrastRatio: 1
+            )
+        )
+
+        var written = 0
+        for (themeName, theme) in Render.themes {
+            AppThemePalette.set(theme)
+            for (appearanceName, appearanceID) in Render.appearances {
+                let data = try XCTUnwrap(
+                    terminalVisibilityImage(appearance: appearanceID, issue: issue),
+                    "Failed to render the terminal warning under \(themeName) in \(appearanceName)"
+                )
+                try data.write(
+                    to: directory.appendingPathComponent(
+                        "notice-terminal-text-visibility-\(themeName)-\(appearanceName).png"
+                    )
+                )
+                written += 1
+            }
+        }
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count)
+        print("Rendered terminal text visibility storybook to \(directory.path)")
+    }
+
     // MARK: - Helpers
 
     private func writeStorybook(
@@ -184,6 +227,70 @@ final class PaneNoticeRenderTests: XCTestCase {
                 notice.leadingAnchor.constraint(equalTo: host.leadingAnchor),
                 notice.trailingAnchor.constraint(equalTo: host.trailingAnchor),
                 notice.topAnchor.constraint(equalTo: host.topAnchor)
+            ])
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+            host.cacheDisplay(in: host.bounds, to: rep)
+            data = rep.representation(using: .png, properties: [:])
+        }
+
+        if let appearance {
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated(render)
+            }
+        }
+        return data
+    }
+
+    /// Uses a real SwiftTerm view, not a painted stand-in, so the storybook preserves the exact
+    /// invisible run that caused the notice: `[last: 23s]` exists between `$` and `master`, but
+    /// ANSI bright white makes it white on the System Light palette's white background.
+    private func terminalVisibilityImage(
+        appearance name: NSAppearance.Name,
+        issue: TerminalTextVisibilityIssue
+    ) -> Data? {
+        let appearance = NSAppearance(named: name)
+
+        var data: Data?
+        let render: @MainActor () -> Void = {
+            let notice = PaneNoticeView(
+                tone: .attention,
+                title: issue.title,
+                message: issue.detail,
+                actions: [PaneNoticeAction(title: L10n.string("Change Theme…")) {}],
+                onDismiss: {}
+            )
+            let terminal = TerminalView(frame: .zero)
+            terminal.translatesAutoresizingMaskIntoConstraints = false
+            terminal.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+            terminal.installColors(TerminalTheme.systemLight.asSwiftTermColors())
+            terminal.nativeForegroundColor = TerminalTheme.systemLight.foreground
+            terminal.nativeBackgroundColor = TerminalTheme.systemLight.background
+            terminal.getTerminal().feed(
+                text: "\r\n$ \u{1b}[97m[last: 23s]\u{1b}[0m  "
+                    + "\u{1b}[33mmaster\u{1b}[0m  "
+                    + "\u{1b}[34m~/repo/AnotherTerminal\u{1b}[0m\r\n$ "
+            )
+
+            let host = ThemedSurfaceView()
+            host.frame = NSRect(x: 0, y: 0, width: Render.paneWidth, height: 280)
+            host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+            host.appearance = appearance
+            host.addSubview(notice)
+            host.addSubview(terminal)
+
+            NSLayoutConstraint.activate([
+                host.widthAnchor.constraint(equalToConstant: Render.paneWidth),
+                host.heightAnchor.constraint(equalToConstant: 280),
+                notice.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                notice.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                notice.topAnchor.constraint(equalTo: host.topAnchor),
+                terminal.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                terminal.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                terminal.topAnchor.constraint(equalTo: notice.bottomAnchor),
+                terminal.bottomAnchor.constraint(equalTo: host.bottomAnchor)
             ])
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()

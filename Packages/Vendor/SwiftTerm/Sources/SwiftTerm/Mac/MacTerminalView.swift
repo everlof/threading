@@ -15,6 +15,62 @@ import AppKit
 import CoreText
 import CoreGraphics
 
+/// The spelling a program used for one colour after terminal rendering semantics such as
+/// inverse video and bold-as-bright have been applied.
+public enum TerminalRenderedColorSource: Hashable, Sendable {
+    case ansi256(index: UInt8)
+    case trueColor(red: UInt8, green: UInt8, blue: UInt8)
+    case defaultForeground
+    case defaultBackground
+    case invertedDefaultForeground
+    case invertedDefaultBackground
+}
+
+/// A colour reduced to the stable sRGB bytes a diagnostic can safely carry out of the renderer.
+public struct TerminalRenderedColor: Hashable, Sendable {
+    public let red: UInt8
+    public let green: UInt8
+    public let blue: UInt8
+
+    public init(red: UInt8, green: UInt8, blue: UInt8) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+}
+
+/// A visible run of meaningful text whose final foreground and background are effectively the
+/// same. SwiftTerm still draws the colours exactly as the program requested; this is observation,
+/// never correction.
+public struct TerminalTextColorConflict: Hashable, Sendable {
+    public let foregroundSource: TerminalRenderedColorSource
+    public let backgroundSource: TerminalRenderedColorSource
+    public let foreground: TerminalRenderedColor
+    public let background: TerminalRenderedColor
+    public let contrastRatio: Double
+
+    public init(
+        foregroundSource: TerminalRenderedColorSource,
+        backgroundSource: TerminalRenderedColorSource,
+        foreground: TerminalRenderedColor,
+        background: TerminalRenderedColor,
+        contrastRatio: Double
+    ) {
+        self.foregroundSource = foregroundSource
+        self.backgroundSource = backgroundSource
+        self.foreground = foreground
+        self.background = background
+        self.contrastRatio = contrastRatio
+    }
+}
+
+struct TerminalTextContrastPair: Hashable {
+    let foregroundSource: TerminalRenderedColorSource
+    let backgroundSource: TerminalRenderedColorSource
+    let foreground: TerminalRenderedColor
+    let background: TerminalRenderedColor
+}
+
 /**
  * TerminalView provides an AppKit front-end to the `Terminal` termininal emulator.
  * It is up to a subclass to either wire the terminal emulator to a remote terminal
@@ -142,6 +198,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             colorsChanged()
         }
     }
+
+    /// Reports severe final text/background collisions found while building visible rows.
+    ///
+    /// The renderer performs the qualification and deduplication itself so a host does not get
+    /// a callback for every token or frame. Setting this never changes terminal output.
+    public var onLowContrastText: ((TerminalTextColorConflict) -> Void)?
+
+    /// Colour pairs already measured for the current palette. Both collections are bounded:
+    /// programs can emit arbitrary truecolour values, and a diagnostic cache must not turn that
+    /// external cardinality into permanent renderer memory.
+    var evaluatedTextContrast: Set<TerminalTextContrastPair> = []
+    var reportedTextContrast: Set<TerminalTextColorConflict> = []
     var transparent = TTColor.transparent ()
     var isBigSur = true
     
@@ -272,6 +340,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             _nativeFg = newValue
             terminal.foregroundColor = nativeForegroundColor.getTerminalColor ()
             settingFg = false
+            evaluatedTextContrast.removeAll(keepingCapacity: true)
+            reportedTextContrast.removeAll(keepingCapacity: true)
         }
     }
 
@@ -288,6 +358,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             _nativeBg = newValue
             terminal.backgroundColor = nativeBackgroundColor.getTerminalColor ()
             settingBg = false
+            evaluatedTextContrast.removeAll(keepingCapacity: true)
+            reportedTextContrast.removeAll(keepingCapacity: true)
         }
     }
     

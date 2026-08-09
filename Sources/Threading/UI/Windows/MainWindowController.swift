@@ -3271,6 +3271,13 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainer(
         _ container: TerminalContainerViewController,
+        didRequestSettingsPage pageID: String
+    ) {
+        showSettingsPage(id: pageID)
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
         visibleSessionDidChange sessionID: SessionID?
     ) {
         updateSessionTitleItem()

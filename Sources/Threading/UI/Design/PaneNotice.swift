@@ -83,12 +83,17 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
+    /// A short heading when the condition needs a name before its exact explanation.
+    let title: String?
+
     /// What the band says, for a test and for the announcement it makes on arrival.
     let message: String
 
     private let tone: Tone
     private let glyph = GlyphView()
+    private let titleLabel: NSTextField?
     private let messageLabel: NSTextField
+    private let textStack = NSStackView()
     private let separator = SeparatorView()
     private let contentAreaGuide = NSLayoutGuide()
     private lazy var minimumHeightConstraint = heightAnchor.constraint(
@@ -117,12 +122,15 @@ final class PaneNoticeView: NSView, ThemedComponent {
     /// when it leaves.
     init(
         tone: Tone,
+        title: String? = nil,
         message: String,
         actions: [PaneNoticeAction],
         onDismiss: (() -> Void)? = nil
     ) {
         self.tone = tone
+        self.title = title
         self.message = message
+        titleLabel = title.map { NSTextField(labelWithString: $0) }
         messageLabel = NSTextField(wrappingLabelWithString: message)
         super.init(frame: .zero)
 
@@ -145,7 +153,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(message)
+        setAccessibilityLabel([title, message].compactMap { $0 }.joined(separator: ". "))
         setAccessibilityIdentifier(PaneNoticeDefaults.identifier)
     }
 
@@ -191,8 +199,13 @@ final class PaneNoticeView: NSView, ThemedComponent {
             pointSize: Design.Symbol.pointSize(forSlot: PaneNoticeDefaults.glyphSlot)
         )
 
+        titleLabel?.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel?.applyFont(.control)
+        titleLabel?.maximumNumberOfLines = 1
+        titleLabel?.lineBreakMode = .byTruncatingTail
+
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        messageLabel.applyFont(.control)
+        messageLabel.applyFont(title == nil ? .control : .detail())
         messageLabel.maximumNumberOfLines = PaneNoticeDefaults.maximumLines
         // Word wrapping with a truncated *last* line, rather than `lineBreakMode =
         // .byTruncatingTail`. A truncating line-break mode turns wrapping off outright, so the
@@ -216,8 +229,15 @@ final class PaneNoticeView: NSView, ThemedComponent {
             for: .vertical
         )
 
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = Design.Spacing.hairline
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        if let titleLabel { textStack.addArrangedSubview(titleLabel) }
+        textStack.addArrangedSubview(messageLabel)
+
         addSubview(glyph)
-        addSubview(messageLabel)
+        addSubview(textStack)
         addSubview(separator)
         addLayoutGuide(contentAreaGuide)
 
@@ -227,6 +247,10 @@ final class PaneNoticeView: NSView, ThemedComponent {
             button.emphasis = action.emphasis
             button.tag = index
             button.translatesAutoresizingMaskIntoConstraints = false
+            // The sentence is the flexible half of a notice. A button stretched to absorb the
+            // remaining width reads as a primary call to action and, worse, takes the room the
+            // explanation needs even though its title already has a complete intrinsic size.
+            button.setContentHuggingPriority(.required, for: .horizontal)
             addSubview(button)
             return button
         }
@@ -274,20 +298,27 @@ final class PaneNoticeView: NSView, ThemedComponent {
             glyph.widthAnchor.constraint(equalToConstant: PaneNoticeDefaults.glyphSlot),
             glyph.heightAnchor.constraint(equalToConstant: PaneNoticeDefaults.glyphSlot),
 
-            messageLabel.leadingAnchor.constraint(
+            textStack.leadingAnchor.constraint(
                 equalTo: glyph.trailingAnchor,
                 constant: Design.Spacing.small
             ),
-            messageLabel.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
-            messageLabel.topAnchor.constraint(
+            textStack.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
+            textStack.topAnchor.constraint(
                 greaterThanOrEqualTo: contentAreaGuide.topAnchor,
                 constant: Design.Spacing.small
             ),
-            messageLabel.bottomAnchor.constraint(
+            textStack.bottomAnchor.constraint(
                 lessThanOrEqualTo: contentAreaGuide.bottomAnchor,
                 constant: -Design.Spacing.small
-            )
+            ),
+            messageLabel.leadingAnchor.constraint(equalTo: textStack.leadingAnchor),
+            messageLabel.trailingAnchor.constraint(equalTo: textStack.trailingAnchor)
         ]
+
+        if let titleLabel {
+            constraints.append(titleLabel.leadingAnchor.constraint(equalTo: textStack.leadingAnchor))
+            constraints.append(titleLabel.trailingAnchor.constraint(equalTo: textStack.trailingAnchor))
+        }
 
         // The trailing run, laid out from the edge inwards: the ✕ sits at the margin and the
         // actions queue to its leading side. Aligned by ink like the two bands beside it — a
@@ -313,12 +344,12 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
         // The sentence must not run under the controls answering it.
         if let firstTrailing = trailingNeighbour {
-            constraints.append(messageLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: firstTrailing.leadingAnchor,
+            constraints.append(textStack.trailingAnchor.constraint(
+                equalTo: firstTrailing.leadingAnchor,
                 constant: -Design.Spacing.medium
             ))
         } else {
-            constraints.append(messageLabel.trailingAnchor.constraint(
+            constraints.append(textStack.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -PaneNoticeDefaults.contentInset
             ))
@@ -344,7 +375,8 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
     private func applyInk() {
         glyph.tint = tone.ink
-        messageLabel.textColor = Design.Text.label
+        titleLabel?.textColor = Design.Text.label
+        messageLabel.textColor = title == nil ? Design.Text.label : Design.Text.secondary
         needsDisplay = true
     }
 

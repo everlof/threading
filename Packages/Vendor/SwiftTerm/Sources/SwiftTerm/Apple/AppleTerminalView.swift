@@ -45,6 +45,10 @@ extension TerminalView {
         self.urlAttributes = [:]
         self.colors = Array(repeating: nil, count: 256)
         self.trueColors = [:]
+        #if os(macOS)
+        self.evaluatedTextContrast = []
+        self.reportedTextContrast = []
+        #endif
     }
     
     // This is invoked when the font changes to recompute state
@@ -244,6 +248,8 @@ extension TerminalView {
         // The transform measures against the palette's own background, so every cached answer
         // is stale the moment the palette moves.
         trueColorBackgrounds = [:]
+        evaluatedTextContrast = []
+        reportedTextContrast = []
         #endif
 
         terminal.updateFullScreen ()
@@ -448,6 +454,17 @@ extension TerminalView {
         
         var str = prefix
         var col = 0
+
+        func appendRun(_ string: String, attribute: Attribute, hasUrl: Bool) {
+            guard !string.isEmpty else { return }
+            res.append(NSAttributedString(
+                string: string,
+                attributes: getAttributes(attribute, withUrl: hasUrl)
+            ))
+            #if os(macOS)
+            inspectTextContrast(in: string, attribute: attribute)
+            #endif
+        }
         
         while col < cols {
             let ch: CharData = line[col]
@@ -463,7 +480,7 @@ extension TerminalView {
                 }
 
                 if attr != ch.attribute || chhas != hasUrl {
-                    res.append(NSAttributedString (string: str, attributes: getAttributes (attr, withUrl: hasUrl)))
+                    appendRun(str, attribute: attr, hasUrl: hasUrl)
                     str = ""
                     attr = ch.attribute
                     hasUrl = chhas
@@ -482,23 +499,204 @@ extension TerminalView {
                 str.append(code == 0 ? " " : ch.getCharacter ())
             } else {
                 // If we have a wide character, we flush the contents we have so far
-                res.append(NSAttributedString (string: str, attributes: getAttributes (attr, withUrl: hasUrl)))
+                appendRun(str, attribute: attr, hasUrl: hasUrl)
                 // Then add the character, and add an extra space, so that the space gets the same attributes as the previous
                 // cell - see https://github.com/migueldeicaza/SwiftTerm/pull/387
-                res.append(NSAttributedString (string: "\(ch.getCharacter()) ", attributes: getAttributes (attr, withUrl: hasUrl)))
+                appendRun("\(ch.getCharacter()) ", attribute: attr, hasUrl: hasUrl)
 
                 str = ""
                 col += 1
             }
             col += 1
         }
-        res.append (NSAttributedString(string: str, attributes: getAttributes(attr, withUrl: hasUrl)))
+        appendRun(str, attribute: attr, hasUrl: hasUrl)
         updateSelectionAttributesIfNeeded(attributedLine: res, row: row, cols: cols)
         // This gives us a large chunk of our performance back, from 7.5 to 5.5 seconds on
         // time for x in 1 2 3 4 5 6; do cat UTF-8-demo.txt; done
         //res.fixAttributes(in: NSRange(location: 0, length: res.length))
         return ViewLineInfo(attrStr: res, images: line.images)
     }
+
+    #if os(macOS)
+    /// Inspects one already-grouped run from a visible row. The work is constant-bounded per run:
+    /// at most 64 scalars are sampled, and colour-pair caches are capped independently of a
+    /// program's truecolour cardinality.
+    private func inspectTextContrast(in string: String, attribute: Attribute) {
+        guard let onLowContrastText,
+              !attribute.style.contains(.invisible)
+        else { return }
+
+        var foreground = attribute.fg
+        var background = attribute.bg
+        if attribute.style.contains(.inverse) {
+            swap(&foreground, &background)
+            if foreground == .defaultColor { foreground = .defaultInvertedColor }
+            if background == .defaultColor { background = .defaultInvertedColor }
+        }
+
+        let isBold = attribute.style.contains(.bold)
+        let foregroundSource = renderedColorSource(
+            foreground,
+            isForeground: true,
+            isBold: isBold
+        )
+        // A default foreground is the terminal-safe answer programs use when they want the
+        // palette to choose readable text. Only an explicitly selected foreground can support
+        // the diagnostic's explanation and remediation.
+        switch foregroundSource {
+        case .ansi256, .trueColor:
+            break
+        case .defaultForeground, .defaultBackground,
+             .invertedDefaultForeground, .invertedDefaultBackground:
+            return
+        }
+        // Default text is overwhelmingly the common case. Qualify the explicit source first so
+        // ordinary rows never even pay for the bounded string scan.
+        guard containsMeaningfulText(string) else { return }
+
+        let backgroundSource = renderedColorSource(
+            background,
+            isForeground: false,
+            isBold: false
+        )
+        var foregroundColor = mapColor(
+            color: foreground,
+            isFg: true,
+            isBold: isBold,
+            useBrightColors: useBrightColors
+        )
+        let backgroundColor = mapColor(
+            color: background,
+            isFg: false,
+            isBold: false
+        )
+        if attribute.style.contains(.dim) {
+            foregroundColor = foregroundColor.withAlphaComponent(
+                foregroundColor.alphaComponent * 0.5
+            )
+        }
+
+        guard let backgroundRGB = backgroundColor.usingColorSpace(.sRGB),
+              let foregroundRGB = foregroundColor.usingColorSpace(.sRGB)
+        else { return }
+
+        let flattenedForeground = composite(foregroundRGB, over: backgroundRGB)
+        let renderedForeground = renderedColor(flattenedForeground)
+        let renderedBackground = renderedColor(backgroundRGB)
+        let pair = TerminalTextContrastPair(
+            foregroundSource: foregroundSource,
+            backgroundSource: backgroundSource,
+            foreground: renderedForeground,
+            background: renderedBackground
+        )
+        guard !evaluatedTextContrast.contains(pair) else { return }
+        insertBounded(pair, into: &evaluatedTextContrast, limit: 256)
+
+        let ratio = contrastRatio(flattenedForeground, backgroundRGB)
+        guard ratio < 1.25 else { return }
+
+        let conflict = TerminalTextColorConflict(
+            foregroundSource: foregroundSource,
+            backgroundSource: backgroundSource,
+            foreground: renderedForeground,
+            background: renderedBackground,
+            contrastRatio: ratio
+        )
+
+        guard !reportedTextContrast.contains(conflict) else { return }
+        insertBounded(conflict, into: &reportedTextContrast, limit: 64)
+        onLowContrastText(conflict)
+    }
+
+    private func containsMeaningfulText(_ string: String) -> Bool {
+        var sampled = 0
+        var printable = 0
+        var containsLetterOrNumber = false
+        for scalar in string.unicodeScalars {
+            sampled += 1
+            if !CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                printable += 1
+                containsLetterOrNumber = containsLetterOrNumber
+                    || CharacterSet.alphanumerics.contains(scalar)
+            }
+            if printable >= 4, containsLetterOrNumber { return true }
+            if sampled >= 64 { return false }
+        }
+        return false
+    }
+
+    private func renderedColorSource(
+        _ color: Attribute.Color,
+        isForeground: Bool,
+        isBold: Bool
+    ) -> TerminalRenderedColorSource {
+        switch color {
+        case .ansi256(let rawIndex):
+            let index: UInt8
+            if useBrightColors, rawIndex < 8, isBold {
+                index = rawIndex + 8
+            } else if !useBrightColors, rawIndex > 7 {
+                index = rawIndex - 8
+            } else {
+                index = rawIndex
+            }
+            return .ansi256(index: index)
+        case .trueColor(let red, let green, let blue):
+            return .trueColor(red: red, green: green, blue: blue)
+        case .defaultColor:
+            return isForeground ? .defaultForeground : .defaultBackground
+        case .defaultInvertedColor:
+            return isForeground ? .invertedDefaultForeground : .invertedDefaultBackground
+        }
+    }
+
+    private func composite(_ foreground: NSColor, over background: NSColor) -> NSColor {
+        let alpha = foreground.alphaComponent
+        guard alpha < 1 else { return foreground }
+        return NSColor(
+            srgbRed: foreground.redComponent * alpha + background.redComponent * (1 - alpha),
+            green: foreground.greenComponent * alpha + background.greenComponent * (1 - alpha),
+            blue: foreground.blueComponent * alpha + background.blueComponent * (1 - alpha),
+            alpha: 1
+        )
+    }
+
+    private func contrastRatio(_ first: NSColor, _ second: NSColor) -> Double {
+        func luminance(_ color: NSColor) -> Double {
+            func linear(_ component: CGFloat) -> Double {
+                let value = Double(component)
+                return value <= 0.04045
+                    ? value / 12.92
+                    : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(color.redComponent)
+                + 0.7152 * linear(color.greenComponent)
+                + 0.0722 * linear(color.blueComponent)
+        }
+        let firstLuminance = luminance(first)
+        let secondLuminance = luminance(second)
+        return (max(firstLuminance, secondLuminance) + 0.05)
+            / (min(firstLuminance, secondLuminance) + 0.05)
+    }
+
+    private func renderedColor(_ color: NSColor) -> TerminalRenderedColor {
+        func byte(_ value: CGFloat) -> UInt8 {
+            UInt8(max(0, min(255, Int((value * 255).rounded()))))
+        }
+        return TerminalRenderedColor(
+            red: byte(color.redComponent),
+            green: byte(color.greenComponent),
+            blue: byte(color.blueComponent)
+        )
+    }
+
+    private func insertBounded<T: Hashable>(_ value: T, into set: inout Set<T>, limit: Int) {
+        if set.count >= limit, let existingValue = set.first {
+            set.remove(existingValue)
+        }
+        set.insert(value)
+    }
+    #endif
     
     /// Apply selection attributes
     /// TODO: Optimize the logic below

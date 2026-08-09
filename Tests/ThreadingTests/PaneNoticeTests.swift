@@ -54,7 +54,7 @@ final class PaneNoticeTests: XCTestCase {
 
     private func label(in notice: PaneNoticeView) throws -> NSTextField {
         try XCTUnwrap(
-            notice.subviews.compactMap { $0 as? NSTextField }.first,
+            notice.descendants.compactMap { $0 as? NSTextField }.first,
             "the band has no sentence on it"
         )
     }
@@ -445,6 +445,25 @@ final class PaneNoticeTests: XCTestCase {
         )
     }
 
+    func testAStructuredNoticeNamesTheConditionBeforeExplainingIt() throws {
+        let notice = PaneNoticeView(
+            tone: .attention,
+            title: "Some terminal text may be invisible",
+            message: "ANSI bright white matches the terminal background. Use ANSI 39 instead.",
+            actions: [PaneNoticeAction(title: "Theme Settings…") {}],
+            onDismiss: {}
+        )
+        host(notice)
+
+        let labels = notice.descendants.compactMap { $0 as? NSTextField }
+        XCTAssertEqual(labels.map(\.stringValue), [notice.title, notice.message].compactMap { $0 })
+        XCTAssertGreaterThan(notice.frame.height, PaneNoticeDefaults.bandHeight)
+        let action = try XCTUnwrap(notice.actionControls.first)
+        XCTAssertEqual(action.frame.width, action.intrinsicContentSize.width, accuracy: 0.5)
+        XCTAssertTrue(notice.accessibilityLabel()?.contains(notice.title!) == true)
+        XCTAssertTrue(notice.accessibilityLabel()?.contains(notice.message) == true)
+    }
+
     func testTheBandIsBuiltEntirelyFromTheDesignSystem() {
         let notice = PaneNoticeView(
             tone: .attention,
@@ -458,5 +477,11 @@ final class PaneNoticeTests: XCTestCase {
         host(notice)
 
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: notice), [])
+    }
+}
+
+private extension NSView {
+    var descendants: [NSView] {
+        subviews + subviews.flatMap(\.descendants)
     }
 }

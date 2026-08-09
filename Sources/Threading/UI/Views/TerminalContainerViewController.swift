@@ -29,7 +29,12 @@ final class TerminalContainerViewController: NSViewController {
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
     private var currentProjectTerminal: ProjectTerminalViewController?
-    private(set) var currentTerminalID: TerminalID?
+    private(set) var currentTerminalID: TerminalID? {
+        didSet {
+            guard currentTerminalID != oldValue else { return }
+            refreshTerminalTextVisibilityNotice()
+        }
+    }
 
     /// The terminal surface currently accepting terminal commands, whether it belongs to a
     /// chat or is a standalone project terminal.
@@ -66,6 +71,7 @@ final class TerminalContainerViewController: NSViewController {
             AgentRuntime.shared.setVisibleSession(currentSessionID)
             delegate?.terminalContainer(self, visibleSessionDidChange: currentSessionID)
             updateGitChangeMonitor()
+            refreshTerminalTextVisibilityNotice()
         }
     }
 
@@ -167,6 +173,18 @@ final class TerminalContainerViewController: NSViewController {
     /// test can ask whether the pane is carrying a notice rather than search its subviews.
     private(set) var noticeView: NSView?
 
+    private enum NoticeOwner: Equatable {
+        case external
+        case terminalTextVisibility(signature: String)
+    }
+
+    /// Recovery/crash notices outrank a terminal diagnostic. The issue remains pending while one
+    /// of those stands, then takes the band only after that higher-priority notice leaves.
+    private var noticeOwner: NoticeOwner?
+    private var terminalTextVisibilityIssues: [
+        TerminalInstanceIdentity: TerminalTextVisibilityIssue
+    ] = [:]
+
     // MARK: - Lifecycle
 
     init(recovery: Bool = RecoveryMode.isActive) {
@@ -228,6 +246,13 @@ final class TerminalContainerViewController: NSViewController {
         appEvents.observe(SessionInputControlDidChange.self) { [weak self] event in
             guard event.sessionID == self?.currentSessionID else { return }
             self?.refreshGitStatusOverlayAudience()
+        }
+        appEvents.observe(TerminalTextVisibilityIssueDetected.self) { [weak self] event in
+            self?.terminalTextVisibilityIssueDetected(event.issue)
+        }
+        appEvents.observe(TerminalTextVisibilityIssuesInvalidated.self) { [weak self] event in
+            self?.terminalTextVisibilityIssues.removeValue(forKey: event.identity)
+            self?.refreshTerminalTextVisibilityNotice()
         }
     }
 
@@ -339,7 +364,17 @@ final class TerminalContainerViewController: NSViewController {
     /// being read. One band at a time — a second replaces the first, because two stacked strips
     /// about different things read as chrome rather than as news.
     func showNotice(_ notice: NSView) {
-        dismissNotice()
+        installNotice(notice, owner: .external)
+    }
+
+    /// Takes the band away and hands the pane's top edge back to the header.
+    func dismissNotice() {
+        removeInstalledNotice()
+        refreshTerminalTextVisibilityNotice()
+    }
+
+    private func installNotice(_ notice: NSView, owner: NoticeOwner) {
+        removeInstalledNotice()
 
         notice.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(notice)
@@ -349,15 +384,83 @@ final class TerminalContainerViewController: NSViewController {
             notice.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
         noticeView = notice
+        noticeOwner = owner
         pinContentTop(to: notice.bottomAnchor)
     }
 
-    /// Takes the band away and hands the pane's top edge back to the header.
-    func dismissNotice() {
+    private func removeInstalledNotice() {
         guard let noticeView else { return }
         noticeView.removeFromSuperview()
         self.noticeView = nil
+        noticeOwner = nil
         pinContentTop(to: headerHost.bottomAnchor)
+    }
+
+    private func terminalTextVisibilityIssueDetected(_ issue: TerminalTextVisibilityIssue) {
+        guard !TerminalTextVisibilityDismissals.shared.contains(issue) else { return }
+        if terminalTextVisibilityIssues.count >= 32,
+           terminalTextVisibilityIssues[issue.identity] == nil,
+           let expired = terminalTextVisibilityIssues.keys.first {
+            terminalTextVisibilityIssues.removeValue(forKey: expired)
+        }
+        terminalTextVisibilityIssues[issue.identity] = issue
+        refreshTerminalTextVisibilityNotice()
+    }
+
+    private func refreshTerminalTextVisibilityNotice() {
+        guard isViewLoaded else { return }
+        // A launch/recovery notice has the band until its own action or dismissal releases it.
+        if noticeOwner == .external { return }
+
+        guard let issue = visibleTerminalTextVisibilityIssue(),
+              !TerminalTextVisibilityDismissals.shared.contains(issue)
+        else {
+            if case .terminalTextVisibility? = noticeOwner { removeInstalledNotice() }
+            return
+        }
+
+        if noticeOwner == .terminalTextVisibility(signature: issue.signature) { return }
+
+        let notice = PaneNoticeView(
+            tone: .attention,
+            title: issue.title,
+            message: issue.detail,
+            actions: [
+                PaneNoticeAction(title: L10n.string("Change Theme…")) { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.terminalContainer(
+                        self,
+                        didRequestSettingsPage: SettingsPages.themesID
+                    )
+                }
+            ],
+            onDismiss: { [weak self] in
+                self?.dismissTerminalTextVisibilityIssue(issue)
+            }
+        )
+        installNotice(notice, owner: .terminalTextVisibility(signature: issue.signature))
+    }
+
+    private func visibleTerminalTextVisibilityIssue() -> TerminalTextVisibilityIssue? {
+        if let terminalID = currentTerminalID {
+            return terminalTextVisibilityIssues[.projectTerminal(terminalID)]
+        }
+        guard let sessionID = currentSessionID else { return nil }
+        if drawerHostController.isOpen(for: sessionID),
+           let shellIssue = terminalTextVisibilityIssues[.sessionShell(sessionID)] {
+            return shellIssue
+        }
+        guard currentChild?.sessionID == sessionID else { return nil }
+        return terminalTextVisibilityIssues[.agentSession(sessionID)]
+    }
+
+    private func dismissTerminalTextVisibilityIssue(_ issue: TerminalTextVisibilityIssue) {
+        TerminalTextVisibilityDismissals.shared.dismiss(issue)
+        terminalTextVisibilityIssues = terminalTextVisibilityIssues.filter {
+            $0.value.signature != issue.signature
+        }
+        removeInstalledNotice()
+        refreshTerminalTextVisibilityNotice()
     }
 
     private func pinContentTop(to anchor: NSLayoutYAxisAnchor) {
@@ -643,6 +746,7 @@ final class TerminalContainerViewController: NSViewController {
                 drawerHeight.constant = 0
                 drawerDivider.isHidden = true
                 drawerHost.isHidden = true
+                refreshTerminalTextVisibilityNotice()
                 return
             }
 
@@ -657,6 +761,7 @@ final class TerminalContainerViewController: NSViewController {
                 self.drawerDivider.isHidden = true
                 self.drawerHost.isHidden = true
             }
+            refreshTerminalTextVisibilityNotice()
             return
         }
 
@@ -675,6 +780,7 @@ final class TerminalContainerViewController: NSViewController {
             drawerHeight.constant = target
         }
         if focusing { drawerHostController.focusActiveTab() }
+        refreshTerminalTextVisibilityNotice()
     }
 
     /// The session's shell-drawer root process, when it has one. Asked by the info panel, which
@@ -1021,6 +1127,7 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
         refreshGitStatusOverlayRunState()
         refreshGitStatusOverlaySubagents()
+        refreshTerminalTextVisibilityNotice()
         controller.focusTerminal()
     }
 
@@ -1040,6 +1147,7 @@ final class TerminalContainerViewController: NSViewController {
         placeholderView.isHidden = true
         composerViewController.view.isHidden = true
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
+        refreshTerminalTextVisibilityNotice()
         controller.focus()
     }
 
@@ -1985,6 +2093,12 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     )
     /// The empty state's one action: begin a session, the same route ⌘N takes.
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
+    /// A diagnostic's remediation opens a settings page through the window, which owns the
+    /// matching sidebar selection and navigation-history entry.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestSettingsPage pageID: String
+    )
     /// The shell drawer opened or shut from inside the pane — a divider dragged past its
     /// floor — so the window's own controls must follow a change they did not make.
     func terminalContainerDidChangeShellDrawer(_ container: TerminalContainerViewController)

@@ -117,6 +117,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     embedder changes the palette under it. The report prompts the program to *re-ask* `OSC 11`,
     which is how a theme switched under a running agent finally reaches it — see
     [`themes.md`](themes.md) for the whole three-leg contract.
+  - **Final text-colour observation is ours.** `TerminalView.onLowContrastText` inspects the
+    colours after inverse, bold-as-bright, faint alpha, palette lookup and background harmony
+    have all resolved, while SwiftTerm is already grouping a visible row for drawing. It never
+    changes output. Only meaningful visible runs with an explicit foreground qualify; default
+    foreground, whitespace/ornament and SGR concealment do not. The evaluated and reported
+    pair sets are independently capped because a process controls 24-bit colour cardinality.
+    `TerminalSession` defers the callback out of the draw pass and turns it into the app's
+    dismissible diagnostic; see [`themes.md`](themes.md).
   - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
     with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
     `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,
@@ -239,7 +247,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `@available(macOS 14.0, *)`. `AgentActivityBeamView` (in `UI/Design/`) is the theme
     boundary that embeds the host behind a runtime availability check — on macOS 13 the
     ring simply does not exist. It also owns the whole visual policy: the count-to-strength
-    curve, the mono-to-colorful escalation at top ladder effort, and the System-theme-only
+    curve, the adaptive-mono-to-colorful escalation at top ladder effort, and the System-theme-only
     gate (re-read on `AppThemeDidChange`; a styled theme removes the ring outright rather
     than letting the beam's own half-second fade trail the one-pass theme sweep).
   - The `.metal` shader is compiled by Xcode's build system only — a plain `swift build` of

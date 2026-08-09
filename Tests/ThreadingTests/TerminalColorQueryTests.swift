@@ -107,6 +107,144 @@ final class TerminalColorQueryTests: XCTestCase {
         )
     }
 
+    // MARK: - Invisible Explicit Colours
+
+    /// The reported bug's exact semantics: SGR 97 resolves to palette index 15, and System's
+    /// light terminal palette states that index and its background as the same white.
+    func testAVisibleBrightWhiteRunOnWhiteReportsItsFinalCollisionOnce() throws {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 100))
+        view.installColors(TerminalTheme.systemLight.asSwiftTermColors())
+        view.nativeForegroundColor = TerminalTheme.systemLight.foreground
+        view.nativeBackgroundColor = TerminalTheme.systemLight.background
+
+        var conflicts: [TerminalTextColorConflict] = []
+        view.onLowContrastText = { conflicts.append($0) }
+        view.getTerminal().feed(text: "\u{1b}[97m[last: 12s] git:main")
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        XCTAssertEqual(conflicts.count, 1, "one visible colour pair warned once per palette")
+        let conflict = try XCTUnwrap(conflicts.first)
+        XCTAssertEqual(conflict.foregroundSource, .ansi256(index: 15))
+        XCTAssertEqual(conflict.backgroundSource, .defaultBackground)
+        XCTAssertEqual(conflict.foreground, .init(red: 255, green: 255, blue: 255))
+        XCTAssertEqual(conflict.background, .init(red: 255, green: 255, blue: 255))
+        XCTAssertEqual(conflict.contrastRatio, 1, accuracy: 0.001)
+    }
+
+    /// Spaces, ornament, deliberate SGR concealment and default text are not evidence that a
+    /// program accidentally selected unreadable ink.
+    func testTheVisibilityHeuristicRejectsNoiseAndIntentionalConcealment() throws {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 140))
+        view.installColors(TerminalTheme.systemLight.asSwiftTermColors())
+        view.nativeForegroundColor = TerminalTheme.systemLight.foreground
+        view.nativeBackgroundColor = TerminalTheme.systemLight.background
+
+        var conflicts: [TerminalTextColorConflict] = []
+        view.onLowContrastText = { conflicts.append($0) }
+        view.getTerminal().feed(
+            text: "plain text\r\n\u{1b}[97m   \r\n---\r\n\u{1b}[8mlong hidden value"
+        )
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        XCTAssertEqual(conflicts, [])
+    }
+
+    func testDismissalIsExactDurableAndBounded() {
+        let suite = "TerminalTextVisibilityDismissals.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let dismissals = TerminalTextVisibilityDismissals(defaults: defaults)
+
+        let base = TerminalTextVisibilityIssue(
+            identity: .ephemeral(UUID()),
+            themeID: "system-light",
+            conflict: TerminalTextColorConflict(
+                foregroundSource: .ansi256(index: 15),
+                backgroundSource: .defaultBackground,
+                foreground: .init(red: 255, green: 255, blue: 255),
+                background: .init(red: 255, green: 255, blue: 255),
+                contrastRatio: 1
+            )
+        )
+        dismissals.dismiss(base)
+
+        XCTAssertTrue(dismissals.contains(base))
+        XCTAssertTrue(dismissals.contains(.init(
+            identity: .ephemeral(UUID()),
+            themeID: base.themeID,
+            conflict: base.conflict
+        )), "the same exact collision should not nag in every terminal")
+        XCTAssertFalse(dismissals.contains(.init(
+            identity: base.identity,
+            themeID: "another-theme",
+            conflict: base.conflict
+        )), "a theme change is a new colour context")
+
+        for index in 0..<(TerminalTextVisibilityDismissals.maximumCount + 8) {
+            dismissals.dismiss(.init(
+                identity: .ephemeral(UUID()),
+                themeID: "theme-\(index)",
+                conflict: base.conflict
+            ))
+        }
+        XCTAssertEqual(
+            defaults.stringArray(forKey: "dismissedTerminalTextVisibilityIssues")?.count,
+            TerminalTextVisibilityDismissals.maximumCount
+        )
+    }
+
+    /// The old palette's diagnosis cannot survive a profile refresh. If the new palette still
+    /// collides, SwiftTerm reports it again after drawing; if it fixed the pair, nothing stale
+    /// remains for the pane to show.
+    func testAProfileRefreshInvalidatesThePreviousVisibilityFinding() {
+        let identity = TerminalInstanceIdentity.ephemeral(UUID())
+        let session = TerminalSession(profile: .default, identity: identity)
+        var invalidated: [TerminalInstanceIdentity] = []
+        let observer = NotificationCenter.default.observe(
+            TerminalTextVisibilityIssuesInvalidated.self
+        ) { event in
+            invalidated.append(event.identity)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        session.increaseFontSize()
+
+        XCTAssertEqual(invalidated, [identity])
+    }
+
+    /// A renderer callback deliberately leaves the draw pass before posting its app event. If a
+    /// theme lands during that one-turn handoff, the finding belongs to the page just left and
+    /// must not repopulate the notice after invalidation.
+    func testAProfileRefreshDiscardsAnOldPaletteFindingAlreadyQueuedForDelivery() async {
+        let session = TerminalSession(profile: .default)
+        var detected: [TerminalTextVisibilityIssue] = []
+        let observer = NotificationCenter.default.observe(
+            TerminalTextVisibilityIssueDetected.self
+        ) { event in
+            detected.append(event.issue)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        session.terminalView.onLowContrastText?(TerminalTextColorConflict(
+            foregroundSource: .ansi256(index: 15),
+            backgroundSource: .defaultBackground,
+            foreground: .init(red: 255, green: 255, blue: 255),
+            background: .init(red: 255, green: 255, blue: 255),
+            contrastRatio: 1
+        ))
+        session.increaseFontSize()
+
+        let queueDrained = expectation(description: "queued renderer delivery drained")
+        DispatchQueue.main.async { queueDrained.fulfill() }
+        await fulfillment(of: [queueDrained], timeout: 1)
+        XCTAssertEqual(detected, [])
+    }
+
     // MARK: - Answering a Query
 
     func testBackgroundQueryIsAnswered() {
