@@ -17,7 +17,8 @@ import XCTest
 /// only asserted.
 ///
 /// No window is ordered on screen — the fixture window exists because the ramp refuses to run
-/// outside one, and stays unshown. This belongs in `fast`.
+/// outside one, and stays unshown. Frames call the real drawing boundary directly rather than
+/// relying on an unshown layer's display cache. This belongs in `fast`.
 @MainActor
 final class ConversationMinimapMotionTests: XCTestCase {
 
@@ -158,6 +159,7 @@ final class ConversationMinimapMotionTests: XCTestCase {
     private func openTaper(on rail: ConversationMinimapView) {
         Design.Motion.reduceMotionOverrideForTesting = true
         rail.mouseEntered(with: pointerEvent(on: rail, atRailY: railTop))
+        Design.Motion.reduceMotionOverrideForTesting = false
         rail.alphaValue = 1
     }
 
@@ -208,7 +210,6 @@ final class ConversationMinimapMotionTests: XCTestCase {
         }
 
         let duration = opening ? Design.Motion.quick : Design.Motion.vanish
-        let started = CACurrentMediaTime()
         if opening {
             rail.mouseEntered(with: pointerEvent(on: rail, atRailY: midRail))
         } else {
@@ -216,8 +217,10 @@ final class ConversationMinimapMotionTests: XCTestCase {
         }
 
         return try (0...Fixture.rampFrames).map { frame in
-            let phase = Double(frame) / Double(Fixture.rampFrames)
-            rail.advanceFisheye(now: started + duration * phase)
+            if duration > 0 {
+                let phase = CGFloat(frame) / CGFloat(Fixture.rampFrames)
+                rail.advanceFisheye(toPhase: phase)
+            }
             rail.alphaValue = 1
             return try drawing(of: rail)
         }
@@ -239,13 +242,34 @@ final class ConversationMinimapMotionTests: XCTestCase {
 
     /// What the rail actually drew, as bytes.
     ///
-    /// `displayIfNeeded()` first: a layer-backed view hands `cacheDisplay` whatever its layer
-    /// already holds, and a state change only marks that layer dirty — so without it every frame
-    /// after the first is a picture of the first, and a test about motion passes by filming none.
+    /// A layer-backed view hands `cacheDisplay` whatever its layer already holds. On macOS 26 an
+    /// unshown window can keep that cache after `display()`, so this fixture supplies a bitmap
+    /// context and calls the view's real drawing boundary synchronously for every requested state.
     private func drawing(of rail: NSView) throws -> Data {
-        rail.displayIfNeeded()
-        let rep = try XCTUnwrap(rail.bitmapImageRepForCachingDisplay(in: rail.bounds))
-        rail.cacheDisplay(in: rail.bounds, to: rep)
+        let scale: CGFloat = 2
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: max(1, Int(rail.bounds.width * scale)),
+            pixelsHigh: max(1, Int(rail.bounds.height * scale)),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        rep.size = rail.bounds.size
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        rail.effectiveAppearance.performAsCurrentDrawingAppearance {
+            rail.draw(rail.bounds)
+        }
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
     }
 

@@ -379,9 +379,10 @@ final class ConversationMinimapView: NSView {
         startDriver()
     }
 
-    /// One frame of the ramp, split from the tick so a test can drive the clock by hand.
-    func advanceFisheye(now: CFTimeInterval) {
-        let phase = min(1, CGFloat((now - fisheyeStart) / fisheyeDuration))
+    /// One frame of the ramp, split from the tick so the interpolation has one clock-independent
+    /// boundary. Tests drive this directly; the display link only translates time into phase.
+    func advanceFisheye(toPhase requestedPhase: CGFloat) {
+        let phase = min(1, max(0, requestedPhase))
         fisheye = fisheyeFrom + (fisheyeTarget - fisheyeFrom) * phase
 
         guard phase >= 1 else { return }
@@ -389,6 +390,12 @@ final class ConversationMinimapView: NSView {
         // The taper is shut, so the place it shut towards is no longer worth holding.
         if fisheyeTarget == 0 { fisheyeCenter = nil }
         stopDriver()
+    }
+
+    /// One display-link frame of the ramp.
+    func advanceFisheye(now: CFTimeInterval) {
+        guard fisheyeDuration > 0 else { return }
+        advanceFisheye(toPhase: CGFloat((now - fisheyeStart) / fisheyeDuration))
     }
 
     @objc private func tick() {

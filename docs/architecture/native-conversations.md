@@ -1045,7 +1045,10 @@ frame and assert that consecutive frames differ, and they reproduce the old beha
 real drawing code — a pointer that only ever reports the centre of the mark it is nearest *is*
 sampling by nearest mark, with nothing stubbed to arrange it. Measured across 80pt of travel: the
 old sampling produced four distinct frames, the new one produces one per position the pointer was
-actually at.
+actually at. The fixture calls the view's drawing boundary into its own bitmap context; an unshown
+layer's display cache stopped refreshing reliably on macOS 26, and filming that cache tests window
+visibility rather than taper motion. The ramp is driven by phase at the interpolation boundary for
+the same reason: wall-clock scheduling is the display link's concern, not the curve's.
 
 **The model is separate from the drawing.** `ConversationTimeline` folds `[StreamEvent]` into
 `[Row]` and reports what changed; `ConversationRowView` turns one row into one view;
