@@ -1184,9 +1184,11 @@ final class TerminalContainerViewController: NSViewController {
     /// shows it, but leaving a stale colour there is exactly the seam this avoids — so every
     /// surface swap sets it, resetting to the window's own colour for anything but a terminal.
     ///
-    /// Takes the typed ground rather than a colour, because the backdrop's *ownership* travels
-    /// with it: `WindowBackdrop` tells the divider whether the theme states this ground, and a
-    /// bare `NSColor` cannot carry that answer — see `WindowBackdrop.Ground`.
+    /// Takes the typed ground rather than a colour because the backdrop's ownership travels with
+    /// it: the split divider preserves themed border ink on chrome and derives neutral ink over a
+    /// terminal palette. The chrome case also remains a live semantic role through a System
+    /// light/dark switch rather than freezing the appearance resolved here — see
+    /// `WindowBackdrop.Ground`.
     private func applyPaneBackground(_ ground: WindowBackdrop.Ground) {
         let color: NSColor
         switch ground {

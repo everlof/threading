@@ -1638,7 +1638,7 @@ final class AppThemeTests: XCTestCase {
 
         let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
 
-        // The chrome's own ground: always the theme's line.
+        // Cyberpunk's rule reads on its own ground, so the seam keeps the theme's line.
         AppThemePalette.set(AppThemeStyles.cyberpunk)
         WindowBackdrop.set(.chrome)
         XCTAssertEqual(
@@ -1663,6 +1663,32 @@ final class AppThemeTests: XCTestCase {
             WindowBackdrop.ink.rule.resolvedHex,
             "a rule the backdrop swallows must fall back to the measured neutral"
         )
+    }
+
+    /// System light's separator is deliberately quieter than a border, but at that opacity it
+    /// disappears as the only seam between the sidebar material and the pale content pane. The
+    /// split view's visibility floor applies to the chrome ground too: ownership cannot make an
+    /// otherwise invisible colour register.
+    func testSystemLightSplitDividerFallsBackToVisibleBorderOnTheChromeGround() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+
+        AppThemePalette.set(.system)
+        WindowBackdrop.set(.chrome)
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        var actual = ""
+        var fallback = ""
+        var authored = ""
+        appearance.performAsCurrentDrawingAppearance {
+            actual = (split.dividerColor.usingColorSpace(.sRGB) ?? .clear).hexString
+            fallback = (Design.Surface.border.usingColorSpace(.sRGB) ?? .clear).hexString
+            authored = (Design.Surface.divider.usingColorSpace(.sRGB) ?? .clear).hexString
+        }
+
+        XCTAssertEqual(actual, fallback, "System light left its sidebar seam below visibility")
+        XCTAssertNotEqual(actual, authored, "the fixture's authored rule was not faint enough")
     }
 
     // MARK: - The Divider's Weight

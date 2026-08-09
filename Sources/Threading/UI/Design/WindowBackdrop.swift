@@ -17,11 +17,11 @@ import AppKit
 /// Deliberately *not* the same thing as a theme change. The backdrop moves when the selected
 /// session changes as well, since the session next to this one may draw with another palette.
 ///
-/// The backdrop is recorded as a `Ground` rather than as a bare colour, because two consumers
-/// need to know more than "what colour": the split view's divider draws the theme's own border
-/// when the backdrop is a ground the theme states, and the neutral measured ink only when it is
-/// not. A colour cannot answer "is this the chrome's?" — a terminal palette is free to state the
-/// chrome's exact ground and still not be it.
+/// The backdrop is recorded as a `Ground` rather than as a bare colour for two reasons. The split
+/// divider must preserve the theme's own border on chrome but derive neutral ink over an unrelated
+/// terminal palette; equal colours cannot answer who owns them. And the chrome case must resolve
+/// its dynamic system role when it is read — storing the colour chosen during the swap would
+/// freeze a System window onto the previous light/dark appearance.
 @MainActor
 enum WindowBackdrop {
 

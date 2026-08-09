@@ -378,9 +378,11 @@ a document, and the wrong shape for a structural column beside a terminal: the m
 toolbar's tab and controls reading as loose parts, and the terminal's colour ran underneath the
 sidebar it is meant to sit next to. So the pane is ours — flush to the window's edges, full
 height under the transparent titlebar, the split view's rule as the only seam. That rule is the
-theme's, in weight as well as ink — `ThemedSplitView` overrides `dividerThickness` so the seam
-between two panes matches the rules drawn inside them (see [`themes.md`](themes.md)); AppKit's
-`.thin` divider is a fixed point,
+theme's in weight and starts from its rule ink; when that ink falls below the seam's visibility
+floor — including System light on its own chrome ground — `ThemedSplitView` steps up to the
+theme's border on chrome, or neutral ink measured from an unrelated terminal backdrop. It
+overrides `dividerThickness` so the seam between two panes matches the rules drawn inside them
+(see [`themes.md`](themes.md)); AppKit's `.thin` divider is a fixed point,
 which under a heavy-ruling style was the one hairline in a window of 2pt rules.
 
 Three things the behaviour supplied and now have to be stated, each found by losing it:

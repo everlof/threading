@@ -575,9 +575,11 @@ own values; Industrial's hand-authored 2pt × 33% is almost exactly what the cap
 Neo Brutalism), and Increase Contrast bypasses the cap for its floor. Because it is derived at
 draw time, a custom or contributed theme cannot state its way past it — the gates still clamp
 `borderWidth` to 0.5–4, and within that range the capped ink always clears the seam's visibility
-floor. Three consequences to know about: the split seam now draws `Surface.divider` rather than
+floor. Three consequences to know about: the split seam starts from `Surface.divider` rather than
 `Surface.border` (it is a rule between panes, and in the eight hand-attenuated themes the seam
-was stepping in *ink* at the same crossing it once stepped in weight); `Design.Ink` gained
+was stepping in *ink* at the same crossing it once stepped in weight), then steps up to the
+theme's border on chrome — or neutral backdrop ink over a terminal palette — only when that
+authored rule falls below the seam's visibility floor; `Design.Ink` gained
 `rule` beside `border` so backdrop-drawn rules (the shell drawer's strip) state the same
 decision; and `RemoteThemeBridge` applies the ceiling to the `divider` it projects, so remote
 clients inherit the discipline instead of re-learning it. The catalogue sweep is

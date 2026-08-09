@@ -10,16 +10,14 @@ import AppKit
 ///
 /// `dividerColor` is the whole of the seam AppKit offers here. The rule is: **the theme's own
 /// line wherever it visibly reads on the backdrop; the measured neutral only where it does
-/// not.** Over the chrome's ground the theme's border always reads — a theme is built that way
-/// — and a neutral there drew a pale grey seam across a theme whose every other rule is its own
-/// hue. Over a terminal palette the border is *measured* against the actual backdrop first: the
-/// System theme's terminal deliberately matches the chrome, where the quiet themed hairline is
-/// right and the neutral was the one loud line in the window — while a palette the border
-/// vanishes against (a black terminal under a light chrome's black rules) still gets the
-/// neutral, which is the seam this view originally existed to restore. The backdrop moves when
-/// the selected session changes as well as when the theme does — both are observed, because a
-/// divider that keeps the previous session's ink is the bug this exists to fix, one palette
-/// later.
+/// not.** The theme's rule is *measured* against the actual backdrop first, including when the
+/// theme owns that ground: System light deliberately makes an ordinary divider quieter than a
+/// border, but that five-percent hairline disappears as the only seam beside the sidebar. A rule
+/// that already reads keeps its theme's hue; one the chrome swallows steps up to the theme's own
+/// border, while one an unrelated terminal palette swallows gets neutral ink measured from that
+/// ground. The backdrop moves when the selected session changes as well as when the theme does —
+/// both are observed, because a divider that keeps the previous session's ink is the bug this
+/// exists to fix, one palette later.
 final class ThemedSplitView: NSSplitView {
 
     /// Called when a divider drag ends, with the divider's index and where the pointer was let
@@ -85,13 +83,11 @@ final class ThemedSplitView: NSSplitView {
     /// exactly the crossing where it once stepped in weight.
     override var dividerColor: NSColor {
         let rule = Design.Surface.divider
-        guard !WindowBackdrop.isChromeGround else { return rule }
-
         let backdrop = WindowBackdrop.color
         let drawn = backdrop.composited(under: rule)
         return ThemeContrast.ratio(drawn, backdrop) >= Self.visibleLineRatio
             ? rule
-            : WindowBackdrop.ink.rule
+            : (WindowBackdrop.isChromeGround ? Design.Surface.border : WindowBackdrop.ink.rule)
     }
 
     override func viewDidChangeEffectiveAppearance() {
