@@ -21,9 +21,28 @@ enum ToastDefaults {
     /// that has to be dismissed.
     static let unattendedDwell: TimeInterval = 14
 
-    /// How far the band travels as it arrives, and back as it leaves. A short slide, because
-    /// the movement is only there to say the band was not always on screen.
-    static let rise: CGFloat = 8
+    /// The extra distance a card keeps going past the pane's edge on its way out, and the
+    /// extra it starts below on its way in — `Design.Size.glowGutter`, the room that token
+    /// already budgets between a glowing panel and any clip edge. A band exactly level with
+    /// the pane's edge is gone, but the shadow its theme hangs off it is not, and a
+    /// departure that stopped there would leave a smear of shade over the footer with
+    /// nothing above it to cast it.
+    static let clearance: CGFloat = Design.Size.glowGutter
+
+    /// The curve every card in the deck travels on — arriving, and settling forward when
+    /// the card in front goes. Hard deceleration: the card crosses most of its distance at
+    /// once and spends the rest easing into place, which reads as *put there*. The standard
+    /// ease-out at this distance reads as floated, and linear as conveyor-belted.
+    static var glide: CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.19, 1, 0.22, 1)
+    }
+
+    /// The curve a dismissed card leaves on: acceleration, because a card let go of falls
+    /// rather than lowering itself out. Its mirror is `glide` — what arrives decelerates
+    /// into the hand, what leaves accelerates out of it.
+    static var drop: CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.55, 0, 1, 0.45)
+    }
 
     /// Between the band's edge and its content.
     static let contentInset: CGFloat = Design.Spacing.inset
@@ -492,6 +511,19 @@ final class ToastView: NSView {
         layer?.transform = CATransform3DMakeTranslation(
             direction * (bounds.width + ToastDefaults.hostInset),
             0,
+            0
+        )
+    }
+
+    /// Sends the band down out of the pane, back the way it arrived — the settled departure's
+    /// half of `flyOut`, called from inside the departure's own animation group for the same
+    /// reason. Negative, because the band is not flipped: down is towards zero. Its own height
+    /// plus the inset it rests at puts it below the pane's edge, and the clearance takes the
+    /// shadow its theme hangs off it along as well.
+    func dropOut() {
+        layer?.transform = CATransform3DMakeTranslation(
+            0,
+            -(bounds.height + ToastDefaults.hostInset + ToastDefaults.clearance),
             0
         )
     }
@@ -1198,6 +1230,55 @@ private final class ToastStackEdgeView: NSView {
     }
 }
 
+// MARK: - The Lane
+
+/// The strip of pane the deck moves in: the pane's full width, from its top down to the edge
+/// the band rests above. It exists for the one thing a card cannot arrange for itself — **being
+/// somewhere the pane does not show** — so a receipt can start below the pane's edge and rise
+/// over it, and a dismissed one can drop back the same way, without either ever drawing across
+/// the footer under the line or the pane next door. The footer cannot lend cover for this: it
+/// draws nothing but its hairline, so a card behind it would read straight through.
+///
+/// Structural in the theme boundary's sense — it draws nothing and styles nothing — and it
+/// crops only while a card is actually crossing the edge (`clips`, held per transition by the
+/// presenter): a theme may hang up to `Design.Size.glowGutter` of shadow off a card, and a lane
+/// that cropped at rest would slice that shade off every receipt it holds for the sake of
+/// transitions that are not running.
+///
+/// It pins to the host's own top knowingly, against window-chrome's rule of thumb: nothing
+/// here is content that could land under a toolbar — every card pins to the lane's *bottom*,
+/// and the height above is only headroom so no receipt, however tall its words wrap, meets the
+/// crop from the inside.
+private final class ToastLaneView: NSView {
+
+    /// Whether the lane crops to the pane. On only while a card is crossing the pane's edge —
+    /// see the class note for why never at rest.
+    var clips = false {
+        didSet { layer?.masksToBounds = clips }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    /// A full-pane overlay must not become the pane's click surface: whatever lands on a card
+    /// is the card's, and everything else belongs to the list the lane is stretched over. The
+    /// band's own hover-versus-row discipline depends on this staying true — see
+    /// `testAPointerOnTheBandDoesNotHoverTheRowUnderneath` and its other half.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
+
 // MARK: - Presenter
 
 /// Puts one toast at a time into a pane, holds it for its dwell, and takes it away again.
@@ -1233,7 +1314,7 @@ final class ToastPresenter {
     /// The edges standing behind the band, front to back — one per waiting receipt, capped at
     /// `ToastDefaults.stackDepth`. Readable for `queued`'s reason: what the stack says is state,
     /// and a test should be able to ask for it rather than read it out of a picture.
-    private(set) var stackEdges: [NSView] = []
+    var stackEdges: [NSView] { deck.map(\.view) }
 
     /// The interval behind the current clock. Readable for the same reason as `queued`: choosing
     /// the request's dwell over the pane default is state, and tests should not sleep to infer it.
@@ -1242,11 +1323,57 @@ final class ToastPresenter {
     /// whole of it — see `holdOpen`.
     private(set) var scheduledDwell: TimeInterval?
 
+    /// One waiting receipt's edge and the pins holding it behind the band, kept together so a
+    /// promotion can re-pin the whole deck to a new front card and a deal can raise a fresh
+    /// edge from behind the band it was dealt under.
+    private struct DeckEdge {
+        let view: ToastStackEdgeView
+        var pins: [NSLayoutConstraint]
+    }
+
+    /// The constraints that put the front band where it belongs, kept as a set so a promotion
+    /// can stand a new band in the deck's front slot and then move it — bottom, both sides and
+    /// the width cap together — into the resting position, rather than rebuilding it there.
+    private struct Placement {
+
+        let bottom: NSLayoutConstraint
+        let leading: NSLayoutConstraint
+        let fill: NSLayoutConstraint
+        let cap: NSLayoutConstraint
+
+        /// At rest: `hostInset` in from every edge of the lane, the cap at full width.
+        func settle() {
+            bottom.constant = -ToastDefaults.hostInset
+            leading.constant = ToastDefaults.hostInset
+            fill.constant = -ToastDefaults.hostInset
+            cap.constant = ToastDefaults.maxWidth
+        }
+
+        /// The deck's front slot: one step up and one step in on either side, the cap stepped
+        /// in with it — where a promoted receipt stands at the moment its turn comes, so it
+        /// takes over exactly the silhouette of the edge that stood for it.
+        func standInDeckFront() {
+            bottom.constant = -ToastDefaults.hostInset - ToastDefaults.stackStep
+            leading.constant = ToastDefaults.hostInset + ToastDefaults.stackInset
+            fill.constant = -(ToastDefaults.hostInset + ToastDefaults.stackInset)
+            cap.constant = ToastDefaults.maxWidth - ToastDefaults.stackInset * 2
+        }
+    }
+
     private weak var host: NSView?
     private let bottom: NSLayoutYAxisAnchor
-    private var bottomConstraint: NSLayoutConstraint?
+    private var lane: ToastLaneView?
+    private var placement: Placement?
+    private var deck: [DeckEdge] = []
     private var dismissal: Timer?
     private var pending: [ToastRequest] = []
+
+    /// How many transitions are currently crossing the pane's edge. The lane crops while any
+    /// is — a count rather than a flag, because a burst walked through quickly has the next
+    /// card's arrival still travelling when the one after is dismissed.
+    private var clipHolds = 0 {
+        didSet { lane?.clips = clipHolds > 0 }
+    }
 
     /// What was left of the band's dwell when the pointer stopped its clock. Written when the
     /// pointer arrives and spent when it leaves; nil whenever a clock is running.
@@ -1302,7 +1429,7 @@ final class ToastPresenter {
         while pending.count > ToastDefaults.queueLimit {
             pending.removeFirst()
         }
-        refreshStack(animated: true)
+        dealDeck()
     }
 
     /// Takes the current band away early — the action was taken, the ✕ was pressed, the band was
@@ -1314,45 +1441,133 @@ final class ToastPresenter {
         guard let toast = current else { return }
         stopClock()
         toast.stopDwell()
+        // The departing band answers to nobody from here. Its gesture is spent, and its hover
+        // must stop mattering *now*: with a successor taking over, a pointer crossing a card on
+        // its way out would otherwise hold the next receipt's clock.
+        toast.onAction = nil
+        toast.onDismiss = nil
+        toast.onHoldChanged = nil
         current = nil
+        placement = nil
 
-        // The stack leaves with the band it stands behind, and is handed to the departure rather
-        // than kept: its edges are pinned to a band that is on its way out, and the receipt
-        // arriving next builds its own from what is left waiting.
-        let leaving: [NSView] = [toast] + stackEdges
-        stackEdges = []
-
-        // A band that was pushed sideways does not then drop: the throw is half an animation the
-        // hand already performed, and the departure owes it the other half. Only the band travels
-        // — the deck behind it was not thrown and stays where it stood while it fades.
-        if departure == .settled {
-            bottomConstraint?.constant = -ToastDefaults.hostInset - ToastDefaults.rise
+        // Whatever was waiting takes over in the same motion the departure makes — the front
+        // card leaves and the deck steps forward behind it, which is what a deck of cards does.
+        // One band *at rest* is still the rule; two sharing a departure is the departure.
+        guard pending.isEmpty else {
+            return promote(pending.removeFirst(), replacing: toast, by: departure)
         }
-        let host = self.host
-        guard Design.Motion.vanish > 0 else {
-            leaving.forEach { $0.alphaValue = 0 }
-            host?.layoutSubtreeIfNeeded()
-            leaving.forEach { $0.removeFromSuperview() }
-            bottomConstraint = nil
-            showNext()
+        removeStack()
+        depart(toast, by: departure) { [weak self] in
+            self?.dropLaneIfIdle()
+        }
+    }
+
+    /// Sends a band the rest of the way out of the pane — down the way it came, or on along the
+    /// way it was thrown — and removes it once it has gone. A band that was pushed sideways does
+    /// not then drop: the throw is half an animation the hand already performed, and the
+    /// departure owes it the other half.
+    private func depart(
+        _ toast: ToastView,
+        by departure: ToastDeparture,
+        then completion: (() -> Void)? = nil
+    ) {
+        guard Design.Motion.travel > 0 else {
+            toast.removeFromSuperview()
+            completion?()
             return
         }
+        holdClip()
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = Design.Motion.vanish
+            switch departure {
+            case .settled:
+                // Falling, not lowering itself: a dismissed card leaves on gravity's curve —
+                // and at travel's length rather than vanish's, because it has the same ground
+                // to cover leaving as it had arriving.
+                context.duration = Design.Motion.travel
+                context.timingFunction = ToastDefaults.drop
+            case .thrown:
+                // Quick, because the hand already supplied the first half of this movement and
+                // is owed the rest at the speed it meant.
+                context.duration = Design.Motion.vanish
+            }
             context.allowsImplicitAnimation = true
-            if case .thrown(let direction) = departure { toast.flyOut(direction) }
-            leaving.forEach { $0.animator().alphaValue = 0 }
-            host?.layoutSubtreeIfNeeded()
-        }, completionHandler: { [weak self, leaving] in
+            switch departure {
+            case .settled:
+                toast.dropOut()
+            case .thrown(let direction):
+                toast.flyOut(direction)
+                // The carry already faded the band towards `dragAway`; the flight finishes that
+                // fade as it finishes the translation. Both belong to the gesture — the settled
+                // departure, which is a transition and not a gesture, fades nothing.
+                toast.animator().alphaValue = 0
+            }
+        }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
-                leaving.forEach { $0.removeFromSuperview() }
-                if self?.current == nil { self?.bottomConstraint = nil }
-                // After the departure rather than during it: the next receipt sliding up through
-                // the one leaving is two bands on screen, which is the thing the queue exists to
-                // avoid.
-                self?.showNext()
+                toast.removeFromSuperview()
+                self?.releaseClip()
+                completion?()
             }
         })
+    }
+
+    /// Brings the next receipt forward in the departing band's own motion: the new band starts
+    /// in the deck's front slot — the position of the edge that has been standing for it — and
+    /// settles into the resting one while the old band drops or flies, the surviving edges
+    /// step one slot shallower behind it, and any receipt newly entitled to an edge rises from
+    /// behind the band. Nothing fades; every card is somewhere the whole time.
+    private func promote(
+        _ request: ToastRequest,
+        replacing departing: ToastView,
+        by departure: ToastDeparture
+    ) {
+        guard let host, let lane else { return }
+
+        let next = makeToast(for: request)
+        // From behind: under the band on its way out, over everything still waiting.
+        lane.addSubview(next, positioned: .below, relativeTo: departing)
+        current = next
+        let placement = place(next, in: lane)
+        self.placement = placement
+
+        // The deck's front edge is the card this receipt has been standing behind the band
+        // *as*; the real band takes its place before anything moves.
+        if !deck.isEmpty {
+            let replaced = deck.removeFirst()
+            NSLayoutConstraint.deactivate(replaced.pins)
+            replaced.view.removeFromSuperview()
+        }
+
+        guard Design.Motion.travel > 0 else {
+            squareDeck(behind: next, staged: false)
+            departing.removeFromSuperview()
+            host.layoutSubtreeIfNeeded()
+            announce(request)
+            scheduleDismissal()
+            return
+        }
+
+        placement.standInDeckFront()
+        // Freeze the starting picture: the new band in the front slot, the survivors still
+        // pinned behind the departing band — which their pins may be, since its exit is a
+        // transform and never moves its frame.
+        host.layoutSubtreeIfNeeded()
+
+        placement.settle()
+        let dealt = squareDeck(behind: next, staged: true)
+        holdClip()
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Design.Motion.travel
+            context.timingFunction = ToastDefaults.glide
+            context.allowsImplicitAnimation = true
+            raiseDeck(dealt)
+            host.layoutSubtreeIfNeeded()
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.releaseClip() }
+        })
+        depart(departing, by: departure)
+
+        announce(request)
+        scheduleDismissal()
     }
 
     /// Ends this presenter's ownership immediately. Pane owners normally get this through
@@ -1364,20 +1579,67 @@ final class ToastPresenter {
         current?.stopDwell()
         current?.removeFromSuperview()
         current = nil
+        placement = nil
         removeStack()
-        // A stack handed to a departure is no longer this presenter's to name, and a pane being
-        // torn down must not have to wait out an animation to be rid of it.
-        host?.subviews
-            .compactMap { $0 as? ToastStackEdgeView }
-            .forEach { $0.removeFromSuperview() }
-        bottomConstraint = nil
+        // The lane goes synchronously and takes every card with it — the one at rest and any
+        // still mid-departure: a pane being torn down must not have to wait out an animation
+        // to be rid of its overlay.
+        clipHolds = 0
+        lane?.removeFromSuperview()
+        lane = nil
     }
 
     // MARK: - Private Methods
 
     private func show(_ request: ToastRequest) {
         guard let host else { return }
+        let lane = ensureLane(in: host)
 
+        let toast = makeToast(for: request)
+        // Topmost in the lane: over a band still finishing its own departure, and over
+        // everything waiting in the deck.
+        lane.addSubview(toast, positioned: .above, relativeTo: nil)
+        current = toast
+        let placement = place(toast, in: lane)
+        self.placement = placement
+
+        // Built before the arrival rather than after it, so a band that is already the front of
+        // a queue rises with its deck behind it instead of growing one a frame later — the deck
+        // is pinned to the band, so the one staging below carries the other.
+        squareDeck(behind: toast, staged: false)
+
+        if Design.Motion.travel > 0 {
+            // The band arrives from below the pane's edge, whole: no fade, just ground to
+            // cover. How far below is its own height plus the deck peeking over it, which is
+            // not known until its words have wrapped — hence a layout at rest first.
+            host.layoutSubtreeIfNeeded()
+            placement.bottom.constant = toast.frame.height
+                + ToastDefaults.stackStep * CGFloat(deck.count)
+                + ToastDefaults.clearance
+            host.layoutSubtreeIfNeeded()
+
+            placement.settle()
+            holdClip()
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = Design.Motion.travel
+                context.timingFunction = ToastDefaults.glide
+                context.allowsImplicitAnimation = true
+                host.layoutSubtreeIfNeeded()
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated { self?.releaseClip() }
+            })
+        } else {
+            host.layoutSubtreeIfNeeded()
+        }
+
+        announce(request)
+        scheduleDismissal()
+    }
+
+    /// The band, wired to this presenter: the way back dismisses through the caller's undo, the
+    /// way out and the throw dismiss directly, and both holds — pointer and carry — arrive as
+    /// the one signal the view reports.
+    private func makeToast(for request: ToastRequest) -> ToastView {
         let toast = ToastView(request: request)
         toast.onAction = { [weak self] in
             request.action?()
@@ -1390,150 +1652,217 @@ final class ToastPresenter {
             guard let self else { return }
             isHeld ? holdOpen() : scheduleDismissal()
         }
-
-        // Topmost in the pane: the band floats over the list, the settings sidebar, and
-        // anything else the pane swaps in beneath it.
-        host.addSubview(toast, positioned: .above, relativeTo: nil)
-        current = toast
-
-        let bottomConstraint = toast.bottomAnchor.constraint(
-            equalTo: bottom,
-            constant: -ToastDefaults.hostInset - ToastDefaults.rise
-        )
-        self.bottomConstraint = bottomConstraint
-
-        // Fills the column it is given, up to its cap. The trailing pin is breakable so the cap
-        // wins in a pane wider than the band should ever be — and weaker than the pane's own
-        // hold on its width, so losing to the cap never narrows the pane to make up the
-        // difference. See `ToastDefaults.fillPriority`.
-        let trailing = toast.trailingAnchor.constraint(
-            equalTo: host.trailingAnchor,
-            constant: -ToastDefaults.hostInset
-        )
-        trailing.priority = ToastDefaults.fillPriority
-
-        NSLayoutConstraint.activate([
-            bottomConstraint,
-            trailing,
-            toast.leadingAnchor.constraint(
-                equalTo: host.leadingAnchor,
-                constant: ToastDefaults.hostInset
-            ),
-            toast.trailingAnchor.constraint(
-                lessThanOrEqualTo: host.trailingAnchor,
-                constant: -ToastDefaults.hostInset
-            ),
-            toast.widthAnchor.constraint(lessThanOrEqualToConstant: ToastDefaults.maxWidth)
-        ])
-
-        // Built before the arrival rather than after it, so a band that is already the front of a
-        // queue rises with its stack behind it instead of growing one a frame later.
-        refreshStack(animated: false)
-
-        let arriving: [NSView] = [toast] + stackEdges
-        arriving.forEach { $0.alphaValue = 0 }
-        host.layoutSubtreeIfNeeded()
-
-        bottomConstraint.constant = -ToastDefaults.hostInset
-        if Design.Motion.appear > 0 {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Design.Motion.appear
-                context.allowsImplicitAnimation = true
-                arriving.forEach { $0.animator().alphaValue = 1 }
-                host.layoutSubtreeIfNeeded()
-            }
-        } else {
-            arriving.forEach { $0.alphaValue = 1 }
-            host.layoutSubtreeIfNeeded()
-        }
-
-        announce(request)
-        scheduleDismissal()
+        return toast
     }
 
-    /// Brings up whatever a departing band was holding the pane for.
-    private func showNext() {
-        guard current == nil, !pending.isEmpty else { return }
-        show(pending.removeFirst())
+    /// Pins a band into the lane and hands back the constraints a transition moves.
+    ///
+    /// The fill pin: the band fills the column it is given, up to its cap. It is breakable so
+    /// the cap wins in a pane wider than the band should ever be — and weaker than the pane's
+    /// own hold on its width, so losing to the cap never narrows the pane to make up the
+    /// difference; the lane's edges are required-equal to the pane's, so every priority
+    /// relationship reads through it unchanged. See `ToastDefaults.fillPriority`.
+    private func place(_ toast: ToastView, in lane: ToastLaneView) -> Placement {
+        let fill = toast.trailingAnchor.constraint(
+            equalTo: lane.trailingAnchor,
+            constant: -ToastDefaults.hostInset
+        )
+        fill.priority = ToastDefaults.fillPriority
+
+        let placement = Placement(
+            bottom: toast.bottomAnchor.constraint(
+                equalTo: lane.bottomAnchor,
+                constant: -ToastDefaults.hostInset
+            ),
+            leading: toast.leadingAnchor.constraint(
+                equalTo: lane.leadingAnchor,
+                constant: ToastDefaults.hostInset
+            ),
+            fill: fill,
+            cap: toast.widthAnchor.constraint(lessThanOrEqualToConstant: ToastDefaults.maxWidth)
+        )
+        NSLayoutConstraint.activate([
+            placement.bottom,
+            placement.leading,
+            placement.fill,
+            placement.cap,
+            toast.trailingAnchor.constraint(
+                lessThanOrEqualTo: lane.trailingAnchor,
+                constant: -ToastDefaults.hostInset
+            )
+        ])
+        return placement
+    }
+
+    /// The lane every card lives in, made on the first receipt and kept while any card is up.
+    private func ensureLane(in host: NSView) -> ToastLaneView {
+        if let lane, lane.superview === host { return lane }
+        let lane = ToastLaneView()
+        host.addSubview(lane, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            lane.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            lane.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            lane.topAnchor.constraint(equalTo: host.topAnchor),
+            lane.bottomAnchor.constraint(equalTo: bottom)
+        ])
+        self.lane = lane
+        return lane
+    }
+
+    /// Removes the lane once nothing is left to hold it — the pane must not keep an invisible
+    /// overlay for having once shown a receipt. Departure completions call this; one that lands
+    /// after a new receipt has already arrived finds `current` set and leaves the lane alone.
+    private func dropLaneIfIdle() {
+        guard current == nil, deck.isEmpty else { return }
+        lane?.removeFromSuperview()
+        lane = nil
+        clipHolds = 0
+    }
+
+    private func holdClip() {
+        clipHolds += 1
+    }
+
+    private func releaseClip() {
+        clipHolds = max(0, clipHolds - 1)
     }
 
     /// Removes the band outright, with no animation and without running its action. Used when a
-    /// receipt with nothing to offer is replaced: fading one out while the next slides in over it
-    /// reads as a glitch rather than as a replacement.
+    /// receipt with nothing to offer is replaced: sending one out while the next slides in over
+    /// it reads as a glitch rather than as a replacement.
     private func removeCurrent() {
         stopClock()
         current?.stopDwell()
         current?.removeFromSuperview()
         current = nil
+        placement = nil
         removeStack()
-        bottomConstraint = nil
     }
 
-    /// Squares the stack behind the band with what is actually waiting.
+    /// Deals the newly waiting receipt's edge in behind the band.
+    ///
+    /// It arrives the way everything here moves — as a card, from somewhere: dealt at the
+    /// band's own silhouette, exactly hidden behind it, and risen from there into its slot. The
+    /// band itself never moves, so the only motion is a sliver of card emerging above an edge
+    /// the reader already has, which is the report ("another is coming") drawn as the movement
+    /// that causes it.
+    private func dealDeck() {
+        guard let toast = current else { return removeStack() }
+        let staged = Design.Motion.travel > 0
+        let dealt = squareDeck(behind: toast, staged: staged)
+        guard staged, !dealt.isEmpty else { return }
+        host?.layoutSubtreeIfNeeded()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.travel
+            context.timingFunction = ToastDefaults.glide
+            context.allowsImplicitAnimation = true
+            raiseDeck(dealt)
+            host?.layoutSubtreeIfNeeded()
+        }
+    }
+
+    /// Squares the deck with what is actually waiting, pinned behind `front`.
     ///
     /// Grown from the front, because the z-order is the whole illusion: an edge added for a
     /// receipt that arrived later belongs *behind* the ones already standing there, and
     /// `addSubview(_:positioned:relativeTo:)` puts a view directly under whichever one it is
     /// handed — so each new edge goes under the last, and the first goes under the band.
-    private func refreshStack(animated: Bool) {
-        guard let host, let toast = current else { return removeStack() }
-
+    ///
+    /// Edges already standing are re-pinned to `front` at their current index's depth, which is
+    /// how a promotion steps the deck forward: the pin swap is instant and moves nothing by
+    /// itself — the caller's animated layout is what carries each edge from where it stands to
+    /// where its new pins say. A `staged` deal adds new edges at the band's own silhouette —
+    /// depth zero, exactly hidden — and returns them still standing there; the caller owes them
+    /// `raiseDeck` inside whatever animation carries the rest of its transition.
+    @discardableResult
+    private func squareDeck(behind front: ToastView, staged: Bool) -> [DeckEdge] {
+        guard let lane else { return [] }
         let wanted = min(pending.count, ToastDefaults.stackDepth)
-        while stackEdges.count > wanted {
-            stackEdges.removeLast().removeFromSuperview()
+        while deck.count > wanted {
+            deck.removeLast().view.removeFromSuperview()
         }
-        guard stackEdges.count < wanted else { return }
 
-        var arrived: [NSView] = []
-        while stackEdges.count < wanted {
-            let depth = CGFloat(stackEdges.count + 1)
+        for (index, edge) in deck.enumerated() {
+            NSLayoutConstraint.deactivate(edge.pins)
+            let pins = deckPins(for: edge.view, behind: front, depth: CGFloat(index + 1))
+            NSLayoutConstraint.activate(pins)
+            deck[index].pins = pins
+        }
+
+        var dealt: [DeckEdge] = []
+        while deck.count < wanted {
+            let depth = CGFloat(deck.count + 1)
             let edge = ToastStackEdgeView()
-            host.addSubview(edge, positioned: .below, relativeTo: stackEdges.last ?? toast)
-
-            // Pinned to the band's own two edges rather than given a height of its own: the card
-            // behind *is* the same card, lifted, so everything below the band's top edge is
-            // behind an opaque surface however tall the receipt in front turns out to be — and
-            // the theme's corner radius never has to be measured into a constant here.
-            NSLayoutConstraint.activate([
-                edge.topAnchor.constraint(
-                    equalTo: toast.topAnchor,
-                    constant: -ToastDefaults.stackStep * depth
-                ),
-                edge.bottomAnchor.constraint(
-                    equalTo: toast.bottomAnchor,
-                    constant: -ToastDefaults.stackStep * depth
-                ),
-                edge.leadingAnchor.constraint(
-                    equalTo: toast.leadingAnchor,
-                    constant: ToastDefaults.stackInset * depth
-                ),
-                edge.trailingAnchor.constraint(
-                    equalTo: toast.trailingAnchor,
-                    constant: -ToastDefaults.stackInset * depth
-                )
-            ])
-            stackEdges.append(edge)
-            arrived.append(edge)
+            lane.addSubview(edge, positioned: .below, relativeTo: deck.last?.view ?? front)
+            let pins = deckPins(for: edge, behind: front, depth: staged ? 0 : depth)
+            NSLayoutConstraint.activate(pins)
+            if staged {
+                // The start frame, committed by hand: a promotion deals this edge *after* the
+                // freeze layout, and a view that enters an animated layout with no frame of its
+                // own animates in from a zero rect at the pane's corner. At depth zero its pins
+                // resolve to the band's own frame, which the band already has.
+                edge.frame = front.frame
+            }
+            let record = DeckEdge(view: edge, pins: pins)
+            deck.append(record)
+            dealt.append(record)
         }
+        return dealt
+    }
 
-        // A fade rather than a slide: the band does not move when something lines up behind it,
-        // and an edge sliding out from under a receipt somebody is reading is motion drawing the
-        // eye away from the thing the motion is *about*.
-        guard animated, Design.Motion.appear > 0 else { return }
-        arrived.forEach { $0.alphaValue = 0 }
-        host.layoutSubtreeIfNeeded()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Design.Motion.appear
-            context.allowsImplicitAnimation = true
-            arrived.forEach { $0.animator().alphaValue = 1 }
+    /// The four pins that stand an edge behind its band — pinned to the band's own two edges
+    /// rather than given a height of its own: the card behind *is* the same card, lifted, so
+    /// everything below the band's top edge is behind an opaque surface however tall the
+    /// receipt in front turns out to be — and the theme's corner radius never has to be
+    /// measured into a constant here. In `reslot`'s order.
+    private func deckPins(
+        for edge: NSView,
+        behind front: ToastView,
+        depth: CGFloat
+    ) -> [NSLayoutConstraint] {
+        [
+            edge.topAnchor.constraint(
+                equalTo: front.topAnchor,
+                constant: -ToastDefaults.stackStep * depth
+            ),
+            edge.bottomAnchor.constraint(
+                equalTo: front.bottomAnchor,
+                constant: -ToastDefaults.stackStep * depth
+            ),
+            edge.leadingAnchor.constraint(
+                equalTo: front.leadingAnchor,
+                constant: ToastDefaults.stackInset * depth
+            ),
+            edge.trailingAnchor.constraint(
+                equalTo: front.trailingAnchor,
+                constant: -ToastDefaults.stackInset * depth
+            )
+        ]
+    }
+
+    /// Moves an edge's pins to another slot without re-making them, in `deckPins`' order.
+    private func reslot(_ pins: [NSLayoutConstraint], to depth: CGFloat) {
+        guard pins.count == 4 else { return }
+        pins[0].constant = -ToastDefaults.stackStep * depth
+        pins[1].constant = -ToastDefaults.stackStep * depth
+        pins[2].constant = ToastDefaults.stackInset * depth
+        pins[3].constant = -ToastDefaults.stackInset * depth
+    }
+
+    /// Lifts freshly dealt edges from behind the band into their slots — called inside an
+    /// animation group, so the rise rides whatever else that transition is moving.
+    private func raiseDeck(_ dealt: [DeckEdge]) {
+        for record in dealt {
+            guard let index = deck.firstIndex(where: { $0.view === record.view }) else { continue }
+            reslot(record.pins, to: CGFloat(index + 1))
         }
     }
 
     /// Takes the stack away outright — the band it stood behind is going with no departure of its
     /// own, or there is no band left to stand behind.
     private func removeStack() {
-        stackEdges.forEach { $0.removeFromSuperview() }
-        stackEdges.removeAll()
+        deck.forEach { $0.view.removeFromSuperview() }
+        deck.removeAll()
     }
 
     /// Starts the band's clock, and the countdown it shows for it. One method, because a rail

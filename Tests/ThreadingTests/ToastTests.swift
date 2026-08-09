@@ -589,7 +589,9 @@ final class ToastTests: XCTestCase {
             "stepped in on one side only, the stack reads as a band slipping rather than a deck"
         )
 
-        let order = host.subviews
+        // The deck lives in the presenter's lane, so the z-order that carries the illusion is
+        // the lane's subview order.
+        let order = try XCTUnwrap(toast.superview).subviews
         XCTAssertLessThan(
             try XCTUnwrap(order.firstIndex(of: edge)),
             try XCTUnwrap(order.firstIndex(of: toast)),
@@ -614,14 +616,15 @@ final class ToastTests: XCTestCase {
         XCTAssertEqual(presenter.stackEdges.count, ToastDefaults.stackDepth)
 
         // Each one further up and further in than the one in front of it, and behind it in the
-        // pane — three facts that are the same illusion.
+        // lane — three facts that are the same illusion.
         let cards: [NSView] = [try XCTUnwrap(presenter.current)] + presenter.stackEdges
+        let order = try XCTUnwrap(presenter.current?.superview).subviews
         for (front, behind) in zip(cards, cards.dropFirst()) {
             XCTAssertGreaterThan(behind.frame.maxY, front.frame.maxY)
             XCTAssertLessThan(behind.frame.width, front.frame.width)
             XCTAssertLessThan(
-                try XCTUnwrap(host.subviews.firstIndex(of: behind)),
-                try XCTUnwrap(host.subviews.firstIndex(of: front))
+                try XCTUnwrap(order.firstIndex(of: behind)),
+                try XCTUnwrap(order.firstIndex(of: front))
             )
         }
         presenter.invalidate()
@@ -671,6 +674,67 @@ final class ToastTests: XCTestCase {
 
         XCTAssertTrue(presenter.stackEdges.isEmpty)
         XCTAssertEqual(host.subviews.count, 1, "an edge was left standing behind nothing")
+    }
+
+    // MARK: - The lane
+
+    /// The lane the deck rides in stretches over the whole pane, and covering is all it may do:
+    /// a click on a card is the card's, and a click anywhere else belongs to the list the lane
+    /// is stretched over. Without the pass-through, presenting one receipt would make an entire
+    /// sidebar unclickable for six seconds — invisibly, since the lane draws nothing to blame.
+    func testTheLaneTakesNoClickOfItsOwn() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        host.layoutSubtreeIfNeeded()
+        let toast = try XCTUnwrap(presenter.current)
+        let lane = try XCTUnwrap(toast.superview)
+
+        let onBand = lane.convert(
+            NSPoint(x: toast.frame.midX, y: toast.frame.midY),
+            to: host
+        )
+        let hit = try XCTUnwrap(lane.hitTest(onBand))
+        XCTAssertTrue(
+            hit === toast || hit.isDescendant(of: toast),
+            "a click on the band went somewhere other than the band"
+        )
+
+        let clear = NSPoint(x: host.bounds.midX, y: host.bounds.maxY - Design.Spacing.medium)
+        XCTAssertNil(
+            lane.hitTest(clear),
+            "the lane swallowed a click meant for the pane under it"
+        )
+        presenter.invalidate()
+    }
+
+    /// The lane crops only while a card is actually crossing the pane's edge. At rest it must
+    /// not: a theme may hang up to the glow gutter of shadow off a card, and a lane cropping at
+    /// rest would slice that shade off every receipt for the sake of a transition that is not
+    /// running.
+    func testTheLaneCropsDuringTheArrivalAndNotAtRest() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let lane = try XCTUnwrap(presenter.current?.superview)
+        XCTAssertEqual(
+            lane.layer?.masksToBounds,
+            true,
+            "a band still below the pane's edge is showing over whatever is down there"
+        )
+
+        waitForRunLoop(Design.Motion.travel + 0.2)
+        XCTAssertEqual(
+            lane.layer?.masksToBounds,
+            false,
+            "the lane kept cropping after the band settled"
+        )
+        presenter.invalidate()
     }
 
     // MARK: - The way out
@@ -1024,7 +1088,8 @@ final class ToastTests: XCTestCase {
     func testAPointerOnTheBandDoesNotHoverTheRowUnderneath() throws {
         let list = try list()
 
-        let covered = list.host.convert(
+        // The band's frame is stated in its lane's coordinates, so the lane is what converts it.
+        let covered = try XCTUnwrap(list.toast.superview).convert(
             NSPoint(x: list.toast.frame.midX, y: list.toast.frame.midY),
             to: nil
         )
@@ -1042,7 +1107,8 @@ final class ToastTests: XCTestCase {
     func testARowStillHoversWhereTheBandDoesNotCoverIt() throws {
         let list = try list()
 
-        let clear = list.host.convert(
+        // The band's frame is stated in its lane's coordinates, so the lane is what converts it.
+        let clear = try XCTUnwrap(list.toast.superview).convert(
             NSPoint(x: list.toast.frame.midX, y: list.toast.frame.maxY + Design.Spacing.large),
             to: nil
         )

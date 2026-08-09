@@ -510,12 +510,38 @@ same reason: a band that expired halfway through the gesture aimed at it would b
 own dwell while somebody was still deciding. The two holds are reported as one signal, because
 handing the presenter a second pause would spend a paused clock's remainder against itself.
 
+**The deck moves the way a deck of cards moves, and nothing fades.** Every card is somewhere the
+whole time: a receipt arrives by rising over the pane's lower edge — whole, with its deck pinned
+behind it — a newly waiting receipt's edge is dealt in at the band's own silhouette and rises
+from behind it into its slot, and a dismissal is one motion in which the front card drops out of
+the pane while the next receipt takes over from the deck's front slot and the surviving edges
+step one slot shallower behind it. The promoted band is a real `ToastView` stood in the exact
+silhouette of the edge that stood for it, so the swap is invisible and the settle — down one
+`stackStep`, out one `stackInset` a side, the width cap widening with it — reads as the card
+coming forward. Fading was how stacked receipts moved before this, and it made the queue's own
+grammar illegible: a deck announced itself as cards and then dissolved like vapour. The one
+opacity left is the throw's — the carry fades the band towards `dragAway` as a threshold signal,
+and a thrown departure finishes that fade because it is finishing that gesture. Timing is
+`Design.Motion.travel` on `ToastDefaults.glide` (hard deceleration — placed, not floated) for
+everything arriving or settling, and `ToastDefaults.drop` (acceleration — a card falls, it does
+not lower itself) for the settled departure. Being *below the pane's edge* is what a subview
+cannot do alone, so the presenter keeps every card in a `ToastLaneView`: a full-pane,
+event-pass-through, draw-nothing overlay whose bottom is the edge the band rests above. It crops
+(`layer.masksToBounds`) **only while a card is crossing the edge**, held per transition and
+counted because a fast-walked burst overlaps them — never at rest, since a theme may hang up to
+`Design.Size.glowGutter` of shadow off a card and a resting crop would slice it off every
+receipt. The z-order trick was tried first and cannot work: `PaneFooterView` draws nothing but
+its hairline, so a card "behind" the footer reads straight through it. Travel distances carry
+`ToastDefaults.clearance` (the glow gutter again) past the edge, so no departing card leaves its
+own shadow hanging over the footer.
+
 How a band leaves is the request of the departure rather than of the presenter (`ToastDeparture`):
 a receipt that was pushed sideways must not then drop back down the way it arrived, since the
-throw is half an animation the hand already performed and the departure owes it the other half.
-Only the band travels; the deck of waiting edges behind it was not thrown and fades where it
-stands. The queue is untouched by *how* a band went — throwing one hands the pane to whatever was
-waiting exactly as running out of time does, so a burst can be walked through card by card.
+throw is half an animation the hand already performed and the departure owes it the other half —
+quick where the settled drop takes the full travel, because the hand already supplied its first
+half. The queue is untouched by *how* a band went — throwing one hands the pane to whatever was
+waiting exactly as running out of time does, so a burst can be walked through card by card, each
+promotion riding the departure before it.
 
 **A card floating over a list takes the pointer, not only the press.** The band swallows its own
 `mouseDown` so a click cannot fall through to the row it is covering, and the pointer needed the

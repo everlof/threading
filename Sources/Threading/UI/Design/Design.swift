@@ -1331,6 +1331,16 @@ enum Design {
         /// follows, leaving is a decision already made.
         static var vanish: TimeInterval { reducesMotion ? 0 : 0.12 }
 
+        /// A card travelling into or out of a pane's corner — the toast rising over the
+        /// pane's lower edge, the deck behind it stepping forward when the front card goes.
+        ///
+        /// Longer than `appear`, because a fade materialises in place while a slide has the
+        /// card's own height to cover, and at `appear`'s length the trip reads as a pop
+        /// rather than an arrival. Well short of `handoff`, which carries an object across
+        /// a whole pane and must stay readable as the same object for the length of it; a
+        /// card entering at a corner only has to read as *coming from somewhere*.
+        static var travel: TimeInterval { reducesMotion ? 0 : 0.3 }
+
         /// One beat of a menu's confirmation blink — the chosen row flickering once before
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
