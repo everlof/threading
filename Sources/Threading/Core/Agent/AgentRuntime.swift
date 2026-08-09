@@ -161,7 +161,7 @@ final class AgentRuntime {
             resolveTurnStartWaiters(for: report.sessionID)
         }
 
-        guard let tracker = controllers[report.sessionID]?.activityTracker else {
+        guard let controller = controllers[report.sessionID] else {
             // Ordinary for a rendered conversation, which learns its boundaries from the stream
             // and has no terminal controller. Recorded at debug because it is also what a
             // report for an already-closed session looks like.
@@ -170,6 +170,15 @@ final class AgentRuntime {
             )
             return
         }
+        let tracker = controller.activityTracker
+
+        // Codex reports the rollout's exact path on its hooks. Remembering that path avoids a
+        // session-tree walk on terminal output and gives the transcript fallback for the one
+        // terminal boundary Codex 0.147.0 omits from hooks: an interrupted turn.
+        controller.noteReportedCodexTranscript(
+            path: report.transcriptPath,
+            providerSessionID: report.agentSessionID
+        )
 
         // The one transition worth a durable record. Before it, a session's status is inferred
         // from output; after it, the agent is saying so. "Did the hooks actually reach this
@@ -178,7 +187,7 @@ final class AgentRuntime {
         let wasInferring = !tracker.reportsOwnActivity
 
         switch report.event {
-        case .turnStarted: tracker.noteTurnStarted()
+        case .turnStarted: tracker.noteTurnStarted(turnID: report.turnID)
         case .turnFinished:
             if !report.backgroundWork.isEmpty {
                 // The one line that explains a session sitting at `working` with a quiet

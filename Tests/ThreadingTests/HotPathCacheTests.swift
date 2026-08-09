@@ -78,6 +78,51 @@ final class HotPathCacheTests: XCTestCase {
         XCTAssertNil(CodexTranscript.url(sessionID: transcriptID, account: account))
     }
 
+    func testCodexAdoptsOnlyAReportedRolloutInsideTheAccount() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingReportedRollout-\(UUID().uuidString)")
+        let sessions = root.appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)
+            .appendingPathComponent("2026/08/08")
+        let outside = root.appendingPathComponent("outside")
+        let transcriptID = TranscriptID("019fe318-1505-7160-8a6f-6c30faa2a57c")
+        let rollout = sessions.appendingPathComponent(
+            "rollout-2026-08-08T22-37-14-\(transcriptID.rawValue).jsonl"
+        )
+        defer {
+            CodexTranscript.invalidateCache()
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("{}\n".utf8).write(to: rollout)
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .named("reported-path-test"),
+            configPath: root.path
+        )
+
+        XCTAssertEqual(
+            CodexTranscript.url(
+                reportedPath: rollout.path,
+                sessionID: transcriptID,
+                account: account
+            ),
+            rollout.resolvingSymlinksInPath()
+        )
+        XCTAssertNil(CodexTranscript.url(
+            reportedPath: outside
+                .appendingPathComponent(rollout.lastPathComponent).path,
+            sessionID: transcriptID,
+            account: account
+        ))
+        XCTAssertNil(CodexTranscript.url(
+            reportedPath: rollout.path,
+            sessionID: TranscriptID("a-different-session"),
+            account: account
+        ))
+    }
+
     func testCodexTitleComesFromTheAccountSessionIndex() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingCodexTitle-\(UUID().uuidString)")

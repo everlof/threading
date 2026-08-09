@@ -145,6 +145,13 @@ final class SessionActivityTracker {
     /// Whether a turn is open: begun, and not yet reported finished.
     private var turnInFlight = false
 
+    /// The provider's identity for the reported turn, where it supplies one.
+    ///
+    /// Codex's transcript fallback lands after a background file read. Matching that record to
+    /// the open turn prevents an old interruption from closing a newer turn that began before
+    /// the read returned to main.
+    private var reportedTurnID: String?
+
     /// Whether the session is asking for something and cannot continue until it is answered.
     ///
     /// Held apart from the turn because the two are independent — the flag can be raised and
@@ -326,10 +333,11 @@ final class SessionActivityTracker {
     /// A turn means someone is driving the session — a prompt typed through the remote
     /// mirror reaches an unattended terminal too — so the launch grace ends here as surely
     /// as it does on being looked at.
-    func noteTurnStarted() {
+    func noteTurnStarted(turnID: String? = nil) {
         launchedUnattended = false
         adoptOwnReports()
         turnInFlight = true
+        reportedTurnID = turnID
         awaitsUser = false
         // A new prompt is proof the user is past whatever the last turn was asking, so an ask
         // whose close never arrived ends here rather than outliving the turn it belonged to.
@@ -352,7 +360,29 @@ final class SessionActivityTracker {
     /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
     func noteTurnFinished(backgroundWork inFlight: [BackgroundTask] = []) {
         adoptOwnReports()
+        finishReportedTurn(backgroundWork: inFlight)
+    }
+
+    /// Ends the active Codex turn when its rollout records the interrupt that `Stop` omitted.
+    ///
+    /// This is a fallback for a session already driven by reports, not a second activity source:
+    /// it cannot latch an inferred session, cannot end an idle one, and cannot end a differently
+    /// identified turn. Once admitted it settles exactly like `Stop`, including the visible vs.
+    /// off-screen unread distinction, so the sidebar and control plane cross the same edge.
+    @discardableResult
+    func noteTurnInterrupted(turnID: String) -> Bool {
+        guard reportsOwnActivity, turnInFlight,
+              let reportedTurnID, reportedTurnID == turnID else {
+            return false
+        }
+
+        finishReportedTurn(backgroundWork: [])
+        return true
+    }
+
+    private func finishReportedTurn(backgroundWork inFlight: [BackgroundTask]) {
         turnInFlight = false
+        reportedTurnID = nil
         // The turn cannot have ended around an open question, so an ask still held here is one
         // whose close was lost. Believed over the ask, because `Stop` is the stronger statement:
         // the agent is back at its prompt, and a mark saying otherwise would never come down.
@@ -434,6 +464,7 @@ final class SessionActivityTracker {
         awaitsUser = false
         openAsks.removeAll()
         limitPark = recoveryArmed ? .recovering : .flagged
+        reportedTurnID = nil
         settle()
     }
 
@@ -502,6 +533,7 @@ final class SessionActivityTracker {
         bytesSinceQuiet = 0
         isDormant = true
         turnInFlight = false
+        reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
         pausedOnOwnWork = false
@@ -531,6 +563,7 @@ final class SessionActivityTracker {
         hasHeardFromProcess = false
         isDormant = false
         turnInFlight = false
+        reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
         pausedOnOwnWork = false
@@ -599,6 +632,7 @@ final class SessionActivityTracker {
 
         guard turnInFlight else { return }
         turnInFlight = false
+        reportedTurnID = nil
 
         // Finishing while the session is on screen needs no flag; the user saw it happen.
         awaitsUser = !isVisible

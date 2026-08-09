@@ -24,10 +24,7 @@ enum CodexTranscript {
     /// Account-taking seam keeps lookup and memoization independently testable from machine
     /// account discovery. Rollout paths are immutable for the lifetime of a conversation.
     static func url(sessionID: TranscriptID, account: AgentAccount) -> URL? {
-        let key = CacheKey(
-            accountPath: URL(fileURLWithPath: account.configPath).standardizedFileURL.path,
-            sessionID: sessionID
-        )
+        let key = cacheKey(sessionID: sessionID, account: account)
         if let cached = cachedURLs.withLock({ $0[key] }) {
             return cached
         }
@@ -42,16 +39,44 @@ enum CodexTranscript {
         ) else { return nil }
 
         for case let url as URL in enumerator {
-            guard url.pathExtension == CodexDiscoveryDefaults.rolloutExtension,
-                  url.lastPathComponent.hasPrefix(CodexDiscoveryDefaults.rolloutPrefix),
-                  url.deletingPathExtension().lastPathComponent.hasSuffix(sessionID.rawValue)
-            else { continue }
+            guard isRollout(url, for: sessionID) else { continue }
 
             cachedURLs.withLock { $0[key] = url }
             return url
         }
 
         return nil
+    }
+
+    /// Validates and remembers the exact rollout path Codex reported through a lifecycle hook.
+    ///
+    /// The hook already knows the file, so enumerating the account's complete session tree to
+    /// rediscover it would put externally growing filesystem work on a turn callback. The path
+    /// is still treated as input: it must resolve below this account's `sessions` directory and
+    /// carry the reported conversation id before it is admitted to the same immutable-path cache
+    /// as a discovered rollout.
+    static func url(
+        reportedPath: String,
+        sessionID: TranscriptID,
+        account: AgentAccount
+    ) -> URL? {
+        let sessionsRoot = URL(fileURLWithPath: account.configPath, isDirectory: true)
+            .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let candidate = URL(fileURLWithPath: reportedPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        guard candidate.path.hasPrefix(sessionsRoot.path + "/"),
+              isRollout(candidate, for: sessionID) else {
+            return nil
+        }
+
+        cachedURLs.withLock {
+            $0[cacheKey(sessionID: sessionID, account: account)] = candidate
+        }
+        return candidate
     }
 
     /// Reads Codex's current user-facing name for a conversation.
@@ -89,5 +114,23 @@ enum CodexTranscript {
 
     static func invalidateCache() {
         cachedURLs.withLock { $0.removeAll() }
+    }
+
+    // MARK: - Private Methods
+
+    private static func cacheKey(
+        sessionID: TranscriptID,
+        account: AgentAccount
+    ) -> CacheKey {
+        CacheKey(
+            accountPath: URL(fileURLWithPath: account.configPath).standardizedFileURL.path,
+            sessionID: sessionID
+        )
+    }
+
+    private static func isRollout(_ url: URL, for sessionID: TranscriptID) -> Bool {
+        url.pathExtension == CodexDiscoveryDefaults.rolloutExtension
+            && url.lastPathComponent.hasPrefix(CodexDiscoveryDefaults.rolloutPrefix)
+            && url.deletingPathExtension().lastPathComponent.hasSuffix(sessionID.rawValue)
     }
 }

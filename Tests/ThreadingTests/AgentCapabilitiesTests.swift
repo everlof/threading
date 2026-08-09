@@ -44,7 +44,8 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("anchoredUsageWindow", .anchoredUsageWindow),
             ("transcriptUsageLimitRecord", .transcriptUsageLimitRecord),
             ("providerTitleMetadata", .providerTitleMetadata),
-            ("providerArchive", .providerArchive)
+            ("providerArchive", .providerArchive),
+            ("transcriptInterruptedTurnRecord", .transcriptInterruptedTurnRecord)
         ]
 
         var seen: [Int: String] = [:]
@@ -105,6 +106,18 @@ final class AgentCapabilitiesTests: XCTestCase {
             XCTAssertTrue(
                 kind.supports(.resume),
                 "\(kind) reads a transcript it has no identifier for"
+            )
+        }
+    }
+
+    /// Codex is the only measured runtime whose terminal interrupt is authoritative in its
+    /// transcript while the corresponding `Stop` hook is absent.
+    func testInterruptedTurnTranscriptCapabilityMatchesTheCodexReader() {
+        for kind in AgentKind.allCases {
+            XCTAssertEqual(
+                kind.supports(.transcriptInterruptedTurnRecord),
+                kind == .codex,
+                "\(kind) claims the Codex interruption reader against expectation"
             )
         }
     }

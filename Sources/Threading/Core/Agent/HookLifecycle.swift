@@ -202,6 +202,12 @@ struct HookLifecycleReport {
     let lastAssistantMessage: String?
     let turnID: String?
 
+    /// The root conversation transcript reported on ordinary lifecycle events.
+    ///
+    /// Separate from `subagentTranscriptPath`: Codex's missing interrupt boundary is recovered
+    /// from this file, while a child's path belongs only to its navigator row.
+    let transcriptPath: String?
+
     /// The agent's own work still in flight as its turn ends, by the identifier it gave each.
     ///
     /// Claude states this on `Stop` as `background_tasks`, and its own description of the field
@@ -233,6 +239,7 @@ struct HookLifecycleReport {
         self.subagentTranscriptPath = payload["agent_transcript_path"] as? String
         self.lastAssistantMessage = payload["last_assistant_message"] as? String
         self.turnID = payload["turn_id"] as? String
+        self.transcriptPath = Self.text(payload["transcript_path"])
         // Only the identity and the kind are taken: the rest of each entry describes work this
         // side never renders. An entry whose id is missing falls back to its position, which is
         // stable across boundaries for as long as the entry is — so unreadable work still reads

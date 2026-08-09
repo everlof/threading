@@ -110,13 +110,98 @@ final class HookLifecycleTests: XCTestCase {
         let report = try XCTUnwrap(HookLifecycleReport(
             sessionID: sessionID,
             event: .turnStarted,
-            payload: ["session_id": "abc-123", "prompt": "do the thing"]
+            payload: [
+                "session_id": "abc-123",
+                "turn_id": "turn-456",
+                "transcript_path": "/tmp/rollout-abc-123.jsonl",
+                "prompt": "do the thing"
+            ]
         ))
 
         XCTAssertEqual(report.sessionID, sessionID)
         XCTAssertEqual(report.event, .turnStarted)
         XCTAssertEqual(report.agentSessionID, TranscriptID("abc-123"))
+        XCTAssertEqual(report.turnID, "turn-456")
+        XCTAssertEqual(report.transcriptPath, "/tmp/rollout-abc-123.jsonl")
         XCTAssertEqual(report.prompt, "do the thing")
+    }
+
+    // MARK: - Codex Interrupted Turns
+
+    /// A scrubbed copy of the structured record behind Codex 0.147.0's red
+    /// "Conversation interrupted" notice. The presentation string is absent on purpose: the
+    /// lifecycle fact is the event, its reason, and the turn it names.
+    func testCodexReadsAStructuredInterruptedTurn() throws {
+        let record: [String: Any] = [
+            "timestamp": "2026-08-08T21:16:13.332Z",
+            "type": "event_msg",
+            "payload": [
+                "type": "turn_aborted",
+                "turn_id": "019fe33b-9f27-7e72-a5f1-6f54723f468c",
+                "reason": "interrupted"
+            ]
+        ]
+
+        XCTAssertEqual(
+            CodexTranscriptInterruption.interruption(in: record),
+            CodexTurnInterruption(turnID: "019fe33b-9f27-7e72-a5f1-6f54723f468c")
+        )
+    }
+
+    /// Similar prose in a response item is terminal presentation, not authority to move state.
+    func testCodexDoesNotParseRenderedInterruptionText() {
+        let record: [String: Any] = [
+            "type": "response_item",
+            "payload": [
+                "role": "developer",
+                "content": [
+                    ["type": "input_text", "text": "<turn_aborted>Conversation interrupted</turn_aborted>"]
+                ]
+            ]
+        ]
+
+        XCTAssertNil(CodexTranscriptInterruption.interruption(in: record))
+    }
+
+    func testOnlyAnExplicitInterruptedReasonClosesTheTurn() {
+        let record: [String: Any] = [
+            "type": "event_msg",
+            "payload": [
+                "type": "turn_aborted",
+                "turn_id": "turn-1",
+                "reason": "unknown-future-reason"
+            ]
+        ]
+
+        XCTAssertNil(CodexTranscriptInterruption.interruption(in: record))
+    }
+
+    func testCodexReadsAnInterruptionOnlyWhenItIsTheNewestTurnBoundary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-codex-interruption-\(UUID().uuidString)")
+        let transcript = directory.appendingPathComponent("rollout.jsonl")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let interrupted = [
+            #"{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}"#,
+            #"{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted"}}"#
+        ].joined(separator: "\n") + "\n"
+        try Data(interrupted.utf8).write(to: transcript)
+
+        XCTAssertEqual(
+            CodexTranscriptInterruption.newestInterruption(at: transcript),
+            CodexTurnInterruption(turnID: "turn-1")
+        )
+
+        let newerTurn =
+            #"{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}"# + "\n"
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(newerTurn.utf8))
+        try handle.close()
+
+        XCTAssertNil(CodexTranscriptInterruption.newestInterruption(at: transcript))
     }
 
     /// The call's own id, so an ask is closed by the tool that opened it rather than by the next
@@ -570,6 +655,60 @@ final class HookLifecycleTests: XCTestCase {
 
         tracker.noteTurnFinished()
         XCTAssertEqual(tracker.activity, .idle, "a visible session needs no attention flag")
+    }
+
+    /// Codex returns to its prompt after this event but omits `Stop`; the rollout fallback must
+    /// cross the exact same activity edge that hook would have crossed.
+    @MainActor
+    func testAMatchingCodexInterruptionEndsTheReportedTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+        tracker.noteTurnStarted(turnID: "turn-1")
+
+        XCTAssertTrue(tracker.noteTurnInterrupted(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .idle)
+        XCTAssertFalse(tracker.activity.hasTurnInFlight)
+    }
+
+    /// The tail scan is asynchronous. If another prompt starts before it lands, an old abort may
+    /// not close the new turn.
+    @MainActor
+    func testAStaleCodexInterruptionCannotEndANewerTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnStarted(turnID: "turn-2")
+
+        XCTAssertFalse(tracker.noteTurnInterrupted(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+    }
+
+    /// A provider version that stops naming turns cannot safely use a delayed transcript fact:
+    /// without the identity there is no proof the abort belongs to the work now in flight.
+    @MainActor
+    func testACodexInterruptionCannotEndAnUnidentifiedTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+        tracker.noteTurnStarted()
+
+        XCTAssertFalse(tracker.noteTurnInterrupted(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+    }
+
+    @MainActor
+    func testAnOffscreenCodexInterruptionBecomesUnread() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+        tracker.noteTurnStarted(turnID: "turn-1")
+
+        XCTAssertTrue(tracker.noteTurnInterrupted(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
     @MainActor

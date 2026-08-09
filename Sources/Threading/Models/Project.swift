@@ -200,6 +200,12 @@ struct AgentCapabilities: OptionSet {
   /// Threading's reversible Archive/Restore contract, so their filing stays local rather than
   /// losing Undo or being misrepresented as the destructive delete they also expose.
   static let providerArchive = Self(rawValue: 1 << 24)
+
+  /// A terminal interruption is written as a structured transcript record but omits the
+  /// lifecycle hook that ordinarily closes a reported turn. Codex only: 0.147.0 appends
+  /// `event_msg / turn_aborted / reason: interrupted` and returns to its prompt without firing
+  /// `Stop`. Claude, Grok and OpenCode have no measured equivalent that this reader can consume.
+  static let transcriptInterruptedTurnRecord = Self(rawValue: 1 << 25)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -262,7 +268,7 @@ enum AgentKind: String, Codable, CaseIterable {
       return [
         .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
-        .headlessResearch, .providerTitleMetadata, .providerArchive
+        .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptInterruptedTurnRecord
       ]
     case .grok:
       return [

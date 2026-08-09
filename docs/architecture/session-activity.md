@@ -409,6 +409,24 @@ shared by every session — and owned by the user. Measured on 0.144.6: `codex e
 hooks, and the payload is Claude's apart from the spelling — `session_id`, `turn_id`,
 `transcript_path`, `cwd`, `hook_event_name`, `prompt`, and `last_assistant_message` on `Stop`.
 
+**An interrupted terminal turn is the exception.** Measured on Codex 0.147.0: submitting a
+prompt fires `UserPromptSubmit`, but pressing Stop returns the TUI to its prompt without firing
+the configured `Stop` hook. The rollout states the missing edge exactly as an `event_msg` whose
+payload is `turn_aborted`, carries the same `turn_id`, and says `reason: "interrupted"`. Without
+that edge, the hook latch correctly refuses to fall back to terminal silence and the session
+stays `working` forever; the same stale fact also keeps `watch_session` and sibling delivery
+gates waiting.
+
+The `.transcriptInterruptedTurnRecord` capability gives Codex terminals this fallback. The
+controller remembers the hook's validated `transcript_path` and, after a PTY output burst settles,
+revalidates one `TranscriptFactReader` against it. The common path is a background `stat`; growth
+scans one bounded tail chunk, and the callback moves state only when the newest lifecycle boundary
+is the structured interruption for the tracker's active turn id. It never parses the red
+"Conversation interrupted" presentation string. Matching the id is load-bearing: the read is
+asynchronous, so a late result from turn A must not stop a newer turn B. The admitted edge settles
+through `SessionActivityTracker`, exactly like `Stop`, which is why the sidebar, alerts, control
+plane and waiting deliveries all agree again.
+
 - **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
   `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,
   which is what lets one shared file attribute every session correctly. Verified that a hook

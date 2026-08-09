@@ -61,6 +61,8 @@ final class AgentSessionViewController: NSViewController {
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
+    private var codexTranscriptURL: URL?
+    private var codexInterruptionRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -241,6 +243,7 @@ final class AgentSessionViewController: NSViewController {
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
         guard isRunning else { return }
+        resetCodexTranscriptObservation()
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         session.terminate()
         isRunning = false
@@ -412,6 +415,7 @@ final class AgentSessionViewController: NSViewController {
 
         pendingLaunchPlan = nil
         isRunning = true
+        resetCodexTranscriptObservation()
         activityTracker.markRunning()
         if AppSettings.shared.remoteAccessEnabled {
             RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
@@ -480,6 +484,73 @@ final class AgentSessionViewController: NSViewController {
     /// to redraw.
     func noteStateChanged() {
         delegate?.agentSessionDidChangeState(self)
+    }
+
+    /// Adopts the exact rollout path Codex included in a lifecycle report.
+    ///
+    /// The provider session id in the same report is preferred; a resumed session's stored id is
+    /// the fallback. `CodexTranscript` validates both the account boundary and filename before
+    /// caching the path, so output callbacks never enumerate the provider's growing session tree.
+    func noteReportedCodexTranscript(
+        path: String?,
+        providerSessionID: TranscriptID?
+    ) {
+        guard agentKind.supports(.transcriptInterruptedTurnRecord),
+              let path,
+              let stored = ProjectStore.shared.session(withID: sessionID),
+              let transcriptID = providerSessionID ?? stored.resumeState.transcriptID,
+              let account = AgentAccountDiscovery.account(
+                  for: stored.kind,
+                  handle: stored.accountHandle
+              ),
+              let url = CodexTranscript.url(
+                  reportedPath: path,
+                  sessionID: transcriptID,
+                  account: account
+              ) else {
+            return
+        }
+
+        codexTranscriptURL = url
+        scheduleCodexInterruptionRefresh()
+    }
+
+    /// Revalidates once after an output burst settles. The transcript reader performs the stat
+    /// and capped tail scan off-main; this main-queue work is only cancellation and scheduling.
+    private func scheduleCodexInterruptionRefresh() {
+        guard codexTranscriptURL != nil else { return }
+
+        codexInterruptionRefreshWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, let url = self.codexTranscriptURL else { return }
+            self.codexInterruptionRefreshWorkItem = nil
+
+            CodexTranscriptInterruption.revalidate(at: url) { [weak self] interruption in
+                guard let self, self.isRunning, self.codexTranscriptURL == url,
+                      let interruption,
+                      self.activityTracker.noteTurnInterrupted(turnID: interruption.turnID)
+                else { return }
+
+                ThreadingLogger.agent.info(
+                    "Recovered interrupted Codex turn \(interruption.turnID, privacy: .public) from rollout"
+                )
+                EventLog.shared.record(.hooks, "Codex interruption recovered from transcript", [
+                    "session": self.sessionID.uuidString,
+                    "turn": interruption.turnID
+                ])
+            }
+        }
+        codexInterruptionRefreshWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + CodexInterruptionDefaults.quietDelay,
+            execute: item
+        )
+    }
+
+    private func resetCodexTranscriptObservation() {
+        codexInterruptionRefreshWorkItem?.cancel()
+        codexInterruptionRefreshWorkItem = nil
+        codexTranscriptURL = nil
     }
 
     /// Persists the identifier needed to resume a fresh conversation. Codex and OpenCode assign
@@ -636,6 +707,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         activityTracker.recordOutput(byteCount: byteCount)
         attachmentObserver?.noteOutput()
         scheduleProviderTitleRefresh()
+        scheduleCodexInterruptionRefresh()
 
         // Grok and OpenCode do not create a record for a blank TUI. Output after the initial
         // discovery window may mean the first prompt landed; retry at a bounded cadence until
@@ -660,6 +732,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         attachmentObserver?.scanNow()
         agentTitleRefreshWorkItem?.cancel()
         agentTitleRefreshWorkItem = nil
+        resetCodexTranscriptObservation()
         if agentKind.supports(.providerTitleMetadata) {
             SessionNaming.refreshAgentTitle(forSessionID: sessionID)
         }
