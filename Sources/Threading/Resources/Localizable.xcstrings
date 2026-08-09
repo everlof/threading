@@ -1,6 +1,134 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ (%@) is %@ against %@ (%@). Threading shows it as sent. Use default foreground (ANSI 39), or change themes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ (%@) har kontrasten %@ mot %@ (%@). Threading visar färgen som den skickades. Använd standardförgrund (ANSI 39) eller byt tema." } } } },
+    "24-bit color": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "24-bitarsfärg" } } } },
+    "ANSI black": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-svart" } } } },
+    "ANSI blue": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-blå" } } } },
+    "ANSI bright black": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljussvart" } } } },
+    "ANSI bright blue": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusblå" } } } },
+    "ANSI bright cyan": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljuscyan" } } } },
+    "ANSI bright green": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusgrön" } } } },
+    "ANSI bright magenta": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusmagenta" } } } },
+    "ANSI bright red": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusröd" } } } },
+    "ANSI bright white": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusvit" } } } },
+    "ANSI bright yellow": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-ljusgul" } } } },
+    "ANSI cyan": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-cyan" } } } },
+    "ANSI green": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-grön" } } } },
+    "ANSI magenta": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-magenta" } } } },
+    "ANSI palette color %lld": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-palettfärg %lld" } } } },
+    "ANSI red": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-röd" } } } },
+    "ANSI white": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-vit" } } } },
+    "ANSI yellow": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-gul" } } } },
+    "A program color conflicts with this terminal theme": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En programfärg krockar med det här terminaltemat" } } } },
+    "Change Theme…": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt tema…" } } } },
+    "the inverted terminal background": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "den inverterade terminalbakgrunden" } } } },
+    "the inverted terminal foreground": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "den inverterade terminalförgrunden" } } } },
+    "the terminal background": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "terminalbakgrunden" } } } },
+    "the terminal foreground": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "terminalförgrunden" } } } },
+    "* %@ remain unpriced": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "* %@ saknar fortfarande pris" } } } },
+    "+%lld more included in total": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "+%lld fler ingår i totalen" } } } },
+    "%@ cache writes": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ cacheskrivningar" } } } },
+    "%@ cached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ cachelagrad indata" } } } },
+    "%@, %lld%%": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@, %lld %%" } } } },
+    "%@ of observed input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ av observerad indata" } } } },
+    "%@ is at %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ är på %@" } } } },
+    "%@ output": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ utdata" } } } },
+    "%@ pace restored": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ takt återställd" } } } },
+    "%@ reasoning": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ resonemang" } } } },
+    "%@ restored": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ återställd" } } } },
+    "%@ total over %lld days": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ totalt under %lld dagar" } } } },
+    "%@ unpriced": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ utan pris" } } } },
+    "%@ · %lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %lld anrop" } } } },
+    "%@× measured cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@× uppmätt kostnad" } } } },
+    "%lld active days": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld aktiva dagar" } } } },
+    "%lld days · %lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld dagar · %lld anrop" } } } },
+    "%lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld anrop" } } } },
+    "%lld records": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld poster" } } } },
+    "%lld sources": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld källor" } } } },
+    "Appears when a supported OpenCode export reports OpenRouter as its billing route.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visas när en OpenCode-export som stöds anger OpenRouter som faktureringsväg." } } } },
+    "Grok": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Grok" } } } },
+    "Grok reports live context occupancy but no historical token bill.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Grok rapporterar aktuell kontextbeläggning men ingen historisk tokenförbrukning." } } } },
+    "Measured through supported OpenCode exports.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mäts via OpenCode-exporter som stöds." } } } },
+    "ThemedStackedBandChartView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedStackedBandChartView" } } } },
+    "No resumable OpenCode sessions are known to Threading yet.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading känner ännu inte till några återupptagningsbara OpenCode-sessioner." } } } },
+    "No rollout source was found.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen rollout-källa hittades." } } } },
+    "No supported export was found.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen export som stöds hittades." } } } },
+    "No transcript source was found.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen transkriptkälla hittades." } } } },
+    "One or more OpenCode exports could not be read.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En eller flera OpenCode-exporter kunde inte läsas." } } } },
+    "At the observed weekly pace": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Med den observerade veckotakten" } } } },
+    "Banked reset expires": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning löper ut" } } } },
+    "Banked reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning" } } } },
+    "Breakdown": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fördelning" } } } },
+    "Cache saved": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparat med cache" } } } },
+    "Cached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cachelagrad indata" } } } },
+    "Claude Code": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Claude Code" } } } },
+    "Claude and Codex publish authoritative windows": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Claude och Codex publicerar auktoritativa fönster" } } } },
+    "Comparison": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Jämförelse" } } } },
+    "Consumption": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förbrukning" } } } },
+    "Cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad" } } } },
+    "Cost, tokens, provider coverage, and 180 days of observed limit history.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad, tokens, leverantörstäckning och 180 dagar av observerad gränshistorik." } } } },
+    "Data coverage": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Datatäckning" } } } },
+    "Daily cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Daglig kostnad" } } } },
+    "Daily tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dagliga tokens" } } } },
+    "Daily usage": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Daglig användning" } } } },
+    "Limit history date range": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Datumintervall för gränshistorik" } } } },
+    "Limit history": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränshistorik" } } } },
+    "Limit window": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränsfönster" } } } },
+    "Hover or arrow through points, then switch data to inspect the interrupted morph animation.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll pekaren över eller använd piltangenterna för att granska punkter och byt sedan data för att se den avbrutna övergångsanimeringen." } } } },
+    "Local transcripts are read incrementally and deduplicated across resumes, compactions, forks, and subagents. Runtime and billing route stay separate, so OpenCode through OpenRouter is reported honestly. Prices use exact official model identifiers from catalog %@; unmatched tokens remain visibly unpriced. Grok exposes context occupancy but no authoritative token or limit history source.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokala transkript läses inkrementellt och dedupliceras mellan återupptagningar, komprimeringar, förgreningar och underagenter. Körmiljö och faktureringsväg hålls åtskilda, så OpenCode via OpenRouter redovisas korrekt. Priser använder exakta officiella modellidentifierare från katalog %@; tokens utan träff visas utan pris. Grok visar kontextbeläggning men saknar en auktoritativ källa för token- eller gränshistorik." } } } },
+    "Measured": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppmätt" } } } },
+    "Models": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modeller" } } } },
+    "Models, projects, accounts, and billing routes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modeller, projekt, konton och faktureringsvägar." } } } },
+    "More observations needed": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fler observationer behövs" } } } },
+    "Next expires %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa löper ut %@" } } } },
+    "No authoritative limit history yet": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen auktoritativ gränshistorik ännu" } } } },
+    "No data in this range": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga data i intervallet" } } } },
+    "No expiry reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen giltighetstid rapporterad" } } } },
+    "No usage recorded yet": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen användning registrerad ännu" } } } },
+    "Observed reset boundaries": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerade återställningsgränser" } } } },
+    "Observed": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat" } } } },
+    "Observed limits, resets, projections, and expiring banked resets.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerade gränser, återställningar, prognoser och sparade återställningar som löper ut." } } } },
+    "Output": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utdata" } } } },
+    "Overview": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Översikt" } } } },
+    "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Översikt och gränshistorik är separata flikar; byt intervall eller mått för att se hur det beständiga diagrammet övergår." } } } },
+    "Partial": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delvis" } } } },
+    "Personal": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personligt" } } } },
+    "Project %lld": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projekt %lld" } } } },
+    "Projected 100%": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos till 100 %" } } } },
+    "Projected at the scheduled reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos vid planerad återställning" } } } },
+    "Projection": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos" } } } },
+    "Processed tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bearbetade tokens" } } } },
+    "Provider-reported + official catalog rates": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterat + officiella katalogpriser" } } } },
+    "Provider-reported cost where available; exact catalog pricing otherwise.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterad kostnad där den finns; annars exakt katalogpris." } } } },
+    "Provider-neutral charts and the retained dashboard they compose.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsneutrala diagram och den beständiga instrumentpanel de bygger upp." } } } },
+    "Providers": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörer" } } } },
+    "Reading usage sources…": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser användningskällor…" } } } },
+    "Recorded reset boundary": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Registrerad återställningsgräns" } } } },
+    "Recorded resets": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Registrerade återställningar" } } } },
+    "Reported + exact catalog rates": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rapporterat + exakta katalogpriser" } } } },
+    "Requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anrop" } } } },
+    "Reset time unavailable": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställningstid saknas" } } } },
+    "Resets %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@" } } } },
+    "Switch data": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt data" } } } },
+    "Switched the chart data.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bytte diagramdata." } } } },
+    "ThemedTimeSeriesChartView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedTimeSeriesChartView" } } } },
+    "Top tools": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Främsta verktyg" } } } },
+    "Total cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Total kostnad" } } } },
+    "Total measured usage and the tools driving it.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Total uppmätt användning och verktygen som står för den." } } } },
+    "Tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tokens" } } } },
+    "Two provider series with one recorded reset.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Två leverantörsserier med en registrerad återställning." } } } },
+    "Usage analytics": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsanalys" } } } },
+    "Usage chart": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsdiagram" } } } },
+    "Usage date range": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Datumintervall för användning" } } } },
+    "Usage metric": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsmått" } } } },
+    "Usage over time": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användning över tid" } } } },
+    "Usage section": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningssektion" } } } },
+    "UsageDashboardView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageDashboardView" } } } },
+    "Uncached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Icke-cachelagrad indata" } } } },
+    "Use Left and Right Arrow to inspect points.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd vänster- och högerpil för att granska punkter." } } } },
+    "Weekly": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Veckovis" } } } },
+    "What Threading could measure, including unsupported and partial sources.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad Threading kunde mäta, inklusive källor som saknas eller bara stöds delvis." } } } },
     "A bounded diff-shaped slice for a code comment: target rows keep their marker, additions and removals keep theirs, and a large source never turns into a large sheet.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett begränsat, diff-format utdrag för en kodkommentar: målrader behåller sin markör, tillägg och borttagningar sina, och en stor källfil blir aldrig ett stort blad." } } }
@@ -25510,16 +25638,6 @@
         }
       }
     },
-    "Codex may draft the title and description. You review them and press Publish.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codex kan skriva ett utkast till titel och beskrivning. Du granskar dem och trycker på Publicera."
-          }
-        }
-      }
-    },
     "Codex returned no pull request draft.": {
       "localizations": {
         "sv": {
@@ -25690,12 +25808,42 @@
         }
       }
     },
-    "Git Review may push this project's branch, but never creates a pull request.": {
+    "Git Review creates a draft pull request when you press Create.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Git-granskning kan pusha projektets gren, men skapar aldrig en pull request."
+            "value": "Git-granskning skapar ett utkast till pull request när du trycker på Skapa."
+          }
+        }
+      }
+    },
+    "Git Review creates a ready pull request when you press Create.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning skapar en pull request redo för granskning när du trycker på Skapa."
+          }
+        }
+      }
+    },
+    "Git Review lets you edit the pull request title and description first.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning låter dig redigera pull requestens titel och beskrivning först."
+          }
+        }
+      }
+    },
+    "Git Review may push the branch, then stops there.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning kan pusha grenen och stannar sedan där."
           }
         }
       }
@@ -25896,26 +26044,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Förbereder tur…"
-          }
-        }
-      }
-    },
-    "Pressing Create publishes a draft pull request with the proposed title and description.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "När du trycker på Skapa publiceras ett utkast till pull request med den föreslagna titeln och beskrivningen."
-          }
-        }
-      }
-    },
-    "Pressing Create publishes a ready-for-review pull request with the proposed title and description.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "När du trycker på Skapa publiceras en pull request redo för granskning med den föreslagna titeln och beskrivningen."
           }
         }
       }
@@ -26906,7 +27034,14 @@
     "standard mode": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "standardläge"}}}},
     "Follow General Setting": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Följ inställningen i Allmänt"}}}},
     "Uses the Conversation Speed choice in General settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använder valet Konversationshastighet i inställningarna under Allmänt."}}}},
-    "This chat keeps the speed it is running with. The agent's own setting applies the next time it starts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här chatten behåller hastigheten den körs med. Agentens egen inställning gäller nästa gång den startas."}}}}
+    "This chat keeps the speed it is running with. The agent's own setting applies the next time it starts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här chatten behåller hastigheten den körs med. Agentens egen inställning gäller nästa gång den startas."}}}},
+    "Attachment actions": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Åtgärder för bilaga"}}}},
+    "This file could not be previewed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Filen kunde inte förhandsvisas."}}}},
+    "Images, documents, archives, and HTML from this session will appear here.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilder, dokument, arkiv och HTML från den här sessionen visas här."}}}},
+    "Attachments this session exchanged appear here: images, PDFs, documents, and archives you send, and ones the agent shows or names.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilagor som den här sessionen har utbytt visas här: bilder, PDF:er, dokument och arkiv du skickar, och de som agenten visar eller nämner."}}}},
+    "%lld files selected": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld filer markerade"}}}},
+    "Copy Files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera filer"}}}},
+    "Add attachments to chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till bilagor i chatten"}}}}
   },
   "version": "1.0"
 }
