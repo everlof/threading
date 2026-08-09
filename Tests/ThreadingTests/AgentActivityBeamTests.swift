@@ -50,12 +50,13 @@ final class AgentActivityBeamTests: XCTestCase {
         XCTAssertNil(view.appliedStrengthForTesting)
     }
 
-    func testOneWorkingAgentLightsTheFloorInMono() {
+    func testOneWorkingAgentLightsTheFloorInAdaptiveMono() {
         let view = beam(workingCount: 1)
         XCTAssertTrue(view.isBeamMountedAndShowingForTesting)
         XCTAssertEqual(view.appliedStrengthForTesting, 0.3)
         XCTAssertEqual(view.appliedActiveForTesting, true)
         XCTAssertEqual(view.appliedVariantIsColorfulForTesting, false)
+        XCTAssertEqual(view.appliedVariantIsMonoForTesting, true)
     }
 
     func testEachAdditionalAgentAddsAStep() {
@@ -88,6 +89,7 @@ final class AgentActivityBeamTests: XCTestCase {
     func testTopEffortTurnsTheRingColorful() {
         let view = beam(workingCount: 2, topEffort: true)
         XCTAssertEqual(view.appliedVariantIsColorfulForTesting, true)
+        XCTAssertEqual(view.appliedVariantIsMonoForTesting, false)
     }
 
     // MARK: - The theme gate

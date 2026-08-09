@@ -12,9 +12,9 @@ enum ActivityBeamDefaults {
 /// app" — the theme boundary for `BorderBeamKit`, the way `WorkingOrbView` is
 /// for ThinkingOrbs. A host pins this view over the surface to ring and
 /// restates the workload; everything visual is decided here: the
-/// count-to-strength curve, the mono ring escalating to colorful when any
-/// working session runs at the top of its provider's reasoning ladder, and
-/// the theme and motion gates.
+/// count-to-strength curve, the adaptive mono ring escalating to colorful
+/// when any working session runs at the top of its provider's reasoning
+/// ladder, and the theme and motion gates.
 ///
 /// The beam belongs to the stock look only. A styled theme — every retro
 /// chrome especially — states its own idea of depth and glow, and a breathing
@@ -144,6 +144,11 @@ final class AgentActivityBeamView: NSView {
     var appliedVariantIsColorfulForTesting: Bool? {
         guard #available(macOS 14.0, *) else { return nil }
         return hostForTesting?.configuration.colorVariant == .colorful
+    }
+
+    var appliedVariantIsMonoForTesting: Bool? {
+        guard #available(macOS 14.0, *) else { return nil }
+        return hostForTesting?.configuration.colorVariant == .mono
     }
 
     var appliedBorderRadiusForTesting: Double? {
