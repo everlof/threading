@@ -72,16 +72,21 @@ final class AccountsPreferencesViewController: NSViewController {
 
     // MARK: - Row Construction
 
-    /// One account row: icon well, name + provenance labels, a Reset action and the switch that
-    /// takes the account out of use.
+    /// One account row: icon well, name + provenance labels, an explicit presentation restore
+    /// action and the switch that takes the account out of use.
     private func makeAccountRow(for account: AgentAccount, row index: Int) -> NSView {
         let icon = makeIconButton(for: account, row: index)
         let labels = makeLabelStack(for: account, row: index)
 
-        let reset = SettingsUI.button("Reset", target: self, action: #selector(resetClicked(_:)))
-        reset.tag = index
-        reset.toolTip = AccountsPreferencesStrings.resetTooltip
-        reset.setContentHuggingPriority(.required, for: .horizontal)
+        let restore = SettingsUI.button(
+            AccountsPreferencesStrings.restorePresentationButton,
+            target: self,
+            action: #selector(restorePresentationClicked(_:)),
+            localizes: false
+        )
+        restore.tag = index
+        restore.toolTip = AccountsPreferencesStrings.restorePresentationTooltip
+        restore.setContentHuggingPriority(.required, for: .horizontal)
 
         let enabled = SettingsUI.toggle(
             isOn: account.isEnabled,
@@ -105,7 +110,7 @@ final class AccountsPreferencesViewController: NSViewController {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let stack = NSStackView(views: [icon, labels, spacer, reset, enabled])
+        let stack = NSStackView(views: [icon, labels, spacer, restore, enabled])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = Design.Spacing.medium
@@ -230,7 +235,7 @@ final class AccountsPreferencesViewController: NSViewController {
         notifyAccountsChanged()
     }
 
-    @objc private func resetClicked(_ sender: ThemedButton) {
+    @objc private func restorePresentationClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
 
         AccountPreferencesStore.shared.clearPresentation(for: account.id)
@@ -311,8 +316,11 @@ enum AccountsPreferencesStrings {
             """)
     }
     static var iconWellTooltip: String { L10n.string("Choose an icon") }
-    static var resetTooltip: String {
-        L10n.string("Restore this account's default icon and name")
+    static var restorePresentationButton: String {
+        L10n.string("Restore Name & Icon")
+    }
+    static var restorePresentationTooltip: String {
+        L10n.string("Restore this account's detected name and provider icon")
     }
     static var enabledTooltip: String {
         L10n.string("Offer this account for new sessions")

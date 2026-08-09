@@ -60,12 +60,28 @@ final class AccountEnablementTests: XCTestCase {
         XCTAssertEqual(store.emoji(for: id), "🌀")
         XCTAssertEqual(store.displayNameOverride(for: id), "Night Shift")
 
-        // Reset is about presentation: it restores the discovered icon and name, and says
-        // nothing about whether the account is in use.
+        // Restore Name & Icon is about presentation and says nothing about whether the account
+        // is in use.
         store.clearPresentation(for: id)
         XCTAssertNil(store.emoji(for: id))
         XCTAssertNil(store.displayNameOverride(for: id))
-        XCTAssertFalse(store.isEnabled(id), "Reset quietly put a switched-off login back in use")
+        XCTAssertFalse(
+            store.isEnabled(id),
+            "restoring the name and icon quietly put a switched-off login back in use"
+        )
+    }
+
+    func testThePresentationRestoreNamesExactlyWhatItChanges() {
+        XCTAssertEqual(
+            AccountsPreferencesStrings.restorePresentationButton,
+            "Restore Name & Icon"
+        )
+        XCTAssertFalse(
+            AccountsPreferencesStrings.restorePresentationButton.localizedCaseInsensitiveContains(
+                "reset"
+            ),
+            "the account action can still be mistaken for resetting usage limits"
+        )
     }
 
     /// Preferences stored before the switch existed carry no such key, and a decoder that
