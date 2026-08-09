@@ -257,15 +257,82 @@ final class ChangedFilesCardTests: XCTestCase {
         )
     }
 
+    func testALargeFlatTreeBindsOnlyTheOuterViewportsRows() {
+        let tree = makeTree((0..<1_000).map { index in
+            (String(format: "File%04d.swift", index), 1, 0)
+        })
+        let card = ChangedFilesCardView(tree: tree, onViewDiff: {})
+        let viewport = NSRect(x: 0, y: 0, width: 640, height: 700)
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: viewport.width,
+            height: card.fittingSize.height
+        ))
+        host.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: host.topAnchor),
+            card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+
+        let scroll = ThemedScrollView(frame: viewport)
+        scroll.contentView = FlippedClipView()
+        scroll.documentView = host
+        let window = NSWindow(
+            contentRect: viewport,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = scroll
+        host.layoutSubtreeIfNeeded()
+        scroll.layoutSubtreeIfNeeded()
+
+        // Large flat trees defer their data source until this outer clip has committed its
+        // viewport. Let that main-queue bind run, then ask how much AppKit actually retained.
+        let didBind = expectation(description: "bind behind outer viewport layout")
+        DispatchQueue.main.async { didBind.fulfill() }
+        wait(for: [didBind], timeout: 1)
+        host.layoutSubtreeIfNeeded()
+        scroll.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(card.presentedNodeCountForTesting, tree.nodes.count)
+        XCTAssertGreaterThan(card.materializedRowCountForTesting, 0)
+        XCTAssertLessThanOrEqual(card.materializedRowCountForTesting, 80)
+
+        let initialRows = Set(card.materializedNodeIndicesForTesting)
+        scroll.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: ChangedFilesCardDefaults.rowStride * 500
+        ))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        scroll.layoutSubtreeIfNeeded()
+        scroll.displayIfNeeded()
+
+        let didScroll = expectation(description: "recycle rows at the outer scroll position")
+        DispatchQueue.main.async { didScroll.fulfill() }
+        wait(for: [didScroll], timeout: 1)
+        scroll.layoutSubtreeIfNeeded()
+        scroll.displayIfNeeded()
+
+        let deepRows = Set(card.materializedNodeIndicesForTesting)
+        XCTAssertLessThanOrEqual(deepRows.count, 80)
+        XCTAssertTrue(deepRows.contains { $0 >= 400 })
+        XCTAssertTrue(initialRows.isDisjoint(with: deepRows))
+        withExtendedLifetime(window) {}
+    }
+
     // MARK: - Performance
 
     /// Exercises the production card at scales a hand-authored unit fixture never reaches.
     ///
-    /// `collapsed` isolates the tree's retained-view cost: the card starts folded, but today it
-    /// still constructs one AppKit row for every hidden node. `previews` also gives every file a
-    /// diff larger than the production capture cap, separating bounded preview-model cost from
-    /// the card's view cost. Expansion is timed because it is the mutation a reader can actually
-    /// feel after the cold card appears.
+    /// `collapsed` isolates the tree's retained-view cost: the card starts folded and must keep
+    /// its AppKit working set bounded after expansion. `previews` also gives every file a diff
+    /// larger than the production capture cap, separating the aggregate preview-model budget
+    /// from the virtual row cost. Expansion is timed because it is the mutation a reader can
+    /// actually feel after the cold card appears.
     func testStressChangedFilesCardWhenEnabled() throws {
         let environment = ProcessInfo.processInfo.environment
         try XCTSkipUnless(
@@ -333,25 +400,41 @@ final class ChangedFilesCardTests: XCTestCase {
         let card = ChangedFilesCardView(tree: tree, previews: previews, onViewDiff: {})
         let constructEnded = DispatchTime.now().uptimeNanoseconds
 
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 700))
+        let viewport = NSRect(x: 0, y: 0, width: 640, height: 700)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 1))
         host.addSubview(card)
         NSLayoutConstraint.activate([
             card.topAnchor.constraint(equalTo: host.topAnchor),
             card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+            card.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
+        let clip = FlippedClipView()
+        clip.drawsBackground = false
+        let scroll = ThemedScrollView(frame: viewport)
+        scroll.contentView = clip
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.documentView = host
         let window = NSWindow(
-            contentRect: host.bounds,
+            contentRect: viewport,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
+        window.contentView = scroll
+
+        func layoutDocument() {
+            host.frame.size = NSSize(width: viewport.width, height: card.fittingSize.height)
+            host.layoutSubtreeIfNeeded()
+            scroll.layoutSubtreeIfNeeded()
+            card.layoutSubtreeIfNeeded()
+        }
+        layoutDocument()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
 
-        let rowViews = card.descendants(ofType: ChangedFilesRowView.self)
-        let visibleRows = rowViews.filter { !$0.isHidden }.count
+        let initialLogicalRows = card.presentedNodeCountForTesting
+        let initialRowViews = card.materializedRowCountForTesting
         let expandButton = try XCTUnwrap(
             card.descendants(ofType: ThemedButton.self).first { $0.title == "Expand all" },
             "a large card should start collapsed"
@@ -360,21 +443,28 @@ final class ChangedFilesCardTests: XCTestCase {
         let expandStarted = DispatchTime.now().uptimeNanoseconds
         expandButton.performClick()
         let expandUpdated = DispatchTime.now().uptimeNanoseconds
-        host.layoutSubtreeIfNeeded()
+        layoutDocument()
         let expandLaidOut = DispatchTime.now().uptimeNanoseconds
+        let expandedLogicalRows = card.presentedNodeCountForTesting
+        let expandedRowViews = card.materializedRowCountForTesting
 
         let collapseStarted = DispatchTime.now().uptimeNanoseconds
         expandButton.performClick()
         let collapseUpdated = DispatchTime.now().uptimeNanoseconds
-        host.layoutSubtreeIfNeeded()
+        layoutDocument()
         let collapseLaidOut = DispatchTime.now().uptimeNanoseconds
+        let collapsedRowViews = card.materializedRowCountForTesting
         let viewMemory = Self.physicalFootprintBytes()
+        let retainedPreviewLines = previews.values.reduce(0) { total, preview in
+            total + preview.hunks.reduce(0) { $0 + $1.lines.count }
+        }
 
         print(
             "THREADING_PERF changed-files-card "
                 + "theme=\(themeID.rawValue) shape=\(shape.rawValue) files=\(fileCount) "
                 + "lines_per_file=\(shape == .previews ? linesPerFile : 0) "
                 + "nodes=\(tree.nodes.count) previews=\(previews.count) "
+                + "retained_preview_lines=\(retainedPreviewLines) "
                 + "fixture_ms=\(Self.milliseconds(fixtureEnded - fixtureStarted)) "
                 + "tree_ms=\(Self.milliseconds(treeEnded - treeStarted)) "
                 + "previews_ms=\(Self.milliseconds(previewsEnded - treeEnded)) "
@@ -385,13 +475,20 @@ final class ChangedFilesCardTests: XCTestCase {
                 + "collapse_update_ms=\(Self.milliseconds(collapseUpdated - collapseStarted)) "
                 + "collapse_layout_ms=\(Self.milliseconds(collapseLaidOut - collapseUpdated)) "
                 + "descendants=\(card.descendants(ofType: NSView.self).count) "
-                + "row_views=\(rowViews.count) visible_rows=\(visibleRows) "
+                + "initial_logical_rows=\(initialLogicalRows) "
+                + "initial_row_views=\(initialRowViews) "
+                + "expanded_logical_rows=\(expandedLogicalRows) "
+                + "expanded_row_views=\(expandedRowViews) "
+                + "collapsed_row_views=\(collapsedRowViews) "
                 + "model_mb=\(Self.megabytes(Self.positiveDifference(modelMemory, baselineMemory))) "
                 + "view_mb=\(Self.megabytes(Self.positiveDifference(viewMemory, modelMemory)))"
         )
 
-        XCTAssertEqual(rowViews.count, tree.nodes.count)
-        XCTAssertLessThan(visibleRows, rowViews.count)
+        XCTAssertLessThan(initialLogicalRows, tree.nodes.count)
+        XCTAssertLessThanOrEqual(initialRowViews, initialLogicalRows)
+        XCTAssertEqual(expandedLogicalRows, tree.nodes.count)
+        XCTAssertLessThanOrEqual(expandedRowViews, min(tree.nodes.count, 80))
+        XCTAssertLessThanOrEqual(collapsedRowViews, initialLogicalRows)
         withExtendedLifetime(window) {}
     }
 

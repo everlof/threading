@@ -187,11 +187,37 @@ struct ChangedFileDiffPreview: Equatable {
     /// Every file's bounded diff, keyed by path — what a card is built with.
     static func previews(
         from files: [GitFileDiff],
-        lineCap: Int = ChangedFilesDefaults.previewLineCap
+        lineCap: Int = ChangedFilesDefaults.previewLineCap,
+        aggregateLineCap: Int = ChangedFilesDefaults.previewAggregateLineCap
     ) -> [String: ChangedFileDiffPreview] {
         var previews: [String: ChangedFileDiffPreview] = [:]
-        for file in files {
-            previews[file.path] = preview(of: file, lineCap: lineCap)
+        let previewable = Set(files.indices.filter { index in
+            files[index].hunks.contains { !$0.lines.isEmpty }
+        })
+        var remainingFiles = previewable.count
+        var remainingLines = max(aggregateLineCap, 0)
+        let perFileCeiling = max(lineCap, 0)
+
+        for (index, file) in files.enumerated() {
+            let cap: Int
+            if remainingFiles > 0, previewable.contains(index), remainingLines > 0 {
+                // Divide what remains across every file that can actually draw a preview. Short
+                // files return their unused share to later files, while no one file may exceed
+                // the existing per-file ceiling. The retained product is therefore bounded by
+                // the card-wide budget rather than `files × 400`.
+                cap = min(
+                    perFileCeiling,
+                    Int(ceil(Double(remainingLines) / Double(remainingFiles)))
+                )
+                remainingFiles -= 1
+            } else {
+                cap = 0
+            }
+
+            let value = preview(of: file, lineCap: cap)
+            let retained = value.hunks.reduce(0) { $0 + $1.lines.count }
+            remainingLines = max(remainingLines - retained, 0)
+            previews[file.path] = value
         }
         return previews
     }
@@ -241,4 +267,10 @@ enum ChangedFilesDefaults {
     /// normal edit is shown whole, shallow enough that a generated file does not ride along
     /// in memory for the rest of the session.
     static let previewLineCap = 400
+
+    /// The whole retained card, not each file independently. Five ordinary files can still use
+    /// the full per-file reading; a generated sweep shares the same finite 2,000-line product
+    /// instead of retaining hundreds of lines times hundreds of files for the conversation's
+    /// remaining lifetime.
+    static let previewAggregateLineCap = 2_000
 }

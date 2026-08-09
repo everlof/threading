@@ -145,7 +145,7 @@ external data reaches eager AppKit work.
 
 | Priority | Surface | Concrete risk |
 |---|---|---|
-| High | `ChangedFilesCardView` | A turn's complete flattened file tree is converted to retained row views before large trees are collapsed. The card itself is retained in the conversation model, and the 400-line preview cap applies per file rather than to the aggregate turn. |
+| Resolved | `ChangedFilesCardView` | The tree is a value projection rendered by reusable table cells against the conversation's outer viewport; collapsed descendants own no views, and one retained card shares a 2,000-line preview budget across files. The before/after measurements are below. |
 | High | Extension panels | `ExtensionPanel` accepts 500 semantic nodes / 1,000 rendered elements; `ExtensionNodeRenderer` turns the whole recursive value into stacks, and `ExtensionPanelViewController.render()` replaces the whole tree after updates. The validation cap is a transport/safety bound, not an eager-render budget. |
 | High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
@@ -167,9 +167,9 @@ and bounds both retained report cells and chart geometry;
 File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 
-The stress sweep below replaced that risk-only ordering with measurements. Extension settings were
-the first repair, followed in the outstanding queue by the changed-files card and browser baseline
-library; maximum-contract extension panels are measurable but smaller. Archived settings remains
+The stress sweep below replaced that risk-only ordering with measurements. Extension settings and
+the changed-files card are repaired; browser baseline library is the next measured high-priority
+item, while maximum-contract extension panels are measurable but smaller. Archived settings remains
 the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
 at both lazy boundaries: the pane installs one format surface, then the document surface installs
 PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement
@@ -225,11 +225,34 @@ a 512-row view hierarchy. A production-host regression also mounts 128 contribut
 the real Tools controller, reaches the final field, and verifies its recycled control still owns a
 live target.
 
-The changed-files card demonstrates cosmetic laziness directly. A 1,000-file turn shows one row
-but constructs and retains all 1,001, so collapse removes neither cold layout nor its quarter-GB
-footprint. The preview cap is effective per file but not in aggregate: 174 ordinary capped previews
-still retain about 14 MB before any views. The eventual row-model design must therefore bound both
-tree materialization and aggregate preview residency.
+#### Changed-files-card repair
+
+`ChangedFilesCardView` now keeps a pre-order array of presented node indices and renders it through
+one embedded `ThemedTableView`. The table does not introduce a nested scroll gesture: its full
+logical height remains part of the conversation document, while the conversation's outer clip is
+also the cell-materialization viewport. Folding rebuilds only the value projection, updates one
+height constraint, and invalidates the retained conversation row. A large flat root-level tree
+defers binding its data source until that outer clip has committed layout; otherwise a detached
+full-height table would correctly consider every row visible and eagerly construct it.
+
+Diff preview capture now has both the existing 400-line per-file ceiling and a 2,000-line card-wide
+ceiling. The remaining aggregate budget is divided fairly among files that have drawable hunks;
+short files return unused lines to later files. The dictionary still contains every path, but a
+wide generated turn no longer retains `file count × 400` diff lines for the lifetime of the chat.
+
+A paired fresh-process System run immediately before and after the repair measured:
+
+| Valid workload | Before | After | Retained result after |
+|---|---:|---:|---:|
+| 1,000 files, initially collapsed | 606.4 ms construction + 3,936.5 ms layout | **11.0 ms construction + 30.9 ms layout** | 1 row collapsed / 35 rows expanded; 17 descendants; 7.3 MB views |
+| Expand all 1,001 logical rows | 109.2 ms update + 432.5 ms layout | **1.2 ms update + 34.3 ms layout** | viewport-bound rather than total-row-bound |
+| 174 files × 400-line diffs | 222.6 ms construction + 200.4 ms layout | **11.5 ms construction + 29.8 ms layout** | 2,000 of 69,600 lines; 7.3 MB views |
+
+Neo Brutalism follows the same ownership bound: the 1,000-file cold path is 12.4 ms construction +
+31.0 ms layout, expansion is 1.2 ms + 36.5 ms, and only 35 cells are materialized in a 700-point
+viewport. The 174-file preview case is 11.4 ms + 29.8 ms and retains the same 2,000 lines. A
+root-only 1,000-file regression separately proves that a tree with no directory available to fold
+still binds at most 80 cells after entering the outer viewport.
 
 The baseline library's synchronous image-backed rich rows make both cold mount and a one-record
 change total-content operations. Its authored-theme draw gap needs an Animation Hitches/Time

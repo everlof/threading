@@ -680,9 +680,14 @@ tests: single-child directory chains compress into one `a/b` row, ±counts roll 
 ancestors, directories precede files and both sort alphabetically. It auto-expands only for a
 small turn (≤ 5 files and ≤ 200 changed lines — t3code's thresholds, computed once);
 otherwise every directory starts folded so a wide sweep is a line per scope, not forty rows.
-Each directory row discloses its own subtree; the header offers Collapse all and **View
-diff**, which opens Git Review on the Last Turn scope — and is therefore withdrawn from a
-card the moment a newer turn is accepted, before its new baseline replaces the old one.
+Rows are a pre-order value projection rendered by reusable cells in an embedded themed table.
+That table owns no nested scroller: its logical height stays in the conversation document and
+the conversation's clip bounds which cells exist, so folded descendants and offscreen files do
+not leave retained AppKit trees behind. A disclosure rebuilds the projection and invalidates the
+card's retained conversation-row height. Each directory row discloses its own subtree; the header
+offers Collapse all and **View diff**, which opens Git Review on the Last Turn scope — and is
+therefore withdrawn from a card the moment a newer turn is accepted, before its new baseline
+replaces the old one.
 Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
 against it would attribute later work to an old exchange. An empty diff leaves no card.
 
@@ -690,8 +695,9 @@ against it would attribute later work to an old exchange. An empty diff leaves n
 `HostPopoverID.conversationChangedFileDiff`). The reader already parsed the hunks to produce
 the counts, so the preview costs no second git read — but the card is retained for as long as
 the conversation, so what it keeps is bounded *at capture*: `ChangedFileDiffPreview.previews`
-spends `ChangedFilesDefaults.previewLineCap` per file in hunk order and counts what it could
-not cover, rather than pinning every line of every file a session ever touched. The body is
+divides a `previewAggregateLineCap` across drawable files without letting any file exceed
+`previewLineCap`, spends each share in hunk order, and counts what it could not cover. Short
+files return unused budget to later files. The body is
 `GitReviewDiffTextView` — one TextKit document per hunk, not a view per line — because the file
 under the pointer is as likely to be a four-hundred-line rewrite as a two-line fix. The policy
 is the disclosure's rather than the sidebar's: the surface scrolls, so it takes a grace to cross

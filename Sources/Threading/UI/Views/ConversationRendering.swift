@@ -319,10 +319,18 @@ extension ConversationViewController {
         previews: [String: ChangedFileDiffPreview],
         after anchor: PresentationID?
     ) {
-        let card = ChangedFilesCardView(tree: tree, previews: previews) { [weak self] in
-            guard let self else { return }
-            self.delegate?.conversationDidRequestTurnDiff(self)
-        }
+        let cardID = PresentationID.retained(UUID())
+        let card = ChangedFilesCardView(
+            tree: tree,
+            previews: previews,
+            onViewDiff: { [weak self] in
+                guard let self else { return }
+                self.delegate?.conversationDidRequestTurnDiff(self)
+            },
+            onHeightChange: { [weak self] in
+                self?.notePresentationHeightChanged(cardID)
+            }
+        )
 
         // Only the newest card's View diff still describes what the Last Turn scope shows.
         latestChangedFilesCard?.hideViewDiff()
@@ -333,7 +341,7 @@ extension ConversationViewController {
             .map { $0 + 1 }
             ?? presentationItems.count
         presentationItems.insert(PresentationItem(
-            id: .retained(UUID()),
+            id: cardID,
             content: .retained(card),
             opensTurn: false
         ), at: position)

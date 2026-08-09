@@ -167,4 +167,20 @@ final class ChangedFilesTreeTests: XCTestCase {
         XCTAssertEqual(Set(previews.keys), ["src/a.swift", "src/b.swift"])
         XCTAssertEqual(previews["src/b.swift"]?.added, 3)
     }
+
+    func testManyFilesShareOneAggregatePreviewBudget() {
+        let files = (0..<20).map { index in
+            makeFile(path: "src/file\(index).swift", hunks: [400], added: 400)
+        }
+        let previews = ChangedFileDiffPreview.previews(from: files)
+        let retained = previews.values.reduce(0) { total, preview in
+            total + preview.hunks.reduce(0) { $0 + $1.lines.count }
+        }
+
+        XCTAssertEqual(retained, ChangedFilesDefaults.previewAggregateLineCap)
+        XCTAssertTrue(
+            previews.values.allSatisfy { $0.omittedLines > 0 },
+            "a wide change should divide the card-wide budget rather than fully retaining early files"
+        )
+    }
 }

@@ -11,17 +11,21 @@ import AppKit
 ///
 /// Resting on a file row shows that file's diff on a popover: the card names what changed, and
 /// the preview answers the question the name raises without spending the pane on it.
-final class ChangedFilesCardView: NSView {
+final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: - Properties
 
     private let tree: ChangedFilesTree
     private let previews: [String: ChangedFileDiffPreview]
     private let onViewDiff: () -> Void
+    private let onHeightChange: () -> Void
 
-    private var rowsByNodeIndex: [Int: ChangedFilesRowView] = [:]
-    private var chevronsByNodeIndex: [Int: NSImageView] = [:]
     private var collapsedDirectories: Set<Int> = []
+    /// The cheap projection the table presents. AppKit owns only cells intersecting the outer
+    /// conversation viewport; folding changes this array rather than retaining and hiding views.
+    private var presentedNodeIndices: [Int] = []
+    private var tableIsBound = false
+    private var rowsHeightConstraint: NSLayoutConstraint?
 
     /// The row the pointer is on, and the row the open preview belongs to. They differ while
     /// the pointer crosses from one file to the next, which is what swaps the preview over.
@@ -49,13 +53,20 @@ final class ChangedFilesCardView: NSView {
         target: self,
         action: #selector(viewDiff)
     )
-    private lazy var rowsStack: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.hairline
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
+    private lazy var rowsTable: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(identifier: ChangedFilesCardDefaults.rowColumnIdentifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.hairline)
+        table.rowHeight = ChangedFilesCardDefaults.rowHeight
+        table.autoresizingMask = [.width]
+        table.translatesAutoresizingMaskIntoConstraints = false
+        return table
     }()
 
     // MARK: - Initialization
@@ -63,15 +74,20 @@ final class ChangedFilesCardView: NSView {
     init(
         tree: ChangedFilesTree,
         previews: [String: ChangedFileDiffPreview] = [:],
-        onViewDiff: @escaping () -> Void
+        onViewDiff: @escaping () -> Void,
+        onHeightChange: @escaping () -> Void = {}
     ) {
         self.tree = tree
         self.previews = previews
         self.onViewDiff = onViewDiff
+        self.onHeightChange = onHeightChange
         super.init(frame: .zero)
-        setupViews()
 
-        if !tree.autoExpands { collapseAll() }
+        if !tree.autoExpands {
+            collapsedDirectories = allDirectoryIndices
+        }
+        rebuildPresentedNodes()
+        setupViews()
         updateCollapseButton()
     }
 
@@ -105,6 +121,26 @@ final class ChangedFilesCardView: NSView {
         return preview
     }
 
+    /// Cheap logical rows and currently materialized AppKit cells, kept separate so stress tests
+    /// can assert the ownership boundary rather than merely timing it.
+    var presentedNodeCountForTesting: Int { presentedNodeIndices.count }
+    var materializedRowCountForTesting: Int {
+        materializedNodeIndicesForTesting.count
+    }
+    var materializedNodeIndicesForTesting: [Int] {
+        var indices: [Int] = []
+        rowsTable.enumerateAvailableRowViews { [rowsTable] _, tableRow in
+            if let cell = rowsTable.view(
+                atColumn: 0,
+                row: tableRow,
+                makeIfNecessary: false
+            ) as? ChangedFilesRowView, cell.nodeIndex >= 0 {
+                indices.append(cell.nodeIndex)
+            }
+        }
+        return indices
+    }
+
     // MARK: - Setup
 
     private func setupViews() {
@@ -131,120 +167,57 @@ final class ChangedFilesCardView: NSView {
         header.spacing = Design.Spacing.small
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        for (index, node) in tree.nodes.enumerated() {
-            let row = makeRow(for: node, at: index)
-            rowsByNodeIndex[index] = row
-            rowsStack.addArrangedSubview(row)
-            NSLayoutConstraint.activate([
-                row.leadingAnchor.constraint(equalTo: rowsStack.leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: rowsStack.trailingAnchor)
-            ])
-        }
-
         addSubview(header)
-        addSubview(rowsStack)
+        addSubview(rowsTable)
 
         let inset = Design.Spacing.medium
+        let rowsHeight = rowsTable.heightAnchor.constraint(equalToConstant: presentedRowsHeight)
+        rowsHeightConstraint = rowsHeight
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor, constant: inset),
             header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
 
-            rowsStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Design.Spacing.small),
-            rowsStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            rowsStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            rowsStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+            rowsTable.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Design.Spacing.small),
+            rowsTable.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            rowsTable.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            rowsTable.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset),
+            rowsHeight
         ])
+
+        // Small cards are the ordinary case and are safe to bind while detached. A pathological
+        // set of root-level files has no directory to fold; wait until the card is under the
+        // conversation clip before asking AppKit for that table, or detached construction sees
+        // the table's whole height as visible and eagerly requests every cell.
+        bindTableIfNeeded(force: presentedNodeIndices.count <= ChangedFilesCardDefaults.eagerRowCap)
     }
 
     private func summaryText() -> String {
         tree.fileCount == 1 ? "1 changed file" : "\(tree.fileCount) changed files"
     }
 
-    /// One row: indentation, a chevron for directories, the name, and the subtree's ±counts at
-    /// the trailing edge.
-    private func makeRow(for node: ChangedFilesTree.Node, at index: Int) -> ChangedFilesRowView {
-        let row = ChangedFilesRowView(nodeIndex: index)
-        row.translatesAutoresizingMaskIntoConstraints = false
+    private var presentedRowsHeight: CGFloat {
+        guard !presentedNodeIndices.isEmpty else { return 0 }
+        return CGFloat(presentedNodeIndices.count) * ChangedFilesCardDefaults.rowStride
+            - rowsTable.intercellSpacing.height
+    }
 
-        let name = NSTextField(labelWithString: node.name)
-        name.applyFont(.code(), in: .conversation)
-        name.textColor = node.isDirectory ? Design.Text.secondary : Design.Text.label
-        name.lineBreakMode = .byTruncatingMiddle
-        name.usesSingleLineMode = true
-        name.translatesAutoresizingMaskIntoConstraints = false
+    private var allDirectoryIndices: Set<Int> {
+        Set(tree.nodes.indices.filter { tree.nodes[$0].isDirectory })
+    }
 
-        let counts = NSTextField.label(attributed: Self.countText(
-            added: node.added,
-            removed: node.removed
-        ))
-        counts.translatesAutoresizingMaskIntoConstraints = false
-        counts.setContentHuggingPriority(.required, for: .horizontal)
-
-        // Directory rows spend a chevron on their lead-in; file rows skip it but *pay for it
-        // anyway*, so a directory's files start exactly one indent step right of its own name
-        // rather than drifting left of it. One column, not two: a folder mark beside every
-        // chevron said what the chevron already said, and charged every row in the tree the
-        // width of a second glyph to say it.
-        let indent = CGFloat(node.depth) * ChangedFilesCardDefaults.indentStep
-        let nameLeading = indent + ChangedFilesCardDefaults.markColumn
-
-        if node.isDirectory {
-            let chevron = NSImageView()
-            chevron.translatesAutoresizingMaskIntoConstraints = false
-            chevron.image = Self.chevronImage(collapsed: false)
-            chevron.contentTintColor = Design.Text.quaternary
-            chevron.symbolConfiguration = Design.Symbol.configuration(
-                Design.Symbol.chevron,
-                weight: .semibold
-            )
-            chevronsByNodeIndex[index] = chevron
-
-            row.addSubview(chevron)
-            NSLayoutConstraint.activate([
-                chevron.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: indent),
-                chevron.widthAnchor.constraint(
-                    equalToConstant: ChangedFilesCardDefaults.markWidth
-                ),
-                chevron.centerYAnchor.constraint(equalTo: row.centerYAnchor)
-            ])
-
-            row.setAccessibilityRole(.disclosureTriangle)
-            row.setAccessibilityLabel(node.name)
-            row.tracksPointer = true
-
-            let click = NSClickGestureRecognizer(target: self, action: #selector(rowClicked(_:)))
-            row.addGestureRecognizer(click)
-        } else if previews[node.path]?.isEmpty == false {
-            row.tracksPointer = true
-            row.onHoverChange = { [weak self] hovering in
-                self?.hoverChanged(hovering, atNodeIndex: index)
-            }
-        }
-
-        row.addSubview(name)
-        row.addSubview(counts)
-        NSLayoutConstraint.activate([
-            name.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: nameLeading),
-            name.topAnchor.constraint(equalTo: row.topAnchor, constant: Design.Spacing.hairline),
-            name.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -Design.Spacing.hairline),
-
-            counts.leadingAnchor.constraint(
-                greaterThanOrEqualTo: name.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-            counts.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            counts.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor)
-        ])
-
-        return row
+    private func bindTableIfNeeded(force: Bool) {
+        guard !tableIsBound, force else { return }
+        tableIsBound = true
+        rowsTable.delegate = self
+        rowsTable.dataSource = self
+        rowsTable.reloadData()
     }
 
     // MARK: - Collapsing
 
-    @objc private func rowClicked(_ gesture: NSClickGestureRecognizer) {
-        guard let row = gesture.view as? ChangedFilesRowView else { return }
-        let index = row.nodeIndex
+    private func toggleDirectory(at index: Int) {
+        guard tree.nodes.indices.contains(index), tree.nodes[index].isDirectory else { return }
         if collapsedDirectories.contains(index) {
             collapsedDirectories.remove(index)
         } else {
@@ -255,7 +228,7 @@ final class ChangedFilesCardView: NSView {
     }
 
     @objc private func toggleAll() {
-        let allDirectories = Set(tree.nodes.indices.filter { tree.nodes[$0].isDirectory })
+        let allDirectories = allDirectoryIndices
         if collapsedDirectories == allDirectories {
             collapsedDirectories.removeAll()
         } else {
@@ -269,33 +242,40 @@ final class ChangedFilesCardView: NSView {
         onViewDiff()
     }
 
-    private func collapseAll() {
-        collapsedDirectories = Set(tree.nodes.indices.filter { tree.nodes[$0].isDirectory })
-        applyCollapseState()
+    /// A row is presented iff no ancestor directory is collapsed. One pre-order pass produces
+    /// the table model; no AppKit object is created for rows outside the outer scroll viewport.
+    private func applyCollapseState() {
+        rebuildPresentedNodes()
+        rowsHeightConstraint?.constant = presentedRowsHeight
+        if tableIsBound { rowsTable.reloadData() }
+
+        // A row that just folded away cannot go on describing what the pointer is over.
+        if let previewedNodeIndex, !presentedNodeIndices.contains(previewedNodeIndex) {
+            dismissPreview()
+        }
+        onHeightChange()
     }
 
-    /// A row is visible iff no ancestor directory is collapsed. Hidden arranged views detach
-    /// from the stack, so the card's height follows.
-    private func applyCollapseState() {
-        var hidden = Set<Int>()
-        for index in collapsedDirectories {
-            hidden.formUnion(tree.descendantIndices(of: index))
-        }
-        for (index, row) in rowsByNodeIndex {
-            row.isHidden = hidden.contains(index)
-        }
-        for (index, chevron) in chevronsByNodeIndex {
-            chevron.image = Self.chevronImage(collapsed: collapsedDirectories.contains(index))
-            rowsByNodeIndex[index]?.setAccessibilityExpanded(!collapsedDirectories.contains(index))
-        }
-        // A row that just folded away cannot go on describing what the pointer is over.
-        if let previewedNodeIndex, hidden.contains(previewedNodeIndex) {
-            dismissPreview()
+    private func rebuildPresentedNodes() {
+        presentedNodeIndices.removeAll(keepingCapacity: true)
+        presentedNodeIndices.reserveCapacity(tree.nodes.count)
+        var hiddenBelowDepth: Int?
+
+        for (index, node) in tree.nodes.enumerated() {
+            if let depth = hiddenBelowDepth, node.depth <= depth {
+                hiddenBelowDepth = nil
+            }
+            guard hiddenBelowDepth == nil else { continue }
+
+            presentedNodeIndices.append(index)
+            if node.isDirectory, collapsedDirectories.contains(index) {
+                hiddenBelowDepth = node.depth
+            }
         }
     }
 
     private func updateCollapseButton() {
-        let allDirectories = Set(tree.nodes.indices.filter { tree.nodes[$0].isDirectory })
+        let allDirectories = allDirectoryIndices
         let allCollapsed = !allDirectories.isEmpty && collapsedDirectories == allDirectories
         collapseButton.title = allCollapsed ? "Expand all" : "Collapse all"
         collapseButton.isHidden = allDirectories.isEmpty
@@ -315,7 +295,12 @@ final class ChangedFilesCardView: NSView {
 
     private func presentPreview() {
         guard let index = hoveredNodeIndex,
-              let row = rowsByNodeIndex[index], !row.isHidden,
+              let presentedRow = presentedNodeIndices.firstIndex(of: index),
+              let row = rowsTable.view(
+                atColumn: 0,
+                row: presentedRow,
+                makeIfNecessary: false
+              ) as? ChangedFilesRowView,
               let preview = preview(forNodeAt: index),
               window != nil else { return }
 
@@ -351,19 +336,18 @@ final class ChangedFilesCardView: NSView {
     /// anchored to a card that left the window would keep floating over nothing.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
+        if window != nil, !tableIsBound {
+            // The outer conversation table commits this retained row's final frame on the next
+            // turn. Bind behind that layout so `visibleRect` is the clip viewport, not the full
+            // logical height of a detached table.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil else { return }
+                self.bindTableIfNeeded(force: true)
+            }
+        } else if window == nil {
             hoveredNodeIndex = nil
             dismissPreview()
         }
-    }
-
-    // MARK: - Private Methods
-
-    private static func chevronImage(collapsed: Bool) -> NSImage? {
-        NSImage(
-            systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
-            accessibilityDescription: nil
-        )
     }
 
     /// `+N −M` in the diff roles and the caption face — the same reading, in the same voice,
@@ -380,6 +364,38 @@ final class ChangedFilesCardView: NSView {
         ]))
         return text
     }
+
+    // MARK: - Virtual Rows
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentedNodeIndices.count
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row presentedRow: Int
+    ) -> NSView? {
+        guard presentedNodeIndices.indices.contains(presentedRow) else { return nil }
+        let nodeIndex = presentedNodeIndices[presentedRow]
+        let node = tree.nodes[nodeIndex]
+        let row = tableView.makeView(
+            withIdentifier: ChangedFilesCardDefaults.rowIdentifier,
+            owner: self
+        ) as? ChangedFilesRowView ?? ChangedFilesRowView()
+        row.identifier = ChangedFilesCardDefaults.rowIdentifier
+        row.configure(
+            nodeIndex: nodeIndex,
+            node: node,
+            collapsed: collapsedDirectories.contains(nodeIndex),
+            hasPreview: previews[node.path]?.isEmpty == false,
+            onToggle: { [weak self] in self?.toggleDirectory(at: nodeIndex) },
+            onHoverChange: { [weak self] hovering in
+                self?.hoverChanged(hovering, atNodeIndex: nodeIndex)
+            }
+        )
+        return row
+    }
 }
 
 // MARK: - Changed Files Row View
@@ -389,9 +405,9 @@ final class ChangedFilesCardView: NSView {
 /// The wash is the row's own rather than the card's: the preview hangs off *this* row, and a
 /// highlight drawn by whatever happens to be presenting would go stale the moment the tree
 /// folds under it.
-final class ChangedFilesRowView: NSView {
+final class ChangedFilesRowView: NSTableCellView {
 
-    let nodeIndex: Int
+    private(set) var nodeIndex = -1
 
     /// Whether the row answers the pointer at all. A directory folds and a file with a diff
     /// previews it, so both light up; a file the card holds no diff for does nothing when it is
@@ -400,18 +416,121 @@ final class ChangedFilesRowView: NSView {
 
     /// Set on rows with something to preview.
     var onHoverChange: ((Bool) -> Void)?
+    private var onToggle: (() -> Void)?
 
     private(set) var isHovered = false
     private var trackingArea: NSTrackingArea?
+    private let chevron = NSImageView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let countsLabel = NSTextField(labelWithString: "")
+    private lazy var chevronLeading = chevron.leadingAnchor.constraint(equalTo: leadingAnchor)
+    private lazy var nameLeading = nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor)
+    private lazy var clickRecognizer = NSClickGestureRecognizer(
+        target: self,
+        action: #selector(clicked)
+    )
 
-    init(nodeIndex: Int) {
-        self.nodeIndex = nodeIndex
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.contentTintColor = Design.Text.quaternary
+        chevron.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.chevron,
+            weight: .semibold
+        )
+
+        nameLabel.applyFont(.code(), in: .conversation)
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.usesSingleLineMode = true
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        countsLabel.translatesAutoresizingMaskIntoConstraints = false
+        countsLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        addSubview(chevron)
+        addSubview(nameLabel)
+        addSubview(countsLabel)
+        addGestureRecognizer(clickRecognizer)
+
+        NSLayoutConstraint.activate([
+            chevronLeading,
+            chevron.widthAnchor.constraint(equalToConstant: ChangedFilesCardDefaults.markWidth),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            nameLeading,
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.hairline),
+            nameLabel.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Design.Spacing.hairline
+            ),
+
+            countsLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: nameLabel.trailingAnchor,
+                constant: Design.Spacing.small
+            ),
+            countsLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            countsLabel.firstBaselineAnchor.constraint(equalTo: nameLabel.firstBaselineAnchor)
+        ])
+    }
+
+    func configure(
+        nodeIndex: Int,
+        node: ChangedFilesTree.Node,
+        collapsed: Bool,
+        hasPreview: Bool,
+        onToggle: @escaping () -> Void,
+        onHoverChange: @escaping (Bool) -> Void
+    ) {
+        setHovered(false)
+        self.nodeIndex = nodeIndex
+        self.onToggle = node.isDirectory ? onToggle : nil
+        self.onHoverChange = hasPreview ? onHoverChange : nil
+        tracksPointer = node.isDirectory || hasPreview
+        clickRecognizer.isEnabled = node.isDirectory
+
+        let indent = CGFloat(node.depth) * ChangedFilesCardDefaults.indentStep
+        chevronLeading.constant = indent
+        nameLeading.constant = indent + ChangedFilesCardDefaults.markColumn
+        chevron.isHidden = !node.isDirectory
+        chevron.image = NSImage(
+            systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
+            accessibilityDescription: nil
+        )
+        nameLabel.stringValue = node.name
+        nameLabel.textColor = node.isDirectory ? Design.Text.secondary : Design.Text.label
+        countsLabel.attributedStringValue = ChangedFilesCardView.countText(
+            added: node.added,
+            removed: node.removed
+        )
+
+        setAccessibilityRole(node.isDirectory ? .disclosureTriangle : .row)
+        setAccessibilityLabel(node.name)
+        setAccessibilityExpanded(node.isDirectory && !collapsed)
+        applyHoverBackground()
+        updateTrackingAreas()
+    }
+
+    @objc private func clicked() {
+        onToggle?()
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        setHovered(false)
+        nodeIndex = -1
+        tracksPointer = false
+        onHoverChange = nil
+        onToggle = nil
+        clickRecognizer.isEnabled = false
     }
 
     override func updateTrackingAreas() {
@@ -633,7 +752,23 @@ final class ChangedFileDiffViewController: NSViewController {
 
 // MARK: - Changed Files Card Defaults
 
+@MainActor
 enum ChangedFilesCardDefaults {
+    static let rowColumnIdentifier = NSUserInterfaceItemIdentifier("ChangedFilesColumn")
+    static let rowIdentifier = NSUserInterfaceItemIdentifier("ChangedFilesRow")
+
+    /// Detached construction may bind this many ordinary rows immediately. Larger flat-root
+    /// trees wait until they are clipped by the conversation viewport, or AppKit correctly sees
+    /// their entire detached bounds as visible and asks for every cell at once.
+    static let eagerRowCap = 32
+
+    static var rowHeight: CGFloat {
+        Design.Typography.lineHeight(of: Design.FontRole.code().resolved(in: .conversation))
+            + 2 * Design.Spacing.hairline
+    }
+
+    static var rowStride: CGFloat { rowHeight + Design.Spacing.hairline }
+
     /// Indentation per tree level. One `Spacing.medium` step, which beside the chevron column
     /// reads as containment without spending a fifth of a narrow pane on the tree's left edge.
     static let indentStep: CGFloat = Design.Spacing.medium
