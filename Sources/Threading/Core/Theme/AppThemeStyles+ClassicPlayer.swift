@@ -82,6 +82,7 @@ extension AppThemeStyles {
                 typeface: .monospaced,
                 scrollerTrackStyle: .stippled,
                 progressStyle: .segmented,
+                chartStyle: .spectrum,
                 choiceStyle: .dropdown,
                 toggleStyle: .onOffButton
             ),

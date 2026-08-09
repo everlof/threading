@@ -484,7 +484,9 @@ enum ConversationHandoffCapture {
         }
     }
 
-    private nonisolated static func runExport(
+    /// Runs the provider's supported export command. Usage indexing shares this boundary so a
+    /// runtime has one quoting, size and error contract rather than a second private launcher.
+    nonisolated static func runExport(
         kind: AgentKind,
         transcriptID: TranscriptID,
         projectFolder: String,

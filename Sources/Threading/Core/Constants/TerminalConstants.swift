@@ -1025,6 +1025,10 @@ struct AccountUsageDidChange: AppEvent {
     let accountID: AccountID
 }
 
+struct UsageLimitHistoryDidChange: AppEvent {
+    static let name = Notification.Name.usageLimitHistoryDidChange
+}
+
 /// The usage-window poke's schedule was edited.
 struct UsageWindowScheduleDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")

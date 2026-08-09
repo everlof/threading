@@ -136,6 +136,11 @@ target account has never opened prompts once, exactly as it would have anyway.
 
 ## Account Usage
 
+This section owns live account discovery, credentials, endpoint pacing and the compact toolbar
+reading. The combined 90-day transcript ledger and durable 180-day limit/reset dashboard are
+documented in [`usage-dashboard.md`](usage-dashboard.md); they consume these normalized readings
+without taking over provider authentication.
+
 The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session's account
 rate-limit pressure: a ring gauging the peak window beside every window's own value
 (`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then

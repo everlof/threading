@@ -2,53 +2,75 @@ import Foundation
 
 // MARK: - Usage Report
 
-/// What the Usage page draws: totals sliced the three ways worth asking about.
+/// Persisted, provider-neutral input for every range the Usage page can present.
 struct TranscriptUsageReport: Codable, Equatable {
-
-    /// One checkout's spend, which is the unit that answers "where did the week go" — a
-    /// repository's worktrees are separate places doing separate work.
     struct Checkout: Codable, Equatable {
         let path: String
-        /// `<project> · <worktree or branch>`, resolved when the report is built rather than
-        /// when it is drawn, since it costs a git read per checkout.
         let label: String
         var billedTokens: Int64
         var turns: Int
+        var costUSD: Double = 0
     }
 
     struct Slice: Codable, Equatable {
         let name: String
         var billedTokens: Int64
+        var tokens: UsageTokenCounts = .init()
+        var costUSD: Double = 0
+        var records: Int = 0
     }
 
-    /// Spend at quarter-hour resolution, oldest first.
-    ///
-    /// This is what lets the page answer the question the account is actually metered on. A
-    /// five-hour window starts at an arbitrary moment, so a per-day series cannot say what it
-    /// has consumed; quarter-hours can, and 8 days of them is under 800 numbers.
     struct Bucket: Codable, Equatable {
         let at: Date
         var billedTokens: Int64
         var turns: Int
     }
 
-    var checkouts: [Checkout] = []
+    struct Cell: Codable, Equatable {
+        let day: Date
+        let origin: UsageOrigin
+        let accountID: String
+        let accountName: String
+        let model: String
+        let checkoutPath: String
+        let checkoutLabel: String
+        var tokens: UsageTokenCounts
+        var providerReportedCostUSD: Double
+        var catalogCostUSD: Double
+        var unpricedTokens: Int64
+        var cacheSavingsUSD: Double
+        var records: Int
+
+        var costUSD: Double { providerReportedCostUSD + catalogCostUSD }
+    }
+
+    struct ScanStatistics: Codable, Equatable {
+        var sourceFiles: Int = 0
+        var cacheHits: Int = 0
+        var cacheMisses: Int = 0
+        var rawRecords: Int = 0
+        var distinctRecords: Int = 0
+        var duration: TimeInterval = 0
+    }
+
+    var cells: [Cell] = []
     var buckets: [Bucket] = []
-
-    /// Which login spent it, for the accounts that have more than one.
-    var accounts: [Slice] = []
-
-    /// Newest last, so a chart can read it left to right.
-    var days: [Slice] = []
-    var models: [Slice] = []
-
-    var billedTokens: Int64 = 0
-    var cachedTokens: Int64 = 0
-    var turns: Int = 0
+    var coverage: [UsageSourceCoverage] = []
+    var scan = ScanStatistics()
     var builtAt = Date()
+    var pricingCatalogVersion = UsagePricingCatalog.version
 
-    /// Tokens spent since `start`, from the quarter-hour series — the answer to "what has this
-    /// 5h window cost", which no rate-limit API reports and no daily total can reconstruct.
+    /// Compatibility views used by window-spend presentation and the old report while the new
+    /// retained page is assembled.
+    var billedTokens: Int64 { cells.reduce(0) { $0 + $1.tokens.legacyBilled } }
+    var cachedTokens: Int64 { cells.reduce(0) { $0 + $1.tokens.cachedInput } }
+    var turns: Int { cells.reduce(0) { $0 + $1.records } }
+    var checkouts: [Checkout] { selection(days: UsageReportDefaults.maximumDayRange).checkouts }
+    var accounts: [Slice] { selection(days: UsageReportDefaults.maximumDayRange).accounts }
+    var days: [Slice] { selection(days: UsageReportDefaults.maximumDayRange).days }
+    var models: [Slice] { selection(days: UsageReportDefaults.maximumDayRange).models }
+    var recentDays: [Slice] { Array(days.suffix(UsageReportDefaults.legacyDayWindow)) }
+
     func spend(since start: Date) -> (billedTokens: Int64, turns: Int) {
         buckets
             .filter { $0.at >= start }
@@ -58,50 +80,375 @@ struct TranscriptUsageReport: Codable, Equatable {
             }
     }
 
-    /// Days are kept for a bounded window: what a report is *for* is the current billing
-    /// period and the days around it, and a year of history makes the file grow without ever
-    /// being read.
-    var recentDays: [Slice] { Array(days.suffix(UsageReportDefaults.dayWindow)) }
+    func selection(
+        days range: Int,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> UsageReportSelection {
+        UsageReportSelection(
+            cells: cells,
+            range: min(max(1, range), UsageReportDefaults.maximumDayRange),
+            now: now,
+            calendar: calendar
+        )
+    }
+}
+
+// MARK: - Range Selection
+
+struct UsageReportSelection: Equatable {
+    struct Provider: Equatable {
+        let origin: UsageOrigin
+        var tokens: UsageTokenCounts
+        var costUSD: Double
+        var records: Int
+    }
+
+    struct Daily: Equatable {
+        let day: Date
+        let origin: UsageOrigin
+        var tokens: UsageTokenCounts
+        var costUSD: Double
+    }
+
+    struct CostQuality: Equatable {
+        var providerReportedUSD: Double = 0
+        var catalogPricedUSD: Double = 0
+        var unpricedTokens: Int64 = 0
+        var cacheSavingsUSD: Double = 0
+
+        var totalUSD: Double { providerReportedUSD + catalogPricedUSD }
+    }
+
+    let range: Int
+    let start: Date
+    let end: Date
+    let tokens: UsageTokenCounts
+    let records: Int
+    let cost: CostQuality
+    let providers: [Provider]
+    let daily: [Daily]
+    let models: [TranscriptUsageReport.Slice]
+    let days: [TranscriptUsageReport.Slice]
+    let accounts: [TranscriptUsageReport.Slice]
+    let checkouts: [TranscriptUsageReport.Checkout]
+
+    init(cells: [TranscriptUsageReport.Cell], range: Int, now: Date, calendar: Calendar) {
+        self.range = range
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -(range - 1), to: today) ?? today
+        self.start = start
+        self.end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
+
+        let selected = cells.filter { $0.day >= start && $0.day <= today }
+        var total = UsageTokenCounts()
+        var recordCount = 0
+        var quality = CostQuality()
+        var byProvider: [UsageOrigin: Provider] = [:]
+        var byDaily: [DailyKey: Daily] = [:]
+        var byModel: [String: TranscriptUsageReport.Slice] = [:]
+        var byDay: [Date: TranscriptUsageReport.Slice] = [:]
+        var byAccount: [String: TranscriptUsageReport.Slice] = [:]
+        var byCheckout: [String: TranscriptUsageReport.Checkout] = [:]
+
+        for cell in selected {
+            total += cell.tokens
+            recordCount += cell.records
+            quality.providerReportedUSD += cell.providerReportedCostUSD
+            quality.catalogPricedUSD += cell.catalogCostUSD
+            quality.unpricedTokens += cell.unpricedTokens
+            quality.cacheSavingsUSD += cell.cacheSavingsUSD
+
+            var provider = byProvider[cell.origin] ?? Provider(
+                origin: cell.origin,
+                tokens: .init(),
+                costUSD: 0,
+                records: 0
+            )
+            provider.tokens += cell.tokens
+            provider.costUSD += cell.costUSD
+            provider.records += cell.records
+            byProvider[cell.origin] = provider
+
+            let dailyKey = DailyKey(day: cell.day, origin: cell.origin)
+            var daily = byDaily[dailyKey] ?? Daily(
+                day: cell.day,
+                origin: cell.origin,
+                tokens: .init(),
+                costUSD: 0
+            )
+            daily.tokens += cell.tokens
+            daily.costUSD += cell.costUSD
+            byDaily[dailyKey] = daily
+
+            Self.accumulate(
+                &byModel,
+                key: cell.model,
+                name: cell.model,
+                cell: cell
+            )
+            Self.accumulate(
+                &byAccount,
+                key: cell.accountID,
+                name: cell.accountName,
+                cell: cell
+            )
+            Self.accumulate(
+                &byDay,
+                key: cell.day,
+                name: Self.dayLabel(cell.day, calendar: calendar),
+                cell: cell
+            )
+
+            var checkout = byCheckout[cell.checkoutPath] ?? .init(
+                path: cell.checkoutPath,
+                label: cell.checkoutLabel,
+                billedTokens: 0,
+                turns: 0,
+                costUSD: 0
+            )
+            checkout.billedTokens += cell.tokens.legacyBilled
+            checkout.turns += cell.records
+            checkout.costUSD += cell.costUSD
+            byCheckout[cell.checkoutPath] = checkout
+        }
+
+        self.tokens = total
+        self.records = recordCount
+        self.cost = quality
+        self.providers = byProvider.values.sorted { lhs, rhs in
+            if lhs.costUSD != rhs.costUSD { return lhs.costUSD > rhs.costUSD }
+            return lhs.tokens.processed > rhs.tokens.processed
+        }
+        self.daily = byDaily.values.sorted { lhs, rhs in
+            if lhs.day != rhs.day { return lhs.day < rhs.day }
+            return lhs.origin.seriesName < rhs.origin.seriesName
+        }
+        self.models = byModel.values.sorted(by: Self.sliceOrder)
+        self.days = byDay.values.sorted { $0.name < $1.name }
+        self.accounts = byAccount.values.sorted(by: Self.sliceOrder)
+        self.checkouts = byCheckout.values.sorted { lhs, rhs in
+            if lhs.costUSD != rhs.costUSD { return lhs.costUSD > rhs.costUSD }
+            return lhs.billedTokens > rhs.billedTokens
+        }
+    }
+
+    private struct DailyKey: Hashable {
+        let day: Date
+        let origin: UsageOrigin
+    }
+
+    private static func accumulate<Key: Hashable>(
+        _ values: inout [Key: TranscriptUsageReport.Slice],
+        key: Key,
+        name: String,
+        cell: TranscriptUsageReport.Cell
+    ) {
+        var value = values[key] ?? .init(name: name, billedTokens: 0)
+        value.tokens += cell.tokens
+        value.billedTokens += cell.tokens.legacyBilled
+        value.costUSD += cell.costUSD
+        value.records += cell.records
+        values[key] = value
+    }
+
+    private static func sliceOrder(
+        _ lhs: TranscriptUsageReport.Slice,
+        _ rhs: TranscriptUsageReport.Slice
+    ) -> Bool {
+        if lhs.costUSD != rhs.costUSD { return lhs.costUSD > rhs.costUSD }
+        return lhs.billedTokens > rhs.billedTokens
+    }
+
+    private static func dayLabel(_ date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04lld-%02lld-%02lld",
+            Int64(components.year ?? 0),
+            Int64(components.month ?? 0),
+            Int64(components.day ?? 0)
+        )
+    }
+}
+
+// MARK: - Ledger Builder
+
+enum UsageLedgerBuilder {
+    struct ProjectDescriptor: Sendable {
+        let path: String
+        let name: String
+    }
+
+    private struct CellKey: Hashable {
+        let day: Date
+        let origin: UsageOrigin
+        let accountID: String
+        let model: String
+        let checkoutPath: String
+    }
+
+    static func build(
+        records rawRecords: [UsageLedgerRecord],
+        coverage: [UsageSourceCoverage],
+        projects: [ProjectDescriptor],
+        scan: TranscriptUsageReport.ScanStatistics,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> TranscriptUsageReport {
+        let oldest = calendar.date(
+            byAdding: .day,
+            value: -(UsageReportDefaults.maximumDayRange - 1),
+            to: calendar.startOfDay(for: now)
+        ) ?? .distantPast
+        var seen = Set<String>()
+        var rootsByDirectory: [String: String] = [:]
+        var labelsByRoot: [String: String] = [:]
+        var byCell: [CellKey: TranscriptUsageReport.Cell] = [:]
+        var byBucket: [Date: TranscriptUsageReport.Bucket] = [:]
+        var distinct = 0
+
+        for raw in rawRecords {
+            guard seen.insert(raw.identity).inserted else { continue }
+            distinct += 1
+            guard let at = raw.at else { continue }
+            let priced = UsagePricingCatalog.price(raw)
+            let day = calendar.startOfDay(for: at)
+
+            let root: String
+            if let known = rootsByDirectory[raw.workingDirectory] {
+                root = known
+            } else {
+                root = checkoutRoot(of: raw.workingDirectory)
+                rootsByDirectory[raw.workingDirectory] = root
+            }
+            let checkoutLabel: String
+            if let known = labelsByRoot[root] {
+                checkoutLabel = known
+            } else {
+                checkoutLabel = label(for: root, projects: projects)
+                labelsByRoot[root] = checkoutLabel
+            }
+
+            if day >= oldest {
+                let key = CellKey(
+                    day: day,
+                    origin: priced.origin,
+                    accountID: priced.accountID,
+                    model: priced.model,
+                    checkoutPath: root
+                )
+                var cell = byCell[key] ?? .init(
+                    day: day,
+                    origin: priced.origin,
+                    accountID: priced.accountID,
+                    accountName: priced.accountName,
+                    model: priced.model,
+                    checkoutPath: root,
+                    checkoutLabel: checkoutLabel,
+                    tokens: .init(),
+                    providerReportedCostUSD: 0,
+                    catalogCostUSD: 0,
+                    unpricedTokens: 0,
+                    cacheSavingsUSD: 0,
+                    records: 0
+                )
+                cell.tokens += priced.tokens
+                cell.records += 1
+                cell.cacheSavingsUSD += priced.cacheSavingsUSD
+                switch priced.costSource {
+                case .providerReported:
+                    cell.providerReportedCostUSD += priced.costUSD ?? 0
+                case .catalogPriced:
+                    cell.catalogCostUSD += priced.costUSD ?? 0
+                case .unpriced:
+                    cell.unpricedTokens += priced.tokens.processed
+                }
+                byCell[key] = cell
+            }
+
+            if at >= now.addingTimeInterval(-UsageReportDefaults.bucketRetention) {
+                let bucketDate = UsageLedgerDate.quarterHour(at)
+                var bucket = byBucket[bucketDate] ?? .init(
+                    at: bucketDate,
+                    billedTokens: 0,
+                    turns: 0
+                )
+                bucket.billedTokens += priced.tokens.legacyBilled
+                bucket.turns += 1
+                byBucket[bucketDate] = bucket
+            }
+        }
+
+        var finalScan = scan
+        finalScan.distinctRecords = distinct
+        return TranscriptUsageReport(
+            cells: byCell.values.sorted { lhs, rhs in
+                if lhs.day != rhs.day { return lhs.day < rhs.day }
+                if lhs.origin.seriesID != rhs.origin.seriesID {
+                    return lhs.origin.seriesID < rhs.origin.seriesID
+                }
+                return lhs.model < rhs.model
+            },
+            buckets: byBucket.values.sorted { $0.at < $1.at },
+            coverage: coverage.sorted { $0.runtimeName < $1.runtimeName },
+            scan: finalScan,
+            builtAt: now,
+            pricingCatalogVersion: UsagePricingCatalog.version
+        )
+    }
+
+    private static func checkoutRoot(of directory: String) -> String {
+        guard !directory.isEmpty else { return UsageReportDefaults.unknownCheckout }
+        return GitInfo.repositoryRoot(for: directory)?.path ?? directory
+    }
+
+    private static func label(for root: String, projects: [ProjectDescriptor]) -> String {
+        let owner = projects
+            .filter { root == $0.path || root.hasPrefix($0.path + "/") }
+            .max { $0.path.count < $1.path.count }
+        let worktree = GitInfo.worktreeName(for: root)
+
+        switch (owner, worktree) {
+        case let (owner?, worktree?): return "\(owner.name) · \(worktree)"
+        case let (owner?, nil): return owner.name
+        case let (nil, worktree?): return worktree
+        case (nil, nil): return URL(fileURLWithPath: root).lastPathComponent
+        }
+    }
 }
 
 // MARK: - Transcript Usage Service
 
-/// Builds and keeps the usage report.
-///
-/// Same shape as `ArtifactScanService`, for the same reason: the work is a full walk of a large
-/// corpus — 2,501 transcripts and 46 seconds here — so the page reads a cached answer and the
-/// walk happens on a `.background` queue where the system throttles its I/O.
-///
-/// The scan is **whole rather than incremental**, deliberately. Deduplication is global — the
-/// same turn appears in several files, and which file "owns" it depends on the order they are
-/// read in — so a per-file cache would have to store every turn's identity to stay correct,
-/// and re-reading one changed file could not be done without the rest. A whole scan an hour, in
-/// the background, is the cheaper mistake.
 @MainActor
 final class TranscriptUsageService {
-
-    // MARK: - Singleton
-
     static let shared = TranscriptUsageService()
 
-    // MARK: - Properties
+    private struct AccountSource: Sendable {
+        let runtimeID: String
+        let path: String
+        let accountID: String
+        let accountName: String
+    }
+
+    private struct ExportSource: Sendable {
+        let runtimeID: String
+        let transcriptID: String
+        let projectPath: String
+        let lastActiveAt: Date
+    }
 
     private(set) var report: TranscriptUsageReport?
     private(set) var isBuilding = false
 
     private let persistence: RecoverableFileStore<TranscriptUsageReport?>
-    /// `.utility`, not `.background`: the artifact scan is a chore nobody waits on, but this
-    /// one is kicked off by opening the page, and `.background` is throttled hard enough to
-    /// turn a minute of work into several.
+    private let cacheDirectory: URL
     private let queue = DispatchQueue(label: "codes.threading.usage-index", qos: .utility)
-
-    // MARK: - Initialization
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
-
+        self.cacheDirectory = root.appendingPathComponent(UsageScanCacheDefaults.directoryName)
         self.persistence = RecoverableFileStore(
             url: root.appendingPathComponent(UsageReportDefaults.fileName),
             fileManager: fileManager,
@@ -112,198 +459,224 @@ final class TranscriptUsageService {
         self.report = persistence.load(defaultValue: nil).value
     }
 
-    // MARK: - Building
-
-    /// Rebuilds when the last report has aged out, or on demand.
     func refresh(force: Bool = false) {
         guard !isBuilding else { return }
-
         if !force, let builtAt = report?.builtAt,
            Date().timeIntervalSince(builtAt) < UsageReportDefaults.staleAfter { return }
 
         isBuilding = true
         notifyChanged()
 
-        // Resolved on the main queue, because both stores are main-actor bound; the walk that
-        // follows touches neither.
-        let accounts = AgentKind.allCases
+        let accountSources = AgentKind.allCases
             .filter { $0.supports(.transcriptUsageIndex) }
-            .flatMap { AgentAccountDiscovery.accounts(for: $0) }
-            .map { (path: $0.configPath, name: AccountName.display(for: $0)) }
-
-        let projects = ProjectStore.shared.projects.map {
-            (path: $0.folderPath, name: $0.name)
+            .flatMap { runtime in
+                AgentAccountDiscovery.accounts(for: runtime).map { account in
+                    AccountSource(
+                        runtimeID: runtime.rawValue,
+                        path: account.configPath,
+                        accountID: account.id.rawValue,
+                        accountName: AccountName.display(for: account)
+                    )
+                }
+            }
+        let projects = ProjectStore.shared.projects
+        let projectDescriptors = projects.map {
+            UsageLedgerBuilder.ProjectDescriptor(path: $0.folderPath, name: $0.name)
         }
+        let exports: [ExportSource] = projects.flatMap { project in
+            project.sessions.compactMap { session in
+                guard let transcriptID = session.resumeState.transcriptID else { return nil }
+                switch session.kind {
+                case .openCode:
+                    return ExportSource(
+                        runtimeID: session.kind.rawValue,
+                        transcriptID: transcriptID.rawValue,
+                        projectPath: project.folderPath,
+                        lastActiveAt: session.lastActiveAt
+                    )
+                case .claude, .codex, .grok:
+                    return nil
+                }
+            }
+        }
+        let loginShellPath = AgentLauncher.loginShellPath
+        let cacheDirectory = cacheDirectory
 
         queue.async { [weak self] in
-            let report = Self.build(accountPaths: accounts, projects: projects)
+            let report = Self.build(
+                accountSources: accountSources,
+                exportSources: exports,
+                projects: projectDescriptors,
+                loginShellPath: loginShellPath,
+                cacheDirectory: cacheDirectory
+            )
 
             Task { @MainActor in
                 guard let self else { return }
                 self.isBuilding = false
                 self.report = report
-                self.save()
+                _ = self.persistence.save(report)
                 self.notifyChanged()
             }
         }
     }
 
-    // MARK: - Private Methods
-
-    /// Walks every account's transcripts once, with one shared `seen` set so a turn copied
-    /// into a resume or a fork is counted for whichever file reaches it first and never again.
     private nonisolated static func build(
-        accountPaths: [(path: String, name: String)],
-        projects: [(path: String, name: String)]
+        accountSources: [AccountSource],
+        exportSources: [ExportSource],
+        projects: [UsageLedgerBuilder.ProjectDescriptor],
+        loginShellPath: String,
+        cacheDirectory: URL
     ) -> TranscriptUsageReport {
-        var seen: Set<String> = []
-        var report = TranscriptUsageReport()
+        let started = CFAbsoluteTimeGetCurrent()
+        let cache = UsageScanCache(directory: cacheDirectory)
+        cache.beginScan()
+        defer { cache.finishScan() }
 
-        var byCheckout: [String: TranscriptUsageReport.Checkout] = [:]
-        var byDay: [String: Int64] = [:]
-        var byModel: [String: Int64] = [:]
-        var byAccount: [String: Int64] = [:]
-        var byBucket: [String: (tokens: Int64, turns: Int)] = [:]
+        var records: [UsageLedgerRecord] = []
+        var scan = TranscriptUsageReport.ScanStatistics()
+        var coverage = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { runtime in
+            let detail: String?
+            switch runtime {
+            case .grok: detail = GrokUsageAdapter.coverageDetail
+            case .openCode: detail = "No resumable OpenCode sessions are known to Threading yet."
+            case .claude, .codex: detail = "No transcript source was found."
+            }
+            return (runtime.rawValue, UsageSourceCoverage(
+                runtimeID: runtime.rawValue,
+                runtimeName: runtime.displayName,
+                state: runtime.supports(.transcriptUsageIndex) ? .unavailable : .partial,
+                sourceCount: 0,
+                recordCount: 0,
+                detail: detail
+            ))
+        })
+        coverage[UsageReportDefaults.openRouterCoverageID] = UsageSourceCoverage(
+            runtimeID: UsageReportDefaults.openRouterCoverageID,
+            runtimeName: "OpenRouter via OpenCode",
+            state: .unavailable,
+            sourceCount: 0,
+            recordCount: 0,
+            detail: "Appears when a supported OpenCode export reports OpenRouter as its billing route."
+        )
 
-        // Resolving a working directory to its checkout walks up the filesystem looking for a
-        // `.git`, and the same few dozen directories recur across tens of thousands of entries.
-        // Unmemoized it dominated the whole build — quarter-hour buckets multiplied the entry
-        // count, and with it the number of times this was asked the same question.
-        var rootsByDirectory: [String: String] = [:]
+        for source in accountSources {
+            guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
+            let files: [URL]
+            let parserID: String
+            switch runtime {
+            case .claude:
+                files = TranscriptUsageIndex.transcripts(inAccountAt: source.path)
+                    .sorted { $0.path < $1.path }
+                parserID = UsageScanCacheDefaults.claudeParserID
+            case .codex:
+                files = CodexUsageAdapter.rollouts(inAccountAt: source.path)
+                    .sorted { $0.path < $1.path }
+                parserID = UsageScanCacheDefaults.codexParserID
+            case .grok, .openCode:
+                files = []
+                parserID = "unused"
+            }
 
-        for account in accountPaths {
-            let path = account.path
-            for url in TranscriptUsageIndex.transcripts(inAccountAt: path) {
-                for entry in TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen) {
-                    report.billedTokens += entry.usage.billedTokens
-                    report.cachedTokens += entry.usage.cachedTokens
-                    report.turns += entry.usage.turns
-
-                    if !entry.day.isEmpty {
-                        byDay[entry.day, default: 0] += entry.usage.billedTokens
+            for file in files {
+                let result = cache.records(for: file, parserID: parserID) {
+                    switch runtime {
+                    case .claude:
+                        return ClaudeUsageAdapter.records(
+                            inTranscriptAt: file,
+                            accountID: source.accountID,
+                            accountName: source.accountName
+                        )
+                    case .codex:
+                        return CodexUsageAdapter.records(
+                            inRolloutAt: file,
+                            accountID: source.accountID,
+                            accountName: source.accountName
+                        )
+                    case .grok, .openCode:
+                        return []
                     }
-                    byModel[entry.model, default: 0] += entry.usage.billedTokens
-                    byAccount[account.name, default: 0] += entry.usage.billedTokens
-
-                    byBucket[entry.bucket, default: (0, 0)].tokens += entry.usage.billedTokens
-                    byBucket[entry.bucket, default: (0, 0)].turns += entry.usage.turns
-
-                    let root: String
-                    if let known = rootsByDirectory[entry.workingDirectory] {
-                        root = known
-                    } else {
-                        root = checkoutRoot(of: entry.workingDirectory)
-                        rootsByDirectory[entry.workingDirectory] = root
-                    }
-                    var checkout = byCheckout[root] ?? TranscriptUsageReport.Checkout(
-                        path: root,
-                        label: label(for: root, projects: projects),
-                        billedTokens: 0,
-                        turns: 0
-                    )
-                    checkout.billedTokens += entry.usage.billedTokens
-                    checkout.turns += entry.usage.turns
-                    byCheckout[root] = checkout
                 }
+                scan.sourceFiles += 1
+                if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
+                records.append(contentsOf: result.records)
+                var item = coverage[runtime.rawValue]!
+                item.sourceCount += 1
+                item.recordCount += result.records.count
+                item.state = .complete
+                item.detail = nil
+                coverage[runtime.rawValue] = item
             }
         }
 
-        report.checkouts = byCheckout.values.sorted { $0.billedTokens > $1.billedTokens }
-        report.days = byDay.keys.sorted().map {
-            TranscriptUsageReport.Slice(name: $0, billedTokens: byDay[$0] ?? 0)
-        }
-        report.models = byModel
-            .map { TranscriptUsageReport.Slice(name: $0.key, billedTokens: $0.value) }
-            .sorted { $0.billedTokens > $1.billedTokens }
-        report.accounts = byAccount
-            .map { TranscriptUsageReport.Slice(name: $0.key, billedTokens: $0.value) }
-            .sorted { $0.billedTokens > $1.billedTokens }
-
-        // Only the span a window could still be running in: older buckets answer nothing the
-        // day slices do not, and there are 96 of them per day.
-        let cutoff = Date().addingTimeInterval(-UsageReportDefaults.bucketRetention)
-        report.buckets = byBucket
-            .compactMap { key, value in
-                guard let at = bucketDate(key), at > cutoff else { return nil }
-                return TranscriptUsageReport.Bucket(
-                    at: at,
-                    billedTokens: value.tokens,
-                    turns: value.turns
-                )
+        for source in exportSources {
+            guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
+            switch runtime {
+            case .openCode: break
+            case .claude, .codex, .grok: continue
             }
-            .sorted { $0.at < $1.at }
+            var item = coverage[runtime.rawValue]!
+            item.sourceCount += 1
+            do {
+                let result = try cache.records(
+                    forKey: "opencode|\(source.transcriptID)",
+                    revision: source.lastActiveAt,
+                    parserID: UsageScanCacheDefaults.openCodeParserID
+                ) {
+                    let data = try ConversationHandoffCapture.runExport(
+                        kind: runtime,
+                        transcriptID: TranscriptID(source.transcriptID),
+                        projectFolder: source.projectPath,
+                        loginShellPath: loginShellPath
+                    )
+                    return try OpenCodeUsageAdapter.records(fromExport: data)
+                }
+                scan.sourceFiles += 1
+                if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
+                records.append(contentsOf: result.records)
+                item.recordCount += result.records.count
+                item.state = .complete
+                item.detail = nil
 
-        return report
-    }
-
-    /// `2026-07-22T14:30` back into a moment. UTC, which is what the transcripts write.
-    private nonisolated static func bucketDate(_ key: String) -> Date? {
-        bucketFormatter.date(from: key)
-    }
-
-    private nonisolated static let bucketFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter
-    }()
-
-    /// The checkout a conversation ran in, which is what its spend belongs to. A subdirectory
-    /// of a checkout is the same checkout; a worktree is its own.
-    private nonisolated static func checkoutRoot(of directory: String) -> String {
-        guard !directory.isEmpty else { return UsageReportDefaults.unknownCheckout }
-        return GitInfo.repositoryRoot(for: directory)?.path ?? directory
-    }
-
-    /// `<project> · <worktree>` where the checkout belongs to a project Threading knows, else the
-    /// folder's own name — spend predates the project list, and a conversation from before a
-    /// folder was added still happened.
-    private nonisolated static func label(
-        for root: String,
-        projects: [(path: String, name: String)]
-    ) -> String {
-        let owner = projects
-            .filter { root == $0.path || root.hasPrefix($0.path + "/") }
-            .max { $0.path.count < $1.path.count }
-
-        let worktree = GitInfo.worktreeName(for: root)
-
-        switch (owner, worktree) {
-        case let (owner?, worktree?): return "\(owner.name) · \(worktree)"
-        case let (owner?, nil): return owner.name
-        case let (nil, worktree?): return worktree
-        case (nil, nil): return URL(fileURLWithPath: root).lastPathComponent
+                let routed = result.records.filter {
+                    $0.origin.billingProviderID == UsageReportDefaults.openRouterCoverageID
+                }
+                if !routed.isEmpty {
+                    var route = coverage[UsageReportDefaults.openRouterCoverageID]!
+                    route.sourceCount += 1
+                    route.recordCount += routed.count
+                    route.state = .complete
+                    route.detail = nil
+                    coverage[UsageReportDefaults.openRouterCoverageID] = route
+                }
+            } catch {
+                item.state = item.recordCount > 0 ? .partial : .failed
+                item.detail = "One or more OpenCode exports could not be read."
+            }
+            coverage[runtime.rawValue] = item
         }
+
+        scan.rawRecords = records.count
+        scan.duration = CFAbsoluteTimeGetCurrent() - started
+        return UsageLedgerBuilder.build(
+            records: records,
+            coverage: Array(coverage.values),
+            projects: projects,
+            scan: scan
+        )
     }
 
     private func notifyChanged() {
         NotificationCenter.default.post(TranscriptUsageDidChange())
     }
-
-    // MARK: - Persistence
-
-    private func save() {
-        guard let report else { return }
-        _ = persistence.save(report)
-    }
 }
 
-// MARK: - Usage Report Defaults
-
 enum UsageReportDefaults {
-    static let fileName = "usage-report.json"
-
-    /// A full walk is expensive and the answer moves slowly; an hour old is a fine answer to
-    /// "where did the week go".
+    static let fileName = "usage-report-v2.json"
     static let staleAfter: TimeInterval = 60 * 60
-
-    /// Days shown. Long enough to cover the weekly window and see the shape around it.
-    static let dayWindow = 14
-
+    static let maximumDayRange = 90
+    static let legacyDayWindow = 14
     static let unknownCheckout = "unknown"
-
-    /// How much of the quarter-hour series to keep: a little beyond the longest window anyone
-    /// is metered on, since that is the only thing it is read for.
+    static let openRouterCoverageID = "openrouter"
     static let bucketRetention: TimeInterval = 9 * 24 * 3600
 }

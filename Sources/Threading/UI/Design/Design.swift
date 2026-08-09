@@ -532,6 +532,10 @@ enum Design {
         }
 
         /// Numeric labels use fixed-width digits without making the surrounding prose code.
+        static func numericDisplay() -> NSFont {
+            .monospacedDigitSystemFont(ofSize: scaled(30), weight: .semibold)
+        }
+
         static func numericBody() -> NSFont {
             .monospacedDigitSystemFont(ofSize: scaled(13), weight: .regular)
         }
@@ -677,6 +681,87 @@ enum Design {
             guard widest > slot else { return nominal }
             return rendered(at: pointSize * slot / widest)
         }
+    }
+
+    // MARK: - Charts
+
+    /// Shared geometry for dense time-series surfaces. These belong here rather than in the
+    /// Usage feature because the chart is a reusable design-system component and every future
+    /// dashboard should inherit the same plot rhythm, hit target, and bounded render budget.
+    enum Chart {
+        static let preferredHeight: CGFloat = 260
+        static let axisLeading: CGFloat = 64
+        static let axisTrailing: CGFloat = Spacing.inset
+        static let axisTop: CGFloat = Spacing.large
+        static let axisBottom: CGFloat = 28
+        static let gridLineCount = 5
+        static let xLabelCount = 4
+        static let lineWidth: CGFloat = 2
+        static let systemLineWidth: CGFloat = 1.6
+        static let projectionLineWidth: CGFloat = 1.5
+        static let markerLineWidth: CGFloat = 1
+        static let systemAreaOpacity: CGFloat = 0.12
+        static let themedAreaOpacity: CGFloat = 0.08
+        static let systemStackedBandOpacity: CGFloat = 0.58
+        static let themedStackedBandOpacity: CGFloat = 0.50
+        static let spectrumBandOpacity: CGFloat = 0.92
+        static let spectrumColumnWidth: CGFloat = 6
+        static let spectrumColumnGap: CGFloat = 2
+        static let spectrumCellHeight: CGFloat = 4
+        static let spectrumCellGap: CGFloat = 2
+        static let spectrumPeakHeight: CGFloat = 2
+        static let pointRadius: CGFloat = 3
+        static let selectedPointRadius: CGFloat = 5
+        static let tooltipInset = Spacing.medium
+        static let tooltipOffset = Spacing.inset
+        static let tooltipMaxWidth: CGFloat = 180
+        static let maximumRenderedPoints = 240
+        static let maximumRenderedMarkers = 120
+
+        static var style: AppTheme.Material.ChartStyle {
+            AppThemePalette.current.material.chartStyle
+        }
+
+        /// The categorical ramp remains platform-adaptive for ordinary charts. A spectrum
+        /// material instead uses its own authored neon/status vocabulary, keeping the analyzer
+        /// coherent with player chrome without a feature view naming that theme.
+        @MainActor
+        static func color(for style: ThemedChartSeriesStyle) -> NSColor {
+            switch style {
+            case .primary, .projection:
+                return Design.Surface.accent
+            case .positive:
+                return Design.Status.positive
+            case .warning:
+                return Design.Status.warning
+            case .negative:
+                return Design.Status.negative
+            case .categorical(let index) where self.style == .spectrum:
+                let ramp = [
+                    Design.Surface.accent,
+                    Design.Status.warning,
+                    Design.Syntax.type,
+                    Design.Status.negative,
+                    Design.Syntax.keyword,
+                    Design.Syntax.string
+                ]
+                return ramp[((index % ramp.count) + ramp.count) % ramp.count]
+            case .categorical(let index):
+                return Design.Categorical.hue(at: index).color
+            }
+        }
+    }
+
+    enum UsageDashboard {
+        static let metricCardHeight: CGFloat = 76
+        static let breakdownHeight: CGFloat = 300
+        static let breakdownRowHeight: CGFloat = 48
+        static let coverageRowHeight: CGFloat = 54
+        static let minimumContentWidth: CGFloat = 560
+        static let tabControlWidth: CGFloat = 280
+        static let consumptionSummaryWidth: CGFloat = 276
+        static let rangeControlWidth: CGFloat = 148
+        static let metricControlWidth: CGFloat = 144
     }
 
     // MARK: - Surface

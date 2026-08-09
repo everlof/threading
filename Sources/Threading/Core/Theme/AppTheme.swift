@@ -412,6 +412,15 @@ struct AppTheme: Codable, Equatable {
         /// source-inferred.
         var progressStyle: ProgressStyle = .continuous
 
+        /// How retained time-series data is painted inside the shared chart boundary.
+        ///
+        /// `continuous` preserves the ordinary line/area grammar. `spectrum` turns filled data
+        /// into discrete, peak-capped columns inside a sunken value well—the compact analyzer
+        /// language used by player chrome. This belongs to the material rather than to a named
+        /// theme check, so imported player skins and contributed themes can ask for the same
+        /// production renderer.
+        var chartStyle: ChartStyle = .continuous
+
         /// The silhouette and internal anatomy of compact value choosers. A chip is the app's
         /// quiet modern default; a dropdown is the square, sunken value well with an independent
         /// raised arrow button used by desktop-era systems.
@@ -506,6 +515,11 @@ struct AppTheme: Codable, Equatable {
             /// edge rather than either the modern line or Win32's separated blocks.
             case irix
             case amiga
+        }
+
+        enum ChartStyle: String, Codable, CaseIterable {
+            case continuous
+            case spectrum
         }
 
         enum ChoiceStyle: String, Codable, CaseIterable {
@@ -972,6 +986,7 @@ struct AppTheme: Codable, Equatable {
             scrollerAppearance: ScrollerAppearance = .automatic,
             menuAppearance: MenuAppearance = .automatic,
             progressStyle: ProgressStyle = .continuous,
+            chartStyle: ChartStyle = .continuous,
             choiceStyle: ChoiceStyle = .chip,
             checkboxStyle: CheckboxStyle = .automatic,
             toggleStyle: ToggleStyle = .automatic
@@ -997,6 +1012,7 @@ struct AppTheme: Codable, Equatable {
             self.scrollerAppearance = scrollerAppearance
             self.menuAppearance = menuAppearance
             self.progressStyle = progressStyle
+            self.chartStyle = chartStyle
             self.choiceStyle = choiceStyle
             self.checkboxStyle = checkboxStyle
             self.toggleStyle = toggleStyle
@@ -1008,7 +1024,7 @@ struct AppTheme: Codable, Equatable {
             case glow, popoverStyle, controlGlow, buttonStyle, headingStyle, bevel, typeface, fontFamily
             case fontFallbacks
             case scrollerPlacement, scrollerTrackStyle, scrollerAppearance, menuAppearance
-            case progressStyle, choiceStyle, checkboxStyle, toggleStyle
+            case progressStyle, chartStyle, choiceStyle, checkboxStyle, toggleStyle
         }
 
         /// Every field is optional on the wire: a document written before a field existed
@@ -1065,6 +1081,10 @@ struct AppTheme: Codable, Equatable {
             progressStyle = try container.decodeIfPresent(
                 ProgressStyle.self,
                 forKey: .progressStyle
+            ) ?? .continuous
+            chartStyle = try container.decodeIfPresent(
+                ChartStyle.self,
+                forKey: .chartStyle
             ) ?? .continuous
             choiceStyle = try container.decodeIfPresent(
                 ChoiceStyle.self,

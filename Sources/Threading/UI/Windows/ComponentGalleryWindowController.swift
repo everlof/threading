@@ -146,6 +146,8 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
+        "ThemedStackedBandChartView",
+        "ThemedTimeSeriesChartView",
         "ListSelectionStrength",
         "ThemedTableHeaderView",
         "ThemedTableRowView",
@@ -167,6 +169,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ToastPresenter",
         "ToastView",
         "ToolbarButtonGroupView",
+        "UsageDashboardView",
         "WorkingOrbView",
         "WindowBackdrop",
         "WindowChromeButton",
@@ -230,6 +233,9 @@ final class ComponentGalleryViewController: NSViewController {
     private var stripActiveTabID: UUID?
     private let activityMapView = FileActivityMapView()
     private let galleryActivityBeam = AgentActivityBeamView()
+    private let galleryUsageChart = ThemedTimeSeriesChartView()
+    private let galleryStackedUsageChart = ThemedStackedBandChartView(frame: .zero)
+    private var galleryUsageChartShowsAlternateData = false
     private var activityDemoFiles: [String] = []
     private var activityDemoCursor = 0
     private var activityBeamDemoCursor = 2
@@ -404,6 +410,7 @@ final class ComponentGalleryViewController: NSViewController {
             makeButtonsAndChoicesSection(),
             makeTextSection(),
             makeFeedbackSection(),
+            makeUsageAnalyticsSection(),
             makePresentationSection(),
             makeContainersSection(),
             makeBrowserChromeSection(),
@@ -1524,6 +1531,311 @@ final class ComponentGalleryViewController: NSViewController {
                     row([submissionStatus, submissionButtons()])
                 )
             ]
+        )
+    }
+
+    private func makeUsageAnalyticsSection() -> NSView {
+        galleryUsageChart.setModel(
+            galleryChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: false
+        )
+        galleryStackedUsageChart.setModel(
+            galleryStackedChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: false
+        )
+        galleryUsageChart.translatesAutoresizingMaskIntoConstraints = false
+        galleryUsageChart.widthAnchor.constraint(equalToConstant: 820).isActive = true
+        galleryStackedUsageChart.translatesAutoresizingMaskIntoConstraints = false
+        galleryStackedUsageChart.widthAnchor.constraint(equalToConstant: 820).isActive = true
+
+        let switchData = button("Switch data", action: #selector(toggleGalleryUsageChart))
+        let chartSample = NSStackView(views: [galleryUsageChart, switchData])
+        chartSample.orientation = .vertical
+        chartSample.alignment = .leading
+        chartSample.spacing = Design.Spacing.small
+
+        let switchStackedData = button("Switch data", action: #selector(toggleGalleryUsageChart))
+        let stackedChartSample = NSStackView(views: [galleryStackedUsageChart, switchStackedData])
+        stackedChartSample.orientation = .vertical
+        stackedChartSample.alignment = .leading
+        stackedChartSample.spacing = Design.Spacing.small
+
+        let dashboard = galleryUsageDashboardFixture()
+        dashboard.translatesAutoresizingMaskIntoConstraints = false
+        dashboard.widthAnchor.constraint(equalToConstant: 820).isActive = true
+
+        return section(
+            "Usage analytics",
+            note: "Provider-neutral charts and the retained dashboard they compose.",
+            rows: [
+                story(
+                    "ThemedTimeSeriesChartView",
+                    "Hover or arrow through points, then switch data to inspect the interrupted morph animation.",
+                    chartSample
+                ),
+                story(
+                    "ThemedStackedBandChartView",
+                    "Hover or arrow through points, then switch data to inspect the interrupted morph animation.",
+                    stackedChartSample
+                ),
+                story(
+                    "UsageDashboardView",
+                    "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.",
+                    dashboard
+                )
+            ]
+        )
+    }
+
+    @objc private func toggleGalleryUsageChart() {
+        galleryUsageChartShowsAlternateData.toggle()
+        galleryUsageChart.setModel(
+            galleryChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: true
+        )
+        galleryStackedUsageChart.setModel(
+            galleryStackedChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: true
+        )
+        showReceipt(L10n.string("Switched the chart data."))
+    }
+
+    private func galleryChartModel(alternate: Bool) -> ThemedChartModel {
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -20, to: today) ?? today
+        let primary = (0...20).map { index in
+            ThemedChartPoint(
+                at: calendar.date(byAdding: .day, value: index, to: start) ?? start,
+                value: alternate
+                    ? 12 + Double((index * 11 + 7) % 25)
+                    : 8 + Double((index * 7 + 3) % 19),
+                label: L10n.format("%lld requests", Int64(index + 12)),
+                detail: L10n.string("Observed")
+            )
+        }
+        let comparison = stride(from: 0, through: 20, by: 2).map { index in
+            ThemedChartPoint(
+                at: calendar.date(byAdding: .day, value: index, to: start) ?? start,
+                value: alternate
+                    ? 6 + Double((index * 5 + 9) % 14)
+                    : 10 + Double((index * 3 + 1) % 16),
+                label: L10n.format("%lld requests", Int64(index + 6)),
+                detail: L10n.string("Comparison")
+            )
+        }
+        let resetAt = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        return ThemedChartModel(
+            title: L10n.string("Usage over time"),
+            accessibilitySummary: L10n.string("Two provider series with one recorded reset."),
+            series: [
+                ThemedChartSeries(
+                    id: "gallery-primary",
+                    title: L10n.string("Claude Code"),
+                    points: primary,
+                    style: .categorical(0),
+                    fillsArea: true
+                ),
+                ThemedChartSeries(
+                    id: "gallery-comparison",
+                    title: L10n.string("Codex"),
+                    points: comparison,
+                    style: .categorical(1),
+                    fillsArea: true
+                )
+            ],
+            markers: [ThemedChartMarker(
+                id: "gallery-reset",
+                at: resetAt,
+                title: L10n.string("Reset"),
+                detail: L10n.string("Recorded reset boundary"),
+                kind: .reset
+            )],
+            xRange: start...today,
+            valueFormat: .number
+        )
+    }
+
+    private func galleryStackedChartModel(alternate: Bool) -> ThemedChartModel {
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -20, to: today) ?? today
+        let titles = [
+            L10n.string("Claude Code"),
+            L10n.string("Codex"),
+            L10n.string("Grok")
+        ]
+        let series = titles.enumerated().map { seriesIndex, title in
+            ThemedChartSeries(
+                id: "gallery-stacked-\(seriesIndex)",
+                title: title,
+                points: (0...20).map { pointIndex in
+                    let shiftedIndex = pointIndex + seriesIndex * 3 + (alternate ? 5 : 0)
+                    let value = 3 + Double((shiftedIndex * (seriesIndex + 4)) % 13)
+                    return ThemedChartPoint(
+                        at: calendar.date(byAdding: .day, value: pointIndex, to: start) ?? start,
+                        value: value,
+                        label: L10n.format("%lld requests", Int64(value)),
+                        detail: L10n.string("Observed")
+                    )
+                },
+                style: .categorical(seriesIndex),
+                fillsArea: true
+            )
+        }
+        return ThemedChartModel(
+            title: L10n.string("Usage over time"),
+            accessibilitySummary: L10n.string("Usage over time"),
+            series: series,
+            xRange: start...today,
+            valueFormat: .number
+        )
+    }
+
+    private func galleryUsageDashboardFixture() -> UsageDashboardView {
+        let dashboard = UsageDashboardView()
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let origins: [UsageOrigin] = [
+            .direct(.claude),
+            .direct(.codex),
+            .direct(.grok),
+            .direct(.openCode),
+            .openCode(providerID: "openrouter")
+        ]
+        var cells: [TranscriptUsageReport.Cell] = []
+        for dayIndex in 0..<35 {
+            let day = calendar.date(byAdding: .day, value: -dayIndex, to: today) ?? today
+            for (routeIndex, origin) in origins.enumerated() {
+                let wave = 0.45 + Double((dayIndex * (routeIndex + 2)) % 9) / 10
+                let cost = wave * Double(routeIndex + 1) * 0.72
+                cells.append(TranscriptUsageReport.Cell(
+                    day: day,
+                    origin: origin,
+                    accountID: "\(origin.runtimeID):gallery",
+                    accountName: L10n.string("Personal"),
+                    model: galleryModelName(for: origin),
+                    checkoutPath: "/component-gallery/project-\(dayIndex % 12)",
+                    checkoutLabel: L10n.format("Project %lld", Int64(dayIndex % 12 + 1)),
+                    tokens: UsageTokenCounts(
+                        uncachedInput: Int64(cost * 110_000),
+                        cachedInput: Int64(cost * 360_000),
+                        cacheWrite: Int64(cost * 24_000),
+                        output: Int64(cost * 58_000),
+                        reasoning: Int64(cost * 8_000)
+                    ),
+                    providerReportedCostUSD: origin.billingProviderID == "openrouter" ? cost : 0,
+                    catalogCostUSD: origin.billingProviderID == "openrouter" ? 0 : cost,
+                    unpricedTokens: origin.runtimeID == AgentKind.grok.rawValue
+                        ? Int64(cost * 18_000) : 0,
+                    cacheSavingsUSD: cost * 2.1,
+                    records: 5 + (dayIndex + routeIndex) % 16
+                ))
+            }
+        }
+        var scan = TranscriptUsageReport.ScanStatistics()
+        scan.sourceFiles = 96
+        scan.cacheHits = 91
+        scan.cacheMisses = 5
+        scan.rawRecords = 8_240
+        scan.distinctRecords = 8_019
+        let report = TranscriptUsageReport(
+            cells: cells,
+            coverage: galleryUsageCoverage,
+            scan: scan,
+            builtAt: Date()
+        )
+        dashboard.update(
+            report: report,
+            limits: [galleryUsageLimitFixture(now: Date())],
+            isBuilding: false,
+            animated: false
+        )
+        return dashboard
+    }
+
+    private var galleryUsageCoverage: [UsageSourceCoverage] {
+        [
+            UsageSourceCoverage(runtimeID: "claude", runtimeName: "Claude Code", state: .complete, sourceCount: 31, recordCount: 3_182, detail: "Local transcripts"),
+            UsageSourceCoverage(runtimeID: "codex", runtimeName: "Codex", state: .complete, sourceCount: 24, recordCount: 2_954, detail: "Local rollout files"),
+            UsageSourceCoverage(runtimeID: "grok", runtimeName: "Grok", state: .partial, sourceCount: 0, recordCount: 0, detail: "Context occupancy only"),
+            UsageSourceCoverage(runtimeID: "opencode", runtimeName: "OpenCode", state: .complete, sourceCount: 41, recordCount: 1_883, detail: "Supported local exports"),
+            UsageSourceCoverage(runtimeID: "openrouter", runtimeName: "OpenRouter via OpenCode", state: .complete, sourceCount: 12, recordCount: 734, detail: "Billing route from OpenCode")
+        ]
+    }
+
+    private func galleryModelName(for origin: UsageOrigin) -> String {
+        switch origin.billingProviderID {
+        case "anthropic": return "claude-opus-4"
+        case "openai": return "gpt-5.6-sol"
+        case "xai": return "grok-4"
+        case "openrouter": return "openrouter/auto"
+        default: return "opencode/zen"
+        }
+    }
+
+    private func galleryUsageLimitFixture(now: Date) -> UsageLimitDashboardSeries {
+        let day: TimeInterval = 86_400
+        let start = now.addingTimeInterval(-25 * day)
+        let samples = (0...25).map { index -> UsageSample in
+            let cycle = index / 7
+            let step = index % 7
+            let at = start.addingTimeInterval(Double(index) * day)
+            let reset = start.addingTimeInterval(Double((cycle + 1) * 7) * day)
+            return UsageSample(
+                at: at,
+                fraction: min(0.97, 0.10 + Double(step) * 0.145),
+                resetsAt: reset,
+                runtimeID: AgentKind.codex.rawValue,
+                accountID: "codex:gallery",
+                accountName: L10n.string("Personal"),
+                windowID: "weekly",
+                windowLabel: L10n.string("Weekly"),
+                windowDuration: 7 * day,
+                source: .codexAPI,
+                nextResetCreditExpiresAt: now.addingTimeInterval(1.4 * day),
+                resetCreditCount: 3
+            )
+        }
+        let resets = [7, 14, 21].map { index in
+            let detected = start.addingTimeInterval(Double(index) * day)
+            return UsageLimitResetEvent(
+                id: "gallery-reset-\(index)",
+                runtimeID: AgentKind.codex.rawValue,
+                accountID: "codex:gallery",
+                accountName: L10n.string("Personal"),
+                windowID: "weekly",
+                windowLabel: L10n.string("Weekly"),
+                previousObservedAt: detected.addingTimeInterval(-day),
+                detectedAt: detected,
+                oldScheduledResetAt: detected,
+                newScheduledResetAt: detected.addingTimeInterval(7 * day),
+                restoredFraction: 0.97,
+                elapsedFraction: 1,
+                secondsEarly: 0,
+                cause: .scheduled
+            )
+        }
+        let projection = UsageLimitProjection(
+            observedAt: now,
+            observedFraction: 0.68,
+            resetsAt: now.addingTimeInterval(3 * day),
+            projectedFractionAtReset: 1,
+            projectedExhaustionAt: now.addingTimeInterval(2.2 * day),
+            resetCreditExpiresAt: now.addingTimeInterval(1.4 * day)
+        )
+        return UsageLimitDashboardSeries(
+            id: "codex|gallery|weekly",
+            runtimeName: L10n.string("Codex"),
+            accountName: L10n.string("Personal"),
+            windowLabel: L10n.string("Weekly"),
+            samples: samples,
+            resets: resets,
+            projection: projection,
+            currentFraction: 0.68,
+            resetsAt: projection.resetsAt,
+            resetCreditCount: 3,
+            nextResetCreditExpiresAt: projection.resetCreditExpiresAt
         )
     }
 

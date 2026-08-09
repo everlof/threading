@@ -3,13 +3,58 @@ import Foundation
 // MARK: - Usage Sample
 
 /// One reading of one window, at a moment.
-struct UsageSample: Codable, Equatable {
+struct UsageSample: Codable, Equatable, Sendable {
     let at: Date
     /// Fraction of the window consumed, 0…1.
     let fraction: Double
     /// The window's own reset, which is what makes a sample belong to a *particular* window
     /// rather than to a name that repeats every period.
     let resetsAt: Date?
+
+    /// Provenance used by the long-term limit journal. These stay optional so the existing
+    /// short-window forecast and recovered Codex rollout samples keep their compact shape.
+    let runtimeID: String?
+    let accountID: String?
+    let accountName: String?
+    let windowID: String?
+    let windowLabel: String?
+    let windowDuration: TimeInterval?
+    let source: UsageLimitSampleSource?
+    let nextResetCreditExpiresAt: Date?
+    let resetCreditCount: Int?
+
+    init(
+        at: Date,
+        fraction: Double,
+        resetsAt: Date?,
+        runtimeID: String? = nil,
+        accountID: String? = nil,
+        accountName: String? = nil,
+        windowID: String? = nil,
+        windowLabel: String? = nil,
+        windowDuration: TimeInterval? = nil,
+        source: UsageLimitSampleSource? = nil,
+        nextResetCreditExpiresAt: Date? = nil,
+        resetCreditCount: Int? = nil
+    ) {
+        self.at = at
+        self.fraction = min(max(fraction, 0), 1)
+        self.resetsAt = resetsAt
+        self.runtimeID = runtimeID
+        self.accountID = accountID
+        self.accountName = accountName
+        self.windowID = windowID
+        self.windowLabel = windowLabel
+        self.windowDuration = windowDuration
+        self.source = source
+        self.nextResetCreditExpiresAt = nextResetCreditExpiresAt
+        self.resetCreditCount = resetCreditCount
+    }
+
+    var limitSeriesID: String? {
+        guard let runtimeID, let accountID, let windowID else { return nil }
+        return "\(runtimeID)|\(accountID)|\(windowID)"
+    }
 }
 
 // MARK: - Usage Forecast

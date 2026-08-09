@@ -53,6 +53,19 @@ private struct CodexUsageResponse: Decodable {
     }
 }
 
+private struct CodexResetCreditsResponse: Decodable {
+    let credits: [Credit]?
+    let availableCount: Int?
+
+    struct Credit: Decodable {
+        let id: String?
+        let title: String?
+        let status: String?
+        let grantedAt: String?
+        let expiresAt: String?
+    }
+}
+
 // MARK: - Codex Usage Fetcher
 
 /// Reads Codex usage from the ChatGPT backend, authenticated by the tokens the Codex CLI
@@ -68,11 +81,7 @@ enum CodexUsageFetcher {
         guard let endpoint = URL(string: CodexUsageDefaults.usageEndpoint) else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: endpoint)
-        request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
-        request.setValue(auth.accountID, forHTTPHeaderField: "ChatGPT-Account-ID")
-        request.setValue(CodexUsageDefaults.originator, forHTTPHeaderField: "originator")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let request = authenticatedRequest(url: endpoint, auth: auth)
 
         let response = try await UsageHTTP.getJSON(
             request,
@@ -115,6 +124,27 @@ enum CodexUsageFetcher {
 
         usage.resetCredits = response.rateLimitResetCredits?.availableCount
 
+        // Credit expiries live on a companion read-only endpoint. Failure here must not erase
+        // otherwise valid rate limits; the summary count above remains useful on its own.
+        if let detailURL = URL(string: CodexUsageDefaults.resetCreditsEndpoint) {
+            let details = try? await UsageHTTP.getJSON(
+                authenticatedRequest(url: detailURL, auth: auth),
+                as: CodexResetCreditsResponse.self,
+                decoder: UsageHTTP.snakeCaseDecoder()
+            )
+            usage.resetCreditDetails = (details?.credits ?? []).compactMap { credit in
+                guard let id = credit.id, !id.isEmpty else { return nil }
+                return AccountUsage.ResetCredit(
+                    id: id,
+                    title: credit.title ?? "Limit reset",
+                    grantedAt: credit.grantedAt.flatMap(UsageHTTP.parseISO8601),
+                    expiresAt: credit.expiresAt.flatMap(UsageHTTP.parseISO8601),
+                    status: credit.status ?? "unknown"
+                )
+            }
+            usage.resetCredits = details?.availableCount ?? usage.resetCredits
+        }
+
         // Only when there is a balance to speak of: "0" is what every account without credits
         // reports, and stating it would be noise on all of them.
         if response.credits?.hasCredits == true, let balance = response.credits?.balance {
@@ -125,6 +155,18 @@ enum CodexUsageFetcher {
     }
 
     // MARK: - Private Methods
+
+    private static func authenticatedRequest(
+        url: URL,
+        auth: (token: String, accountID: String)
+    ) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
+        request.setValue(auth.accountID, forHTTPHeaderField: "ChatGPT-Account-ID")
+        request.setValue(CodexUsageDefaults.originator, forHTTPHeaderField: "originator")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
 
     private static func normalize(_ window: CodexUsageResponse.Window?) -> AccountUsage.Window? {
         guard let window else { return nil }
@@ -190,6 +232,7 @@ enum CodexUsageFetcher {
 
 enum CodexUsageDefaults {
     static let usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
+    static let resetCreditsEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
     /// The backend gates on known clients; this is the value the Codex app itself sends.
     static let originator = "Codex Desktop"

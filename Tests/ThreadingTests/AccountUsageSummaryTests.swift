@@ -275,6 +275,42 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(UsageFormat.resetCredits(3), "3 limit resets banked")
     }
 
+    func testNextExpiringResetCreditUsesOnlyAvailableDatedCredits() {
+        var usage = makeUsage(windows: [])
+        usage.resetCreditDetails = [
+            .init(
+                id: "spent",
+                title: "Spent",
+                grantedAt: nil,
+                expiresAt: now.addingTimeInterval(60),
+                status: "used"
+            ),
+            .init(
+                id: "later",
+                title: "Later",
+                grantedAt: nil,
+                expiresAt: now.addingTimeInterval(3_600),
+                status: "available"
+            ),
+            .init(
+                id: "soon",
+                title: "Soon",
+                grantedAt: nil,
+                expiresAt: now.addingTimeInterval(600),
+                status: "AVAILABLE"
+            ),
+            .init(
+                id: "undated",
+                title: "Undated",
+                grantedAt: nil,
+                expiresAt: nil,
+                status: "available"
+            )
+        ]
+
+        XCTAssertEqual(usage.nextExpiringResetCredit?.id, "soon")
+    }
+
     // MARK: - Toned Segments
 
     /// The menu line's grammar: names and separators recede, a calm value keeps the line's own

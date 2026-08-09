@@ -703,6 +703,7 @@ final class AppThemeTests: XCTestCase {
             AppThemeStyles.classicPlayer.variant(.dark)?.material
         )
         XCTAssertEqual(classicPlayer.toggleStyle, .onOffButton)
+        XCTAssertEqual(classicPlayer.chartStyle, .spectrum)
         XCTAssertEqual(classicPlayer.buttonStyle.textTransform, .uppercase)
         XCTAssertEqual(classicPlayer.buttonStyle.titleRendering, .pixel5x6)
         XCTAssertTrue(classicPlayer.buttonStyle.antialiasesTitle)
@@ -1064,6 +1065,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(material.scrollerAppearance, .automatic)
         XCTAssertEqual(material.menuAppearance, .automatic)
         XCTAssertEqual(material.progressStyle, .continuous)
+        XCTAssertEqual(material.chartStyle, .continuous)
         XCTAssertEqual(material.choiceStyle, .chip)
         XCTAssertEqual(material.checkboxStyle, .automatic)
         XCTAssertEqual(material.toggleStyle, .automatic)
@@ -1086,6 +1088,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(round.scrollerAppearance, .automatic)
         XCTAssertEqual(round.menuAppearance, .automatic)
         XCTAssertEqual(round.progressStyle, .continuous)
+        XCTAssertEqual(round.chartStyle, .continuous)
         XCTAssertEqual(round.choiceStyle, .chip)
         XCTAssertEqual(round.checkboxStyle, .automatic)
         XCTAssertEqual(round.toggleStyle, .automatic)
@@ -1098,6 +1101,7 @@ final class AppThemeTests: XCTestCase {
             scrollerAppearance: .openStep,
             menuAppearance: .openStep,
             progressStyle: .segmented,
+            chartStyle: .spectrum,
             checkboxStyle: .beOSCross,
             toggleStyle: .onOffButton
         )
@@ -1111,6 +1115,7 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(roundTrip.scrollerAppearance, .openStep)
         XCTAssertEqual(roundTrip.menuAppearance, .openStep)
         XCTAssertEqual(roundTrip.progressStyle, .segmented)
+        XCTAssertEqual(roundTrip.chartStyle, .spectrum)
         XCTAssertEqual(roundTrip.checkboxStyle, .beOSCross)
         XCTAssertEqual(roundTrip.toggleStyle, .onOffButton)
     }

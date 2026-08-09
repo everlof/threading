@@ -110,6 +110,16 @@ final class AgentCapabilitiesTests: XCTestCase {
         }
     }
 
+    /// Usage indexing follows measured source support, not a provider allow-list. Claude and
+    /// Codex expose local structured records, OpenCode exposes a supported structured export,
+    /// and Grok currently exposes neither an authoritative token bill nor a structured history.
+    func testTranscriptUsageCapabilityMatchesMeasuredAdapters() {
+        XCTAssertTrue(AgentKind.claude.supports(.transcriptUsageIndex))
+        XCTAssertTrue(AgentKind.codex.supports(.transcriptUsageIndex))
+        XCTAssertTrue(AgentKind.openCode.supports(.transcriptUsageIndex))
+        XCTAssertFalse(AgentKind.grok.supports(.transcriptUsageIndex))
+    }
+
     /// Codex is the only measured runtime whose terminal interrupt is authoritative in its
     /// transcript while the corresponding `Stop` hook is absent.
     func testInterruptedTurnTranscriptCapabilityMatchesTheCodexReader() {

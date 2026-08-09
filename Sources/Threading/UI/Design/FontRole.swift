@@ -56,6 +56,7 @@ extension Design {
         case compactToolName
 
         // Numeric — SF's monospaced digits, so columns keep aligning.
+        case numericDisplay
         case numericBody
         case numericControl(weight: NSFont.Weight = .regular)
         case numericDetail(weight: NSFont.Weight = .regular)
@@ -91,6 +92,7 @@ extension Design {
             case .previewCode: return Typography.previewCode()
             case .compactCode: return Typography.compactCode()
             case .compactToolName: return Typography.compactToolName()
+            case .numericDisplay: return Typography.numericDisplay()
             case .numericBody: return Typography.numericBody()
             case .numericControl(let weight): return Typography.numericControl(weight: weight)
             case .numericDetail(let weight): return Typography.numericDetail(weight: weight)
@@ -125,7 +127,7 @@ extension Design {
                 return .numericDetail(weight: weight == .regular ? .semibold : weight)
             case .heading, .placeholderTitle, .emphasizedBody, .strongBody, .control, .caption,
                  .markdownHeading, .wordmark, .inlineCode, .previewCode, .compactCode,
-                 .compactToolName, .numericBody, .accountEmoji, .emojiPickerCell:
+                 .compactToolName, .numericDisplay, .numericBody, .accountEmoji, .emojiPickerCell:
                 return self
             }
         }
@@ -141,7 +143,8 @@ extension Design {
                  .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark:
                 return true
             case .code, .inlineCode, .previewCode, .compactCode, .compactToolName,
-                 .numericBody, .numericControl, .numericDetail, .accountEmoji, .emojiPickerCell:
+                 .numericDisplay, .numericBody, .numericControl, .numericDetail,
+                 .accountEmoji, .emojiPickerCell:
                 return false
             }
         }

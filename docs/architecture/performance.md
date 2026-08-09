@@ -156,10 +156,12 @@ external data reaches eager AppKit work.
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
 | Medium | Git Review during live resize | Each meaningful width change calls `noteHeightOfRows` for the complete file table so offscreen wrapping estimates and scrollbar extent stay correct. That is correctness-preserving but total-row work at resize frequency; add a large-index live-resize phase before changing it. |
 | Medium | Account settings cold discovery | `AgentAccountDiscovery` is `@MainActor`; an expired cache reads the home directory, login markers and shell aliases synchronously, then Accounts constructs every row. Account counts are normally small, but cold filesystem latency is externally controlled. |
+| Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
 search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
-branches before constructing collapsed command detail; Usage caps its checkout/model/ledger rows;
+branches before constructing collapsed command detail; Usage virtualizes repeating breakdown rows
+and bounds both retained report cells and chart geometry;
 File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 

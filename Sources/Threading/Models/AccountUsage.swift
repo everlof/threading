@@ -8,6 +8,16 @@ import Foundation
 /// shapes; everything downstream (the toolbar pill, its popover) reads this one model.
 struct AccountUsage: Equatable {
 
+    struct ResetCredit: Equatable, Identifiable {
+        let id: String
+        let title: String
+        let grantedAt: Date?
+        let expiresAt: Date?
+        let status: String
+
+        var isAvailable: Bool { status.lowercased() == "available" }
+    }
+
     // MARK: - Window
 
     /// One rolling rate-limit window, e.g. the 5-hour session limit.
@@ -121,6 +131,16 @@ struct AccountUsage: Equatable {
     /// window early. Worth surfacing precisely when a window is spent, which is the moment the
     /// user is deciding whether to stop for the day.
     var resetCredits: Int?
+
+    /// Detailed reset-credit metadata, when the provider exposes the companion endpoint.
+    /// History retains only the available count and soonest expiry—never provider IDs/titles.
+    var resetCreditDetails: [ResetCredit] = []
+
+    var nextExpiringResetCredit: ResetCredit? {
+        resetCreditDetails
+            .filter { $0.isAvailable && $0.expiresAt != nil }
+            .min { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
+    }
 
     /// Purchased credits that carry on past the plan's included usage, when the provider
     /// reports a balance.

@@ -115,13 +115,11 @@ struct AgentCapabilities: OptionSet {
   /// Threading can walk this runtime's transcripts to price what a project or an account has
   /// spent, which is what the Usage report is built from.
   ///
-  /// Claude only, and the restriction belongs to the *reader* rather than to the runtime:
-  /// `TranscriptUsageIndex.transcripts(inAccountAt:)` enumerates
-  /// `AgentDefaults.claudeProjectsSubdirectory` and knows no other layout. Codex records its
-  /// usage in a rollout of a different shape, and neither Grok nor OpenCode has a transcript
-  /// this app parses at all. Stated here rather than as a filter over `AgentKind.allCases` at
-  /// the call site, which put the restriction a file away from the thing that causes it and
-  /// read like a policy rather than a limitation.
+  /// Claude, Codex and OpenCode. The restriction belongs to the *reader* rather than to a
+  /// provider policy: Claude and Codex have measured local-file adapters, while OpenCode has a
+  /// measured supported-export adapter. Grok's ACP reports context occupancy but its export
+  /// currently carries no historical token bill, so it deliberately remains off until an
+  /// authoritative source exists.
   static let transcriptUsageIndex = Self(rawValue: 1 << 16)
 
   /// A terminal launch can receive Threading's private, session-scoped MCP endpoint without
@@ -268,7 +266,8 @@ enum AgentKind: String, Codable, CaseIterable {
       return [
         .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
-        .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptInterruptedTurnRecord
+        .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
+        .transcriptInterruptedTurnRecord
       ]
     case .grok:
       return [
@@ -276,7 +275,9 @@ enum AgentKind: String, Codable, CaseIterable {
         .deferredSessionIdentifier
       ]
     case .openCode:
-      return [.resume, .deferredSessionIdentifier, .openingFileAttachments]
+      return [
+        .resume, .deferredSessionIdentifier, .openingFileAttachments, .transcriptUsageIndex
+      ]
     }
   }
 

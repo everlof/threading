@@ -1,88 +1,114 @@
 import Foundation
 
-// MARK: - Usage History Store
-
-/// Keeps rate-limit readings over time, so a level can become a rate.
-///
-/// Nothing kept history before this: `AccountUsageService` held one snapshot per account, and
-/// every reading before the current one was discarded. That is enough to say "85% spent" and
-/// can never say "and you will run out at 19:40" — which is the question that actually changes
-/// what someone does next.
-///
-/// Samples are cheap and the window that matters is short: one reading is a date, a fraction
-/// and a reset, and anything older than the longest window it could belong to has nothing left
-/// to say. The file is pruned on every write rather than growing forever.
+/// Main-actor view of rate-limit history. Durable I/O is isolated in
+/// `UsageLimitHistoryJournal`; existing forecast callers retain synchronous in-memory reads.
 @MainActor
 final class UsageHistoryStore {
-
-    // MARK: - Singleton
-
     static let shared = UsageHistoryStore()
 
-    // MARK: - Properties
+    struct PreparedJournal: Sendable {
+        let samplesBySeries: [String: [UsageSample]]
+        let resets: [UsageLimitResetEvent]
+        let sampleIdentities: Set<String>
+        let loadedAt: Date
+    }
 
     /// Samples per `accountID|windowID`, oldest first.
-    private var samples: [String: [UsageSample]] = [:]
-
-    private let persistence: RecoverableFileStore<[String: [UsageSample]]>
-
-    // MARK: - Initialization
+    private var samples: [String: [UsageSample]]
+    private var resetEvents: [UsageLimitResetEvent] = []
+    private let legacySamples: [UsageSample]
+    private let journal: UsageLimitHistoryJournal
+    private var journalLoaded = false
+    private var journalLoadTask: Task<PreparedJournal, Never>?
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.persistence = RecoverableFileStore(
-            url: root.appendingPathComponent(UsageHistoryDefaults.fileName),
+        let legacy = RecoverableFileStore<[String: [UsageSample]]>(
+            url: root.appendingPathComponent(UsageHistoryDefaults.legacyFileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
+        ).load(defaultValue: [:]).value
+        let enriched = Self.enrichedLegacy(legacy)
+        self.samples = enriched
+        self.legacySamples = enriched.values.flatMap { $0 }
+        self.journal = UsageLimitHistoryJournal(
+            directory: root.appendingPathComponent(UsageLimitHistoryDefaults.directoryName)
         )
-        self.samples = persistence.load(defaultValue: [:]).value
+
+        Task { [weak self] in
+            await self?.bootstrapJournal()
+        }
     }
 
-    // MARK: - Public Methods
-
-    /// Records every window of a reading, ignoring what has not moved.
-    ///
-    /// A reading arrives every 30 seconds from a local cache, and most say exactly what the last
-    /// one did. Storing those would fill the file with duplicates and teach the forecast
-    /// nothing, so a sample is kept only when the fraction actually changed or enough time has
-    /// passed to prove the *absence* of change.
+    /// Records changed observations and a sparse heartbeat. This keeps 180 days useful without
+    /// turning a 30-second refresh loop into millions of identical chart points.
     func record(_ usage: AccountUsage, for account: AgentAccount) {
-        for window in usage.windows {
-            guard let fraction = window.fraction, !window.isExpired() else { continue }
+        var persistedSamples: [UsageSample] = []
+        var persistedResets: [UsageLimitResetEvent] = []
+        let accountName = AccountName.display(for: account)
+        let source = sampleSource(for: account.provider, usageSource: usage.source)
 
-            let key = "\(account.id)|\(window.id)"
-            var series = samples[key] ?? []
-
-            if let last = series.last {
-                let moved = abs(fraction - last.fraction) >= UsageHistoryDefaults.minimumChange
-                let waited = usage.observedAt.timeIntervalSince(last.at)
-                    >= UsageHistoryDefaults.forcedInterval
-                guard moved || waited else { continue }
+        for window in usage.allWindows {
+            guard let fraction = window.fraction, !window.isExpired(at: usage.observedAt) else {
+                continue
             }
 
-            series.append(UsageSample(
+            let key = Self.key(accountID: account.id.rawValue, windowID: window.id)
+            var series = samples[key] ?? []
+            let sample = UsageSample(
                 at: usage.observedAt,
                 fraction: fraction,
-                resetsAt: window.resetsAt
-            ))
+                resetsAt: window.resetsAt,
+                runtimeID: account.provider.rawValue,
+                accountID: account.id.rawValue,
+                accountName: accountName,
+                windowID: window.id,
+                windowLabel: window.label,
+                windowDuration: window.windowDuration,
+                source: source,
+                nextResetCreditExpiresAt: usage.nextExpiringResetCredit?.expiresAt,
+                resetCreditCount: usage.resetCredits
+            )
 
-            samples[key] = prune(series)
+            if let last = series.last {
+                guard sample.at > last.at else { continue }
+                let moved = abs(sample.fraction - last.fraction)
+                    >= UsageHistoryDefaults.minimumChange
+                let resetMoved = sample.resetsAt != last.resetsAt
+                let creditChanged = sample.resetCreditCount != last.resetCreditCount
+                    || sample.nextResetCreditExpiresAt != last.nextResetCreditExpiresAt
+                let waited = sample.at.timeIntervalSince(last.at)
+                    >= UsageHistoryDefaults.forcedInterval
+                guard moved || resetMoved || creditChanged || waited else { continue }
+
+                if let event = UsageLimitHistoryAnalysis.reset(between: last, and: sample),
+                   !resetEvents.contains(where: { $0.id == event.id }) {
+                    resetEvents.append(event)
+                    persistedResets.append(event)
+                }
+            }
+
+            series.append(sample)
+            samples[key] = prune(series, now: usage.observedAt)
+            persistedSamples.append(sample)
         }
 
-        save()
+        pruneEvents(now: usage.observedAt)
+        persist(samples: persistedSamples, resets: persistedResets)
+        if !persistedSamples.isEmpty {
+            NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+        }
     }
 
-    /// Every sample kept for one window of one account, oldest first.
     func samples(for account: AgentAccount, windowID: String) -> [UsageSample] {
-        samples["\(account.id)|\(windowID)"] ?? []
+        samples[Self.key(accountID: account.id.rawValue, windowID: windowID)] ?? []
     }
 
-    /// The projection for one window, or `.unknown` while the history is too thin to claim one.
     func forecast(for account: AgentAccount, window: AccountUsage.Window) -> UsageForecast.Outcome {
         UsageForecast.project(
             samples: samples(for: account, windowID: window.id),
@@ -90,58 +116,227 @@ final class UsageHistoryStore {
         )
     }
 
-    /// Seeds a window's history from readings recovered elsewhere — Codex writes rate limits
-    /// into its own rollouts, so a fresh install can know the week's shape before it has watched
-    /// any of it.
+    /// Seeds a Codex window from bounded rollout recovery and also joins it to the long journal.
     func seed(_ recovered: [UsageSample], for account: AgentAccount, windowID: String) {
-        let key = "\(account.id)|\(windowID)"
+        let key = Self.key(accountID: account.id.rawValue, windowID: windowID)
         let existing = samples[key] ?? []
-
-        // Anything already observed wins: a live reading is first-hand, and a recovered one is
-        // whatever a rollout happened to record.
         let earliest = existing.first?.at ?? .distantFuture
-        let merged = recovered.filter { $0.at < earliest } + existing
+        let accountName = AccountName.display(for: account)
+        let enriched = recovered
+            .filter { $0.at < earliest }
+            .map {
+                UsageSample(
+                    at: $0.at,
+                    fraction: $0.fraction,
+                    resetsAt: $0.resetsAt,
+                    runtimeID: account.provider.rawValue,
+                    accountID: account.id.rawValue,
+                    accountName: accountName,
+                    windowID: windowID,
+                    windowLabel: windowID,
+                    windowDuration: nil,
+                    source: .codexRollout
+                )
+            }
 
-        samples[key] = prune(merged.sorted { $0.at < $1.at })
-        save()
+        guard !enriched.isEmpty else { return }
+        samples[key] = prune((enriched + existing).sorted { $0.at < $1.at }, now: Date())
+        persist(samples: enriched, resets: [])
+        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
     }
 
-    // MARK: - Private Methods
-
-    /// Drops what is too old to belong to any window still in progress, and caps the series so
-    /// a busy day cannot grow it without bound.
-    private func prune(_ series: [UsageSample]) -> [UsageSample] {
-        let cutoff = Date().addingTimeInterval(-UsageHistoryDefaults.retention)
-        let recent = series.filter { $0.at > cutoff }
-        return Array(recent.suffix(UsageHistoryDefaults.maximumSamples))
+    func snapshot(
+        since: Date,
+        now: Date = Date()
+    ) -> UsageLimitHistorySnapshot {
+        UsageLimitHistorySnapshot(
+            samples: samples.values.flatMap { $0 }.filter { $0.at >= since && $0.at <= now },
+            resets: resetEvents.filter { $0.detectedAt >= since && $0.detectedAt <= now },
+            loadedAt: now
+        )
     }
 
-    private func save() {
-        _ = persistence.save(samples)
+    /// Ensures a caller opening the full dashboard sees the journal load, without forcing app
+    /// launch or compact pill reads to parse up to 250,000 records on the main actor.
+    func loadSnapshot(
+        since: Date,
+        now: Date = Date()
+    ) async -> UsageLimitHistorySnapshot {
+        if !journalLoaded { await bootstrapJournal() }
+        return snapshot(since: since, now: now)
+    }
+
+    func deleteHistory() async {
+        await journal.deleteHistory()
+        samples = [:]
+        resetEvents = []
+        journalLoaded = true
+        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+    }
+
+    private func bootstrapJournal() async {
+        guard !journalLoaded else { return }
+        let task: Task<PreparedJournal, Never>
+        if let journalLoadTask {
+            task = journalLoadTask
+        } else {
+            let journal = journal
+            let includeIdentities = !legacySamples.isEmpty
+            task = Task.detached(priority: .utility) {
+                let snapshot = await journal.load(now: Date())
+                return Self.prepareJournalSnapshot(
+                    snapshot,
+                    includeIdentities: includeIdentities
+                )
+            }
+            journalLoadTask = task
+        }
+        let prepared = await task.value
+
+        // Initialization and the dashboard's first load can arrive together. Claim the result
+        // before the legacy-migration await so only one continuation merges and appends it.
+        guard !journalLoaded else { return }
+        journalLoaded = true
+        journalLoadTask = nil
+
+        merge(prepared)
+        if !legacySamples.isEmpty {
+            let missing = legacySamples.filter {
+                !prepared.sampleIdentities.contains(Self.sampleIdentity($0))
+            }
+            if !missing.isEmpty {
+                try? await journal.append(samples: missing, resets: [], now: Date())
+            }
+        }
+        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+    }
+
+    private func merge(_ prepared: PreparedJournal) {
+        for (key, durable) in prepared.samplesBySeries {
+            let existing = samples[key] ?? []
+            guard !existing.isEmpty else {
+                samples[key] = durable
+                continue
+            }
+
+            var seenDates = Set(existing.map(\.at))
+            let missing = durable.filter { seenDates.insert($0.at).inserted }
+            samples[key] = prune(
+                (existing + missing).sorted { $0.at < $1.at },
+                now: prepared.loadedAt
+            )
+        }
+
+        var ids = Set(resetEvents.map(\.id))
+        for event in prepared.resets where ids.insert(event.id).inserted {
+            resetEvents.append(event)
+        }
+        resetEvents.sort { $0.detectedAt < $1.detectedAt }
+        pruneEvents(now: prepared.loadedAt)
+    }
+
+    private func persist(samples: [UsageSample], resets: [UsageLimitResetEvent]) {
+        guard !samples.isEmpty || !resets.isEmpty else { return }
+        Task { [journal] in
+            try? await journal.append(samples: samples, resets: resets, now: Date())
+        }
+    }
+
+    private func prune(_ series: [UsageSample], now: Date) -> [UsageSample] {
+        let cutoff = now.addingTimeInterval(-UsageHistoryDefaults.retention)
+        return Array(series.lazy.filter { $0.at >= cutoff }.suffix(UsageHistoryDefaults.maximumSamples))
+    }
+
+    private func pruneEvents(now: Date) {
+        let cutoff = now.addingTimeInterval(-UsageHistoryDefaults.retention)
+        resetEvents.removeAll { $0.detectedAt < cutoff }
+    }
+
+    private func sampleSource(
+        for provider: AgentKind,
+        usageSource: AccountUsage.Source
+    ) -> UsageLimitSampleSource {
+        switch (provider, usageSource) {
+        case (.claude, .api): return .claudeAPI
+        case (.claude, .localCache): return .claudeLocalCache
+        case (.codex, _): return .codexAPI
+        case (.grok, _): return .grokRuntime
+        case (.openCode, _): return .openCodeRuntime
+        }
+    }
+
+    private static func key(accountID: String, windowID: String) -> String {
+        "\(accountID)|\(windowID)"
+    }
+
+    nonisolated static func prepareJournalSnapshot(
+        _ snapshot: UsageLimitHistorySnapshot,
+        includeIdentities: Bool
+    ) -> PreparedJournal {
+        var grouped: [String: [UsageSample]] = [:]
+        grouped.reserveCapacity(32)
+        for sample in snapshot.samples {
+            guard let id = sample.limitSeriesID else { continue }
+            grouped[id, default: []].append(sample)
+        }
+        for (id, raw) in grouped {
+            let sorted = raw.sorted { $0.at < $1.at }
+            grouped[id] = Array(sorted.suffix(UsageHistoryDefaults.maximumSamples))
+        }
+        let identities = includeIdentities
+            ? Set(snapshot.samples.map(Self.sampleIdentity))
+            : []
+        return PreparedJournal(
+            samplesBySeries: grouped,
+            resets: snapshot.resets,
+            sampleIdentities: identities,
+            loadedAt: snapshot.loadedAt
+        )
+    }
+
+    private nonisolated static func sampleIdentity(_ sample: UsageSample) -> String {
+        [
+            sample.limitSeriesID ?? "legacy",
+            String(Int64((sample.at.timeIntervalSince1970 * 1_000).rounded())),
+            String(sample.fraction.bitPattern)
+        ].joined(separator: "|")
+    }
+
+    private static func enrichedLegacy(
+        _ values: [String: [UsageSample]]
+    ) -> [String: [UsageSample]] {
+        Dictionary(uniqueKeysWithValues: values.map { key, series in
+            guard let separator = key.lastIndex(of: "|") else { return (key, series) }
+            let accountID = String(key[..<separator])
+            let windowID = String(key[key.index(after: separator)...])
+            let runtimeID = accountID.split(separator: ":", maxSplits: 1).first.map(String.init)
+            let enriched = series.map {
+                UsageSample(
+                    at: $0.at,
+                    fraction: $0.fraction,
+                    resetsAt: $0.resetsAt,
+                    runtimeID: runtimeID,
+                    accountID: accountID,
+                    accountName: accountID,
+                    windowID: windowID,
+                    windowLabel: windowID,
+                    source: runtimeID == AgentKind.codex.rawValue ? .codexRollout : nil
+                )
+            }
+            return (key, enriched)
+        })
     }
 }
 
-// MARK: - Usage History Defaults
+extension Notification.Name {
+    static let usageLimitHistoryDidChange = Notification.Name("usageLimitHistoryDidChange")
+}
 
 enum UsageHistoryDefaults {
-    static let fileName = "usage-history.json"
-
-    /// Longer than the longest window anyone meters on, so a weekly window always has its whole
-    /// span available, and nothing older is kept.
-    static let retention: TimeInterval = 9 * 24 * 3600
-
-    /// Enough for a reading every few minutes across a week.
-    static let maximumSamples = 4000
-
-    /// Movement below this is the same reading again — Claude reports whole percentages, so one
-    /// point is the smallest real change there is.
+    static let legacyFileName = "usage-history.json"
+    static let retention: TimeInterval = TimeInterval(UsageLimitHistoryDefaults.retentionDays) * 86_400
+    static let maximumSamples = UsageLimitHistoryDefaults.retentionDays * 24 * 4
     static let minimumChange = 0.005
-
-    /// Below this many samples, a window has no shape worth projecting from and is worth
-    /// recovering from disk where that is possible.
     static let thinHistory = 8
-
-    /// Recorded even without movement at this spacing, because a window that is *not* moving is
-    /// itself a fact the forecast needs.
     static let forcedInterval: TimeInterval = 15 * 60
 }
