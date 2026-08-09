@@ -127,51 +127,20 @@ final class SessionAttachmentsViewController: NSViewController {
     }()
     private lazy var previewHost: NSView = {
         let host = NSView()
+        host.setAccessibilityIdentifier("attachments.preview-host")
         host.translatesAutoresizingMaskIntoConstraints = false
         host.wantsLayer = true
         return host
     }()
-    private lazy var imageView: ThemedImagePreview = {
-        let image = ThemedImagePreview()
-        image.inspectorSelectionProvider = { [weak self] in
-            guard let self else { return nil }
-            let row = self.tableView.selectedRow
-            guard self.attachments.indices.contains(row) else { return nil }
-            let selectedID = self.attachments[row].id
-            // An allow-list, not "everything but HTML": the inspector's canvas decodes images
-            // and its document view draws PDFs, and a zip paged in between two screenshots
-            // would be a rail slot the inspector can only answer with a blank.
-            let inspectable = self.attachments.filter { $0.kind == .image || $0.kind == .pdf }
-            guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
-                return nil
-            }
-            let items = inspectable.map {
-                MediaInspectorItem(url: $0.url, title: $0.name)
-            }
-            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
-        }
-        image.translatesAutoresizingMaskIntoConstraints = false
-        return image
-    }()
+    private var imageView: ThemedImagePreview?
     /// PDFs, archives and office documents alike: PDFKit for the first, Quick Look for the
     /// rest, both already contained inside the one named system-chrome boundary.
-    private lazy var documentView: MediaInspectorDocumentView = {
-        let document = MediaInspectorDocumentView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        return document
-    }()
+    private var documentView: MediaInspectorDocumentView?
 
     /// The fold between the two panes: the chronology ends here, and what its selected row
     /// holds begins.
     private lazy var listFold = SeparatorView()
-    private lazy var htmlView: WKWebView = {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isHidden = true
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        return webView
-    }()
+    private var htmlView: WKWebView?
     private lazy var previewMessage: NSTextField = {
         let label = NSTextField(wrappingLabelWithString: "")
         label.applyFont(.detail())
@@ -184,14 +153,9 @@ final class SessionAttachmentsViewController: NSViewController {
     /// A diagram's *source*, in the theme's own code face. Text is what these files are —
     /// rendering Graphviz or Mermaid would take an engine the app does not carry — and their
     /// source is short, legible, and exactly what gets dragged into a chat box next.
-    private lazy var sourcePreview: ThemedScrollView = {
-        let scroll = ThemedTextView.scrolling()
-        scroll.isHidden = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        return scroll
-    }()
+    private var sourcePreview: ThemedScrollView?
     private var sourceTextView: ThemedTextView? {
-        sourcePreview.documentView as? ThemedTextView
+        sourcePreview?.documentView as? ThemedTextView
     }
     private lazy var fileLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -414,21 +378,8 @@ final class SessionAttachmentsViewController: NSViewController {
 
     private func setupPreview() {
         view.addSubview(listFold)
-        previewHost.addSubview(imageView)
-        previewHost.addSubview(documentView)
-        previewHost.addSubview(htmlView)
-        previewHost.addSubview(sourcePreview)
         previewHost.addSubview(previewMessage)
         view.addSubview(previewHost)
-
-        if let text = sourceTextView {
-            text.isEditable = false
-            text.applyFont(.previewCode)
-            text.textContainerInset = NSSize(
-                width: Design.Spacing.medium,
-                height: Design.Spacing.medium
-            )
-        }
         applyPreviewTheme()
     }
 
@@ -478,26 +429,6 @@ final class SessionAttachmentsViewController: NSViewController {
                 equalTo: footerBand.topAnchor,
                 constant: -Design.Spacing.small
             ),
-
-            imageView.topAnchor.constraint(equalTo: previewHost.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
-
-            documentView.topAnchor.constraint(equalTo: previewHost.topAnchor),
-            documentView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
-            documentView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            documentView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
-
-            htmlView.topAnchor.constraint(equalTo: previewHost.topAnchor),
-            htmlView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
-            htmlView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            htmlView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
-
-            sourcePreview.topAnchor.constraint(equalTo: previewHost.topAnchor),
-            sourcePreview.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
-            sourcePreview.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            sourcePreview.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
 
             previewMessage.centerXAnchor.constraint(equalTo: previewHost.centerXAnchor),
             previewMessage.centerYAnchor.constraint(equalTo: previewHost.centerYAnchor),
@@ -857,10 +788,8 @@ final class SessionAttachmentsViewController: NSViewController {
                 showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
             }
-            documentView.clear()
-            documentView.isHidden = true
-            clearHTMLPreview()
-            clearSourcePreview()
+            hideInstalledPreviews()
+            let imageView = installedImageView()
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
@@ -870,6 +799,8 @@ final class SessionAttachmentsViewController: NSViewController {
             // contained inside the same named boundary — renders an office document's pages
             // and an archive's icon-and-metadata card, which is what the space bar shows in
             // Finder for the same file.
+            hideInstalledPreviews()
+            let documentView = installedDocumentView()
             guard documentView.display(attachment.url) else {
                 showPreviewMessage(
                     attachment.kind == .pdf
@@ -878,18 +809,11 @@ final class SessionAttachmentsViewController: NSViewController {
                 )
                 return
             }
-            imageView.image = nil
-            imageView.isHidden = true
-            clearHTMLPreview()
-            clearSourcePreview()
             documentView.isHidden = false
 
         case .html:
-            imageView.image = nil
-            imageView.isHidden = true
-            documentView.clear()
-            documentView.isHidden = true
-            clearSourcePreview()
+            hideInstalledPreviews()
+            let htmlView = installedHTMLView()
             htmlView.loadFileURL(
                 attachment.url,
                 allowingReadAccessTo: attachment.url.deletingLastPathComponent()
@@ -904,12 +828,12 @@ final class SessionAttachmentsViewController: NSViewController {
                 showPreviewMessage(L10n.string("This file could not be previewed."))
                 return
             }
-            imageView.image = nil
-            imageView.isHidden = true
-            documentView.clear()
-            documentView.isHidden = true
-            clearHTMLPreview()
-            sourceTextView?.string = String(decoding: data, as: UTF8.self)
+            hideInstalledPreviews()
+            let sourcePreview = installedSourcePreview()
+            (sourcePreview.documentView as? ThemedTextView)?.string = String(
+                decoding: data,
+                as: UTF8.self
+            )
             sourcePreview.isHidden = false
         }
     }
@@ -937,12 +861,7 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func clearPreview() {
-        imageView.image = nil
-        imageView.isHidden = true
-        documentView.clear()
-        documentView.isHidden = true
-        clearHTMLPreview()
-        clearSourcePreview()
+        hideInstalledPreviews()
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
         fileLabel.stringValue = ""
@@ -950,31 +869,111 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func showPreviewMessage(_ message: String) {
-        imageView.image = nil
-        imageView.isHidden = true
-        documentView.clear()
-        documentView.isHidden = true
-        clearHTMLPreview()
-        clearSourcePreview()
+        hideInstalledPreviews()
         previewMessage.stringValue = message
         previewMessage.isHidden = false
     }
 
+    private func installedImageView() -> ThemedImagePreview {
+        if let imageView { return imageView }
+        let image = ThemedImagePreview()
+        image.inspectorSelectionProvider = { [weak self] in
+            guard let self else { return nil }
+            let row = self.tableView.selectedRow
+            guard self.attachments.indices.contains(row) else { return nil }
+            let selectedID = self.attachments[row].id
+            // An allow-list, not "everything but HTML": the inspector's canvas decodes images
+            // and its document view draws PDFs, and a zip paged in between two screenshots
+            // would be a rail slot the inspector can only answer with a blank.
+            let inspectable = self.attachments.filter { $0.kind == .image || $0.kind == .pdf }
+            guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
+                return nil
+            }
+            let items = inspectable.map {
+                MediaInspectorItem(url: $0.url, title: $0.name)
+            }
+            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+        }
+        image.isHidden = true
+        installPreviewSurface(image)
+        imageView = image
+        return image
+    }
+
+    private func installedDocumentView() -> MediaInspectorDocumentView {
+        if let documentView { return documentView }
+        let document = MediaInspectorDocumentView()
+        document.isHidden = true
+        installPreviewSurface(document)
+        document.applyTheme()
+        documentView = document
+        return document
+    }
+
+    private func installedHTMLView() -> WKWebView {
+        if let htmlView { return htmlView }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isHidden = true
+        webView.underPageBackgroundColor = Design.Surface.ground
+        installPreviewSurface(webView)
+        htmlView = webView
+        return webView
+    }
+
+    private func installedSourcePreview() -> ThemedScrollView {
+        if let sourcePreview { return sourcePreview }
+        let scroll = ThemedTextView.scrolling()
+        scroll.isHidden = true
+        if let text = scroll.documentView as? ThemedTextView {
+            text.isEditable = false
+            text.applyFont(.previewCode)
+            text.textContainerInset = NSSize(
+                width: Design.Spacing.medium,
+                height: Design.Spacing.medium
+            )
+        }
+        installPreviewSurface(scroll)
+        sourcePreview = scroll
+        return scroll
+    }
+
+    private func installPreviewSurface(_ surface: NSView) {
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        previewHost.addSubview(surface, positioned: .below, relativeTo: previewMessage)
+        NSLayoutConstraint.activate([
+            surface.topAnchor.constraint(equalTo: previewHost.topAnchor),
+            surface.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
+            surface.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
+        ])
+    }
+
+    private func hideInstalledPreviews() {
+        imageView?.image = nil
+        imageView?.isHidden = true
+        documentView?.clear()
+        documentView?.isHidden = true
+        clearHTMLPreview()
+        clearSourcePreview()
+    }
+
     private func clearSourcePreview() {
         sourceTextView?.string = ""
-        sourcePreview.isHidden = true
+        sourcePreview?.isHidden = true
     }
 
     private func applyPreviewTheme() {
         guard isViewLoaded else { return }
         previewHost.applySurface(fill: Design.Surface.ground, radius: .panel)
-        documentView.applyTheme()
-        htmlView.underPageBackgroundColor = Design.Surface.ground
+        documentView?.applyTheme()
+        htmlView?.underPageBackgroundColor = Design.Surface.ground
     }
 
     private func clearHTMLPreview() {
-        htmlView.stopLoading()
-        htmlView.isHidden = true
+        htmlView?.stopLoading()
+        htmlView?.isHidden = true
     }
 
     private func detail(for attachment: SessionAttachment) -> String {

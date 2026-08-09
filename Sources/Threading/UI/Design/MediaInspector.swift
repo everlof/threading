@@ -985,8 +985,8 @@ final class MediaInspectorCanvas: ThemedControl {
 /// so the exception is explicit and cannot leak to siblings in the inspector.
 final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBoundary {
 
-    private let pdfView = PDFView()
-    private let quickLookView = QLPreviewView(frame: .zero, style: .normal)!
+    private var pdfView: PDFView?
+    private var quickLookView: QLPreviewView?
     private var themeRedraw: ThemeRedraw?
 
     override init(frame frameRect: NSRect) {
@@ -995,13 +995,6 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
         wantsLayer = true
         themeRedraw = ThemeRedraw(self)
 
-        pdfView.autoScales = true
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
-        pdfView.displaysPageBreaks = true
-        quickLookView.autostarts = true
-        addSubview(pdfView)
-        addSubview(quickLookView)
         applyTheme()
     }
 
@@ -1012,8 +1005,8 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
 
     override func layout() {
         super.layout()
-        pdfView.frame = bounds
-        quickLookView.frame = bounds
+        pdfView?.frame = bounds
+        quickLookView?.frame = bounds
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1026,36 +1019,66 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
         clear()
         if url.pathExtension.lowercased() == "pdf" {
             guard let document = PDFDocument(url: url) else { return false }
+            let pdfView = installedPDFView()
             pdfView.document = document
             pdfView.isHidden = false
-            quickLookView.isHidden = true
         } else {
+            let quickLookView = installedQuickLookView()
             quickLookView.previewItem = url as NSURL
             quickLookView.isHidden = false
-            pdfView.isHidden = true
         }
         return true
     }
 
     func clear() {
-        pdfView.document = nil
-        quickLookView.previewItem = nil
-        pdfView.isHidden = true
-        quickLookView.isHidden = true
+        pdfView?.document = nil
+        quickLookView?.previewItem = nil
+        pdfView?.isHidden = true
+        quickLookView?.isHidden = true
     }
 
     func close() {
-        quickLookView.close()
+        quickLookView?.close()
         clear()
     }
 
     func applyTheme() {
-        pdfView.backgroundColor = Design.Surface.panel
+        pdfView?.backgroundColor = Design.Surface.panel
         needsDisplay = true
     }
 
     func permitsSystemChrome(_ view: NSView) -> Bool {
-        belongs(view, to: pdfView) || belongs(view, to: quickLookView)
+        if let pdfView, belongs(view, to: pdfView) { return true }
+        if let quickLookView, belongs(view, to: quickLookView) { return true }
+        return false
+    }
+
+    var hasPDFRendererForTesting: Bool { pdfView != nil }
+    var hasQuickLookRendererForTesting: Bool { quickLookView != nil }
+
+    private func installedPDFView() -> PDFView {
+        if let pdfView { return pdfView }
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.displaysPageBreaks = true
+        view.backgroundColor = Design.Surface.panel
+        view.frame = bounds
+        view.isHidden = true
+        addSubview(view)
+        pdfView = view
+        return view
+    }
+
+    private func installedQuickLookView() -> QLPreviewView {
+        if let quickLookView { return quickLookView }
+        let view = QLPreviewView(frame: bounds, style: .normal)!
+        view.autostarts = true
+        view.isHidden = true
+        addSubview(view)
+        quickLookView = view
+        return view
     }
 
     private func belongs(_ view: NSView, to root: NSView) -> Bool {

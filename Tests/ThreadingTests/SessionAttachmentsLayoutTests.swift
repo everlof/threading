@@ -194,13 +194,15 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
     }
 
     /// The preview well between the fold and the footer — the one surface filled with
-    /// `Design.Surface.ground`, found by the views it hosts.
+    /// `Design.Surface.ground`. Its identity is on the host rather than on whichever format
+    /// renderer happens to have been installed lazily inside it.
     private func previewHost(in view: NSView) throws -> NSView {
-        let image = try XCTUnwrap(
-            descendants(of: view).compactMap { $0 as? ThemedImagePreview }.first,
+        try XCTUnwrap(
+            descendants(of: view).first {
+                $0.accessibilityIdentifier() == "attachments.preview-host"
+            },
             "the pane grew no preview"
         )
-        return try XCTUnwrap(image.superview, "the preview is not hosted")
     }
 
     private func attachmentsTable(in view: NSView) throws -> ThemedTableView {
@@ -332,6 +334,14 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             preview.frame.height,
             600,
             "a document's preview no longer fills the pane"
+        )
+        let document = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first
+        )
+        XCTAssertTrue(document.hasPDFRendererForTesting)
+        XCTAssertFalse(
+            document.hasQuickLookRendererForTesting,
+            "showing a PDF eagerly constructed the unused Quick Look renderer"
         )
     }
 
@@ -549,11 +559,16 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first,
             "the pane grew no document preview"
         )
-        let image = try XCTUnwrap(
-            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first
-        )
         XCTAssertFalse(document.isHidden, "an archive found nothing to preview it")
-        XCTAssertTrue(image.isHidden, "an archive was sent to the image decoder")
+        XCTAssertTrue(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.isEmpty,
+            "an archive initialized the image preview"
+        )
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+        XCTAssertFalse(
+            document.hasPDFRendererForTesting,
+            "showing an archive eagerly constructed the unused PDF renderer"
+        )
 
         let attachment = try XCTUnwrap(
             SessionAttachmentStore.shared.attachments(for: pane.sessionID).first
@@ -589,10 +604,10 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             },
             "an oversized file was not refused with the message"
         )
-        let document = try XCTUnwrap(
-            descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first
+        XCTAssertTrue(
+            descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.isEmpty,
+            "an oversized archive initialized Quick Look before the size gate"
         )
-        XCTAssertTrue(document.isHidden, "an oversized archive still reached Quick Look")
     }
 
     /// Diagram source previews as itself: the pane carries no Graphviz or Mermaid engine, and
@@ -614,10 +629,10 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             try XCTUnwrap(text.enclosingScrollView).isHidden,
             "the source preview is built but not shown"
         )
-        let image = try XCTUnwrap(
-            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first
+        XCTAssertTrue(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.isEmpty,
+            "a diagram initialized the image preview"
         )
-        XCTAssertTrue(image.isHidden, "a diagram was sent to the image decoder")
     }
 
     private func items(in entries: [ThemedMenuEntry]) -> [ThemedMenuItem] {

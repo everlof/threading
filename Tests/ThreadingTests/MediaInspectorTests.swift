@@ -352,6 +352,9 @@ final class MediaInspectorTests: XCTestCase {
         let document = MediaInspectorDocumentView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
         document.layoutSubtreeIfNeeded()
 
+        XCTAssertFalse(document.hasPDFRendererForTesting)
+        XCTAssertFalse(document.hasQuickLookRendererForTesting)
+        XCTAssertTrue(document.subviews.isEmpty, "an unused document host eagerly built a renderer")
         XCTAssertTrue(document.subviews.allSatisfy { document.permitsSystemChrome($0) })
         XCTAssertTrue(ThemeBoundaryAudit.violations(in: document).isEmpty)
     }

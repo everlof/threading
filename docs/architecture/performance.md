@@ -157,7 +157,7 @@ external data reaches eager AppKit work.
 | Medium | Git Review during live resize | Each meaningful width change calls `noteHeightOfRows` for the complete file table so offscreen wrapping estimates and scrollbar extent stay correct. That is correctness-preserving but total-row work at resize frequency; add a large-index live-resize phase before changing it. |
 | Medium | Account settings cold discovery | `AgentAccountDiscovery` is `@MainActor`; an expired cache reads the home directory, login markers and shell aliases synchronously, then Accounts constructs every row. Account counts are normally small, but cold filesystem latency is externally controlled. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
-| High | Attachment preview cold open | The pane constructs image, PDFKit, Quick Look, WebKit and TextKit preview surfaces before it knows the selected file's format. One file costs the same ~209–243 ms cold construction as the 64-file cap; install handlers on first use. |
+| Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
@@ -170,9 +170,9 @@ and cell hosts removing old subviews during reuse is the intended ownership boun
 The stress sweep below replaced that risk-only ordering with measurements. Extension settings were
 the first repair, followed in the outstanding queue by the changed-files card and browser baseline
 library; maximum-contract extension panels are measurable but smaller. Archived settings remains
-the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open is the newest
-measured high-priority case and already has a specific boundary: install only the selected format's
-handler. Git Review resize and Account discovery still need a focused measurement before a rewrite;
+the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
+at both lazy boundaries: the pane installs one format surface, then the document surface installs
+PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement before a rewrite;
 their correctness/caching constraints make an unmeasured "optimization" more likely to move the
 cost or show stale data than remove it.
 
@@ -628,7 +628,7 @@ its display bundle asynchronously, so each fresh-process workload retains its of
 until process exit; immediately destroying or closing an activation-pending `QLPreviewView` tests
 an unsupported XCTest teardown race rather than the pane.
 
-A Debug sweep on 2026-08-09 measured:
+The pre-fix Debug sweep on 2026-08-09 measured:
 
 | Format | Source bytes, 64 files | Cold pane construction | First all-row pass | Reverse warm pass | Footprint delta |
 |---|---:|---:|---:|---:|---:|
@@ -640,15 +640,18 @@ A Debug sweep on 2026-08-09 measured:
 | Diagram | 32.0 MB | 230.8 ms | 90.1 ms | 101.3 ms | 12.9 MB |
 | Mixed | 5.9 MB | 188.0 ms | 82.3 ms | 49.7 ms | 12.9 MB |
 
-The scaling bounds work: even the 32 MB aggregate diagram edge is roughly 1.5 ms per selection,
-and the PDF decoder is the only 64-file pass over 100 ms. The cold result exposes a different
+The scaling bounds worked: even the 32 MB aggregate diagram edge was roughly 1.5 ms per selection,
+and the PDF decoder was the only 64-file pass over 100 ms. The cold result exposed a different
 problem. One-file controls measured the same 209–243 ms construction band as 64 files, independent
-of whether the selected file was an image, PDF, HTML document or diagram. `setupPreview()` eagerly
-constructs all five hidden preview surfaces — including PDFKit, Quick Look and WebKit — before it
-knows which handler the selected file needs. Hidden content is not lazy merely because it is
-hidden. The next attachment optimization is to install the selected handler on demand and retain
-only handlers that have actually been used; file-count virtualization or faster format detection
-will not move this cold cost.
+of whether the selected file was an image, PDF, HTML document or diagram. Hidden content is not
+lazy merely because it is hidden.
+
+That finding is now repaired. The pane installs only the selected image, document, WebKit or
+TextKit surface and retains surfaces that have actually been used. The document surface applies
+the same boundary again, installing PDFKit for a PDF or Quick Look for other documents without
+constructing its unused sibling. Layout tests pin both halves of that contract. The table remains
+the pre-fix baseline that motivated the change; rerun `attachment-format-stress` before claiming a
+new cold-open budget.
 
 ## Whole-window resize stress target
 
