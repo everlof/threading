@@ -151,3 +151,6 @@ __pycache__/
 /docs/references/chrome/.cache/
 /docs/references/chrome/.generated/
 tmp
+
+# Agent-specific permissions and paths are local state. Shared guidance lives in CLAUDE.md.
+/.claude/settings.local.json

@@ -77,7 +77,7 @@ Start with:
 - `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`
 - `docs/extensions/SANDBOX_RUNNER.md`
 - `docs/extensions/AUTHORING_FLOW.md`
-- `ThreadingExtensionKit/README.md`
+- `Packages/ThreadingExtensionKit/README.md`
 
 ## Important architecture boundaries
 
@@ -176,8 +176,8 @@ code that suffers from it:
 
 Relevant files:
 
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostDescriptorTransport.swift`
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostDescriptorTransport.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
 - `Sources/Threading/Core/Extensions/ExtensionHostDescriptorConnection.swift`
 - `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 
@@ -289,7 +289,7 @@ collapsed, in the note.
 
 ### The helper exists, and it works
 
-`Helper/` is a small target of its own: `main.swift` validates and `execve`s, and it shares
+`Targets/ExtensionHelper/` is a small target of its own: `main.swift` validates and `execve`s, and it shares
 `ExtensionRunnerRequest.swift` with the app. Two Xcode command-line-tool targets build it —
 `ThreadingExtensionHelper` and `ThreadingExtensionHelperNetwork`, differing only in
 `com.apple.security.network.client` — and the app embeds both into `Contents/Helpers` with
@@ -351,8 +351,8 @@ work is replacing deprecated `sandbox-exec` without promoting the helper's weake
 
 Relevant files:
 
-- `Helper/main.swift`, `Helper/ExtensionRunnerRequest.swift`
-- `Helper/threading-extension-helper*.entitlements`, `Helper/Info*.plist`
+- `Targets/ExtensionHelper/main.swift`, `Targets/ExtensionHelper/ExtensionRunnerRequest.swift`
+- `Targets/ExtensionHelper/threading-extension-helper*.entitlements`, `Targets/ExtensionHelper/Info*.plist`
 - `Sources/Threading/Core/Extensions/HelperLaunchPolicy.swift`
 - `Sources/Threading/Core/Extensions/ExtensionChildSpawner.swift`
 
@@ -365,9 +365,9 @@ blocking-store test proves a slow extension-controlled cache operation cannot pi
 
 Relevant files:
 
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionKeyValueBroker.swift`
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionCacheBroker.swift`
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionStorage.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionKeyValueBroker.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionCacheBroker.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionStorage.swift`
 - `Sources/Threading/Core/Extensions/ExtensionStorageStore.swift`
 - `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 
@@ -381,7 +381,7 @@ visible placement can still be dispatched by its assigned shortcut.
 
 Relevant files:
 
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionContributions.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionContributions.swift`
 - `Sources/Threading/App/AppDelegate.swift`
 - `Sources/Threading/Core/Settings/ExtensionCommandMenuLayout.swift`
 - `Sources/Threading/Core/Settings/CommandRegistry.swift`
@@ -406,8 +406,8 @@ Important properties:
 
 Relevant files:
 
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionSecrets.swift`
-- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionSecrets.swift`
+- `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
 - `Sources/Threading/Core/Extensions/ExtensionSecretStore.swift`
 - `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 - `docs/extensions/schema/extension-secrets.schema.json`
@@ -421,14 +421,14 @@ not receive access to the generation's exact loopback port. Both `services.consu
 The following was green after the latest changes:
 
 ```bash
-swift test --package-path ThreadingExtensionKit
+swift test --package-path Packages/ThreadingExtensionKit
 # 46 tests, 0 failures
 
 xcodebuild -project Threading.xcodeproj -scheme Threading \
   -destination 'platform=macOS' test
 # 1038 tests, 2 intentionally skipped, 0 failures
 
-swift run --package-path ThreadingExtensionKit \
+swift run --package-path Packages/ThreadingExtensionKit \
   ThreadingComponentCatalogGenerator --check docs/extensions/generated
 # Component catalogue is up to date.
 

@@ -43,10 +43,11 @@ Screen Recording and Accessibility for a directly supervised child to Threading,
 preflights and requests those two grants only when the companion declared their capabilities.
 
 ```bash
-swift build --package-path ThreadingExtensionKit
-swift test --package-path ThreadingExtensionKit
-swift run --package-path ThreadingExtensionKit HelloStatusExtensionExample --threading-register
-swift run --package-path ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
+# From the ThreadingExtensionKit package directory, wherever the SDK snapshot lives:
+swift build
+swift test
+swift run HelloStatusExtensionExample --threading-register
+swift run HelloStatusConsumerExtensionExample --threading-register
 ```
 
 Threading links this package, renders `ExtensionNode` through its own AppKit design system, and

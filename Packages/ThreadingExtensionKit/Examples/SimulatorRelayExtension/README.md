@@ -43,7 +43,7 @@ before starting it; the companion defensively preflights them again before captu
 With a Simulator window open:
 
 ```bash
-xcodebuild -project ../../../Threading.xcodeproj -scheme Threading \
+xcodebuild -project ../../../../Threading.xcodeproj -scheme Threading \
   -destination 'platform=macOS' test \
   DEVELOPMENT_TEAM=SMQ3E8Y57T CODE_SIGN_IDENTITY='Apple Development' \
   -only-testing:ThreadingTests/ExtensionBundleLoaderTests/testSimulatorRelayDogfoodProducesARealFrameAndAcceptsInput

@@ -16,12 +16,12 @@ accessibility, focus, motion, component state, and future visual changes.
 
 The first vertical slice exists:
 
-- [`ThreadingExtensionKit`](../../ThreadingExtensionKit) defines manifests, capabilities,
+- [`ThreadingExtensionKit`](../../Packages/ThreadingExtensionKit) defines manifests, capabilities,
   contributions, and the initial declarative UI nodes.
-- [`ThreadingExtensionPolicyPlugin`](../../ThreadingExtensionKit/Plugins/ThreadingExtensionPolicyPlugin)
+- [`ThreadingExtensionPolicyPlugin`](../../Packages/ThreadingExtensionKit/Plugins/ThreadingExtensionPolicyPlugin)
   fails the supported safe-extension build when source imports AppKit or SwiftUI.
-- [`HelloStatusExtension`](../../ThreadingExtensionKit/Examples/HelloStatusExtension) is the
-  compiling provider reference; [`HelloStatusConsumerExtension`](../../ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
+- [`HelloStatusExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusExtension) is the
+  compiling provider reference; [`HelloStatusConsumerExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
   is the matching service consumer.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
@@ -472,7 +472,7 @@ Source-only packages remain a developer workflow: normal installation never depe
 compatible Swift toolchain.
 
 An outside project consumes a **vendored, versioned snapshot** of `ThreadingExtensionKit` through
-`.package(path: "Vendor/ThreadingExtensionKit")`. `ThreadingExtensionKit/SDK_VERSION` identifies the
+`.package(path: "Vendor/ThreadingExtensionKit")`. `Packages/ThreadingExtensionKit/SDK_VERSION` identifies the
 snapshot. This avoids an absolute path into the Threading checkout, a floating dependency, and a
 network fetch during rebuild. Every app build embeds the filtered snapshot at
 `Contents/Resources/ExtensionSDK/ThreadingExtensionKit` and the matching public authoring contract
@@ -480,6 +480,11 @@ at `Contents/Resources/ExtensionSDK/docs/extensions`. The scaffold flow preserve
 layout under `Vendor/`, making the SDK README links valid and retaining the complete docs,
 schemas, generated component catalogue, and checklist inside packaged `Source/`. Local `.build`
 and `Build` artifacts are excluded from the app snapshot.
+
+`Packages/docs` is intentionally a symlink to the repository's root `docs` directory. It keeps
+the SDK README's `../docs/extensions` links valid in all three supported layouts: this checkout,
+the app bundle's `ExtensionSDK`, and a scaffolded project's `Vendor` directory. Do not flatten or
+rewrite those package-relative links without changing all three layouts together.
 
 Import follows a strict sequence:
 
@@ -645,7 +650,7 @@ any Threading host-data authority.
 ## Repository layout
 
 ```text
-ThreadingExtensionKit/
+Packages/ThreadingExtensionKit/
 ├── Package.swift
 ├── Sources/ThreadingExtensionKit/
 ├── Plugins/ThreadingExtensionPolicyPlugin/
@@ -686,12 +691,12 @@ docs/extensions/
 From the repository root:
 
 ```bash
-swift build --package-path ThreadingExtensionKit
-swift test --package-path ThreadingExtensionKit
-swift run --package-path ThreadingExtensionKit HelloStatusExtensionExample --threading-register
-swift run --package-path ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
-swift run --package-path ThreadingExtensionKit SessionInfoExtensionExample --threading-register
-swift run --package-path ThreadingExtensionKit ThreadingComponentCatalogGenerator \
+swift build --package-path Packages/ThreadingExtensionKit
+swift test --package-path Packages/ThreadingExtensionKit
+swift run --package-path Packages/ThreadingExtensionKit HelloStatusExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated
 ```
 
@@ -710,7 +715,7 @@ the same language version. Verify that the selected Swift.org binary can see an 
 SWIFT_ORG=/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/swift
 "$SWIFT_ORG" sdk list
 "$SWIFT_ORG" build --disable-sandbox \
-  --package-path ThreadingExtensionKit \
+  --package-path Packages/ThreadingExtensionKit \
   --swift-sdk swift-6.3.2-RELEASE_wasm \
   --product HelloStatusExtensionExample
 ```
@@ -719,15 +724,15 @@ Use the exact SDK identifier printed by `sdk list`; it is intentionally not infe
 assemble the directory the manifest describes:
 
 ```bash
-WASM_BIN=ThreadingExtensionKit/.build/wasm32-unknown-wasip1/debug
+WASM_BIN=Packages/ThreadingExtensionKit/.build/wasm32-unknown-wasip1/debug
 mkdir -p /tmp/HelloStatusExtension/bin
-cp ThreadingExtensionKit/Examples/HelloStatusExtension/threading-extension.json \
+cp Packages/ThreadingExtensionKit/Examples/HelloStatusExtension/threading-extension.json \
   /tmp/HelloStatusExtension/
 cp "$WASM_BIN/HelloStatusExtensionExample.wasm" \
   /tmp/HelloStatusExtension/bin/hello-status.wasm
 mkdir -p /tmp/HelloStatusExtension/Source
 rsync -a --exclude .build --exclude .git --exclude .swiftpm \
-  ThreadingExtensionKit/ /tmp/HelloStatusExtension/Source/
+  Packages/ThreadingExtensionKit/ /tmp/HelloStatusExtension/Source/
 ```
 
 For a direct development run, open **Component Gallery**, find **Extension rendering**, choose

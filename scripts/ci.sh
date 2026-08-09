@@ -28,7 +28,7 @@ swiftlint lint \
 
 for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime; do
     say "Testing ${package}"
-    swift test --package-path "${repository_directory}/${package}"
+    swift test --package-path "${repository_directory}/Packages/${package}"
 done
 
 say "Testing Threading (off-screen plan, complete concurrency checking)"

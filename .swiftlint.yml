@@ -11,7 +11,7 @@
 # warning nobody reads is worse than no warning at all.
 #
 # This remains deliberately fast editor feedback. The canonical, syntax-aware policy is
-# `config/theme-boundary.json`, enforced by `scripts/check_theme_boundaries.sh` in the Xcode
+# `scripts/config/theme-boundary.json`, enforced by `scripts/check_theme_boundaries.sh` in the Xcode
 # build and test suite. The SwiftLint expressions need not carry exceptions because the
 # canonical checker is what decides whether a boundary use is legitimate.
 

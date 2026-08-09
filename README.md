@@ -38,8 +38,10 @@ scripts/test.sh          # fast: everything that keeps windows off screen
 scripts/test.sh all      # the whole suite
 ```
 
-Targets macOS 13+. The submodules (`ThinkingOrbs`, `LabelMorph`, `BorderBeamKit`) are cloned
-with `git clone --recurse-submodules`; SwiftTerm is vendored in-tree.
+Targets macOS 13+. The submodules under `Packages/Vendor/` (`ThinkingOrbs`, `LabelMorph`, and
+`BorderBeamKit`) are cloned with `git clone --recurse-submodules`; SwiftTerm is vendored beside
+them. First-party Swift packages live directly under `Packages/`, and auxiliary executables live
+under `Targets/`.
 
 ## Documentation
 
@@ -53,9 +55,10 @@ with `git clone --recurse-submodules`; SwiftTerm is vendored in-tree.
 The repository is licensed under the **GNU GPLv3** (see [`LICENSE`](LICENSE)), with these
 carve-outs, each under its own terms:
 
-- `SwiftTerm/` — a vendored fork of [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm),
+- `Packages/Vendor/SwiftTerm/` — a vendored fork of [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm),
   MIT (its `LICENSE` file governs that tree).
-- `ThinkingOrbs/`, `LabelMorph/`, `BorderBeamKit/` — submodule forks, each MIT under its own
+- `Packages/Vendor/ThinkingOrbs/`, `Packages/Vendor/LabelMorph/`, and
+  `Packages/Vendor/BorderBeamKit/` — submodule forks, each MIT under its own
   `LICENSE`.
 - `Sources/Threading/Resources/Fonts/` — open-licensed fallback fonts; provenance and license
   per family in its `*-SOURCE.md`.

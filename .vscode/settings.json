@@ -1,5 +1,5 @@
 {
-  "// note": "This repo vendors the SwiftTerm fork and edits it in place. Auto-formatting on save (esp. trailing-whitespace trimming) rewrites whole upstream files on a one-line change, so it is disabled for this workspace. Your global Cursor settings are unaffected.",
+  "// note": "This repo vendors the SwiftTerm fork under Packages/Vendor and edits it in place. Auto-formatting on save (esp. trailing-whitespace trimming) rewrites whole upstream files on a one-line change, so it is disabled for this workspace. Your global Cursor settings are unaffected.",
 
   "files.trimTrailingWhitespace": false,
   "files.insertFinalNewline": false,

@@ -5,7 +5,7 @@ import AppKit
 /// "Custom time…": a day, a time, and the one sentence that keeps both honest.
 ///
 /// Two pop-ups rather than a calendar widget, which is what the reference does and what the
-/// theme boundary requires anyway — `NSDatePicker` is banned by `config/theme-boundary.json`, and
+/// theme boundary requires anyway — `NSDatePicker` is banned by `scripts/config/theme-boundary.json`, and
 /// a picker whose bezel came from the system would sit in a Swiss Minimalist sheet looking like a
 /// form field somebody forgot.
 ///

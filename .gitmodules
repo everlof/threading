@@ -1,9 +1,9 @@
 [submodule "ThinkingOrbs"]
-	path = ThinkingOrbs
+	path = Packages/Vendor/ThinkingOrbs
 	url = https://github.com/everlof/thinking-orbs-swift
 [submodule "LabelMorph"]
-	path = LabelMorph
+	path = Packages/Vendor/LabelMorph
 	url = https://github.com/everlof/LabelMorph.git
 [submodule "BorderBeamKit"]
-	path = BorderBeamKit
+	path = Packages/Vendor/BorderBeamKit
 	url = ./BorderBeamKit

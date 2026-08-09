@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-policy="$repo_root/config/theme-boundary.json"
+policy="$repo_root/scripts/config/theme-boundary.json"
 source_file="$script_dir/theme_boundary_lint.swift"
 
 swiftc_path="$(xcrun --find swiftc)"

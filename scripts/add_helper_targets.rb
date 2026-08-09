@@ -10,20 +10,20 @@ HELPERS = [
   {
     name: 'ThreadingExtensionHelper',
     product: 'threading-extension-helper',
-    plist: 'Helper/Info.plist',
-    entitlements: 'Helper/threading-extension-helper.entitlements',
+    plist: 'Targets/ExtensionHelper/Info.plist',
+    entitlements: 'Targets/ExtensionHelper/threading-extension-helper.entitlements',
     bundle_id: 'codes.threading.extension-helper'
   },
   {
     name: 'ThreadingExtensionHelperNetwork',
     product: 'threading-extension-helper-network',
-    plist: 'Helper/Info-network.plist',
-    entitlements: 'Helper/threading-extension-helper-network.entitlements',
+    plist: 'Targets/ExtensionHelper/Info-network.plist',
+    entitlements: 'Targets/ExtensionHelper/threading-extension-helper-network.entitlements',
     bundle_id: 'codes.threading.extension-helper-network'
   }
 ]
-SHARED_SOURCE = 'Helper/ExtensionRunnerRequest.swift'
-HELPER_MAIN = 'Helper/main.swift'
+SHARED_SOURCE = 'Targets/ExtensionHelper/ExtensionRunnerRequest.swift'
+HELPER_MAIN = 'Targets/ExtensionHelper/main.swift'
 EMBED_PHASE_NAME = 'Embed Extension Helpers'
 
 project = Xcodeproj::Project.open(PROJECT)
@@ -39,13 +39,13 @@ end
 app.build_phases.select { |ph|
   ph.is_a?(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase) && ph.name == EMBED_PHASE_NAME
 }.each { |ph| app.build_phases.delete(ph); ph.remove_from_project }
-if (group = project.main_group['Helper'])
+if (group = project.main_group['Extension Helper'])
   group.recursive_children.each(&:remove_from_project)
   group.remove_from_project
 end
 
-# --- The Helper group -------------------------------------------------------------------
-group = project.main_group.new_group('Helper', 'Helper')
+# --- The Extension Helper group ---------------------------------------------------------
+group = project.main_group.new_group('Extension Helper', 'Targets/ExtensionHelper')
 shared_ref = group.new_reference(File.basename(SHARED_SOURCE))
 main_ref = group.new_reference(File.basename(HELPER_MAIN))
 HELPERS.each do |helper|

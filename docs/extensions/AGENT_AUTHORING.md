@@ -19,9 +19,9 @@ literally. Do not infer APIs from Threading's application source.
 8. Read [`schema/extension-host-data.schema.json`](schema/extension-host-data.schema.json) when
    reading host snapshots or events.
 9. Use
-   [`ThreadingExtensionKit/Examples/HelloStatusExtension`](../../ThreadingExtensionKit/Examples/HelloStatusExtension)
+   [`Packages/ThreadingExtensionKit/Examples/HelloStatusExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusExtension)
    as the provider template and
-   [`HelloStatusConsumerExtension`](../../ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
+   [`HelloStatusConsumerExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
    as the consumer template.
 10. Do not copy types from `Sources/Threading`.
 
@@ -313,7 +313,7 @@ The socket is the authority and is inherited only by that supervised generation.
 reload, update, core failure, companion failure, and panel close tear it down. Never pass view,
 layer, Metal, IOSurface, accessibility, or system-event objects across this boundary.
 
-See `ThreadingExtensionKit/Examples/SimulatorRelayExtension` for a complete source-bundled
+See `Packages/ThreadingExtensionKit/Examples/SimulatorRelayExtension` for a complete source-bundled
 reference. It uses no Simulator-specific host API: the core declares a panel and the companion
 composes generic process launch, window capture, normalized input, and remote frames.
 
@@ -1115,7 +1115,7 @@ fallback used when no active account reading exists. The host owns the `MTKView`
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB and frame rate to 60 fps.
 
-Use `ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
+Use `Packages/ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
 Never import Metal, MetalKit, AppKit or SwiftUI in extension Swift source.
 
 Buttons in a selected full-content replacement arrive as

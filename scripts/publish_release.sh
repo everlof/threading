@@ -7,7 +7,8 @@
 # whichever release is newest, which is why the appcast is uploaded *beside* each zip.
 #
 # This script never pushes. `submodule.recurse` is true in this repo, so a push from here
-# recurses into the LabelMorph/ThinkingOrbs forks and publishes them (see CLAUDE.md); the tag
+# recurses into the Packages/Vendor/LabelMorph and Packages/Vendor/ThinkingOrbs forks and
+# publishes them (see CLAUDE.md); the tag
 # is pushed by hand, and this script only verifies the remote already has it, exactly where
 # HEAD is. Run:
 #   git tag -a v0.1.0 -m "Threading 0.1.0"

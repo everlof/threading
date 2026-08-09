@@ -227,7 +227,9 @@ final class ExtensionAppearanceTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("ThreadingExtensionKit/Examples/StormThemeExtension")
+            .appendingPathComponent(
+                "Packages/ThreadingExtensionKit/Examples/StormThemeExtension"
+            )
 
         let manifestData = try Data(
             contentsOf: root.appendingPathComponent("threading-extension.json")

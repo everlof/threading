@@ -395,7 +395,7 @@ struct RemoteGitReviewView: View {
             repositoryFiles = RemoteRepositoryFilesDTO(paths: [
                 "AGENTS.md",
                 "README.md",
-                "ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
+                "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
                 "Sources/ThreadingMobile/RemoteGitReviewView.swift",
                 "Sources/ThreadingMobile/SessionDetailView.swift",
             ])
@@ -505,7 +505,7 @@ struct RemoteGitReviewView: View {
             removed: 12
         )
         let second = RemoteGitFileDiffDTO(
-            path: "ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
+            path: "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
             change: "modified",
             hunks: [
                 RemoteGitHunkDTO(

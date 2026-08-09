@@ -365,9 +365,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		7A0000010000000000000011 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift; sourceTree = SOURCE_ROOT; };
-		7A0000010000000000000012 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
-		7A0000010000000000000013 /* threading-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = WasmRunner/threading-wasm-extension-runner.entitlements; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000011 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000012 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Targets/WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000013 /* threading-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Targets/WasmRunner/threading-wasm-extension-runner.entitlements; sourceTree = SOURCE_ROOT; };
 		7A0000010000000000000014 /* ThreadingWasmExtensionRunner */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingWasmExtensionRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HookLifecycleTests.swift; sourceTree = "<group>"; };
 		06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyTests.swift; sourceTree = "<group>"; };
@@ -1081,7 +1081,7 @@
 			name = "OS X";
 			sourceTree = "<group>";
 		};
-		DEBA3EC0E0E1A6C00C62BAE7 /* Helper */ = {
+		DEBA3EC0E0E1A6C00C62BAE7 /* Extension Helper */ = {
 			isa = PBXGroup;
 			children = (
 				09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */,
@@ -1091,8 +1091,8 @@
 				19157F0EEE4BA2AFB5105E44 /* Info-network.plist */,
 				F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */,
 			);
-			name = Helper;
-			path = Helper;
+			name = "Extension Helper";
+			path = Targets/ExtensionHelper;
 			sourceTree = "<group>";
 		};
 		F5000001000000000000001 = {
@@ -1107,7 +1107,7 @@
 				B1792448FB880E01F5D9086C /* Tests */,
 				B2000001000000000000000F /* Mobile Tests */,
 				D2E00001000000000000000E /* Notification E2E Tests */,
-				DEBA3EC0E0E1A6C00C62BAE7 /* Helper */,
+				DEBA3EC0E0E1A6C00C62BAE7 /* Extension Helper */,
 				7A0000010000000000000041 /* Wasm Runner */,
 			);
 			sourceTree = "<group>";
@@ -1440,7 +1440,7 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/ThreadingExtensionKit",
+				"$(SRCROOT)/Packages/ThreadingExtensionKit",
 				"$(SRCROOT)/scripts/embed_extension_sdk.sh",
 			);
 			name = "Embed Extension SDK";
@@ -1463,7 +1463,7 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Sources",
-				"$(SRCROOT)/config/theme-boundary.json",
+				"$(SRCROOT)/scripts/config/theme-boundary.json",
 				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
 				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
 				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
@@ -1852,7 +1852,7 @@
 		7A0000010000000000000081 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = WasmRunner/threading-wasm-extension-runner.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Targets/WasmRunner/threading-wasm-extension-runner.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1865,7 +1865,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/WasmRunner/Info.plist",
+					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.wasm-extension-runner;
 				PRODUCT_NAME = "threading-wasm-extension-runner";
@@ -1878,7 +1878,7 @@
 		7A0000010000000000000082 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = WasmRunner/threading-wasm-extension-runner.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Targets/WasmRunner/threading-wasm-extension-runner.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1891,7 +1891,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/WasmRunner/Info.plist",
+					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.wasm-extension-runner;
 				PRODUCT_NAME = "threading-wasm-extension-runner";
@@ -1904,7 +1904,7 @@
 		0F5B132AD8A070E729F93431 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper-network.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -1912,7 +1912,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info-network.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
 				PRODUCT_NAME = "threading-extension-helper-network";
@@ -1925,7 +1925,7 @@
 		39E37C55A3E2219555956D29 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -1933,7 +1933,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
 				PRODUCT_NAME = "threading-extension-helper";
@@ -1946,7 +1946,7 @@
 		3DB3C9B15199B2029009DFDF /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -1954,7 +1954,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
 				PRODUCT_NAME = "threading-extension-helper";
@@ -1967,7 +1967,7 @@
 		42E68C88D65AA8EAE7E7206F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper-network.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1976,7 +1976,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info-network.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
 				PRODUCT_NAME = "threading-extension-helper-network";
@@ -1989,7 +1989,7 @@
 		4D581B8242E06AB691820CF1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper-network.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1998,7 +1998,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info-network.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
 				PRODUCT_NAME = "threading-extension-helper-network";
@@ -2033,7 +2033,7 @@
 		7A66E846FFEEFD7F918F9A8D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper-network.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -2041,7 +2041,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info-network.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
 				PRODUCT_NAME = "threading-extension-helper-network";
@@ -2120,7 +2120,7 @@
 		D3203469E1C36D64E4761E9D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -2129,7 +2129,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
 				PRODUCT_NAME = "threading-extension-helper";
@@ -2142,7 +2142,7 @@
 		D7A6EB9391AC48FF393D7B6F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Helper/threading-extension-helper.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -2151,7 +2151,7 @@
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Helper/Info.plist",
+					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
 				PRODUCT_NAME = "threading-extension-helper";
@@ -2613,31 +2613,31 @@
 /* Begin XCLocalSwiftPackageReference section */
 		F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = SwiftTerm;
+			relativePath = Packages/Vendor/SwiftTerm;
 		};
 		F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ThinkingOrbs;
+			relativePath = Packages/Vendor/ThinkingOrbs;
 		};
 		F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = LabelMorph;
+			relativePath = Packages/Vendor/LabelMorph;
 		};
 		F4000001000000000000012 /* XCLocalSwiftPackageReference "BorderBeamKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = BorderBeamKit;
+			relativePath = Packages/Vendor/BorderBeamKit;
 		};
 		F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ThreadingExtensionKit;
+			relativePath = Packages/ThreadingExtensionKit;
 		};
 		F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ThreadingRemoteKit;
+			relativePath = Packages/ThreadingRemoteKit;
 		};
 		7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ThreadingWasmRuntime;
+			relativePath = Packages/ThreadingWasmRuntime;
 		};
 /* End XCLocalSwiftPackageReference section */
 

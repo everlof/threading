@@ -20,7 +20,7 @@ submission: iOS suspends sockets and either endpoint can disappear after committ
 
 ## Public wire contract
 
-`ThreadingRemoteKit/PublicIssueReporting.swift` is the native contract. The hosted endpoint
+`Packages/ThreadingRemoteKit/PublicIssueReporting.swift` is the native contract. The hosted endpoint
 revalidates every field independently because public input is untrusted.
 
 - The description is required and capped at 10 KiB.

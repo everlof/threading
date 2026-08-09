@@ -6,7 +6,7 @@ ours.
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
-  - Location: `./SwiftTerm/` (vendored source in the main repository, not a git submodule)
+  - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
@@ -124,7 +124,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
   conversation status while a turn is in flight.
-  - Location: `./ThinkingOrbs/` (git submodule), referenced as a local Swift package through
+  - Location: `./Packages/Vendor/ThinkingOrbs/` (git submodule), referenced as a local Swift package through
     `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`.
   - Upstream: https://github.com/everlof/thinking-orbs-swift — **our fork**, mod it directly.
   - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
@@ -144,7 +144,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **LabelMorph** (local fork): the single-line label that morphs a name character by
   character when it changes, used for every session, project and checkout name the app shows.
-  - Location: `./LabelMorph/` (git submodule), a local Swift package like the other two.
+  - Location: `./Packages/Vendor/LabelMorph/` (git submodule), a local Swift package like the other two.
   - Upstream: https://github.com/everlof/LabelMorph — **our fork**, mod it directly.
   - `MorphingTitleLabel` (in `UI/Design/`) is the theme boundary: the package owns glyph
     layout and animation, the wrapper owns the semantic ink, Reduce Motion, clipping,
@@ -219,7 +219,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **BorderBeamKit** (local fork): the breathing agent-activity ring over both composers,
   extracted from the author's own verified SwiftUI port.
-  - Location: `./BorderBeamKit/` (git submodule), a local Swift package like the other two.
+  - Location: `./Packages/Vendor/BorderBeamKit/` (git submodule), a local Swift package like the other two.
   - Upstream: https://github.com/Jakubantalik/border-beam — the `ports/ios/BorderBeamKit`
     tree of the MIT-licensed web library, extracted into a standalone package with a macOS
     demo app (`Demo/run.sh`) replicating the site's playground. **Ours to modify directly.**

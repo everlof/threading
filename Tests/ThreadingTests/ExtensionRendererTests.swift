@@ -2819,7 +2819,7 @@ final class ExtensionRendererTests: XCTestCase {
       .deletingLastPathComponent()
       .deletingLastPathComponent()
     let sourceURL = repository.appendingPathComponent(
-      "ThreadingExtensionKit/Examples/RainWindowExtension/Resources/usage-rain.metal"
+      "Packages/ThreadingExtensionKit/Examples/RainWindowExtension/Resources/usage-rain.metal"
     )
     let source = try String(contentsOf: sourceURL, encoding: .utf8)
     let specification = ExtensionMetalSurface(
@@ -2851,7 +2851,7 @@ final class ExtensionRendererTests: XCTestCase {
       .deletingLastPathComponent()
     let source = try String(
       contentsOf: repository.appendingPathComponent(
-        "ThreadingExtensionKit/Examples/RainWindowExtension/Resources/usage-rain.metal"
+        "Packages/ThreadingExtensionKit/Examples/RainWindowExtension/Resources/usage-rain.metal"
       ),
       encoding: .utf8
     )

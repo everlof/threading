@@ -409,7 +409,7 @@ outage a versioning scheme exists to prevent. So the apps' marketing versions st
 (the iOS app already keeps its own numbering, and does not ship through Sparkle), and
 compatibility hangs on one number pair instead:
 `RemoteProtocol.current` / `RemoteProtocol.minimumSupported`
-(`ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteProtocol.swift`). Both ends carry the
+(`Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteProtocol.swift`). Both ends carry the
 pair compiled in, exchange it at the handshake, and a mismatch produces a directional "update
 the Mac app" / "update this app" sentence (`RemoteUpdateTarget`), never a decode failure three
 frames later. The protocol integer is the semver *major* of this relationship; nothing else is.

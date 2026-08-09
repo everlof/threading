@@ -238,7 +238,7 @@ to see. The bytes go through `ProjectIconStore.normalizedPNGData` first — the 
 every untrusted image passes — which is why that function grew a `maxPixelSize` parameter rather
 than a second copy at icon scale.
 
-`ThreadingExtensionKit/Examples/StormThemeExtension` is the worked example, and
+`Packages/ThreadingExtensionKit/Examples/StormThemeExtension` is the worked example, and
 `ExtensionAppearanceTests.testTheShippedStormExampleIsValid` pins it: the manifest validates, the
 theme document decodes and passes `AppThemeEditing.validate`, and the mark clears both gates
 `inspectThemeIconMark` applies. It cannot be inspected as a package — the examples ship source

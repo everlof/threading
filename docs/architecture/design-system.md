@@ -403,7 +403,7 @@ slider arrives through a themed wrapper rather than establishing stock. Layout t
 (`NSView`, `NSStackView`, `NSGridView`), labels, chromeless `NSImageView` and genuinely system
 workflows (native application/context menus and file panels) stay allowed — they draw nothing
 the theme owns. App-owned popovers and alerts do not: `ThemedPopover` and `ThemedAlert` own those
-surfaces. `config/theme-boundary.json` owns the list; the build and test suite both run
+surfaces. `scripts/config/theme-boundary.json` owns the list; the build and test suite both run
 its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
 wrapper yet gets one in `UI/Design/` first.
 

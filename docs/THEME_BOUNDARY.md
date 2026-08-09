@@ -130,7 +130,7 @@ documented policy exception only for genuinely system-owned chrome.
 
 ## Enforcement
 
-`config/theme-boundary.json` is the machine-readable policy. `scripts/check_theme_boundaries.sh`
+`scripts/config/theme-boundary.json` is the machine-readable policy. `scripts/check_theme_boundaries.sh`
 compiles the SwiftSyntax checker shipped with the active Xcode toolchain and runs it over every
 Swift source file. The Threading target executes it before compilation, and the test suite invokes
 the same command rather than maintaining a second regular-expression implementation.

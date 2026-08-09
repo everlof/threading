@@ -350,7 +350,7 @@ until its tracking loop has pulled the mouse-up — there are no gesture recogni
 view, checked at runtime — and then reports the divider and where the release landed. The
 release point is read from `NSApp.currentEvent`, the event that ended the loop, rather than
 `NSEvent.mouseLocation`: they agree in the app, and only the first can be driven from a test.
-That override is the one entry in `config/theme-boundary.json` for this file — the interactive
+That override is the one entry in `scripts/config/theme-boundary.json` for this file — the interactive
 rule is right that a view answering `mouseDown` is usually a control, and this one routes no
 activation of its own.
 
@@ -450,7 +450,7 @@ outer-to-core pulse through those points and turns the whole mark exactly one st
 the mark's six-fold symmetry makes free (the model value never moves, so nothing is left rotated).
 The press is the whole action: the brand names the window and opens nothing, which is why the row stays
 `.staticText` and carries a documented `interactiveComponent` exception in
-`config/theme-boundary.json` rather than becoming a `ThemedControl` with a focus ring and an
+`scripts/config/theme-boundary.json` rather than becoming a `ThemedControl` with a focus ring and an
 accessibility action for a press that does nothing.
 
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table

@@ -2292,15 +2292,17 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         let helper = try Self.resigned(
             builtHelper,
             entitlements: repository
-                .appendingPathComponent("Helper/threading-extension-helper.entitlements")
+                .appendingPathComponent(
+                    "Targets/ExtensionHelper/threading-extension-helper.entitlements"
+                )
         )
         defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
         let probe = repository.appendingPathComponent(
-            "ThreadingExtensionKit/.build/\(Self.hostTriple)/debug/DenialProbeExtension"
+            "Packages/ThreadingExtensionKit/.build/\(Self.hostTriple)/debug/DenialProbeExtension"
         )
         try XCTSkipUnless(
             FileManager.default.isExecutableFile(atPath: probe.path),
-            "build it first: swift build --package-path ThreadingExtensionKit "
+            "build it first: swift build --package-path Packages/ThreadingExtensionKit "
                 + "--product DenialProbeExtension"
         )
 
@@ -2419,11 +2421,11 @@ final class ExtensionBundleLoaderTests: XCTestCase {
     func testTheSandboxPreventsAnAdversarialExtensionFromRaisingAKeychainPrompt() throws {
         let repository = try XCTUnwrap(Self.repositoryRoot)
         let probe = repository.appendingPathComponent(
-            "ThreadingExtensionKit/.build/\(Self.hostTriple)/debug/DenialProbeExtension"
+            "Packages/ThreadingExtensionKit/.build/\(Self.hostTriple)/debug/DenialProbeExtension"
         )
         try XCTSkipUnless(
             FileManager.default.isExecutableFile(atPath: probe.path),
-            "build it first: swift build --package-path ThreadingExtensionKit "
+            "build it first: swift build --package-path Packages/ThreadingExtensionKit "
                 + "--product DenialProbeExtension"
         )
 

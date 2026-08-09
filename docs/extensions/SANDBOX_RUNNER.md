@@ -404,7 +404,7 @@ Three findings came out of writing it, each of which cost a run:
 
 ### The compiled probe, under the helper
 
-`ThreadingExtensionKit/Examples/DenialProbeExtension` reaches what a shell cannot: the Keychain,
+`Packages/ThreadingExtensionKit/Examples/DenialProbeExtension` reaches what a shell cannot: the Keychain,
 inbound listeners, and whether a spawned child inherits the containment. It reports on **stderr**
 and emits an ordinary registration on stdout, so it is a real extension the launcher starts
 rather than a special mode the launcher would have to allow — widening the entry-mode list to

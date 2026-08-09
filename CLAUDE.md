@@ -57,10 +57,10 @@ around them.
 
 | | Location / upstream | What it draws |
 |---|---|---|
-| **SwiftTerm** | `./SwiftTerm/` — [migueldeicaza/SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulation: VT100/xterm, ANSI parsing, PTY. The iOS folder is excluded on macOS builds. |
-| **ThinkingOrbs** | `./ThinkingOrbs/` — [everlof/thinking-orbs-swift](https://github.com/everlof/thinking-orbs-swift) | The dotted "working" orb beside the conversation status. AppKit `ThinkingOrbView` only; the app stays AppKit-only. |
-| **LabelMorph** | `./LabelMorph/` — [everlof/LabelMorph](https://github.com/everlof/LabelMorph) | The label that morphs a name character by character — every session, project and checkout name. |
-| **BorderBeamKit** | `./BorderBeamKit/` — [Jakubantalik/border-beam](https://github.com/Jakubantalik/border-beam) (its `ports/ios` tree, extracted) | The breathing agent-activity ring over the composer. AppKit `BorderBeamHostView` only; the SwiftUI + Metal half stays inside the package. |
+| **SwiftTerm** | `./Packages/Vendor/SwiftTerm/` — [migueldeicaza/SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulation: VT100/xterm, ANSI parsing, PTY. The iOS folder is excluded on macOS builds. |
+| **ThinkingOrbs** | `./Packages/Vendor/ThinkingOrbs/` — [everlof/thinking-orbs-swift](https://github.com/everlof/thinking-orbs-swift) | The dotted "working" orb beside the conversation status. AppKit `ThinkingOrbView` only; the app stays AppKit-only. |
+| **LabelMorph** | `./Packages/Vendor/LabelMorph/` — [everlof/LabelMorph](https://github.com/everlof/LabelMorph) | The label that morphs a name character by character — every session, project and checkout name. |
+| **BorderBeamKit** | `./Packages/Vendor/BorderBeamKit/` — [Jakubantalik/border-beam](https://github.com/Jakubantalik/border-beam) (its `ports/ios` tree, extracted) | The breathing agent-activity ring over the composer. AppKit `BorderBeamHostView` only; the SwiftUI + Metal half stays inside the package. |
 
 Each has a seam that is ours (ThinkingOrbs' `tint`, LabelMorph's truncation, BorderBeamKit's
 AppKit host) plus the theme wrapper that drives it: see
@@ -180,7 +180,7 @@ the canonical policy for both humans and agents.
 
 `scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a
 directory exclusion; fix the call site or add the smallest justified exception to
-`config/theme-boundary.json`.
+`scripts/config/theme-boundary.json`.
 
 It runs from the **Enforce Repository Boundaries** build phase, together with
 `scripts/check_architecture_boundaries.sh` (structural invariants the type checker cannot
@@ -238,7 +238,7 @@ normal lifecycle work, not violations.
 Safe extensions are machine-authored, out-of-process executables built against the
 Foundation-only `ThreadingExtensionKit`. Before creating or changing one, read
 `docs/extensions/AGENT_AUTHORING.md` completely and use
-`ThreadingExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
+`Packages/ThreadingExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
 extension API from application internals, remove `ThreadingExtensionPolicyPlugin`, or import
 AppKit/SwiftUI in a safe extension. If the semantic UI model cannot express a requested
 interface, report the missing node as an SDK requirement rather than bypassing the host
@@ -354,7 +354,7 @@ pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push`
 `--no-verify`, which also skips Git LFS.
 
 **Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
-into `LabelMorph` and `ThinkingOrbs` and publishes them to their real GitHub
+into `Packages/Vendor/LabelMorph` and `Packages/Vendor/ThinkingOrbs` and publishes them to their real GitHub
 remotes — even when the outer push targets a local throwaway path, and even though the main repo
 has no remote configured. To exercise the hook, pipe fabricated ref lines into
 `scripts/pre_push.sh` directly.
