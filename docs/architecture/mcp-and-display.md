@@ -304,7 +304,57 @@ Three consequences worth keeping:
   are in place. Converting inside the restore loop re-restores the same layout per image until the
   stack is gone.
 
-`display_scene` is the generic non-HTML visualization bridge. Its value is the same bounded
+`display_chart` is how an agent reports numbers. It takes **data, not geometry** — `categories`,
+one `series` of values each, a unit, a format — and Threading owns the scale, the axes, the ticks,
+the legend, the categorical palette, hover, focus and the VoiceOver summary. That altitude is the
+whole point of a separate tool: `display_scene` below asks the caller for normalized rectangles,
+and a model asked for rectangles will confidently draw a 42 shorter than the 18 beside it. Nothing
+about the appearance crosses the wire, so a chart drawn in one theme and reopened in another is
+right both times.
+
+It renders on the chart stack the Usage dashboard already uses. `ThemedChartModel` gained a mark
+(line or bar), an x-axis mode (time or categories) and an orientation; `ThemedChartGeometry` was
+not touched. Two consequences worth knowing before changing either:
+
+- **A categorical axis is an ordinal domain carried in the time slot** — category *i* is second
+  *i* — so one downsampler, one stacking rule and one interpolator serve both domains. A parallel
+  scale type would have duplicated all three and let them drift.
+- **A band scale falls out of the range, not out of new code.** `ThemedChartModel.categorical`
+  widens the domain to `-0.5 ... n-0.5`, which centres each bar in a band of equal width; without
+  the half-step the first and last bar are cut in half by the plot edges. A bar is then just
+  `baselineY → y` in the space a line already uses, so **grouped and stacked bars need no geometry
+  of their own**: `.independent` puts every foot on zero and `.stackedBands` puts it on the running
+  total, both already computed for the curve grammar.
+
+Three rules here were arrived at by rendering the fixtures and looking at them, and every
+assertion passed while each was wrong. A chart whose view is left on its autoresizing mask keeps
+the zero frame it was built with and draws a perfect title over an empty rectangle. A bar's own
+number lands next to a grid rule by construction — the top of a tall bar is near a gridline — so
+it is drawn on a plate of the chart's own background, and **a stacked bar prints no per-segment
+number at all**: the figure reads as a running total, and its plate punches a hole in the rule
+behind it. Finally the value axis is rounded up to a *nice* ceiling (`ChartCardView.axisCeiling`)
+rather than fitted to the data, because a true axis labelled 73.4 ms and 55.1 ms tells nobody
+anything; the step ladder is fine-grained because a coarse one leaves a third of the plot empty.
+
+The same `ChartCardView` serves both surfaces, so the panel and the transcript cannot disagree
+about what a chart looks like. In a natively rendered conversation the chart is drawn **inline, on
+the tool call that produced it** — `ConversationTimeline.ToolCall.chart`, decoded from the call's
+own arguments exactly as its diff is, so the row is the record of what was done *and* the picture
+it produced rather than a line saying a chart was drawn somewhere else. A chart row survives the
+turn fold for the same reason a decided permission card does: it is part of the answer, not work
+done on the way to it. A refused call falls back to the ordinary tool row and shows what the panel
+said about it. Terminal sessions get the pane tab only, which is also the only surface that
+persists.
+
+`ChartSpec` validates at the boundary and **fails loudly with a sentence the caller can act on** —
+which series, how many values, how many categories — because the caller is a model holding the
+data and can fix its own call; a silently truncated chart is a wrong picture with no warning. The
+mark cap is on the *product* of series and categories and sits well below the two per-axis caps
+multiplied together, or it would never refuse anything. The tab keeps the values, so `Copy Chart
+Data` hands back a TSV: a picture of numbers you cannot get the numbers out of is a dead end.
+
+`display_scene` is the generic non-HTML visualization bridge, and after `display_chart` it is for
+geometry the caller *already has* rather than for measured values. Its value is the same bounded
 `ExtensionScene` used by safe extension panels: normalized rectangles, host-owned shapes,
 semantic colour roles, labels, detail, selection, and accessibility. `SemanticSceneView` renders
 those marks through Threading's design system, so an external MCP can supply a treemap, heatmap,
@@ -713,9 +763,9 @@ pointerless twin, per the design system's rule.
 The Attachments tab is the session's visual history: everything that passed between the two
 parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
 
-**Five kinds, one explicit map.** Images, PDFs, HTML, archives (`zip`/`tar`/`gz`/`7z`/…) and
-open document formats (ODF, OOXML, `rtf`) — `AttachmentReferenceDetector.kind(for:)` names each
-family explicitly. It used to answer `.image` for anything on the extension list that was not a
+**Six kinds, one explicit map.** Images, PDFs, HTML, archives (`zip`/`tar`/`gz`/`7z`/…), open
+document formats (ODF, OOXML, `rtf`) and diagram source (`dot`/`gv`/`mmd`/`mermaid`) —
+`AttachmentReferenceDetector.kind(for:)` names each family explicitly. It used to answer `.image` for anything on the extension list that was not a
 PDF or HTML, which was correct only while images were the remainder, and one added extension
 away from the pane decoding a zip as a picture. The alternation the scanner builds from the
 list is sorted longest-first, because nothing after the group requires a word boundary: with
@@ -723,8 +773,13 @@ list is sorted longest-first, because nothing after the group requires a word bo
 and the real one was never recorded. Previews route by kind: images through
 `ThemedImagePreview`, PDFs through PDFKit, archives and documents through Quick Look — the
 latter two inside `MediaInspectorDocumentView`, the one named system-chrome boundary, so an
-archive previews as the same icon-and-metadata card the space bar shows in Finder. Only images
-and PDFs join the media inspector's rail; only images can be a side of a comparison. A
+archive previews as the same icon-and-metadata card the space bar shows in Finder. Diagram
+source previews as *itself*, in a read-only `ThemedTextView` capped at
+`maximumSourcePreviewBytes`: the app carries no Graphviz or Mermaid engine, and rendering one
+would mean either the pane fetching a CDN library on row-selection or vendoring the renderer —
+both deliberate decisions, neither taken here; the display panel already renders a diagram when
+an agent writes `display_html` that pulls the library in. Only images and PDFs join the media
+inspector's rail; only images can be a side of a comparison. A
 persisted row whose `kind` this build does not know re-derives it from the file's own
 extension, and drops alone when both are unknown — decoding used to be all-or-nothing per
 session, and the next admission then persisted the fresh rows over a payload that still held
@@ -801,7 +856,7 @@ order — the preview first, the list after it, and the footer, whose band is `r
 
 | | admitted | served to a paired phone |
 |---|---|---|
-| **scanned** — the terminal's rendered buffer, a native conversation's finished assistant prose | inside the checkout only | yes |
+| **scanned** — terminal output plus intact terminal-turn transcript prose, a native conversation's finished assistant prose | inside the checkout only | yes |
 | **declared** — `display_image`, `display_compare_files`, an image dropped or pasted into a prompt or a terminal | anywhere, copied in if it is not already in the checkout | yes |
 
 The containment rule is real, but it is a rule about **what may leave over the wire**, and it was
@@ -811,6 +866,21 @@ length-and-NUL check — so without containment a single `find ~ -name '*.png'` 
 terminal would enumerate the user's pictures into a remotely fetchable list. That is why *scanned*
 paths still may not leave the checkout: text is not a handoff, and a build log, a `cat`, or a
 repository's own fixtures can name any path on disk.
+
+Terminal scanning has two complementary views of the same output. The live observer reads a
+bounded logical-buffer suffix: SwiftTerm joins emulator-owned soft wraps and keeps real line
+breaks, so narrowing or resizing the terminal cannot split a shell-printed path. Full-screen
+agent TUIs have a second shape the emulator cannot solve: they often wrap markdown themselves
+and paint each visual row with cursor movement, so every row is structurally independent in the
+terminal buffer. On a reported terminal-turn boundary, Claude and Codex therefore scan the
+bounded tail of their provider transcript off-main, through `TranscriptReplay`'s normalization,
+and admit only assistant text from the newest turn. Tool results, reasoning, response-item
+duplicates and older turns do not enter that scan. Stability retries cover the hook arriving
+before the transcript's final record is flushed; source-path dedupe keeps those retries from
+recopying or reordering a file. Codex's hook supplies the exact immutable rollout path; if hooks
+are absent, the fallback session-tree lookup runs off-main rather than putting externally growing
+filesystem work on the activity callback. Grok, OpenCode and ordinary shell output keep the
+logical-buffer path until they expose an equally authoritative transcript reader.
 
 **The scanned rule is a default, and the user may answer it — `includesAttachmentsOutsideProject`,
 off.** It is the safety measure that has to survive being configurable, so widening it does not

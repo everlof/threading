@@ -143,11 +143,19 @@ the header follows a **collapse** as readily as a drag, and it stops where the p
 the display panel's own strip lines up with it rather than sitting under a window-wide row.
 
 The header's leading control is the **page tab** (`MainWindowController.pageTabView`): one
-chip naming the current page — session, composer, or settings. Deliberately one, not a strip:
+chip naming the current workspace page — session or composer. Deliberately one, not a strip:
 a page here swaps the whole workspace, so a row of them would be a second session switcher
 duplicating the sidebar (see `sessions.md`, "Why Sessions Are Not Tabs"). It is the same
 `ThemedTabItemView` the pane strips build from, inked from the backdrop, bounded by
 `SessionTitleDefaults.minWidth/maxWidth`.
+
+**Settings is a mode, not a page tab.** It temporarily replaces the workspace and its sidebar,
+and only one category can be visible; selecting another category replaces the same surface. A
+closable category tab therefore promised multiple settings documents, made × mean “leave the
+mode,” and repeated the category already named in both the sidebar and page heading. While the
+mode is active the header instead shows a plain **Settings** label and an ordinary **Done**
+button. Done, ⌘W, the ⌘, Settings command, and the sidebar's Settings button all take the same
+return path, restoring the session or composer the mode covered.
 
 Before those actions sits a second, smaller group: **Open in** — the visible checkout handed to
 the editor, terminal or Finder used last, with a chevron that picks another. It is a separate

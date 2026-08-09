@@ -1153,7 +1153,7 @@ mean different faces. Only a hash of the email (Gravatar) or the email as a sear
 (GitHub) ever leaves the machine, and **Settings > General > Discover account avatars**
 turns the whole thing off. Rename an account
 if the discovered name is not what you call it; clearing a name restores the one from your
-shell alias, and **Reset Selected** clears both.
+shell alias, and **Restore Name & Icon** clears both custom choices.
 
 Accounts cannot be added or removed here — they come from your config directories. Log in to a
 new one from the terminal, e.g. `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude`.
@@ -1163,8 +1163,9 @@ Each row carries a **switch**. Turning it off withdraws that login from everywhe
 is offered — the composer's identity chip, the new-session menus, the usage readings and the
 import list — without deleting anything. The config directory, its conversations and the
 sessions already running on that account are untouched, and those sessions still resume on it.
-A switched-off account stays listed here, dimmed, so you can switch it back on; **Reset**
-restores its icon and name and leaves the switch alone.
+A switched-off account stays listed here, dimmed, so you can switch it back on; **Restore Name
+& Icon** restores only those two presentation choices and leaves the switch and usage readings
+alone.
 
 If the account you switch off is the CLI's default one, new sessions start on the first login
 that is still on. Switch off every account for an agent and it stops being offered for new
@@ -1811,6 +1812,20 @@ order is the same one the agent sees, and it survives a relaunch. **⌘⇧[** an
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
+**Charts are drawn by Threading, not by the agent.** Ask any agent to compare something —
+"chart the cold-start numbers before and after", "rank the slowest tests", "break the turn cost
+down by part" — and it sends the values; the app draws them in your theme, with its own scale,
+axes, legend and VoiceOver summary. That is why an agent's chart matches the Usage dashboard
+instead of looking like whatever the model last saw on the web, and why reopening one in a
+different theme redraws it correctly rather than restoring old colours. Comparisons and
+breakdowns come as bars, rankings as horizontal bars with the names down the side, and
+progressions as a line. Hover any bar for its exact value; the **⋯** menu's **Copy Chart Data**
+hands you the numbers as a table you can paste into a spreadsheet.
+
+In a natively rendered conversation the chart also appears **inline, where the agent produced
+it**, and stays visible when the rest of that turn's work folds away — the picture is part of the
+answer. Terminal sessions get it in the panel, which is where it persists across relaunches.
+
 **Opening a picture properly.** Click an image in the panel, or focus it and press **Space**, to
 open Threading's media inspector inside the same window. It starts fitted; pinch or press
 **⌘+**/**⌘−** to zoom, drag to pan, and double-click or press **Z** to switch between Fit and
@@ -1844,10 +1859,11 @@ project list.
 
 There is deliberately **one** page tab, not a row of them: switching a session swaps the whole
 workspace — its drawer, its panel, its sidebar selection — so the sidebar is the session
-switcher, and this chip names where you are (a session, the new-session composer, or a
-Settings page). Click it to reveal the current page's row in the sidebar; its × (or **⌘W**)
-closes the page back to the empty pane — which never stops the agent; the session stays in
-the sidebar. For hopping between recent sessions, use the **‹ ›** history pair or ⌃⌘←/→.
+switcher, and this chip names where you are (a session or the new-session composer). Click it
+to reveal the current page's row in the sidebar; its × (or **⌘W**) closes the page back to the
+empty pane — which never stops the agent; the session stays in the sidebar. Settings is a
+temporary mode instead: the header shows **Settings** and **Done**, not a category-shaped tab.
+For hopping between recent sessions, use the **‹ ›** history pair or ⌃⌘←/→.
 
 The window's toolbar keeps only the controls that act on the window rather than on a pane,
 beside the traffic lights: the **sidebar toggle**, and the **‹ ›** history pair — Go Back and
@@ -1937,10 +1953,10 @@ The **Attachments** tab is the session's visual history — the images, PDFs, do
 archives that went in either direction, newest first. Two things land there:
 
 - **What the agent surfaces.** A path it prints to an existing image (PNG, JPEG, GIF, WebP,
-  HEIC, TIFF, BMP), PDF, archive (ZIP, TAR, GZ, BZ2, XZ, 7Z, RAR), or open document (ODT, ODS,
-  ODP, DOCX, XLSX, PPTX, RTF), in the terminal or in a native Chat reply, and any image it shows
-  deliberately through the display tool. Code files are ignored because Git Review already
-  covers them.
+  HEIC, TIFF, BMP), PDF, archive (ZIP, TAR, GZ, BZ2, XZ, 7Z, RAR), open document (ODT, ODS,
+  ODP, DOCX, XLSX, PPTX, RTF), or diagram source (DOT, GV, MMD, Mermaid), in the terminal or in
+  a native Chat reply, and any image it shows deliberately through the display tool. Code files
+  are ignored because Git Review already covers them.
 - **What you send.** An image you paste or drop into a composer, or drop onto a terminal —
   including the ones attached to the prompt that *starts* a session. These are marked **You** so
   the picture you just sent is findable next to whatever the agent made of it, rather than
@@ -1955,7 +1971,8 @@ being asked to show something outranks a filter you left set.
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
 The tab is two panes: the list above, and the selected file's preview filling the space below —
 images and PDFs inline (click an image to enter the same collection-aware media inspector),
-archives and documents through the same Quick Look preview the space bar shows in Finder.
+archives and documents through the same Quick Look preview the space bar shows in Finder, and
+diagram files as their own source text, ready to read or drag into a chat.
 
 The footer names the selected file and, beside the name, offers one button plus a **⌄** menu —
 like Finder's toolbar. The button performs whatever you last chose from the menu (**Open**,
@@ -2248,9 +2265,12 @@ Available in every session, since every session is an agent conversation.
 ### How it works
 
 Threading runs a small MCP server on a loopback port and registers it with each Claude or Codex
-session it launches, giving that session a private endpoint. The agent gets four display tools —
-`display_image`, `display_scene`, `display_html` and `display_compare_files` — and is told the
-panel exists so it reaches for them instead of printing a file path or an ASCII table.
+session it launches, giving that session a private endpoint. The agent gets five display tools —
+`display_image`, `display_chart`, `display_scene`, `display_html` and `display_compare_files` —
+and is told the panel exists, and when each one is the right answer, so it reaches for them
+instead of printing a file path or an ASCII table. `display_chart` takes only the numbers and
+their names, never any drawing: every agent Threading supports reads that guidance the same way,
+which is why a chart from Codex and a chart from Claude are the same picture.
 
 They are pre-approved, so displaying something does not raise a permission prompt every time.
 This does not affect any other tool: your normal permission rules and your own MCP servers
@@ -2582,6 +2602,11 @@ Above the captured details is the **description**: whatever you type there leads
 text and the filed issue, so "make this padding smaller" arrives above the evidence for it. It
 opens several lines tall — **Return adds a line, ⌘Return submits the issue**.
 
+Click the screenshot preview, or focus it and press **Space**, to inspect the capture at full
+size. The media inspector supports pinch or **⌘+**/**⌘−** to zoom, dragging to pan, and
+double-click or **Z** to switch between Fit and 100%; **Space** or **Escape** returns to the
+report.
+
 Two things to do with a capture:
 
 - **Copy Report** puts the text on the clipboard as markdown. The screenshot is referenced by
@@ -2841,17 +2866,18 @@ under either setting, since a path typed at a shell has to be the path you point
 ## Settings
 
 **Cmd+,** opens Settings, and pressing it again closes it — unlike most Mac apps, where
-preferences are their own window and Cmd+W closes them. Here Settings is a *page in this
-window*, replacing the session in the pane and the project list in the sidebar, so the chord
-that put it there is what takes it away. The **✕** on its tab, and the **Settings** button at
-the sidebar's bottom-left, do the same thing.
+preferences are their own window and Cmd+W closes them. Here Settings is a temporary mode in
+this window, replacing the session in the pane and the project list in the sidebar, so the chord
+that put it there is what takes it away. The header identifies the mode as **Settings** rather
+than making the selected category look like a closable tab; **Done**, **Cmd+W**, and the
+**Settings** button at the sidebar's bottom-left all return to the workspace.
 
 Closing it returns you to exactly what it covered. If that was a **new-session composer**, it
 comes back untouched — the same agent, account, model and checkout, the same attached images,
 and the prompt still half-written — so a trip into Settings to change a default costs you
 nothing of what you were composing.
 
-While Settings is the page, the header offers no **+**: that button creates a session, and a
+While Settings is active, the header offers no **+**: that button creates a session, and a
 preferences page is no context for one.
 
 The search field at the top of the Settings sidebar searches page names and the settings they

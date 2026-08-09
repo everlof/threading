@@ -47,6 +47,11 @@ it — the account sticks to the session, switch or no switch. And the accounts 
 everything, since it is where a login is switched back on. `AccountName` also resolves against
 every sibling: a disabled login still owns the address that would make another one ambiguous.
 
+The presentation action on that row is deliberately **Restore Name & Icon**, not Reset. It
+clears only the display-name and emoji overrides and leaves enablement, credentials, sessions,
+and every usage reading untouched. “Reset” beside the Usage destinations made the last of those
+easy to misread; the button now names the complete scope of its action on its face.
+
 The composer starts on the standard handle, so a disabled *default* is the case that bites —
 without `preferredAccount`, the login the user just switched off is still what a fresh session
 launches on, while the chip names it as though it had been chosen. `preferredAccount` is the

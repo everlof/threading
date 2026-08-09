@@ -68,6 +68,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     are what say so: Claude Code turns a *pasted* image path into `[Image #1]` and Codex into its
     own attachment, while the identical bytes typed stay a line of path. See
     `TerminalDrop` and `TerminalDropPasteTests`, which pin the wire format.
+  - **Logical recent-buffer extraction is ours.** `getBufferAsData` is a screen-shaped export:
+    every physical grid row ends in a newline, including a row the terminal wrapped only because
+    the window was narrow. `getRecentLogicalBufferText(maximumUTF8Bytes:)` instead joins rows
+    carrying `BufferLine.isWrapped`, preserves hard line breaks, and walks backwards under its
+    byte budget before materialising text. It returns complete logical lines only, so a cap or a
+    scrollback trim cannot turn the tail of a path into an apparently complete relative path.
+    Threading's attachment detector uses this seam; agent TUIs that pre-wrap their own painted
+    rows are covered separately by the provider transcript at the turn boundary.
   - **The selection seam is ours**, and it carries copy-on-select. `selectionGestureEnded()` is
     called when a *pointer* gesture settles a selection — a drag released, a double- or
     triple-click, a shift-click extension — and `selectedText` answers what is selected, nil when

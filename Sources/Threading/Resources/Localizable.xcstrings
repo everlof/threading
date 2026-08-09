@@ -1,6 +1,21 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "After": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Efter" } } } },
+    "Before": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Före" } } } },
+    "Cache": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cache" } } } },
+    "ChartCardView": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ChartCardView" } } } },
+    "Cold start by phase": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kallstart per fas" } } } },
+    "Duration": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Längd" } } } },
+    "Input": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Indata" } } } },
+    "Slowest tests": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Långsammaste testerna" } } } },
+    "Turn cost by part": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turkostnad per del" } } } },
+    "What an agent's display_chart call draws: grouped bars, a stacked breakdown, and a horizontal ranking, all on the same renderer.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad en agents display_chart-anrop ritar: grupperade staplar, en staplad uppdelning och en liggande rangordning, alla i samma renderare." } } } },
+    "Copy Chart Data": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kopiera diagramdata" } } } },
+    "%@ across %lld categories: %@": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ över %lld kategorier: %@" } } } },
+    "Chart": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Diagram" } } } },
+    "Chart numbers": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rita diagram" } } } },
+    "Plot measured values natively — comparisons, rankings, breakdowns, trends.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rita upp mätvärden inbyggt – jämförelser, rangordningar, uppdelningar, trender." } } } },
     "%@ (%@) is %@ against %@ (%@). Threading shows it as sent. Use default foreground (ANSI 39), or change themes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ (%@) har kontrasten %@ mot %@ (%@). Threading visar färgen som den skickades. Använd standardförgrund (ANSI 39) eller byt tema." } } } },
     "24-bit color": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "24-bitarsfärg" } } } },
     "ANSI black": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-svart" } } } },
@@ -27041,7 +27056,13 @@
     "Attachments this session exchanged appear here: images, PDFs, documents, and archives you send, and ones the agent shows or names.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilagor som den här sessionen har utbytt visas här: bilder, PDF:er, dokument och arkiv du skickar, och de som agenten visar eller nämner."}}}},
     "%lld files selected": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld filer markerade"}}}},
     "Copy Files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera filer"}}}},
-    "Add attachments to chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till bilagor i chatten"}}}}
+    "Add attachments to chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till bilagor i chatten"}}}},
+    "Images, documents, archives, diagrams, and HTML from this session will appear here.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilder, dokument, arkiv, diagram och HTML från den här sessionen visas här."}}}},
+    "Attachments this session exchanged appear here: images, PDFs, documents, archives, and diagrams you send, and ones the agent shows or names.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilagor som den här sessionen har utbytt visas här: bilder, PDF:er, dokument, arkiv och diagram du skickar, och de som agenten visar eller nämner."}}}},
+    "No data to compare": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga data att jämföra"}}}},
+    "Close Settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng inställningarna"}}}},
+    "Restore Name & Icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ namn och ikon"}}}},
+    "Restore this account's detected name and provider icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ kontots upptäckta namn och leverantörsikon"}}}}
   },
   "version": "1.0"
 }

@@ -470,7 +470,7 @@ feature lock.
   interactive all-sessions owner may
   create, rename, pin, archive or restore sessions, or select the shared app appearance and a
   session's visual terminal theme. Workspace browser metadata and bounded visible-tab snapshots,
-  plus checkout reads including Git Review, repository files, and detected image/PDF/HTML/archive/document attachments,
+  plus checkout reads including Git Review, repository files, and detected image/PDF/HTML/archive/document/diagram attachments,
   also require that owner scope. View-only and guest links cannot change host state, read checkout
   files, or receive browser pixels. Permanent deletion remains a Mac-only action.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
