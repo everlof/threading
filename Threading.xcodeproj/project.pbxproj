@@ -1280,6 +1280,7 @@
 				F6000001000000000000002 /* Sources */,
 				F3000001000000000000001 /* Frameworks */,
 				F6000001000000000000003 /* Resources */,
+				E77200010000000000000001 /* Embed Legal Notices */,
 				E77100010000000000000001 /* Embed Extension SDK */,
 				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
 			);
@@ -1316,6 +1317,7 @@
 				A20000010000000000000005 /* Sources */,
 				A20000010000000000000003 /* Frameworks */,
 				A20000010000000000000004 /* Resources */,
+				E77200010000000000000002 /* Embed Legal Notices */,
 			);
 			buildRules = (
 			);
@@ -1461,6 +1463,48 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		E77200010000000000000001 /* Embed Legal Notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/scripts/legal-notices-macos-inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Embed Legal Notices";
+			outputFileListPaths = (
+				"$(SRCROOT)/scripts/legal-notices-macos-outputs.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/embed_legal_notices.sh\"";
+		};
+		E77200010000000000000002 /* Embed Legal Notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/scripts/legal-notices-ios-inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Embed Legal Notices";
+			outputFileListPaths = (
+				"$(SRCROOT)/scripts/legal-notices-ios-outputs.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/embed_legal_notices.sh\"";
+		};
 		E77100010000000000000001 /* Embed Extension SDK */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -2428,6 +2472,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_ThreadingReportIntakeToken = "$(THREADING_REPORT_INTAKE_TOKEN)";
@@ -2489,6 +2534,7 @@
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_ThreadingReportIntakeToken = "$(THREADING_REPORT_INTAKE_TOKEN)";

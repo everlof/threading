@@ -14,10 +14,11 @@ This is an engineering publication gate, not a legal opinion.
 | Public dependency access | Pass | Every Git-backed dependency is anonymously readable on GitHub. |
 | Reproducible resolution | Pass | Submodules are gitlinks; remote Swift packages have committed `Package.resolved` revisions; vendored SwiftTerm is part of the parent repository. |
 | Known-vulnerability check | Pass | No resolved version or pinned revision matched OSV or GitHub Advisory Database records on the audit date. |
-| Binary license delivery | **Fail** | A clean `Threading.app` contains no GPL or third-party license/notice file. Fix this before publishing a binary release. |
+| Binary license delivery | Pass | Fresh macOS and iOS Simulator builds embed target-specific, build-verified legal-notice bundles containing 21 and 12 non-empty files respectively. |
+| iOS export declaration | Pass | The generated iOS `Info.plist` declares `ITSAppUsesNonExemptEncryption = NO`; the mobile graph uses only system CryptoKit hashing, Keychain, and system networking rather than bundled or proprietary encryption. |
 
-Source publication can proceed. The first downloadable application archive must wait until the
-binary-license-delivery finding is fixed and rechecked.
+The source-publication and binary-distribution gates pass. Re-run the advisory queries and the
+finished-product notice check immediately before tagging a release.
 
 ## Human-readable SBOM
 
@@ -90,23 +91,46 @@ Those are the three changes in the upstream fix, so the vendored code is not aff
 An empty advisory result means no published record matched the supplied identity on the audit
 date. It does not prove that a dependency contains no undisclosed vulnerability.
 
-## Required remediation before a binary release
+## Binary-distribution control
 
-The clean x86_64 application built during publication verification was inspected at:
+Both application targets have an `Embed Legal Notices` build phase. The phase copies the root
+GPLv3 text plus the exact upstream license, notice, and provenance files from the pinned source
+tree and resolved SwiftPM checkouts into the finished application's `Legal` resource directory.
 
-`/private/tmp/threading-derived-e986256a/Build/Products/Debug/Threading.app`
+The build remains sandboxed on iOS: target-specific `.xcfilelist` files declare each allowed
+input and output rather than disabling `ENABLE_USER_SCRIPT_SANDBOXING`. The macOS profile
+contains 21 required files; the smaller iOS graph contains 12. The shared verifier rejects any
+missing or empty file and runs as part of every application build, including release builds.
 
-It contained no file whose name identifies a license, notice, or acknowledgements document.
-Before shipping the first zip:
+Verification on the audit date used fresh derived-data directories:
 
-1. Bundle the root GPLv3 license with the application.
-2. Bundle the exact MIT/BSD/zlib/Apache notices from every code dependency above, including
-   WasmKit's `NOTICE.txt` and the Swift runtime exceptions.
-3. Bundle the OFL and GPL font notices already preserved under
-   `Sources/Threading/Resources/Fonts/`.
-4. Add a build test that inspects the finished `.app` and fails when the notice bundle is absent
-   or an SBOM component has no corresponding notice.
-5. Re-run the exact-version advisory queries immediately before a tagged release.
+- macOS x86_64 Release build:
+  `/private/tmp/threading-legal-release-x86-derived/Build/Products/Release/Threading.app`
+- macOS arm64 Debug build:
+  `/private/tmp/threading-legal-derived/Build/Products/Debug/Threading.app`
+- iOS Simulator Debug build:
+  `/private/tmp/threading-legal-mobile-derived/Build/Products/Debug-iphonesimulator/ThreadingMobile.app`
+
+All three builds passed `scripts/check_bundled_licenses.sh`; the Release executable was confirmed
+as Mach-O x86_64. The verifier's failure path was also
+exercised against an empty directory and correctly reported every absent notice.
+
+Release procedure: re-run the exact-version advisory queries, build the release archive, and run
+the same verifier against the archived `.app` immediately before tagging.
+
+## iOS encryption export declaration
+
+The iOS target sets `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO` in both Debug and Release,
+which produces a Boolean `ITSAppUsesNonExemptEncryption` value in the generated `Info.plist`.
+The audited mobile graph uses:
+
+- CryptoKit SHA-256 for one-way diagnostic pseudonyms;
+- Security framework Keychain storage; and
+- URLSession HTTP/WebSocket transport, including operating-system TLS when using secure URLs.
+
+It does not link the SSH sample shipped in SwiftTerm's repository, any standalone cryptographic
+library, or a proprietary encryption implementation. Re-evaluate this declaration before adding
+custom encryption, a bundled crypto/SSH library, or a dependency that provides either.
 
 ## Authoritative references
 

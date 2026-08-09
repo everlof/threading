@@ -1,0 +1,63 @@
+#!/bin/bash
+
+set -euo pipefail
+
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(dirname "$script_directory")"
+
+: "${TARGET_BUILD_DIR:?TARGET_BUILD_DIR must be set by Xcode}"
+: "${UNLOCALIZED_RESOURCES_FOLDER_PATH:?UNLOCALIZED_RESOURCES_FOLDER_PATH must be set by Xcode}"
+: "${BUILD_DIR:?BUILD_DIR must be set by Xcode}"
+
+if [[ "${PLATFORM_NAME:-macosx}" == "macosx" ]]; then
+    profile="macos"
+else
+    profile="ios"
+fi
+
+legal_directory="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Legal"
+derived_data_directory="$(dirname "$(dirname "$BUILD_DIR")")"
+package_checkouts="${THREADING_SOURCE_PACKAGES_DIR:-$derived_data_directory/SourcePackages/checkouts}"
+
+copy_notice() {
+    local source_path="$1"
+    local destination_name="$2"
+
+    if [[ ! -s "$source_path" ]]; then
+        echo "error: required legal notice is missing or empty: $source_path" >&2
+        exit 1
+    fi
+
+    /usr/bin/install -m 0644 "$source_path" "$legal_directory/$destination_name"
+}
+
+/bin/mkdir -p "$legal_directory"
+
+copy_notice "$repository_root/LICENSE" "Threading-GPL-3.0.txt"
+copy_notice "$repository_root/Legal/THIRD_PARTY_NOTICES.md" "THIRD_PARTY_NOTICES.md"
+copy_notice "$repository_root/Packages/Vendor/SwiftTerm/LICENSE" "SwiftTerm-MIT.txt"
+copy_notice "$package_checkouts/NativeDiffKit/LICENSE" "NativeDiffKit-MIT.txt"
+
+font_root="$repository_root/Sources/Threading/Resources/Fonts"
+copy_notice "$font_root/W95FA/W95FA-OFL.txt" "W95FA-OFL-1.1.txt"
+copy_notice "$font_root/W95FA/W95FA-SOURCE.md" "W95FA-SOURCE.md"
+copy_notice "$font_root/PlatinumBitmap/PlatinumBitmap-OFL.txt" "PlatinumBitmap-OFL-1.1.txt"
+copy_notice "$font_root/PlatinumBitmap/PlatinumBitmap-SOURCE.md" "PlatinumBitmap-SOURCE.md"
+copy_notice "$font_root/Topaz/Topaz-GPL-2.0.txt" "Topaz-GPL-2.0.txt"
+copy_notice "$font_root/Topaz/Topaz-FONT-EXCEPTION.txt" "Topaz-FONT-EXCEPTION.txt"
+copy_notice "$font_root/Topaz/Topaz-UPSTREAM-README.txt" "Topaz-UPSTREAM-README.txt"
+copy_notice "$font_root/Topaz/Topaz-SOURCE.md" "Topaz-SOURCE.md"
+
+if [[ "$profile" == "macos" ]]; then
+    copy_notice "$repository_root/Packages/Vendor/BorderBeamKit/LICENSE" "BorderBeamKit-MIT.txt"
+    copy_notice "$repository_root/Packages/Vendor/LabelMorph/LICENSE" "LabelMorph-MIT.txt"
+    copy_notice "$repository_root/Packages/Vendor/ThinkingOrbs/LICENSE" "ThinkingOrbs-MIT.txt"
+    copy_notice "$package_checkouts/Sparkle/LICENSE" "Sparkle-LICENSE.txt"
+    copy_notice "$package_checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt" "Sparkle-ed25519-LICENSE.txt"
+    copy_notice "$package_checkouts/WasmKit/LICENSE" "WasmKit-MIT.txt"
+    copy_notice "$package_checkouts/WasmKit/NOTICE.txt" "WasmKit-NOTICE.txt"
+    copy_notice "$package_checkouts/swift-system/LICENSE.txt" "swift-system-LICENSE.txt"
+    copy_notice "$package_checkouts/swift-argument-parser/LICENSE.txt" "swift-argument-parser-LICENSE.txt"
+fi
+
+"$repository_root/scripts/check_bundled_licenses.sh" "$profile" "$legal_directory"

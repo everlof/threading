@@ -1,0 +1,14 @@
+$(SRCROOT)/Legal/THIRD_PARTY_NOTICES.md
+$(SRCROOT)/LICENSE
+$(SRCROOT)/Packages/Vendor/SwiftTerm/LICENSE
+$(SRCROOT)/Sources/Threading/Resources/Fonts/W95FA/W95FA-OFL.txt
+$(SRCROOT)/Sources/Threading/Resources/Fonts/W95FA/W95FA-SOURCE.md
+$(SRCROOT)/Sources/Threading/Resources/Fonts/PlatinumBitmap/PlatinumBitmap-OFL.txt
+$(SRCROOT)/Sources/Threading/Resources/Fonts/PlatinumBitmap/PlatinumBitmap-SOURCE.md
+$(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-GPL-2.0.txt
+$(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-FONT-EXCEPTION.txt
+$(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-UPSTREAM-README.txt
+$(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-SOURCE.md
+$(BUILD_DIR)/../../SourcePackages/checkouts/NativeDiffKit/LICENSE
+$(SRCROOT)/scripts/check_bundled_licenses.sh
+$(SRCROOT)/scripts/embed_legal_notices.sh
