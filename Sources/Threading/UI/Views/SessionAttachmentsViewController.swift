@@ -382,20 +382,6 @@ final class SessionAttachmentsViewController: NSViewController {
         updateListHeight()
     }
 
-    /// Ends system preview work before the pane loses its window.
-    ///
-    /// Quick Look can still be completing a display-bundle request after the last selection.
-    /// Removing its view first leaves that request targeting a window whose screen/backing state
-    /// has already gone away; rapid archive/document switching made the late callback trap inside
-    /// `QLPreviewView.backingScaleFactor`.
-    func prepareForRemoval() {
-        guard isViewLoaded else { return }
-        documentView.close()
-        clearHTMLPreview()
-        clearSourcePreview()
-        imageView.image = nil
-    }
-
     // MARK: - Setup
 
     private func setupList() {

@@ -18,6 +18,11 @@ import XCTest
 @MainActor
 final class SessionAttachmentsLayoutTests: XCTestCase {
 
+    /// Quick Look completes display-bundle activation asynchronously. The stress commands run
+    /// one workload per process, so retaining their offscreen window until process exit avoids
+    /// turning XCTest's immediate local teardown into a lifecycle the production pane never has.
+    private static var parkedStressWindows: [NSWindow] = []
+
     private var root: URL!
     private var outside: URL?
 
@@ -903,14 +908,6 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let pane = SessionAttachmentsViewController(sessionID: sessionID)
         _ = pane.view
         let constructEnded = DispatchTime.now().uptimeNanoseconds
-        let warmConstructNanoseconds: UInt64 = autoreleasepool {
-            let started = DispatchTime.now().uptimeNanoseconds
-            let warmPane = SessionAttachmentsViewController(sessionID: sessionID)
-            _ = warmPane.view
-            let ended = DispatchTime.now().uptimeNanoseconds
-            warmPane.prepareForRemoval()
-            return ended - started
-        }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 760),
             styleMask: .borderless,
@@ -954,7 +951,6 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 + "format=\(format.rawValue) files=\(fileCount) "
                 + "source_mb=\(Self.megabytes(sourceBytes)) "
                 + "construct_ms=\(Self.milliseconds(constructEnded - constructStarted)) "
-                + "warm_construct_ms=\(Self.milliseconds(warmConstructNanoseconds)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - layoutStarted)) "
                 + "cold_draw_ms=\(Self.milliseconds(coldDrawEnded - coldDrawStarted)) "
                 + "cold_switch_ms=\(Self.milliseconds(coldSwitchEnded - coldSwitchStarted)) "
@@ -963,8 +959,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 + "descendants=\(descendants(of: pane.view).count) "
                 + "footprint_delta_mb=\(Self.megabytes(footprint))"
         )
-        pane.prepareForRemoval()
-        _ = window
+        Self.parkedStressWindows.append(window)
     }
 
     // MARK: - The Rows
