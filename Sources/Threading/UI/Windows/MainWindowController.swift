@@ -152,11 +152,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// "native frame", which is also what it means.
     private(set) var chromeCoordinator: WindowChromeCoordinator?
 
-    /// The active page, drawn as the selected tab of the window's page strip.
+    /// The active workspace page, drawn as the selected tab of the window's page strip.
     ///
     /// Deliberately a *single* chip, not a strip: a page here swaps the whole workspace — the
     /// drawer, the panel, the sidebar's selection — so a row of them would be a second session
     /// switcher wearing tab clothes. The sidebar is the switcher; this names where you are.
+    /// Settings is not one of these pages: it is a temporary window mode with its own static
+    /// label and Done action, because presenting a changing category as a closable tab implies
+    /// that several settings documents can coexist when they cannot.
     /// The *same* class the pane strips use, inked from the backdrop rather than the chrome
     /// because the header floats over the terminal's own palette — which is the only thing
     /// that differs between the two, and now the only thing stated. See `ThemedTabItemView`.
@@ -167,6 +170,29 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         showsClose: true,
         inkSource: .backdrop
     )
+
+    /// Settings replaces the workspace temporarily rather than opening a document. Its header
+    /// therefore states the mode and the way back without borrowing tab selection or close
+    /// semantics from `pageTabView`.
+    let settingsModeLabel = NSTextField(labelWithString: L10n.string("Settings"))
+    let settingsDoneButton = ThemedButton(title: L10n.string("Done"), target: nil, action: nil)
+    private(set) lazy var settingsModeHeaderView: NSStackView = {
+        settingsModeLabel.applyFont(.control)
+        settingsModeLabel.textColor = Design.Text.label
+        settingsModeLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        settingsDoneButton.target = self
+        settingsDoneButton.action = #selector(settingsDoneClicked(_:))
+        settingsDoneButton.toolTip = L10n.string("Close Settings")
+        settingsDoneButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        let header = NSStackView(views: [settingsModeLabel, settingsDoneButton])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = Design.Spacing.medium
+        header.isHidden = true
+        return header
+    }()
 
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
@@ -1415,16 +1441,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Keeps the header naming whatever is on screen.
     ///
-    /// Each branch hands the tab an **identity** as well as a title, which is what lets a rename
-    /// morph while a change of page lands directly — see `ThemedTabItemView.update`.
+    /// Each workspace branch hands the tab an **identity** as well as a title, which is what lets
+    /// a rename morph while a change of page lands directly — see `ThemedTabItemView.update`.
+    /// Settings instead shows one stable mode label: the selected category is already named by
+    /// its sidebar row and page heading, and changing it does not create a new document.
     func updateSessionTitleItem() {
-        if let pageID = containerViewController.currentSettingsPageID,
-           let page = SettingsPages.page(id: pageID) {
-            showPageTab(title: page.title, symbolName: page.symbol, identity: pageID)
+        if containerViewController.isShowingSettings {
+            pageTabView.isHidden = true
+            settingsModeHeaderView.isHidden = false
             updateAccountUsageItem(session: nil)
             updateToolbarControlStates()
             return
         }
+
+        settingsModeHeaderView.isHidden = true
 
         let sessionID = containerViewController.currentSessionID
         let session = sessionID.flatMap { ProjectStore.shared.session(withID: $0) }
@@ -1470,6 +1500,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         icon: NSImage? = nil,
         toolTip: String? = nil
     ) {
+        settingsModeHeaderView.isHidden = true
         pageTabView.isHidden = false
         pageTabView.update(
             title: title,
@@ -1481,6 +1512,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             pageTabView.setIcon(icon)
         }
         pageTabView.toolTip = toolTip ?? title
+    }
+
+    @objc private func settingsDoneClicked(_ sender: ThemedButton) {
+        guard containerViewController.isShowingSettings else { return }
+        toggleSettings()
     }
 
     // MARK: - Tab Transfer
@@ -2189,10 +2225,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         toggleSettings()
     }
 
-    /// What ⌘, does: opens Settings, and closes it again if it is already the page.
+    /// What ⌘, does: opens Settings, and closes it again if the mode is already active.
     ///
     /// The platform's Preferences chord only ever *opens*, because on macOS preferences are a
-    /// separate window and ⌘W closes them. Here Settings is a **page in this window**, sharing
+    /// separate window and ⌘W closes them. Here Settings is a **mode in this window**, sharing
     /// the pane with the session it replaced — so the chord that put it there is the obvious
     /// thing to press to get the session back, and there is no second window for ⌘W to mean.
     func toggleSettingsFromCommand() {
@@ -2508,11 +2544,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         let hasSession = session != nil
         updatePaneToggleSelection()
-        // **New Session is hidden while Settings is the page.** It creates a session, which a
-        // preferences page is not a context for — and beside a closable "Profiles" tab a `+`
-        // reads as "add another one of these", which is the one thing it does not do. The
-        // design system's own rule: a control offering nothing here hides rather than sitting
-        // there dead.
+        // **New Session is hidden while Settings is active.** It creates a session, which this
+        // temporary mode is not a context for. The design system's own rule: a control offering
+        // nothing here hides rather than sitting there dead.
         newSessionButton?.isHidden = containerViewController.isShowingSettings
         updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession

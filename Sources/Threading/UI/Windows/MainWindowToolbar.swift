@@ -98,13 +98,15 @@ extension MainWindowController: NSToolbarDelegate {
 
     // MARK: - Pane Header
 
-    /// Everything that names or acts on the session on screen, in one row for the content pane's
+    /// Everything that names or acts on the page on screen, in one row for the content pane's
     /// own header.
     ///
     /// The window controller builds it because the window controller owns what these do — the
     /// composer, the panes, the session's menu. The pane owns only where the row sits, which is
     /// what makes it move with the pane. Reading across: which page, a way to open another, then
-    /// what that page's account has left to spend, then what can be done to it.
+    /// what that page's account has left to spend, then what can be done to it. Settings swaps
+    /// the page tab for a plain mode label and Done action; its categories are destinations in
+    /// the sidebar, not documents in this row.
     func makePaneHeaderView() -> NSView {
         let newSessionButton = ThemedIconButton(
             symbolName: "plus",
@@ -120,6 +122,7 @@ extension MainWindowController: NSToolbarDelegate {
 
         let header = NSStackView(views: [
             pageTabView,
+            settingsModeHeaderView,
             newSessionButton,
             spacer,
             accountUsageItemView,

@@ -3030,7 +3030,9 @@ final class ThemedControlTests: XCTestCase {
 
         // Reading across: which page, then a way to open another. Adjacency is the claim; the
         // gap between them is the stack's.
-        let arranged = header.arrangedSubviews
+        // The hidden Settings mode header occupies the same leading slot when active; hidden
+        // arranged subviews cost no geometry and are not neighbours in the visible strip.
+        let arranged = header.arrangedSubviews.filter { !$0.isHidden }
         let tabIndex = try XCTUnwrap(arranged.firstIndex(of: tab))
         XCTAssertTrue(
             arranged[tabIndex + 1] is ThemedIconButton,
@@ -3228,11 +3230,10 @@ final class ThemedControlTests: XCTestCase {
         }
     }
 
-    /// A `+` beside a closable "General ✕" reads as "add another one of these", which is the one
-    /// thing it does not do — it creates a *session*, and a preferences page is no context for
-    /// one. The design system's own rule: a control offering nothing here hides.
+    /// New Session creates a workspace session, and the temporary Settings mode is no context
+    /// for that action. A control that offers nothing in the current context withdraws entirely.
     @MainActor
-    func testNewSessionHidesWhileSettingsIsThePage() throws {
+    func testNewSessionHidesWhileSettingsIsActive() throws {
         let controller = MainWindowController()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
@@ -3242,15 +3243,42 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(
             controller.newSessionButton?.isHidden,
             true,
-            "New Session is still offered on a settings page"
+            "New Session is still offered while Settings is active"
         )
 
         controller.toggleSettings()
         XCTAssertEqual(controller.newSessionButton?.isHidden, false)
     }
 
+    /// Settings is a temporary mode over the workspace, not one more closable document. Its
+    /// category already appears in the sidebar and page heading, so the pane header names the
+    /// mode once and gives it an ordinary way out.
+    @MainActor
+    func testSettingsUsesAModeHeaderInsteadOfAClosablePageTab() throws {
+        let controller = MainWindowController()
+        let container = try XCTUnwrap(
+            controller.splitViewController.splitViewItems[1].viewController
+                as? TerminalContainerViewController
+        )
+
+        controller.toggleSettings()
+
+        XCTAssertTrue(controller.pageTabView.isHidden, "Settings still looks like a page tab")
+        XCTAssertFalse(
+            controller.settingsModeHeaderView.isHidden,
+            "Settings has no mode header or visible way back"
+        )
+        XCTAssertEqual(controller.settingsModeLabel.stringValue, L10n.string("Settings"))
+        XCTAssertEqual(controller.settingsDoneButton.accessibilityTitle(), L10n.string("Done"))
+        XCTAssertTrue(container.isShowingSettings)
+
+        XCTAssertTrue(controller.settingsDoneButton.accessibilityPerformPress())
+        XCTAssertFalse(container.isShowingSettings, "Done did not return to the workspace")
+        XCTAssertTrue(controller.settingsModeHeaderView.isHidden)
+    }
+
     /// ⌘, is the platform's *open* chord because preferences are normally their own window, with
-    /// ⌘W to close. Here Settings is a page in this window, so the chord that put it there is
+    /// ⌘W to close. Here Settings is a mode in this window, so the chord that put it there is
     /// what takes it away again — there is no second window for ⌘W to mean.
     @MainActor
     func testTheSettingsCommandClosesWhatItOpened() throws {
