@@ -1372,7 +1372,8 @@ The same pattern reaches beyond messages:
 
 - secondary-click a code line in Git Review or an edit tool's diff to add or comment on that line;
 - secondary-click a changed-file row to reference/comment on the whole file, including an image;
-- in **Attachments**, select an item and use **Chat…** to add it or comment on it;
+- in **Attachments**, select an item and use the footer's **⌄** menu (or the row's own) to add
+  it to the chat or comment on it;
 - secondary-click an image already waiting in the reply box and choose **Comment…**.
 
 Several references and comments can be staged together. The reply box keeps them as compact count
@@ -1932,12 +1933,14 @@ Five kinds of content:
 
 ### Attachments
 
-The **Attachments** tab is the session's visual history — the images and PDFs that went in either
-direction, newest first. Two things land there:
+The **Attachments** tab is the session's visual history — the images, PDFs, documents and
+archives that went in either direction, newest first. Two things land there:
 
-- **What the agent surfaces.** A path it prints to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF,
-  BMP or PDF, in the terminal or in a native Chat reply, and any image it shows deliberately
-  through the display tool. Code files are ignored because Git Review already covers them.
+- **What the agent surfaces.** A path it prints to an existing image (PNG, JPEG, GIF, WebP,
+  HEIC, TIFF, BMP), PDF, archive (ZIP, TAR, GZ, BZ2, XZ, 7Z, RAR), or open document (ODT, ODS,
+  ODP, DOCX, XLSX, PPTX, RTF), in the terminal or in a native Chat reply, and any image it shows
+  deliberately through the display tool. Code files are ignored because Git Review already
+  covers them.
 - **What you send.** An image you paste or drop into a composer, or drop onto a terminal —
   including the ones attached to the prompt that *starts* a session. These are marked **You** so
   the picture you just sent is findable next to whatever the agent made of it, rather than
@@ -1949,15 +1952,30 @@ filter appears beside the count. It stays hidden while everything came from one 
 agent shows opens this tab and selects its row, and resets that filter if it would have hidden it:
 being asked to show something outranks a filter you left set.
 
-Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
-sits above an inline image/PDF preview; click an image to enter the same collection-aware media
-inspector. **Open**, **Finder**, and **Copy Path** act on the selected file.
+Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
+The tab is two panes: the list above, and the selected file's preview filling the space below —
+images and PDFs inline (click an image to enter the same collection-aware media inspector),
+archives and documents through the same Quick Look preview the space bar shows in Finder.
 
-Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in** your
-installed editors, **Reveal in Finder**, **Copy Image** (or **Copy File** for a PDF) and **Copy
-Path** — plus **Compare with**, which names every other picture the session holds and opens the two
-of them in a **Compare** tab. Right-clicking also selects the row, so the preview underneath is
-always showing the file the menu is about.
+The footer names the selected file and, beside the name, offers one button plus a **⌄** menu —
+like Finder's toolbar. The button performs whatever you last chose from the menu (**Open**,
+**Finder**, **Copy Path**, **Copy Image**/**Copy File**, or **Add to Chat**), starting at
+**Open**; choosing from the menu both runs the action and retitles the button, and the choice
+is remembered across sessions and launches. Double-clicking a row always opens the file without
+changing the remembered action.
+
+Several rows can be selected at once (⇧-click, ⌘-click): the footer counts the batch with its
+total size, the button and the **⌄** menu act on all of them — open all, reveal all, copy every
+path one per line, copy the files, add each to the chat — and dragging any selected row carries
+the whole batch, so a handful of screenshots can be dropped on a composer, a terminal, or
+Finder in one gesture. Right-clicking inside the selection keeps it and aims the menu at the
+row under the pointer.
+
+Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in**
+your installed editors, **Reveal in Finder**, **Copy Image** (or **Copy File** for anything that
+is not a picture) and **Copy Path** — plus **Compare with**, which names every other picture the
+session holds and opens the two of them in a **Compare** tab. Right-clicking also selects the
+row, so the preview underneath is always showing the file the menu is about.
 
 **Comparing two pictures.** Drag one row onto another and drop it: the row under the pointer says
 **Drop to compare**, and releasing opens the pair in the Compare tab with the wipe, crossfade,
@@ -1971,15 +1989,16 @@ the older file is always the *old* side — and two pictures that arrived togeth
 the list already shows them — so the arrow points the way you read. Rows can be dragged out too —
 onto Finder, onto a composer, into a message.
 
-PDFs are not part of this: a comparison is drawn from pixels, so a PDF row is not offered
-**Compare with** and does not take a drop.
+Only images compare: a comparison is drawn from pixels, so a PDF, archive or document row is
+not offered **Compare with** and does not take a drop.
 
 Images shown by earlier versions came back as one panel tab each. On the first launch after
 updating, those tabs become rows in this list — same pictures, same order, one place.
 
-When the session uses native Chat, **Chat…** adds the selected attachment to the reply box or opens
-a comment prompt for it. The attachment becomes a compact context receipt; the original file stays
-in this list and is not copied into the message text.
+When the session can receive context, the footer's menu also offers **Add attachment to chat**
+and **Comment on attachment…** — the first is the **Add to Chat** the button can remember. The
+attachment becomes a compact context receipt; the original file stays in this list and is not
+copied into the message text.
 
 A file already inside the checkout is *referenced*: a new mention of the same path moves it to the
 top and refreshes the preview, so the project file stays the source of truth. A file from anywhere

@@ -155,6 +155,8 @@ private struct RemoteAttachmentRow: View {
         switch attachment.kind {
         case "pdf": "doc.richtext"
         case "html": "safari"
+        case "archive": "archivebox"
+        case "document": "doc.text"
         default: "photo"
         }
     }
@@ -236,7 +238,12 @@ struct RemoteAttachmentPreview: View {
 
     var body: some View {
         Group {
-            if let data {
+            // Decided before any bytes move: the phone has no renderer for an archive or an
+            // office document, and downloading one only to say "the image could not be decoded"
+            // spends the attachment byte cap on a file it was never going to show.
+            if attachment.kind == "archive" || attachment.kind == "document" {
+                unavailable("This file previews on your Mac.")
+            } else if let data {
                 if attachment.kind == "pdf" {
                     RemotePDFView(data: data, backgroundColor: theme.uiColor(
                         "ground",
@@ -288,15 +295,25 @@ struct RemoteAttachmentPreview: View {
     private func unavailable(_ message: String) -> some View {
         ContentUnavailableView(
             "No preview",
-            systemImage: attachment.kind == "pdf"
-                ? "doc.richtext"
-                : (attachment.kind == "html" ? "safari" : "photo"),
+            systemImage: unavailableIconName,
             description: Text(MobileL10n.string(message))
         )
     }
 
+    private var unavailableIconName: String {
+        switch attachment.kind {
+        case "pdf": "doc.richtext"
+        case "html": "safari"
+        case "archive": "archivebox"
+        case "document": "doc.text"
+        default: "photo"
+        }
+    }
+
     @MainActor
     private func load() async {
+        // The body never renders these kinds, so their bytes are never asked for.
+        guard attachment.kind != "archive", attachment.kind != "document" else { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }

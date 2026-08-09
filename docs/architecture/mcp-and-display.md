@@ -713,6 +713,23 @@ pointerless twin, per the design system's rule.
 The Attachments tab is the session's visual history: everything that passed between the two
 parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
 
+**Five kinds, one explicit map.** Images, PDFs, HTML, archives (`zip`/`tar`/`gz`/`7z`/…) and
+open document formats (ODF, OOXML, `rtf`) — `AttachmentReferenceDetector.kind(for:)` names each
+family explicitly. It used to answer `.image` for anything on the extension list that was not a
+PDF or HTML, which was correct only while images were the remainder, and one added extension
+away from the pane decoding a zip as a picture. The alternation the scanner builds from the
+list is sorted longest-first, because nothing after the group requires a word boundary: with
+`tif` offered before `tiff`, `shot.tiff` matched as `shot.tif` — a file that does not exist —
+and the real one was never recorded. Previews route by kind: images through
+`ThemedImagePreview`, PDFs through PDFKit, archives and documents through Quick Look — the
+latter two inside `MediaInspectorDocumentView`, the one named system-chrome boundary, so an
+archive previews as the same icon-and-metadata card the space bar shows in Finder. Only images
+and PDFs join the media inspector's rail; only images can be a side of a comparison. A
+persisted row whose `kind` this build does not know re-derives it from the file's own
+extension, and drops alone when both are unknown — decoding used to be all-or-nothing per
+session, and the next admission then persisted the fresh rows over a payload that still held
+every older one.
+
 **It is also where the panel's per-image tabs went** — see the Display Panel section above for the
 merge and its no-project fallback. The list had to become two things it was not to take them:
 
@@ -731,16 +748,41 @@ merge and its no-project fallback. The list had to become two things it was not 
   rows carry no time is a list whose order has to be taken on trust, and the order is the whole
   reason the images stopped being tabs.
 
-**The pane leads with its content; the slack falls below the footer, empty.** The preview used
-to be the layout's one flexible element between a top-pinned list and a *bottom-pinned* footer,
-so a tall panel stretched it to hundreds of points around a small picture and put the file's
-name and buttons at the window's floor, a screen below the list they describe. An image now
-states the preview's height (its fitted height at the pane's width, floored at
-`SessionAttachmentsDefaults.minimumPreviewHeight`), the footer's floor is a
-`lessThanOrEqualTo` limit rather than a home, and a gentle pull
-(`SessionAttachmentsDefaults.footerPullPriority`) below the image's priority is what lets the
-one kind that *should* fill the room — a PDF — still do so. A pane shorter than the picture
-compresses the preview, never the footer. `SessionAttachmentsLayoutTests` pins all three.
+**The pane is two panes, and the footer is a band.** The list is one half, its preview the
+other — a full-bleed `SeparatorView` folds them apart, and the preview is the layout's one
+flexible element, filling whatever stands between the fold and the footer. The footer is a
+`PaneFooterView` at the pane's floor: the selected file's name over its path on the leading
+side, the action control on the trailing side, one centreline between them. An earlier design
+computed the preview's height from its content so the footer could hug the picture; the strict
+split replaces all of that — nothing in the pane states a content-derived height any more
+except the list's own (see below), which is also what keeps every constraint here under
+`windowSizeStayPut` (a content height at 500+ is the pane resizing the *window*; a full-page
+screenshot once grew the main window to 3386 points). A pane too short for everything gives
+way in one order: the preview first, the list after it, the footer never.
+`SessionAttachmentsLayoutTests` pins the floor, the band and the order.
+
+**The footer's action is the one the user last took — Finder's pattern, the header control's
+rule.** Four buttons (Open / Finder / Copy Path / Chat…) became one `ThemedButton` whose press
+performs the remembered action, with a chevron (`ThemedIconButton`, `.besidePrimary`,
+`presentsMenu`) beside it presenting the same entries as the row's own context menu — one
+builder, `contextMenuEntries(for:)`, so the two surfaces cannot drift. Choosing a rememberable
+action (`AttachmentAction`: open, reveal, copy path, copy file, add to chat) from *either* menu
+records it through `PreferenceStore` (`SessionAttachmentsDefaults.lastActionKey`) and retitles
+the button; the extras — Open in, Compare with, Comment — stay direct, because none of them is
+a single press's worth of decision. `AttachmentAction.resolvePreferred` is pure for
+`ExternalApps.resolvePreferred`'s reason: a remembered Chat falls back to Open while nothing is
+listening, without the memory being overwritten, so the door reopening restores the remembered
+answer. A double-click on a row opens without touching the memory, exactly as Finder's does.
+
+**Several rows are a batch.** The list allows multiple selection, and a drag from a selected
+row carries every selected row's file — AppKit asks `pasteboardWriterForRow` per row, and the
+places a batch lands (a composer, a terminal, Finder) already take several files in one drop.
+The preview cannot show three pictures, so it and the footer say the count instead, and the
+footer's action applies to all: reveal selects them together, Copy Path joins one path per
+line, chat stages one receipt per file. The chevron's batch menu (`actionMenuEntries`) keeps
+only the actions that mean something said of several files — no Open in, no comparison, no
+comment, each a decision about one thing. A secondary click inside the selection does not
+collapse it (Finder's rule); the row menu still speaks for the row under the pointer.
 
 **The list is as tall as its rows, up to half the pane.** It used to be a constant 136pt —
 three rows — whatever the session had exchanged, so eight attachments were read through a
@@ -750,11 +792,10 @@ its rows measure (its row rects, so the padding the inset style puts above the f
 below the last is not clipped off into a scroller a complete list has no reason to offer),
 capped at `SessionAttachmentsDefaults.listShareOfPane` of the pane and scrolled past that. It is
 re-asked from `refresh()` because the rows change and from `viewDidLayout` because the cap is a
-fraction of the pane's *height* — the pair of reasons `updatePreviewHeight()` already had for
-width. The cap is also what makes the height safe at `listHeightPriority`, *above* the preview's
-`.defaultHigh`: a list that can never ask for more than half the pane cannot be what pushes the
-buttons out of reach, so a pane too short for everything gives way in one order — the preview
-first, the list after it, and the footer, whose floor is `required`, never.
+fraction of the pane's *height*. The cap is also what makes the height safe at
+`listHeightPriority`: a list that can never ask for more than half the pane cannot be what
+pushes the footer's action out of reach, so a pane too short for everything gives way in one
+order — the preview first, the list after it, and the footer, whose band is `required`, never.
 
 **There are two doors into the list, and conflating them was the bug.**
 

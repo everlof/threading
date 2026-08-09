@@ -2,7 +2,8 @@ import AppKit
 import ImageIO
 import WebKit
 
-/// A session's inspectable deliverables: a compact list above an in-place preview.
+/// A session's inspectable deliverables: two panes, the chronology above its preview, and a
+/// footer naming the selected file with the one action the user last took beside it.
 ///
 /// The controller holds no file bytes. The referenced project file stays authoritative, so a
 /// second mention after an overwrite refreshes the preview in place.
@@ -49,26 +50,16 @@ final class SessionAttachmentsViewController: NSViewController {
     /// as it has been answered, so a later reload does not keep dragging the selection back.
     private var revealPath: String?
 
-    /// The preview's preferred height — its *content's* height, not the pane's slack.
-    ///
-    /// Without it the preview was the layout's flexible element between a top-pinned list and a
-    /// bottom-pinned footer, so a tall pane stretched it to hundreds of points around a small
-    /// picture and put the file's name and buttons at the window's floor, a screen away from
-    /// the list — reported as the pane feeling "stretched out, landing at the bottom". Stated
-    /// below `required` so a pane *shorter* than the picture still compresses the preview
-    /// rather than pushing the footer out of reach; deactivated for a PDF, which reads better
-    /// the taller it is (`footerPull` is what stretches it then).
-    private var previewHeightConstraint: NSLayoutConstraint?
-
     /// The list's height — its *rows'* height, capped at its share of the pane.
     ///
     /// It used to be a constant three rows tall, so a session with eight attachments read
-    /// through a letterbox while the pane's slack sat below the footer doing nothing; and this
-    /// list is becoming the session's whole visual history, which a fixed three rows cannot be.
-    /// Stated *above* `previewHeightConstraint` (`listHeightPriority`) and below `required`, so
-    /// the order a pane too short for everything gives way in is: the preview first, then the
-    /// list, and never the footer — the cap is what makes that safe, since a list that can only
-    /// ever ask for half the pane cannot be what pushes the buttons out of reach.
+    /// through a letterbox; and this list is the session's whole visual history, which a fixed
+    /// three rows cannot be. The preview pane below the fold is the layout's one flexible
+    /// element, so a pane too short for everything gives way in one order: the preview first,
+    /// the list after it (`listHeightPriority` is below `required`), and the footer — whose
+    /// band height and edges are required — never. The cap is what makes that safe: a list that
+    /// can only ever ask for half the pane cannot be what pushes the footer's actions out of
+    /// reach.
     private var listHeightConstraint: NSLayoutConstraint?
 
     private lazy var countLabel: NSTextField = {
@@ -118,6 +109,10 @@ final class SessionAttachmentsViewController: NSViewController {
         table.target = self
         table.doubleAction = #selector(openSelected)
         table.allowsEmptySelection = false
+        // Several rows are a batch: dragging one selected row carries every selected row's
+        // file — AppKit asks `pasteboardWriterForRow` per row — and the two places a batch
+        // lands, a composer and a terminal, already take several files in one drop.
+        table.allowsMultipleSelection = true
         let column = NSTableColumn(identifier: SessionAttachmentsDefaults.columnIdentifier)
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -143,7 +138,10 @@ final class SessionAttachmentsViewController: NSViewController {
             let row = self.tableView.selectedRow
             guard self.attachments.indices.contains(row) else { return nil }
             let selectedID = self.attachments[row].id
-            let inspectable = self.attachments.filter { $0.kind != .html }
+            // An allow-list, not "everything but HTML": the inspector's canvas decodes images
+            // and its document view draws PDFs, and a zip paged in between two screenshots
+            // would be a rail slot the inspector can only answer with a blank.
+            let inspectable = self.attachments.filter { $0.kind == .image || $0.kind == .pdf }
             guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
                 return nil
             }
@@ -155,11 +153,17 @@ final class SessionAttachmentsViewController: NSViewController {
         image.translatesAutoresizingMaskIntoConstraints = false
         return image
     }()
-    private lazy var pdfView: MediaInspectorDocumentView = {
-        let pdf = MediaInspectorDocumentView()
-        pdf.translatesAutoresizingMaskIntoConstraints = false
-        return pdf
+    /// PDFs, archives and office documents alike: PDFKit for the first, Quick Look for the
+    /// rest, both already contained inside the one named system-chrome boundary.
+    private lazy var documentView: MediaInspectorDocumentView = {
+        let document = MediaInspectorDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        return document
     }()
+
+    /// The fold between the two panes: the chronology ends here, and what its selected row
+    /// holds begins.
+    private lazy var listFold = SeparatorView()
     private lazy var htmlView: WKWebView = {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -181,6 +185,8 @@ final class SessionAttachmentsViewController: NSViewController {
         label.applyFont(.subheading)
         label.textColor = Design.Text.label
         label.lineBreakMode = .byTruncatingMiddle
+        // The footer's trailing controls keep their size; the name is what gives way.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -189,30 +195,67 @@ final class SessionAttachmentsViewController: NSViewController {
         label.applyFont(.compactCode)
         label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
-    private lazy var openButton = ThemedButton(
+
+    /// The file's name over its place — the caption half of the footer's sentence, one block so
+    /// the band can centre it against the control beside it.
+    private lazy var fileTextBlock: NSStackView = {
+        let block = NSStackView(views: [fileLabel, pathLabel])
+        block.orientation = .vertical
+        block.alignment = .leading
+        block.spacing = Design.Spacing.hairline
+        block.translatesAutoresizingMaskIntoConstraints = false
+        return block
+    }()
+
+    /// The one press the footer offers: whatever the menu was last used for.
+    ///
+    /// Finder's pattern, and the header's Open in control already states the rule here
+    /// (`external-apps.md`, "last used wins"): there is no Settings row for a preferred action
+    /// because the choice is made in the act of taking it — choosing from either menu retitles
+    /// this button. `updatePrimaryAction()` re-resolves on every refresh, because what the
+    /// memory names may stop being on offer (a remembered Chat with nothing listening).
+    private lazy var primaryActionButton = ThemedButton(
         title: L10n.string("Open"),
         target: self,
-        action: #selector(openSelected)
+        action: #selector(performRememberedAction)
     )
-    private lazy var revealButton = ThemedButton(
-        title: L10n.string("Finder"),
-        target: self,
-        action: #selector(revealSelected)
-    )
-    private lazy var copyButton = ThemedButton(
-        title: L10n.string("Copy Path"),
-        target: self,
-        action: #selector(copySelectedPath)
-    )
-    private lazy var chatButton = ThemedButton(
-        title: L10n.string("Chat…"),
-        target: self,
-        action: #selector(showChatActions)
-    )
-    private var chatMenuSession: AnyObject?
+
+    /// The other ways to take it — the same entries as the row's own menu, one builder
+    /// (`contextMenuEntries`), so the two surfaces cannot drift apart. Beside the titled press
+    /// rather than welded to it: the tighter `PaneFooterView` item gap is the same ranking the
+    /// composer's schedule chevron draws next to its send.
+    private lazy var actionsChevron: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: DesignSymbols.chevron,
+            accessibility: L10n.string("Attachment actions"),
+            target: .besidePrimary
+        )
+        button.presentsMenu = true
+        button.onPress = { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.presentActionsMenu(from: button)
+        }
+        return button
+    }()
+
+    /// The pane's floor: the selected file named at one edge, what to do with it at the other,
+    /// one centreline between them — the band's geometry, stated once in `PaneFooterView`.
+    private lazy var footerBand: PaneFooterView = {
+        let band = PaneFooterView(
+            leading: [fileTextBlock],
+            trailing: [primaryActionButton, actionsChevron],
+            margin: .paneEdge
+        )
+        // Two `PaneFooterView`s live in this pane; the identifier is what tells them apart.
+        band.setAccessibilityIdentifier("attachments.footer")
+        return band
+    }()
+
+    private var actionMenuSession: AnyObject?
     private var contextMenuSession: AnyObject?
 
     /// Which row is currently saying it would take the drop, or `-1` for none.
@@ -223,7 +266,7 @@ final class SessionAttachmentsViewController: NSViewController {
     private var dropTargetRow = -1
     private lazy var emptyLabel: NSTextField = {
         let label = NSTextField(wrappingLabelWithString:
-            L10n.string("Images, documents, and HTML from this session will appear here.")
+            L10n.string("Images, documents, archives, and HTML from this session will appear here.")
         )
         label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
@@ -255,14 +298,18 @@ final class SessionAttachmentsViewController: NSViewController {
     /// Shown only when the setting would change *this* pane, which is the whole rule for it:
     /// a control that is present whatever it would do teaches nothing, and a session that never
     /// names a file outside its project should never be asked about files outside its project.
-    private lazy var scopeBand = PaneFooterView(
-        leading: [scopeLabel],
-        trailing: [scopeButton],
-        margin: .paneEdge
-    )
+    private lazy var scopeBand: PaneFooterView = {
+        let band = PaneFooterView(
+            leading: [scopeLabel],
+            trailing: [scopeButton],
+            margin: .paneEdge
+        )
+        band.setAccessibilityIdentifier("attachments.scope-band")
+        return band
+    }()
     private var scopeBandConstraints: [NSLayoutConstraint] = []
-    private var actionsToPaneBottom: [NSLayoutConstraint] = []
-    private var actionsToScopeBand: [NSLayoutConstraint] = []
+    private var footerToPaneBottom: [NSLayoutConstraint] = []
+    private var footerToScopeBand: [NSLayoutConstraint] = []
 
     // MARK: - Initialization
 
@@ -281,12 +328,12 @@ final class SessionAttachmentsViewController: NSViewController {
         }
         // Whether anything can be handed an attachment is a fact about the *agent*, not about
         // the list, and it changes without the list changing: a dormant session has no door
-        // until it launches, and loses it again when it exits. Only the one control is touched
-        // — activity churns several times a turn, and re-reading the store for each would be a
-        // pane rebuilding itself while the agent thinks.
+        // until it launches, and loses it again when it exits. Only the footer's action is
+        // re-resolved — activity churns several times a turn, and re-reading the store for each
+        // would be a pane rebuilding itself while the agent thinks.
         appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
             guard event.sessionID == self?.sessionID else { return }
-            self?.updateChatAvailability()
+            self?.updatePrimaryAction()
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyPreviewTheme()
@@ -309,7 +356,7 @@ final class SessionAttachmentsViewController: NSViewController {
         super.viewDidLoad()
         setupList()
         setupPreview()
-        setupActions()
+        setupFooter()
         setupConstraints()
         refresh()
     }
@@ -318,7 +365,6 @@ final class SessionAttachmentsViewController: NSViewController {
         super.viewDidLayout()
         tableView.sizeLastColumnToFit()
         updateListHeight()
-        updatePreviewHeight()
     }
 
     // MARK: - Setup
@@ -352,8 +398,9 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func setupPreview() {
+        view.addSubview(listFold)
         previewHost.addSubview(imageView)
-        previewHost.addSubview(pdfView)
+        previewHost.addSubview(documentView)
         previewHost.addSubview(htmlView)
         previewHost.addSubview(previewMessage)
         view.addSubview(previewHost)
@@ -361,13 +408,8 @@ final class SessionAttachmentsViewController: NSViewController {
         applyPreviewTheme()
     }
 
-    private func setupActions() {
-        for control in [openButton, revealButton, copyButton, chatButton] {
-            control.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(control)
-        }
-        view.addSubview(fileLabel)
-        view.addSubview(pathLabel)
+    private func setupFooter() {
+        view.addSubview(footerBand)
         view.addSubview(scopeBand)
         scopeBand.isHidden = true
     }
@@ -390,14 +432,26 @@ final class SessionAttachmentsViewController: NSViewController {
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
+            // Edge to edge, like the footer's own rule below: this is the fold between the
+            // pane's two halves, and a rule that stops short of the pane it divides reads as a
+            // stray line rather than as a boundary.
+            listFold.topAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            listFold.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            listFold.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            // The preview is the layout's one flexible element: it fills whatever stands
+            // between the fold and the footer, which is what makes the two halves *panes*
+            // rather than a stack of bands with the slack pooling under them. Nothing here
+            // states a content height, so nothing here can grow the window (the trap
+            // `listHeightPriority`'s comment records).
             previewHost.topAnchor.constraint(
-                equalTo: scrollView.bottomAnchor,
+                equalTo: listFold.bottomAnchor,
                 constant: Design.Spacing.small
             ),
             previewHost.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             previewHost.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
             previewHost.bottomAnchor.constraint(
-                equalTo: fileLabel.topAnchor,
+                equalTo: footerBand.topAnchor,
                 constant: -Design.Spacing.small
             ),
 
@@ -406,10 +460,10 @@ final class SessionAttachmentsViewController: NSViewController {
             imageView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
 
-            pdfView.topAnchor.constraint(equalTo: previewHost.topAnchor),
-            pdfView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
-            pdfView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            pdfView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
+            documentView.topAnchor.constraint(equalTo: previewHost.topAnchor),
+            documentView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
+            documentView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
 
             htmlView.topAnchor.constraint(equalTo: previewHost.topAnchor),
             htmlView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
@@ -427,42 +481,8 @@ final class SessionAttachmentsViewController: NSViewController {
                 constant: -inset
             ),
 
-            fileLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            fileLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
-
-            pathLabel.topAnchor.constraint(
-                equalTo: fileLabel.bottomAnchor,
-                constant: Design.Spacing.hairline
-            ),
-            pathLabel.leadingAnchor.constraint(equalTo: fileLabel.leadingAnchor),
-            pathLabel.trailingAnchor.constraint(equalTo: fileLabel.trailingAnchor),
-
-            // Wider than the two points holding the path under the name: those two lines are one
-            // block naming the file, and the row beneath them is a different kind of thing — a set
-            // of things to *do* to it. At the row spacing they all shared, the block read as four
-            // stacked items rather than a caption with actions under it, and a 26pt bordered row
-            // sat as close to the path as the path sits to the name it belongs with.
-            openButton.topAnchor.constraint(
-                equalTo: pathLabel.bottomAnchor,
-                constant: Design.Spacing.medium
-            ),
-            openButton.leadingAnchor.constraint(equalTo: fileLabel.leadingAnchor),
-            revealButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
-            revealButton.leadingAnchor.constraint(
-                equalTo: openButton.trailingAnchor,
-                constant: Design.Spacing.tight
-            ),
-            copyButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
-            copyButton.leadingAnchor.constraint(
-                equalTo: revealButton.trailingAnchor,
-                constant: Design.Spacing.tight
-            ),
-            chatButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
-            chatButton.leadingAnchor.constraint(
-                equalTo: copyButton.trailingAnchor,
-                constant: Design.Spacing.tight
-            ),
-            chatButton.trailingAnchor.constraint(lessThanOrEqualTo: fileLabel.trailingAnchor),
+            footerBand.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            footerBand.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -470,29 +490,15 @@ final class SessionAttachmentsViewController: NSViewController {
             emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset)
         ])
 
-        // The floor is a limit, not a home: the footer sits under the preview's content and the
-        // pane's slack falls *below* it, empty. Pinned `==` here, a tall pane stretched the
-        // preview to fill the difference — see `previewHeightConstraint`. What stretches a PDF to
-        // that floor is the gentle pull beneath, which loses deliberately to an image's own
-        // height above: "a document fills the room it has", not "a snapshot stretched across it".
-        //
-        // Stated twice because the floor moves: with the scope band installed the actions stop
+        // Stated twice because the floor moves: with the scope band installed the footer stops
         // above it, and one set is active at a time.
-        //
-        // The pane's own inset, the one the block already keeps on its left and right: at half of
-        // it the buttons hugged the bottom edge, which is the other half of why this footer read
-        // as crowded. It is the clearance `ConversationViewController` leaves at the same edge.
-        actionsToPaneBottom = Self.floorConstraints(
-            for: openButton,
-            above: view.safeAreaLayoutGuide.bottomAnchor,
-            inset: inset
-        )
-        actionsToScopeBand = Self.floorConstraints(
-            for: openButton,
-            above: scopeBand.topAnchor,
-            inset: inset
-        )
-        NSLayoutConstraint.activate(actionsToPaneBottom)
+        footerToPaneBottom = [
+            footerBand.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        ]
+        footerToScopeBand = [
+            footerBand.bottomAnchor.constraint(equalTo: scopeBand.topAnchor)
+        ]
+        NSLayoutConstraint.activate(footerToPaneBottom)
 
         scopeBandConstraints = [
             // Edge to edge, and to the frame rather than the safe area: the band draws the
@@ -504,12 +510,7 @@ final class SessionAttachmentsViewController: NSViewController {
         ]
         NSLayoutConstraint.activate(scopeBandConstraints)
 
-        let previewHeight = previewHost.heightAnchor.constraint(equalToConstant: 0)
-        previewHeight.priority = SessionAttachmentsDefaults.previewHeightPriority
-        previewHeightConstraint = previewHeight
-
-        // Always active, unlike the preview's: a list with no rows asks for no height, which is
-        // the same sentence said with a zero.
+        // A list with no rows asks for no height, which is the same sentence said with a zero.
         let listHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
         listHeight.priority = SessionAttachmentsDefaults.listHeightPriority
         listHeight.isActive = true
@@ -517,23 +518,9 @@ final class SessionAttachmentsViewController: NSViewController {
         updateListHeight()
     }
 
-    /// A hard floor plus the gentle pull toward it — the pair that has to move together, so a
-    /// call site cannot activate one and leave the other pinning the actions to the wrong edge.
-    private static func floorConstraints(
-        for control: NSView,
-        above anchor: NSLayoutYAxisAnchor,
-        inset: CGFloat
-    ) -> [NSLayoutConstraint] {
-        let limit = control.bottomAnchor.constraint(lessThanOrEqualTo: anchor, constant: -inset)
-        let pull = control.bottomAnchor.constraint(equalTo: anchor, constant: -inset)
-        pull.priority = SessionAttachmentsDefaults.footerPullPriority
-        return [limit, pull]
-    }
-
     /// Re-aims `listHeightConstraint` at the rows the list currently holds, capped at its share
     /// of the pane. Called from `refresh()`, because the rows change, and from `viewDidLayout`,
-    /// because the cap is a function of the pane's *height* — the same pair of reasons
-    /// `updatePreviewHeight()` has for width.
+    /// because the cap is a function of the pane's *height*.
     ///
     /// One row is a one-row-tall list; eight rows in a tall pane are eight visible rows; eight
     /// rows in a short one are the cap, scrolled.
@@ -578,35 +565,6 @@ final class SessionAttachmentsViewController: NSViewController {
             scrollerStyle: scrollView.scrollerStyle
         ).height
         return insets + border
-    }
-
-    /// Re-aims `previewHeightConstraint` at what the preview currently holds. Called when the
-    /// selection changes what is shown and from `viewDidLayout`, because an image's fitted
-    /// height is a function of the pane's *width*.
-    private func updatePreviewHeight() {
-        guard let constraint = previewHeightConstraint else { return }
-
-        if !imageView.isHidden, let image = imageView.image {
-            // Activated even before the pane has a width — the floor stands in, and the
-            // `viewDidLayout` call corrects it the moment the width is real. Returning early
-            // here left the constraint inactive for the first pass, which was a whole pane of
-            // stretched preview until something else caused a layout.
-            let width = previewHost.bounds.width
-            let fitted = width > 0
-                ? ThemedImagePreview.fittedRect(
-                    for: image.size,
-                    in: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
-                ).height
-                : 0
-            let target = max(fitted, SessionAttachmentsDefaults.minimumPreviewHeight)
-            if constraint.constant != target { constraint.constant = target }
-            constraint.isActive = true
-        } else if !previewMessage.isHidden {
-            constraint.constant = SessionAttachmentsDefaults.messagePreviewHeight
-            constraint.isActive = true
-        } else {
-            constraint.isActive = false
-        }
     }
 
     // MARK: - Public Methods
@@ -664,13 +622,9 @@ final class SessionAttachmentsViewController: NSViewController {
         let hasAttachments = !attachments.isEmpty
         headerRow.isHidden = allAttachments.isEmpty
         scrollView.isHidden = !hasAttachments
+        listFold.isHidden = !hasAttachments
         previewHost.isHidden = !hasAttachments
-        fileLabel.isHidden = !hasAttachments
-        pathLabel.isHidden = !hasAttachments
-        openButton.isHidden = !hasAttachments
-        revealButton.isHidden = !hasAttachments
-        copyButton.isHidden = !hasAttachments
-        updateChatAvailability()
+        footerBand.isHidden = !hasAttachments
         emptyLabel.isHidden = hasAttachments
 
         guard hasAttachments else {
@@ -694,15 +648,31 @@ final class SessionAttachmentsViewController: NSViewController {
         showSelected()
     }
 
-    /// Draws **Chat…** only when there is something on the other side of it.
+    /// Re-resolves the remembered action against what the selection can actually take, and
+    /// retitles the footer's press with the answer.
     ///
-    /// Not "is this session rendered natively" but "is anything listening": a terminal session
-    /// is handed the same attachment by paste, which is the case this pane was silently missing
-    /// for every OpenCode session and every session with native Chat turned off — the button was
-    /// there, and pressing it did nothing at all.
-    private func updateChatAvailability() {
-        chatButton.isHidden = attachments.isEmpty
-            || !SessionContextHandoff.canReceiveContext(for: sessionID)
+    /// The memory may name Chat while nothing is listening — a dormant session has no door, and
+    /// "is anything listening" is the question, not "is this session rendered natively" — and a
+    /// button performing nothing is worse than a button saying something else. So the
+    /// resolution falls back the way the header's Open in control does when the remembered
+    /// editor was uninstalled, without overwriting the memory: the door reopening restores the
+    /// remembered answer.
+    private func updatePrimaryAction() {
+        guard isViewLoaded else { return }
+        let selection = selectedAttachments
+        guard !selection.isEmpty else { return }
+        let action = resolvedPrimaryAction()
+        primaryActionButton.title = action.buttonTitle(for: selection)
+    }
+
+    /// The action the footer's press would take right now.
+    private func resolvedPrimaryAction() -> AttachmentAction {
+        AttachmentAction.resolvePreferred(
+            storedID: PreferenceStore.shared.string(
+                forKey: SessionAttachmentsDefaults.lastActionKey
+            ),
+            canChat: SessionContextHandoff.canReceiveContext(for: sessionID)
+        )
     }
 
     /// Whether a row names `path`, which has already been standardized and resolved.
@@ -746,8 +716,8 @@ final class SessionAttachmentsViewController: NSViewController {
 
         scopeBand.isHidden = count == 0
         if scopeBand.isHidden != wasHidden {
-            NSLayoutConstraint.deactivate(scopeBand.isHidden ? actionsToScopeBand : actionsToPaneBottom)
-            NSLayoutConstraint.activate(scopeBand.isHidden ? actionsToPaneBottom : actionsToScopeBand)
+            NSLayoutConstraint.deactivate(scopeBand.isHidden ? footerToScopeBand : footerToPaneBottom)
+            NSLayoutConstraint.activate(scopeBand.isHidden ? footerToPaneBottom : footerToScopeBand)
         }
         guard !scopeBand.isHidden else { return }
 
@@ -805,8 +775,8 @@ final class SessionAttachmentsViewController: NSViewController {
         }
         return L10n.string(
             """
-            Attachments this session exchanged appear here: images and PDFs you send, \
-            and ones the agent shows or names.
+            Attachments this session exchanged appear here: images, PDFs, documents, and \
+            archives you send, and ones the agent shows or names.
             """
         )
     }
@@ -819,8 +789,20 @@ final class SessionAttachmentsViewController: NSViewController {
         return attachments[row]
     }
 
+    /// Every selected row's file, in the list's own order.
+    private var selectedAttachments: [SessionAttachment] {
+        tableView.selectedRowIndexes.compactMap {
+            attachments.indices.contains($0) ? attachments[$0] : nil
+        }
+    }
+
     private func showSelected() {
-        guard let attachment = selectedAttachment else {
+        let selection = selectedAttachments
+        if selection.count > 1 {
+            showSelectionSummary(selection)
+            return
+        }
+        guard let attachment = selection.first ?? selectedAttachment else {
             clearPreview()
             return
         }
@@ -832,6 +814,7 @@ final class SessionAttachmentsViewController: NSViewController {
         pathLabel.toolTip = attachment.url.path
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
+        updatePrimaryAction()
 
         let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size <= SessionAttachmentsDefaults.maximumPreviewFileBytes else {
@@ -845,66 +828,92 @@ final class SessionAttachmentsViewController: NSViewController {
                 showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
             }
-            pdfView.clear()
-            pdfView.isHidden = true
+            documentView.clear()
+            documentView.isHidden = true
             clearHTMLPreview()
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
 
-        case .pdf:
-            guard pdfView.display(attachment.url) else {
-                showPreviewMessage(L10n.string("The PDF could not be decoded."))
+        case .pdf, .archive, .document:
+            // One surface for all three: PDFKit draws the first, and Quick Look — already
+            // contained inside the same named boundary — renders an office document's pages
+            // and an archive's icon-and-metadata card, which is what the space bar shows in
+            // Finder for the same file.
+            guard documentView.display(attachment.url) else {
+                showPreviewMessage(
+                    attachment.kind == .pdf
+                        ? L10n.string("The PDF could not be decoded.")
+                        : L10n.string("This file could not be previewed.")
+                )
                 return
             }
             imageView.image = nil
             imageView.isHidden = true
             clearHTMLPreview()
-            pdfView.isHidden = false
+            documentView.isHidden = false
 
         case .html:
             imageView.image = nil
             imageView.isHidden = true
-            pdfView.clear()
-            pdfView.isHidden = true
+            documentView.clear()
+            documentView.isHidden = true
             htmlView.loadFileURL(
                 attachment.url,
                 allowingReadAccessTo: attachment.url.deletingLastPathComponent()
             )
             htmlView.isHidden = false
         }
+    }
 
-        updatePreviewHeight()
+    /// Several rows at once. The preview cannot show three pictures, so it says the count; the
+    /// footer says it too, with the batch's total weight under it, and the action beside them
+    /// applies to all — which is the point of a selection, since the rows can now leave
+    /// together: dragged to a composer, a terminal, or Finder as one batch.
+    private func showSelectionSummary(_ selection: [SessionAttachment]) {
+        selectedRelativePath = selection.first?.relativePath
+        let title = L10n.format("%lld files selected", Int64(selection.count))
+        fileLabel.stringValue = title
+        fileLabel.toolTip = nil
+        let bytes = selection
+            .compactMap { try? $0.url.resourceValues(forKeys: [.fileSizeKey]).fileSize }
+            .reduce(0, +)
+        pathLabel.stringValue = ByteCountFormatter.string(
+            fromByteCount: Int64(bytes),
+            countStyle: .file
+        )
+        // The names still one hover away: the label under a count cannot carry thirty paths.
+        pathLabel.toolTip = selection.map(\.relativePath).joined(separator: "\n")
+        updatePrimaryAction()
+        showPreviewMessage(title)
     }
 
     private func clearPreview() {
         imageView.image = nil
         imageView.isHidden = true
-        pdfView.clear()
-        pdfView.isHidden = true
+        documentView.clear()
+        documentView.isHidden = true
         clearHTMLPreview()
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
         fileLabel.stringValue = ""
         pathLabel.stringValue = ""
-        updatePreviewHeight()
     }
 
     private func showPreviewMessage(_ message: String) {
         imageView.image = nil
         imageView.isHidden = true
-        pdfView.clear()
-        pdfView.isHidden = true
+        documentView.clear()
+        documentView.isHidden = true
         clearHTMLPreview()
         previewMessage.stringValue = message
         previewMessage.isHidden = false
-        updatePreviewHeight()
     }
 
     private func applyPreviewTheme() {
         guard isViewLoaded else { return }
         previewHost.applySurface(fill: Design.Surface.ground, radius: .panel)
-        pdfView.applyTheme()
+        documentView.applyTheme()
         htmlView.underPageBackgroundColor = Design.Surface.ground
     }
 
@@ -921,66 +930,154 @@ final class SessionAttachmentsViewController: NSViewController {
 
     // MARK: - Actions
 
+    /// The table's double-click. Deliberately `perform`, never `take`: opening by double-click
+    /// is the list's own idiom, not a choice from a menu, and Finder's memory does not move
+    /// when a file is double-clicked either.
     @objc private func openSelected() {
-        guard let attachment = selectedAttachment else { return }
-        NSWorkspace.shared.open(attachment.url)
+        perform(.open, on: selectedAttachments)
     }
 
-    @objc private func revealSelected() {
-        guard let attachment = selectedAttachment else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([attachment.url])
+    /// The footer's press: whatever the menu was last used for, resolved against what the
+    /// selection can take right now, applied to every selected row.
+    @objc private func performRememberedAction() {
+        perform(resolvedPrimaryAction(), on: selectedAttachments)
     }
 
-    @objc private func copySelectedPath() {
-        guard let attachment = selectedAttachment else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(attachment.url.path, forType: .string)
-    }
-
-    @objc private func showChatActions() {
-        guard chatMenuSession == nil, let attachment = selectedAttachment else { return }
-        let entries = chatEntries(for: attachment)
+    /// The chevron's menu — the row's own entries for one file, the batch actions for several.
+    private func presentActionsMenu(from button: ThemedIconButton) {
+        guard actionMenuSession == nil else { return }
+        let entries = actionMenuEntries(for: selectedAttachments)
         guard !entries.isEmpty else { return }
-
-        chatMenuSession = ThemedMenuPresenter.present(
+        actionMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(
                 entries: entries,
                 minimumWidth: SessionAttachmentsDefaults.menuWidth
             ),
-            from: chatButton,
+            from: button,
             selectedEntryIndex: nil,
             onChoose: { _, item in item.onChoose?() },
-            onDismiss: { [weak self] in self?.chatMenuSession = nil }
+            onDismiss: { [weak self] in self?.actionMenuSession = nil }
         )
     }
 
-    /// The two things a session can be handed a file for, in the one place both surfaces read
-    /// them from: the **Chat…** button under the preview, and the row's own menu.
-    ///
-    /// Empty when nothing is listening — the same question `updateChatAvailability` asks, and the
-    /// reason the menu can simply append what comes back without asking it a second time.
-    private func chatEntries(for attachment: SessionAttachment) -> [ThemedMenuEntry] {
-        guard SessionContextHandoff.canReceiveContext(for: sessionID) else { return [] }
+    /// What the chevron offers. One file gets the row menu's whole vocabulary; a batch keeps
+    /// only the actions that mean something said of several files at once — no Open in, no
+    /// comparison, no comment, each of which is a decision about *one* thing.
+    func actionMenuEntries(for selection: [SessionAttachment]) -> [ThemedMenuEntry] {
+        guard selection.count > 1 else {
+            return selection.first.map(contextMenuEntries(for:)) ?? []
+        }
 
-        // The store-relative path, not the machine's own, for exactly the reason the attachment
-        // record keeps one: it is what travels to a transcript and to a paired phone. The real
-        // file goes alongside it as `fileURL`, which only the terminal path reads.
-        let context = ConversationContextAttachment(
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Open"),
+                onChoose: { [weak self] in self?.take(.open, on: selection) }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Reveal in Finder"),
+                onChoose: { [weak self] in self?.take(.reveal, on: selection) }
+            ))
+        ]
+        if SessionContextHandoff.canReceiveContext(for: sessionID) {
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Add attachments to chat"),
+                onChoose: { [weak self] in self?.take(.chat, on: selection) }
+            )))
+        }
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Files"),
+            onChoose: { [weak self] in self?.take(.copyFile, on: selection) }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Path"),
+            onChoose: { [weak self] in self?.take(.copyPath, on: selection) }
+        )))
+        return entries
+    }
+
+    /// A choice from either menu is two things at once: the action runs, and it becomes what
+    /// the footer's press does next — "last used wins", the header control's rule
+    /// (`external-apps.md`). Through `PreferenceStore` because it records a choice the user
+    /// made, and app-wide rather than per session because it is a habit about the *user*, not
+    /// a fact about a file.
+    private func take(_ action: AttachmentAction, on attachments: [SessionAttachment]) {
+        PreferenceStore.shared.set(
+            action.rawValue,
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+        updatePrimaryAction()
+        perform(action, on: attachments)
+    }
+
+    private func take(_ action: AttachmentAction, on attachment: SessionAttachment) {
+        take(action, on: [attachment])
+    }
+
+    private func perform(_ action: AttachmentAction, on attachments: [SessionAttachment]) {
+        guard !attachments.isEmpty else { return }
+        switch action {
+        case .open:
+            for attachment in attachments { NSWorkspace.shared.open(attachment.url) }
+        case .reveal:
+            NSWorkspace.shared.activateFileViewerSelecting(attachments.map(\.url))
+        case .copyPath:
+            // One per line: several paths on one line are a sentence no shell or prompt can
+            // take back apart once a name holds a space.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(
+                attachments.map(\.url.path).joined(separator: "\n"),
+                forType: .string
+            )
+        case .copyFile:
+            Self.copy(attachments)
+        case .chat:
+            guard SessionContextHandoff.canReceiveContext(for: sessionID) else { return }
+            // One receipt per file, the same shape a batch staged from Git Review takes.
+            for attachment in attachments {
+                SessionContextHandoff.stage(
+                    contextAttachment(for: attachment),
+                    fileURL: attachment.url,
+                    for: sessionID
+                )
+            }
+        }
+    }
+
+    /// The store-relative path, not the machine's own, for exactly the reason the attachment
+    /// record keeps one: it is what travels to a transcript and to a paired phone. The real
+    /// file goes alongside it as `fileURL`, which only the terminal path reads.
+    private func contextAttachment(
+        for attachment: SessionAttachment
+    ) -> ConversationContextAttachment {
+        ConversationContextAttachment(
             kind: .reference,
             source: .attachment,
             title: attachment.name,
             excerpt: attachment.relativePath,
             locator: attachment.relativePath
         )
+    }
+
+    /// The two things a session can be handed a file for, in the one place both surfaces read
+    /// them from: the footer's action menu and the row's own.
+    ///
+    /// Empty when nothing is listening — the same question `resolvedPrimaryAction` asks, and the
+    /// reason the menu can simply append what comes back without asking it a second time.
+    private func chatEntries(for attachment: SessionAttachment) -> [ThemedMenuEntry] {
+        guard SessionContextHandoff.canReceiveContext(for: sessionID) else { return [] }
+
+        let context = contextAttachment(for: attachment)
         let fileURL = attachment.url
         let sessionID = self.sessionID
         return [
             .item(ThemedMenuItem(
                 title: L10n.string("Add attachment to chat"),
-                onChoose: {
-                    SessionContextHandoff.stage(context, fileURL: fileURL, for: sessionID)
-                }
+                onChoose: { [weak self] in self?.take(.chat, on: attachment) }
             )),
+            // Not rememberable: a comment opens a dialog, and a footer press that raises a
+            // question is a press whose outcome depends on a second decision.
             .item(ThemedMenuItem(
                 title: L10n.string("Comment on attachment…"),
                 onChoose: {
@@ -994,8 +1091,8 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// The row's menu, built per click for the row under the pointer.
     ///
-    /// The pane's own four buttons say it for the *selected* file; this says the same four for the
-    /// row you actually pointed at, and adds the one thing no button under a single preview can:
+    /// The footer's menu says it for the *selected* file; this says the same list for the row
+    /// you actually pointed at, and adds the one thing no control under a single preview can:
     /// another row's name. Every item captures the attachment it was built for, so a menu left
     /// open cannot act on a list that changed underneath it — the same rule the file tree's rows
     /// follow.
@@ -1007,7 +1104,10 @@ final class SessionAttachmentsViewController: NSViewController {
         // The click also selects, and that is not ceremony: the preview under this list is what
         // "this file" means in this pane, so a menu acting on one row while the picture below it
         // shows another is the pane disagreeing with itself in front of the person using it.
-        if tableView.selectedRow != row {
+        // Unless the row is already inside a wider selection, which a secondary click must not
+        // collapse — Finder's rule, and the batch someone just gathered to drag is exactly what
+        // a stray right-click would otherwise cost them.
+        if !tableView.selectedRowIndexes.contains(row) {
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
 
@@ -1028,17 +1128,22 @@ final class SessionAttachmentsViewController: NSViewController {
         return contextMenuSession != nil
     }
 
-    /// What that menu holds, for one file.
+    /// What that menu holds, for one file. The footer's chevron presents the same list for the
+    /// *selected* file, so the two surfaces are one builder and cannot drift apart.
     ///
     /// Apart from the presentation because this is the part with decisions in it — which items a
     /// PDF loses, what a session with no listener loses, what a lone picture cannot be compared
     /// against — and every one of them is a sentence a test can read back. Presenting a real
     /// dropdown needs a key window; the rules do not.
+    ///
+    /// The typed actions route through `take`, which is what makes choosing one also the answer
+    /// to what the footer's press does next; the extras — an Open in submenu, a comparison, a
+    /// comment — stay direct, because none of them is a single press's worth of decision.
     func contextMenuEntries(for attachment: SessionAttachment) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
                 title: L10n.string("Open"),
-                onChoose: { NSWorkspace.shared.open(attachment.url) }
+                onChoose: { [weak self] in self?.take(.open, on: attachment) }
             ))
         ]
         if let openIn = OpenInMenu.submenuEntry(for: .file(attachment.url, line: nil)) {
@@ -1046,7 +1151,7 @@ final class SessionAttachmentsViewController: NSViewController {
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reveal in Finder"),
-            onChoose: { NSWorkspace.shared.activateFileViewerSelecting([attachment.url]) }
+            onChoose: { [weak self] in self?.take(.reveal, on: attachment) }
         )))
 
         if let comparison = compareEntry(for: attachment) {
@@ -1065,14 +1170,11 @@ final class SessionAttachmentsViewController: NSViewController {
             title: attachment.kind == .image
                 ? L10n.string("Copy Image")
                 : L10n.string("Copy File"),
-            onChoose: { Self.copy(attachment) }
+            onChoose: { [weak self] in self?.take(.copyFile, on: attachment) }
         )))
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Copy Path"),
-            onChoose: {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(attachment.url.path, forType: .string)
-            }
+            onChoose: { [weak self] in self?.take(.copyPath, on: attachment) }
         )))
         return entries
     }
@@ -1101,15 +1203,22 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// The pasteboard answer for one row: the picture where there is one to give, the file
     /// otherwise. `MediaInspector`'s own rule, so the two surfaces that offer this in the same
-    /// pane mean the same thing by it.
-    private static func copy(_ attachment: SessionAttachment) {
+    /// pane mean the same thing by it. A batch is always files — Finder's answer for several
+    /// selected pictures, and the one a paste target can take whole.
+    private static func copy(_ attachments: [SessionAttachment]) {
         NSPasteboard.general.clearContents()
-        if attachment.kind == .image,
+        if attachments.count == 1,
+           let attachment = attachments.first,
+           attachment.kind == .image,
            let image = NSImage(contentsOf: attachment.url), image.isValid {
             NSPasteboard.general.writeObjects([image])
             return
         }
-        NSPasteboard.general.writeObjects([attachment.url as NSURL])
+        NSPasteboard.general.writeObjects(attachments.map { $0.url as NSURL })
+    }
+
+    private static func copy(_ attachment: SessionAttachment) {
+        copy([attachment])
     }
 
     // MARK: - Comparison
@@ -1578,6 +1687,51 @@ enum SessionAttachmentThumbnails {
     }
 }
 
+// MARK: - Footer Actions
+
+/// The actions the footer can take on the selected file, and the one its button remembers.
+///
+/// There is no Settings row for a preferred action because the choice is made in the act of
+/// taking it — whatever either menu was last used for becomes what the button's press does,
+/// which is `external-apps.md`'s "last used wins" said about actions instead of editors. Pure
+/// and separate from the pane for the same reason `ExternalApps.resolvePreferred` is: what the
+/// stored id names may no longer be on offer, and the rule is assertable while the pane is not.
+enum AttachmentAction: String, CaseIterable {
+    case open
+    case reveal
+    case copyPath
+    case copyFile
+    case chat
+
+    /// The word on the button's face — the footer is a band, not a sentence, so these stay as
+    /// terse as the four buttons they replaced. Only the copy changes with what is selected: a
+    /// picture offers its pixels, anything else — and any batch — offers the file.
+    func buttonTitle(for selection: [SessionAttachment]) -> String {
+        switch self {
+        case .open: return L10n.string("Open")
+        case .reveal: return L10n.string("Finder")
+        case .copyPath: return L10n.string("Copy Path")
+        case .copyFile:
+            if selection.count > 1 { return L10n.string("Copy Files") }
+            return selection.first?.kind == .image
+                ? L10n.string("Copy Image")
+                : L10n.string("Copy File")
+        case .chat: return L10n.string("Add to Chat")
+        }
+    }
+
+    /// What a stored id means today. An unknown or absent id is `.open` — the one action every
+    /// file always takes — and a remembered Chat falls back there while nothing is listening,
+    /// without the memory being overwritten: the door reopening restores the remembered answer.
+    static func resolvePreferred(storedID: String?, canChat: Bool) -> AttachmentAction {
+        guard let storedID, let stored = AttachmentAction(rawValue: storedID) else {
+            return .open
+        }
+        if stored == .chat, !canChat { return .open }
+        return stored
+    }
+}
+
 // MARK: - Filter
 
 /// Which side's attachments the pane is showing.
@@ -1626,7 +1780,7 @@ enum SessionAttachmentsDefaults {
     static let columnIdentifier = NSUserInterfaceItemIdentifier("SessionAttachmentsColumn")
     static let rowHeight: CGFloat = 42
 
-    /// One width for both of this pane's menus — the row's and the **Chat…** button's — because
+    /// One width for both of this pane's menus — the row's and the footer chevron's — because
     /// they carry the same items and a narrower one under the button would read as a different
     /// menu saying the same thing.
     static let menuWidth: CGFloat = 220
@@ -1640,35 +1794,24 @@ enum SessionAttachmentsDefaults {
     /// between two conversations re-decodes neither of them.
     static let thumbnailCacheCount = SessionAttachmentDefaults.maximumPerSession * 2
 
-    /// A floor for the image well, so a small mark still gets a quiet panel rather than a
-    /// sliver whose corner radius outweighs its height.
-    static let minimumPreviewHeight: CGFloat = 96
-    /// The well around a sentence — "too large to preview", "could not be decoded".
-    static let messagePreviewHeight: CGFloat = 160
-    /// Gentle on purpose: it loses to an image's own height (`previewHeightPriority`) and wins
-    /// only when nothing states one — a PDF, which fills whatever room the pane has.
-    static let footerPullPriority = NSLayoutConstraint.Priority(300)
-
     /// How much of the pane the list may take before it starts scrolling. Half: the rows and
     /// what they are describing are two halves of the same pane, and neither may swallow the
     /// other on the way to the footer.
     static let listShareOfPane: CGFloat = 0.5
 
-    /// Both height priorities sit **below** `windowSizeStayPut` (500), and that line is the
-    /// whole point: AppKit reads a window's minimum size out of every constraint it finds at
-    /// 500 and above, so a content-derived height any higher is not a preference inside the
-    /// pane — it is the pane resizing the window. The preview's constant is an image's fitted
-    /// height with no ceiling, and at the old `.defaultHigh` a full-page screenshot grew the
-    /// main window to 3386 points on a 1084-point screen every time its session was opened
-    /// (`MainWindowFrame` is what brings such a window back; this is what stops it leaving).
-    /// Inside the pane nothing moves: both still outrank `footerPullPriority`, and the order
-    /// between them still compresses the preview before the list. The pane's own height is
-    /// `required` at its edges, so below 500 these constraints shape the pane and only the
-    /// pane — which is what the detached-fixture tests always saw, while a hosted window
-    /// quietly obeyed the 750.
-    static let previewHeightPriority = NSLayoutConstraint.Priority(480)
-    /// Above the preview's, below `windowSizeStayPut`. A pane too short for everything
-    /// therefore compresses the preview first and the list only after it — and the footer's
-    /// floor, which is `required`, never.
+    /// Below `windowSizeStayPut` (500), and that line is the whole point: AppKit reads a
+    /// window's minimum size out of every constraint it finds at 500 and above, so a
+    /// content-derived height any higher is not a preference inside the pane — it is the pane
+    /// resizing the window. A content-height constraint at `.defaultHigh` once grew the main
+    /// window to 3386 points on a 1084-point screen every time a session holding a full-page
+    /// screenshot was opened (`MainWindowFrame` is what brings such a window back; this is
+    /// what stops it leaving). The preview pane states no height at all now — it fills what
+    /// stands between the fold and the footer — so this list constraint is the only
+    /// content-derived height left, and a pane too short for everything compresses the preview
+    /// first, the list after it, and the footer, whose band height is `required`, never.
     static let listHeightPriority = NSLayoutConstraint.Priority(490)
+
+    /// Where the footer's remembered action lives. `PreferenceStore`, not `.standard`: it
+    /// records a choice the user made, and the hosted test suite runs inside the shipping app.
+    static let lastActionKey = "attachments.lastAction"
 }

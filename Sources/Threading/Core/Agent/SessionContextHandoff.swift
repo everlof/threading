@@ -9,7 +9,7 @@ import Foundation
 /// typed envelope every native transport carries — was built on `ConversationViewController`,
 /// which exists only for a session rendered natively. That is three of the four runtimes, and
 /// only when the user has native Chat turned on for that session; everything else runs the
-/// agent's own TUI in a PTY. So the Attachments pane's **Chat…** button, the Git Review row's
+/// agent's own TUI in a PTY. So the Attachments pane's chat actions, the Git Review row's
 /// reference actions and every sibling site were quietly absent for a terminal session, and the
 /// one thing the feature exists to save — copy the path, switch panes, paste it, then type the
 /// sentence — was still being done by hand exactly where it costs the most.

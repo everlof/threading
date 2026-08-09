@@ -873,7 +873,9 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let path: String
     public let name: String
-    /// `image`, `pdf`, or `html`.
+    /// `image`, `pdf`, `html`, `archive`, or `document`. A string rather than an enum on
+    /// purpose: a phone from before a kind existed still decodes the row and falls into its
+    /// default presentation, instead of refusing the whole list.
     public let kind: String
     public let byteCount: Int64
     public let modifiedAt: Date?

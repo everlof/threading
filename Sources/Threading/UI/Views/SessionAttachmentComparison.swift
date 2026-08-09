@@ -16,9 +16,10 @@ enum AttachmentComparison {
     ///
     /// Images only, and that is the comparison surface's own rule read back rather than a second
     /// one invented here: `CompareViewController` decides what a pair *is* from the bytes, and a
-    /// PDF classifies as binary — so every comparison offered for a PDF row would open a tab
-    /// saying it cannot draw one. An offer that is always a dead end is worse than no offer, so
-    /// a PDF row is neither a drop target nor a name in the submenu.
+    /// PDF, an archive or an office document classifies as binary — so every comparison offered
+    /// for such a row would open a tab saying it cannot draw one. An offer that is always a dead
+    /// end is worse than no offer, so those rows are neither drop targets nor names in the
+    /// submenu.
     static func canCompare(_ attachment: SessionAttachment) -> Bool {
         attachment.kind == .image
     }

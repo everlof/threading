@@ -3,7 +3,8 @@ import Foundation
 
 // MARK: - Attachment
 
-/// A visual file that passed between the two parties in one session.
+/// An inspectable file that passed between the two parties in one session: an image, a PDF,
+/// generated HTML, an archive, or an open document format.
 ///
 /// Attachments inside the checkout are references, not copies. The project file remains
 /// authoritative, so replacing an image or PDF at the same path updates every preview without
@@ -15,6 +16,8 @@ struct SessionAttachment: Equatable, Identifiable {
         case image
         case pdf
         case html
+        case archive
+        case document
     }
 
     /// Which side of the conversation put the file in front of the other.
@@ -674,9 +677,16 @@ final class SessionAttachmentStore {
               )
         else { return }
 
-        attachmentsBySession[sessionID] = document.entries.map { entry in
+        attachmentsBySession[sessionID] = document.entries.compactMap { entry in
             let root = URL(fileURLWithPath: entry.root, isDirectory: true)
             let url = root.appendingPathComponent(entry.relativePath)
+            // A kind this build has no case for — a payload from a newer build — re-derives
+            // from the file itself, the authority every read already trusts. A row unknown both
+            // ways holds nothing this build can show, and drops alone rather than taking the
+            // session's list with it.
+            guard let kind = entry.kind ?? AttachmentReferenceDetector.kind(for: url) else {
+                return nil
+            }
             return SessionAttachment(
                 sessionID: sessionID,
                 id: entry.id ?? Self.legacyID(
@@ -690,7 +700,7 @@ final class SessionAttachmentStore {
                 // A payload written before provenance was recorded has no source of its own, and
                 // its own path is the key it was already deduplicated by.
                 sourcePath: entry.sourcePath ?? url.path,
-                kind: entry.kind,
+                kind: kind,
                 origin: entry.origin ?? .agent,
                 // A payload written before the scope was configurable holds only files that
                 // passed the narrow rule, so absent reads as "inside" rather than as unknown.
@@ -932,7 +942,8 @@ final class SessionAttachmentStore {
 
 // MARK: - Reference Detection
 
-/// Extracts only image/PDF-shaped paths, then lets the filesystem decide whether each one is real.
+/// Extracts only supported-attachment-shaped paths — images, PDFs, HTML, archives and open
+/// document formats — then lets the filesystem decide whether each one is real.
 enum AttachmentReferenceDetector {
 
     /// Real files the text named, split by the one question the caller has to answer.
@@ -948,11 +959,28 @@ enum AttachmentReferenceDetector {
         var isEmpty: Bool { insideProject.isEmpty && outsideProject.isEmpty }
     }
 
-    private static let extensions = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp", "pdf",
-        "html", "htm"
+    /// One set per kind, and the kinds joined for the scan. `kind(for:)` maps each set
+    /// explicitly — it used to answer `.image` for anything the list held that was not a PDF or
+    /// HTML, which was correct only while images were the remainder, and one added extension
+    /// away from the pane decoding a zip as a picture.
+    private static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"
     ]
-    private static let extensionAlternation = extensions.joined(separator: "|")
+    private static let archiveExtensions: Set<String> = [
+        "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar"
+    ]
+    private static let documentExtensions: Set<String> = [
+        "odt", "ods", "odp", "docx", "xlsx", "pptx", "rtf"
+    ]
+    private static let extensions =
+        imageExtensions.sorted() + ["pdf", "html", "htm"]
+            + archiveExtensions.sorted() + documentExtensions.sorted()
+    /// Longest first, because the alternation is ordered and nothing after it requires a word
+    /// boundary: with `tif` offered before `tiff`, `shot.tiff` matched as `shot.tif`, a file
+    /// that does not exist, and the real one was never recorded.
+    private static let extensionAlternation = extensions
+        .sorted { $0.count > $1.count }
+        .joined(separator: "|")
 
     /// Quoted and Markdown forms admit spaces. The plain form deliberately does not: prose around
     /// an unquoted path is otherwise indistinguishable from the path itself.
@@ -963,7 +991,7 @@ enum AttachmentReferenceDetector {
         expression(#"((?:file://)?[^\s<>"'`()\[\]{}]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)"#)
     ]
 
-    /// Every real image or PDF the text names, sorted by whether it lives in the project.
+    /// Every real supported file the text names, sorted by whether it lives in the project.
     ///
     /// Containment used to be checked *before* the filesystem, which made an outside path free to
     /// reject — it was rejected on a string. Reporting one costs a `stat`, because a path in prose
@@ -1026,10 +1054,12 @@ enum AttachmentReferenceDetector {
 
     static func kind(for url: URL) -> SessionAttachment.Kind? {
         let ext = url.pathExtension.lowercased()
-        guard extensions.contains(ext) else { return nil }
+        if imageExtensions.contains(ext) { return .image }
         if ext == "pdf" { return .pdf }
         if ext == "html" || ext == "htm" { return .html }
-        return .image
+        if archiveExtensions.contains(ext) { return .archive }
+        if documentExtensions.contains(ext) { return .document }
+        return nil
     }
 
     static func contains(_ file: URL, inside root: URL) -> Bool {

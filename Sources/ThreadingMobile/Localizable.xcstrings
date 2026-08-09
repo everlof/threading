@@ -4489,6 +4489,16 @@
           }
         }
       }
+    },
+    "This file previews on your Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den h\u00e4r filen f\u00f6rhandsvisas p\u00e5 din Mac."
+          }
+        }
+      }
     }
   },
   "version": "1.2"

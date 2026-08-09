@@ -1575,6 +1575,23 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "heic", "heif": return "image/heic"
         case "tif", "tiff": return "image/tiff"
         case "bmp": return "image/bmp"
+        case "zip": return "application/zip"
+        case "tar": return "application/x-tar"
+        case "gz", "tgz": return "application/gzip"
+        case "bz2", "tbz2": return "application/x-bzip2"
+        case "xz", "txz": return "application/x-xz"
+        case "7z": return "application/x-7z-compressed"
+        case "rar": return "application/vnd.rar"
+        case "rtf": return "application/rtf"
+        case "odt": return "application/vnd.oasis.opendocument.text"
+        case "ods": return "application/vnd.oasis.opendocument.spreadsheet"
+        case "odp": return "application/vnd.oasis.opendocument.presentation"
+        case "docx":
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "xlsx":
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "pptx":
+            return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         default: return "application/octet-stream"
         }
     }

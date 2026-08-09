@@ -2005,7 +2005,14 @@ struct PersistedSessionAttachment: Codable {
   /// Both absent in payloads written before provenance was recorded, which is why neither is
   /// required — a missing origin is read as `agent`, the only kind that could have been stored.
   let sourcePath: String?
-  let kind: SessionAttachment.Kind
+
+  /// Nil when the payload names a kind this build has no case for — a document written by a
+  /// newer build. Kind is advisory here anyway (every read re-derives it from the file), so an
+  /// unknown value costs the reader nothing it can use; what it must not cost is the *list*,
+  /// which is what a strict decode did: `Array` decoding is all-or-nothing, `loadIfNeeded`
+  /// swallows the throw, and the next `admit` persists the freshly recorded rows over a payload
+  /// that still held every older one.
+  let kind: SessionAttachment.Kind?
   let origin: SessionAttachment.Origin?
 
   /// Written only when true, and read as false when absent: every payload predating the
@@ -2026,6 +2033,45 @@ struct PersistedSessionAttachment: Codable {
     case isOutsideProject
     case isImmutableSnapshot
     case referencedAt
+  }
+
+  init(
+    id: String?,
+    root: String,
+    relativePath: String,
+    sourcePath: String?,
+    kind: SessionAttachment.Kind?,
+    origin: SessionAttachment.Origin?,
+    isOutsideProject: Bool?,
+    isImmutableSnapshot: Bool?,
+    referencedAt: Date
+  ) {
+    self.id = id
+    self.root = root
+    self.relativePath = relativePath
+    self.sourcePath = sourcePath
+    self.kind = kind
+    self.origin = origin
+    self.isOutsideProject = isOutsideProject
+    self.isImmutableSnapshot = isImmutableSnapshot
+    self.referencedAt = referencedAt
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decodeIfPresent(String.self, forKey: .id)
+    root = try container.decode(String.self, forKey: .root)
+    relativePath = try container.decode(String.self, forKey: .relativePath)
+    sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
+    // Read as strings and mapped by hand: an unknown raw value is a *newer build's* row, not
+    // corruption, and it reads as nil rather than throwing the whole array away.
+    kind = (try container.decodeIfPresent(String.self, forKey: .kind))
+      .flatMap(SessionAttachment.Kind.init(rawValue:))
+    origin = (try container.decodeIfPresent(String.self, forKey: .origin))
+      .flatMap(SessionAttachment.Origin.init(rawValue:))
+    isOutsideProject = try container.decodeIfPresent(Bool.self, forKey: .isOutsideProject)
+    isImmutableSnapshot = try container.decodeIfPresent(Bool.self, forKey: .isImmutableSnapshot)
+    referencedAt = try container.decode(Date.self, forKey: .referencedAt)
   }
 }
 

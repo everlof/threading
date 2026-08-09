@@ -2,15 +2,16 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// The attachments pane leads with its content instead of stretching across the pane, and its
+/// The attachments pane is two panes — the chronology above the fold, its preview below — with
+/// a footer band naming the selected file beside the one action the user last took, and its
 /// rows read as a visual history.
 ///
-/// The bug these pin down: the preview was the layout's one flexible element between a
-/// top-pinned list and a *bottom-pinned* footer, so a tall display panel stretched it to
-/// hundreds of points around a small picture and put the file's name and buttons at the
-/// window's floor, a screen below the list they describe. The footer's floor is now a limit
-/// (`lessThanOrEqualTo`), an image states the preview's height (`previewHeightConstraint`),
-/// and only a PDF — which reads better the taller it is — still fills the room the pane has.
+/// The shape these pin down: the list asks for its rows' height up to half the pane, the
+/// preview is the layout's one flexible element between the fold and the footer, and the
+/// footer is a `PaneFooterView` at the pane's floor — its band height `required`, so nothing
+/// the preview or the list does can push the file's name and its action out of reach. What no
+/// constraint here may do is state a content-derived height at `windowSizeStayPut` or above;
+/// the window test at the bottom is the tripwire for that.
 ///
 /// The rows are here for the same reason the list grew: this is where the panel's per-image
 /// tabs went, so a row has to carry the picture and the moment a tab used to.
@@ -24,16 +25,33 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
     /// is the developer's own — so it is put back exactly as it was found.
     private var scopeBeforeTest = false
 
+    /// The footer's remembered action lives in `PreferenceStore`'s scratch suite here — never
+    /// the developer's own — but that suite persists across tests in one process, so it is
+    /// still put back exactly as it was found.
+    private var lastActionBeforeTest: String?
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("attachments-layout-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         scopeBeforeTest = AppSettings.shared.includesAttachmentsOutsideProject
+        lastActionBeforeTest = PreferenceStore.shared.string(
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+        PreferenceStore.shared.removeObject(forKey: SessionAttachmentsDefaults.lastActionKey)
     }
 
     override func tearDownWithError() throws {
         AppSettings.shared.includesAttachmentsOutsideProject = scopeBeforeTest
+        if let lastActionBeforeTest {
+            PreferenceStore.shared.set(
+                lastActionBeforeTest,
+                forKey: SessionAttachmentsDefaults.lastActionKey
+            )
+        } else {
+            PreferenceStore.shared.removeObject(forKey: SessionAttachmentsDefaults.lastActionKey)
+        }
         if let root { try? FileManager.default.removeItem(at: root) }
         if let outside { try? FileManager.default.removeItem(at: outside) }
         outside = nil
@@ -148,11 +166,36 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 
+    /// By identifier, not by type: the pane holds two `PaneFooterView`s now — the footer naming
+    /// the selected file, and this band — and "the first one found" is whichever the traversal
+    /// happens to reach.
     private func scopeBand(in view: NSView) throws -> PaneFooterView {
         try XCTUnwrap(
-            descendants(of: view).compactMap { $0 as? PaneFooterView }.first,
+            descendants(of: view)
+                .compactMap { $0 as? PaneFooterView }
+                .first { $0.accessibilityIdentifier() == "attachments.scope-band" },
             "the pane grew no scope band"
         )
+    }
+
+    /// The band at the pane's floor naming the selected file beside its action.
+    private func footerBand(in view: NSView) throws -> PaneFooterView {
+        try XCTUnwrap(
+            descendants(of: view)
+                .compactMap { $0 as? PaneFooterView }
+                .first { $0.accessibilityIdentifier() == "attachments.footer" },
+            "the pane grew no footer band"
+        )
+    }
+
+    /// The preview well between the fold and the footer — the one surface filled with
+    /// `Design.Surface.ground`, found by the views it hosts.
+    private func previewHost(in view: NSView) throws -> NSView {
+        let image = try XCTUnwrap(
+            descendants(of: view).compactMap { $0 as? ThemedImagePreview }.first,
+            "the pane grew no preview"
+        )
+        return try XCTUnwrap(image.superview, "the preview is not hosted")
     }
 
     private func attachmentsTable(in view: NSView) throws -> ThemedTableView {
@@ -214,61 +257,314 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
     // MARK: - Tests
 
-    /// A small picture on a tall pane: the footer follows the content, and the slack falls
-    /// *below* the buttons, empty — not into the preview.
-    func testATallPaneHugsItsContentRatherThanStretchingThePreview() throws {
+    /// The footer is the pane's floor, whatever the pane's height: the file's name and its
+    /// action are always in the same place, and the preview pane above them takes the slack.
+    func testTheFooterIsThePanesFloorAndThePreviewTakesTheSlack() throws {
         let pane = try laidOutPane(
             showing: try writePNG(size: NSSize(width: 400, height: 400)),
             size: NSSize(width: 353, height: 900)
         )
-        let open = try button(titled: L10n.string("Open"), in: pane.view)
-        let frame = pane.view.convert(open.bounds, from: open)
+        let footer = try footerBand(in: pane.view)
+        let preview = try previewHost(in: pane.view)
 
+        XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.5, "the footer left the pane's floor")
+        XCTAssertEqual(
+            footer.frame.height,
+            Design.Size.footerHeight,
+            accuracy: 0.5,
+            "the footer is not the band `PaneFooterView` states"
+        )
         XCTAssertGreaterThan(
-            frame.minY,
-            200,
-            "the footer sits at the pane's floor, so the preview is absorbing the slack again"
+            preview.frame.height,
+            400,
+            "a tall pane's slack did not go to the preview pane"
+        )
+        XCTAssertEqual(
+            preview.frame.minY,
+            footer.frame.maxY + Design.Spacing.small,
+            accuracy: 1,
+            "the preview does not stand directly on the footer"
         )
     }
 
-    /// The same pane, shorter than the picture: the limit still holds — the preview compresses
-    /// and the buttons stay reachable inside the pane.
+    /// The same pane, shorter than the picture: the preview is what compresses — the footer
+    /// keeps its band and stays reachable at the floor.
     func testAShortPaneCompressesThePreviewRatherThanTheFooter() throws {
         let pane = try laidOutPane(
             showing: try writePNG(size: NSSize(width: 400, height: 400)),
             size: NSSize(width: 353, height: 420)
         )
-        let open = try button(titled: L10n.string("Open"), in: pane.view)
-        let frame = pane.view.convert(open.bounds, from: open)
+        let footer = try footerBand(in: pane.view)
+        let preview = try previewHost(in: pane.view)
 
-        XCTAssertGreaterThanOrEqual(
-            frame.minY,
-            Design.Spacing.inset - 0.5,
-            "the footer was pushed out of the pane"
+        XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.5, "the footer was pushed off the floor")
+        XCTAssertEqual(
+            footer.frame.height,
+            Design.Size.footerHeight,
+            accuracy: 0.5,
+            "a short pane compressed the footer instead of the preview"
         )
-        XCTAssertLessThanOrEqual(
-            frame.minY,
-            Design.Spacing.inset + 1,
-            "a short pane left slack under the footer instead of giving it to the preview"
+        XCTAssertGreaterThan(preview.frame.height, 0, "the preview vanished entirely")
+        XCTAssertLessThan(
+            preview.frame.height,
+            400,
+            "a short pane did not compress the preview"
         )
     }
 
-    /// A PDF is the case that *should* fill the pane: a document reads better the taller it is,
-    /// so the footer returns to the floor and the preview takes the room.
+    /// Every kind fills the room between the fold and the footer now — a PDF, which reads
+    /// better the taller it is, most visibly.
     func testAPDFStillFillsTheRoomThePaneHas() throws {
         let pane = try laidOutPane(
             showing: try writePDF(),
             size: NSSize(width: 353, height: 900)
         )
-        let open = try button(titled: L10n.string("Open"), in: pane.view)
-        let frame = pane.view.convert(open.bounds, from: open)
+        let footer = try footerBand(in: pane.view)
+        let preview = try previewHost(in: pane.view)
 
-        XCTAssertEqual(
-            frame.minY,
-            Design.Spacing.inset,
-            accuracy: 1,
+        XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.5)
+        XCTAssertGreaterThan(
+            preview.frame.height,
+            600,
             "a document's preview no longer fills the pane"
         )
+    }
+
+    // MARK: - The Footer's Sentence
+
+    /// The band names the file on one side and offers the action on the other, centred on one
+    /// line — the name gives way, never the controls.
+    func testTheFooterNamesTheFileBesideItsAction() throws {
+        let pane = try laidOutPane(
+            showing: try writePNG(size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 600)
+        )
+        let footer = try footerBand(in: pane.view)
+        let labels = descendants(of: footer).compactMap { $0 as? NSTextField }
+        XCTAssertTrue(
+            labels.contains { $0.stringValue == "picture.png" },
+            "the footer does not name the selected file"
+        )
+
+        let open = try button(titled: L10n.string("Open"), in: footer)
+        let chevron = try XCTUnwrap(
+            descendants(of: footer).compactMap { $0 as? ThemedIconButton }.first,
+            "the footer's action carries no menu beside it"
+        )
+        XCTAssertEqual(
+            chevron.accessibilityTitle(),
+            L10n.string("Attachment actions"),
+            "the chevron says nothing assistive about what it opens"
+        )
+
+        // One centreline: the action stands on the same line as the name block, which is the
+        // whole difference between a footer and a stack of leftovers.
+        let openFrame = footer.convert(open.bounds, from: open)
+        XCTAssertEqual(
+            openFrame.midY,
+            footer.bounds.midY,
+            accuracy: 1,
+            "the action is not centred in the band"
+        )
+    }
+
+    /// "Last used wins": choosing from the menu is two things at once — the action runs, and it
+    /// becomes what the footer's press does next. The entries walked here are the row menu's
+    /// own, which is the same builder the chevron presents.
+    ///
+    /// Copy Path is the probe because it is the one rememberable action whose side effect a
+    /// test can hold and put back — the pasteboard's string. Open and Finder leave the process.
+    func testChoosingFromTheMenuBecomesTheFootersPress() throws {
+        let clipboardBefore = NSPasteboard.general.string(forType: .string)
+        defer {
+            NSPasteboard.general.clearContents()
+            if let clipboardBefore {
+                NSPasteboard.general.setString(clipboardBefore, forType: .string)
+            }
+        }
+
+        let pane = try laidOutPane(
+            showing: try writePNG(size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 600)
+        )
+        let attachment = try XCTUnwrap(
+            SessionAttachmentStore.shared.attachments(for: pane.sessionID).first
+        )
+        let copyPath = try XCTUnwrap(
+            items(in: pane.contextMenuEntries(for: attachment))
+                .first { $0.title == L10n.string("Copy Path") },
+            "the menu no longer offers Copy Path"
+        )
+        copyPath.onChoose?()
+
+        XCTAssertEqual(
+            PreferenceStore.shared.string(forKey: SessionAttachmentsDefaults.lastActionKey),
+            AttachmentAction.copyPath.rawValue,
+            "the choice was not remembered"
+        )
+        XCTAssertEqual(
+            NSPasteboard.general.string(forType: .string),
+            attachment.url.path,
+            "the remembered choice did not also run"
+        )
+        _ = try button(titled: L10n.string("Copy Path"), in: try footerBand(in: pane.view))
+    }
+
+    /// The memory survives the pane: a fresh pane resolves the stored id before anything is
+    /// chosen in it.
+    func testAStoredActionRetitlesTheFootersPress() throws {
+        PreferenceStore.shared.set(
+            AttachmentAction.reveal.rawValue,
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+        let pane = try laidOutPane(
+            showing: try writePNG(size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 600)
+        )
+        _ = try button(titled: L10n.string("Finder"), in: try footerBand(in: pane.view))
+    }
+
+    /// A remembered Chat falls back while nothing is listening — a button performing nothing is
+    /// worse than a button saying something else — and the memory itself is not overwritten, so
+    /// the door reopening restores the remembered answer.
+    func testARememberedChatFallsBackWhileNothingIsListening() throws {
+        PreferenceStore.shared.set(
+            AttachmentAction.chat.rawValue,
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+        let pane = try laidOutPane(
+            showing: try writePNG(size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 600)
+        )
+
+        _ = try button(titled: L10n.string("Open"), in: try footerBand(in: pane.view))
+        XCTAssertEqual(
+            PreferenceStore.shared.string(forKey: SessionAttachmentsDefaults.lastActionKey),
+            AttachmentAction.chat.rawValue,
+            "falling back rewrote the memory instead of waiting out the closed door"
+        )
+    }
+
+    // MARK: - Several Rows At Once
+
+    /// Several rows are a batch: the list allows the selection, the footer counts it, and the
+    /// preview says the same count rather than pretending one picture speaks for three.
+    func testSelectingSeveralRowsTurnsTheFooterIntoABatch() throws {
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 700)
+        )
+        let table = try attachmentsTable(in: pane.view)
+        XCTAssertTrue(table.allowsMultipleSelection, "the list refuses a second selected row")
+
+        table.selectRowIndexes(IndexSet(0..<3), byExtendingSelection: false)
+        pane.view.layoutSubtreeIfNeeded()
+
+        let footer = try footerBand(in: pane.view)
+        let labels = descendants(of: footer).compactMap { ($0 as? NSTextField)?.stringValue }
+        let expected = L10n.format("%lld files selected", 3)
+        XCTAssertTrue(labels.contains(expected), "the footer does not count the batch: \(labels)")
+    }
+
+    /// The remembered action applies to the whole batch. Copy Path is the probe again — the one
+    /// action whose side effect a test can hold and put back.
+    func testTheFootersPressActsOnEverySelectedRow() throws {
+        let clipboardBefore = NSPasteboard.general.string(forType: .string)
+        defer {
+            NSPasteboard.general.clearContents()
+            if let clipboardBefore {
+                NSPasteboard.general.setString(clipboardBefore, forType: .string)
+            }
+        }
+        PreferenceStore.shared.set(
+            AttachmentAction.copyPath.rawValue,
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 2, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 700)
+        )
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(0..<2), byExtendingSelection: false)
+        pane.view.layoutSubtreeIfNeeded()
+
+        let press = try XCTUnwrap(
+            button(titled: L10n.string("Copy Path"), in: try footerBand(in: pane.view))
+                as? ThemedButton
+        )
+        press.performClick()
+
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+        let expected = Set(
+            SessionAttachmentStore.shared.attachments(for: pane.sessionID)
+                .prefix(2)
+                .map(\.url.path)
+        )
+        XCTAssertEqual(
+            Set(copied.split(separator: "\n").map(String.init)),
+            expected,
+            "the footer's press did not act on the whole selection"
+        )
+    }
+
+    /// A batch's chevron menu keeps only the actions that mean something said of several files —
+    /// no Open in, no comparison, no comment — and offers the batch forms of the rest.
+    func testABatchMenuOffersTheBatchActionsOnly() throws {
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 2, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 700)
+        )
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(0..<2), byExtendingSelection: false)
+
+        let selection = SessionAttachmentStore.shared.attachments(for: pane.sessionID)
+        let titles = items(in: pane.actionMenuEntries(for: selection)).map(\.title)
+        XCTAssertTrue(titles.contains(L10n.string("Open")))
+        XCTAssertTrue(titles.contains(L10n.string("Reveal in Finder")))
+        XCTAssertTrue(titles.contains(L10n.string("Copy Files")))
+        XCTAssertTrue(titles.contains(L10n.string("Copy Path")))
+        XCTAssertFalse(
+            titles.contains(L10n.string("Compare with")),
+            "a batch was offered a comparison, which is a decision about one pair"
+        )
+    }
+
+    // MARK: - Kinds
+
+    /// An archive and an office document land in the document preview — the same Quick Look
+    /// surface the space bar shows in Finder — never in the image decoder.
+    func testArchivesAndDocumentsPreviewThroughTheDocumentView() throws {
+        // The smallest zip there is: a bare end-of-central-directory record.
+        let zip = root.appendingPathComponent("bundle.zip")
+        try Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18)).write(to: zip)
+        let pane = try laidOutPane(showing: zip, size: NSSize(width: 353, height: 700))
+
+        let document = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first,
+            "the pane grew no document preview"
+        )
+        let image = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first
+        )
+        XCTAssertFalse(document.isHidden, "an archive found nothing to preview it")
+        XCTAssertTrue(image.isHidden, "an archive was sent to the image decoder")
+
+        let attachment = try XCTUnwrap(
+            SessionAttachmentStore.shared.attachments(for: pane.sessionID).first
+        )
+        XCTAssertEqual(attachment.kind, .archive)
+        XCTAssertNil(
+            SessionAttachmentThumbnails.thumbnail(for: attachment),
+            "an archive was sent through the image decoder for its row"
+        )
+    }
+
+    private func items(in entries: [ThemedMenuEntry]) -> [ThemedMenuItem] {
+        entries.compactMap {
+            if case .item(let item) = $0 { return item }
+            return nil
+        }
     }
 
     // MARK: - The List's Height
@@ -371,28 +667,29 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
-    /// The regression the flexible list could have caused: rows *and* a picture taller than the
-    /// pane, in a pane too short for either. The preview is what gives way — the list is capped
-    /// at half the pane and the footer's floor is `required`, so neither can be what yields.
+    /// Rows *and* a picture taller than the pane, in a pane too short for either. The preview
+    /// is what gives way — the list is capped at half the pane and the footer's band is
+    /// `required`, so neither can be what yields.
     func testRowsAndATallImageInAShortPaneStillCompressThePreview() throws {
         let height: CGFloat = 420
         let pane = try laidOutPane(
             showing: try writePNGs(count: 8, size: NSSize(width: 400, height: 400)),
             size: NSSize(width: 353, height: height)
         )
-        let open = try button(titled: L10n.string("Open"), in: pane.view)
-        let frame = pane.view.convert(open.bounds, from: open)
+        let footer = try footerBand(in: pane.view)
         let list = try list(in: pane.view)
 
-        XCTAssertGreaterThanOrEqual(
-            frame.minY,
-            Design.Spacing.inset - 0.5,
+        XCTAssertEqual(
+            footer.frame.minY,
+            0,
+            accuracy: 0.5,
             "the rows pushed the footer out of the pane"
         )
-        XCTAssertLessThanOrEqual(
-            frame.minY,
-            Design.Spacing.inset + 1,
-            "a short pane left slack under the footer instead of giving it to the preview"
+        XCTAssertEqual(
+            footer.frame.height,
+            Design.Size.footerHeight,
+            accuracy: 0.5,
+            "a crowded pane compressed the footer instead of the preview"
         )
         XCTAssertEqual(
             list.frame.height,
@@ -470,14 +767,13 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         XCTAssertFalse(band.isHidden, "the pane refused a file and then said nothing about it")
         _ = try button(titled: L10n.string("Show"), in: band)
 
-        // The band is the pane's floor while it is there, so the actions stop above it rather
-        // than sliding underneath the one control that explains them.
-        let open = try button(titled: L10n.string("Open"), in: pane.view)
-        let actions = pane.view.convert(open.bounds, from: open)
+        // The band is the pane's floor while it is there, so the footer stops above it rather
+        // than sliding underneath the one control that explains it.
+        let footer = try footerBand(in: pane.view)
         XCTAssertGreaterThanOrEqual(
-            actions.minY,
-            band.frame.maxY,
-            "the pane's actions were laid out over the scope band"
+            footer.frame.minY,
+            band.frame.maxY - 0.5,
+            "the pane's footer was laid out over the scope band"
         )
     }
 

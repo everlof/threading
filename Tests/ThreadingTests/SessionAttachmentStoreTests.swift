@@ -509,6 +509,99 @@ final class SessionAttachmentStoreTests: XCTestCase {
                        [file.resolvingSymlinksInPath()])
     }
 
+    /// A payload from a *newer* build may name a kind this build has no case for. `Array`
+    /// decoding is all-or-nothing and `loadIfNeeded` swallows the throw, so a strict decode
+    /// cost the session its whole list — and the next admission persisted the fresh rows over
+    /// a payload that still held every older one. One unknown row costs one row.
+    func testAPayloadNamingAnUnknownKindKeepsEveryOtherRow() throws {
+        let session = SessionID()
+        let kept = try write([0x89], to: checkout.appendingPathComponent("kept.png"))
+        try write([0x01], to: checkout.appendingPathComponent("mystery.hologram"))
+        payloads[session] = """
+        [{"projectRoot":"\(checkout.path)","relativePath":"mystery.hologram",\
+        "kind":"hologram","referencedAt":1},\
+        {"projectRoot":"\(checkout.path)","relativePath":"kept.png",\
+        "kind":"image","referencedAt":0}]
+        """
+
+        let attachments = makeStore().attachments(for: session)
+
+        XCTAssertEqual(
+            attachments.map(\.name),
+            ["kept.png"],
+            "a kind this build does not know took the rest of the list with it"
+        )
+        XCTAssertEqual(attachments.map(\.url).map { $0.resolvingSymlinksInPath() },
+                       [kept.resolvingSymlinksInPath()])
+    }
+
+    /// The same tolerance, the useful way round: a kind this build does not know over an
+    /// extension it does re-derives from the file, the authority every read already trusts.
+    func testAnUnknownKindOverAKnownExtensionReDerivesFromTheFile() throws {
+        let session = SessionID()
+        try write([0x89], to: checkout.appendingPathComponent("chart.png"))
+        payloads[session] = """
+        [{"projectRoot":"\(checkout.path)","relativePath":"chart.png",\
+        "kind":"picture-but-newer","referencedAt":0}]
+        """
+
+        XCTAssertEqual(
+            makeStore().attachments(for: session).map(\.kind),
+            [.image],
+            "a known file behind an unknown label was dropped instead of re-derived"
+        )
+    }
+
+    // MARK: - Kinds
+
+    /// The detector's explicit map: one extension per kind family, and never the old
+    /// fall-through that read anything unclaimed as an image.
+    func testTheDetectorNamesArchivesAndDocuments() {
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.zip")), .archive)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.tar")), .archive)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.tar.gz")), .archive)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.7z")), .archive)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.docx")), .document)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.odt")), .document)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.rtf")), .document)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.png")), .image)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.pdf")), .pdf)
+        XCTAssertNil(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.swift")))
+    }
+
+    /// An archive named in output is filed like any other supported reference.
+    func testAScannedArchiveInsideTheCheckoutIsRecorded() throws {
+        let store = makeStore()
+        let session = SessionID()
+        try write([0x50, 0x4B, 0x05, 0x06], to: checkout.appendingPathComponent("dist.zip"))
+
+        store.recordReferences(
+            in: "wrote the release to `dist.zip`",
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        XCTAssertEqual(store.attachments(for: session).map { [$0.name: $0.kind] },
+                       [["dist.zip": .archive]])
+    }
+
+    /// The alternation is ordered longest-first, and this is why: with `tif` offered before
+    /// `tiff` and no boundary after the group, `shot.tiff` matched as `shot.tif` — a file that
+    /// does not exist — and the real one was never recorded.
+    func testALongerExtensionIsNotShadowedByItsPrefix() throws {
+        let store = makeStore()
+        let session = SessionID()
+        try write([0x4D, 0x4D], to: checkout.appendingPathComponent("shot.tiff"))
+
+        store.recordReferences(
+            in: "saved shot.tiff",
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["shot.tiff"])
+    }
+
     // MARK: - Custody Ends
 
     /// Bytes nobody else owns are the store's to remove: a row pushed out by the cap leaves

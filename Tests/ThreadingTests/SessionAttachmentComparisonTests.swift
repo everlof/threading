@@ -128,8 +128,8 @@ final class SessionAttachmentComparisonTests: XCTestCase {
 
     // MARK: - The row's menu
 
-    /// The pane's own four buttons, said for the row that was actually pointed at, plus the one
-    /// thing no button under a single preview can offer: another row's name.
+    /// The footer menu's own actions, said for the row that was actually pointed at, plus the
+    /// one thing no control under a single preview can offer: another row's name.
     func testTheRowMenuCarriesThePanesOwnActionsAndNamesTheOtherPictures() throws {
         let urls = try (0..<2).map { try writePNG(named: "picture-\($0).png") }
         let pane = try laidOutPane(showing: urls)
