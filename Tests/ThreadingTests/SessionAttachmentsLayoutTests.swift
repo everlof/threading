@@ -588,6 +588,28 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
+    /// HTML is the one preview whose system handoff can exceed a frame after the app is warm.
+    /// The pane itself must finish first, and a later row selection must be able to cancel this
+    /// handoff before WebKit starts navigating stale content.
+    func testHTMLNavigationWaitsUntilAfterThePaneMounts() throws {
+        let html = root.appendingPathComponent("preview.html")
+        try Data("<html><body>Preview</body></html>".utf8).write(to: html)
+        let pane = try laidOutPane(showing: html, size: NSSize(width: 353, height: 700))
+
+        XCTAssertTrue(
+            pane.hasPendingHTMLNavigationForTesting,
+            "WebKit navigation blocked the pane's initial mount"
+        )
+        XCTAssertFalse(
+            pane.hasInstalledHTMLRendererForTesting,
+            "the deferred navigation still constructed WebKit during pane mount"
+        )
+        XCTAssertEqual(pane.latestHTMLNavigationNanosecondsForTesting, 0)
+        XCTAssertGreaterThan(pane.flushPendingHTMLNavigationForTesting(), 0)
+        XCTAssertFalse(pane.hasPendingHTMLNavigationForTesting)
+        XCTAssertTrue(pane.hasInstalledHTMLRendererForTesting)
+    }
+
     /// A file over the preview cap is refused before any surface touches it: the size is read
     /// from metadata, the message is the whole preview, and neither Quick Look nor the image
     /// decoder is ever asked. Pinned with an archive because archives are where multi-gigabyte
@@ -928,9 +950,26 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let baselineMemory = Self.physicalFootprintBytes()
 
         let constructStarted = DispatchTime.now().uptimeNanoseconds
+        let initStarted = DispatchTime.now().uptimeNanoseconds
         let pane = SessionAttachmentsViewController(sessionID: sessionID)
+        let initEnded = DispatchTime.now().uptimeNanoseconds
+        let viewLoadStarted = DispatchTime.now().uptimeNanoseconds
         _ = pane.view
+        let viewLoadEnded = DispatchTime.now().uptimeNanoseconds
         let constructEnded = DispatchTime.now().uptimeNanoseconds
+        let coldPreview = try XCTUnwrap(pane.firstPreviewTimingForTesting)
+        let coldPreviewCalls = pane.previewPresentationCountForTesting
+        XCTAssertEqual(
+            coldPreviewCalls,
+            1,
+            "restoring the initial row presented its preview through both refresh and the delegate"
+        )
+        let constructNanoseconds = constructEnded - constructStarted
+        let coldHTMLNavigationNanoseconds = pane.flushPendingHTMLNavigationForTesting()
+        let coldHTMLInstallNanoseconds = pane.latestHTMLRendererInstallNanosecondsForTesting
+        let shellNanoseconds = constructNanoseconds >= coldPreview.totalNanoseconds
+            ? constructNanoseconds - coldPreview.totalNanoseconds
+            : 0
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 760),
             styleMask: .borderless,
@@ -953,6 +992,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let coldSwitchStarted = DispatchTime.now().uptimeNanoseconds
         for row in 0..<table.numberOfRows {
             table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            pane.flushPendingHTMLNavigationForTesting()
             pane.view.layoutSubtreeIfNeeded()
         }
         let coldSwitchEnded = DispatchTime.now().uptimeNanoseconds
@@ -960,6 +1000,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let warmSwitchStarted = DispatchTime.now().uptimeNanoseconds
         for row in (0..<table.numberOfRows).reversed() {
             table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            pane.flushPendingHTMLNavigationForTesting()
             pane.view.layoutSubtreeIfNeeded()
         }
         let warmSwitchEnded = DispatchTime.now().uptimeNanoseconds
@@ -969,11 +1010,52 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
         let finalMemory = Self.physicalFootprintBytes()
         let footprint = finalMemory >= baselineMemory ? finalMemory - baselineMemory : 0
+
+        // The app has already loaded AppKit and its design system long before a person opens a
+        // second attachment pane. Keep a same-process reopen beside the fresh-process number so
+        // framework/class initialization is not mistaken for repeatable pane work.
+        let warmConstructStarted = DispatchTime.now().uptimeNanoseconds
+        let warmPane = SessionAttachmentsViewController(sessionID: sessionID)
+        _ = warmPane.view
+        let warmConstructEnded = DispatchTime.now().uptimeNanoseconds
+        let reopenedPreview = try XCTUnwrap(warmPane.firstPreviewTimingForTesting)
+        let warmConstructNanoseconds = warmConstructEnded - warmConstructStarted
+        let warmHTMLNavigationNanoseconds = warmPane.flushPendingHTMLNavigationForTesting()
+        let warmHTMLInstallNanoseconds = warmPane.latestHTMLRendererInstallNanosecondsForTesting
+        let warmShellNanoseconds = warmConstructNanoseconds >= reopenedPreview.totalNanoseconds
+            ? warmConstructNanoseconds - reopenedPreview.totalNanoseconds
+            : 0
+        let warmWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 760),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        warmWindow.contentViewController = warmPane
         print(
             "THREADING_PERF attachment-formats "
                 + "format=\(format.rawValue) files=\(fileCount) "
                 + "source_mb=\(Self.megabytes(sourceBytes)) "
-                + "construct_ms=\(Self.milliseconds(constructEnded - constructStarted)) "
+                + "construct_ms=\(Self.milliseconds(constructNanoseconds)) "
+                + "init_ms=\(Self.milliseconds(initEnded - initStarted)) "
+                + "view_load_ms=\(Self.milliseconds(viewLoadEnded - viewLoadStarted)) "
+                + "shell_ms=\(Self.milliseconds(shellNanoseconds)) "
+                + "preview_calls=\(coldPreviewCalls) "
+                + "preview_total_ms=\(Self.milliseconds(coldPreview.totalNanoseconds)) "
+                + "metadata_ms=\(Self.milliseconds(coldPreview.metadataNanoseconds)) "
+                + "clear_ms=\(Self.milliseconds(coldPreview.clearNanoseconds)) "
+                + "prepare_ms=\(Self.milliseconds(coldPreview.prepareNanoseconds)) "
+                + "install_ms=\(Self.milliseconds(coldPreview.installNanoseconds)) "
+                + "present_ms=\(Self.milliseconds(coldPreview.presentNanoseconds)) "
+                + "deferred_html_install_ms=\(Self.milliseconds(coldHTMLInstallNanoseconds)) "
+                + "deferred_html_ms=\(Self.milliseconds(coldHTMLNavigationNanoseconds)) "
+                + "warm_construct_ms=\(Self.milliseconds(warmConstructNanoseconds)) "
+                + "warm_shell_ms=\(Self.milliseconds(warmShellNanoseconds)) "
+                + "warm_preview_ms=\(Self.milliseconds(reopenedPreview.totalNanoseconds)) "
+                + "warm_install_ms=\(Self.milliseconds(reopenedPreview.installNanoseconds)) "
+                + "warm_present_ms=\(Self.milliseconds(reopenedPreview.presentNanoseconds)) "
+                + "warm_deferred_html_install_ms=\(Self.milliseconds(warmHTMLInstallNanoseconds)) "
+                + "warm_deferred_html_ms=\(Self.milliseconds(warmHTMLNavigationNanoseconds)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - layoutStarted)) "
                 + "cold_draw_ms=\(Self.milliseconds(coldDrawEnded - coldDrawStarted)) "
                 + "cold_switch_ms=\(Self.milliseconds(coldSwitchEnded - coldSwitchStarted)) "
@@ -982,7 +1064,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 + "descendants=\(descendants(of: pane.view).count) "
                 + "footprint_delta_mb=\(Self.megabytes(footprint))"
         )
-        Self.parkedQuickLookWindows.append(window)
+        Self.parkedQuickLookWindows.append(contentsOf: [window, warmWindow])
     }
 
     // MARK: - The Rows

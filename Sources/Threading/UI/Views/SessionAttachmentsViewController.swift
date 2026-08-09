@@ -2,6 +2,21 @@ import AppKit
 import ImageIO
 import WebKit
 
+/// The synchronous main-thread work that presents one attachment preview.
+///
+/// Kept as nanoseconds so the stress fixture can subtract the preview from controller construction
+/// without losing precision. It is a deterministic per-controller sample for the CLI benchmark;
+/// the outer production span makes the same operation visible to xctrace and self-profile exports.
+struct SessionAttachmentPreviewTiming {
+    var format = "none"
+    var metadataNanoseconds: UInt64 = 0
+    var clearNanoseconds: UInt64 = 0
+    var prepareNanoseconds: UInt64 = 0
+    var installNanoseconds: UInt64 = 0
+    var presentNanoseconds: UInt64 = 0
+    var totalNanoseconds: UInt64 = 0
+}
+
 /// A session's inspectable deliverables: two panes, the chronology above its preview, and a
 /// footer naming the selected file with the one action the user last took beside it.
 ///
@@ -40,6 +55,13 @@ final class SessionAttachmentsViewController: NSViewController {
     private var attachments: [SessionAttachment] = []
     private var filter: AttachmentFilter = .all
     private var selectedRelativePath: String?
+    /// `selectRowIndexes` invokes the delegate synchronously. A refresh owns the one presentation
+    /// after it has restored selection, so its delegate notification must not present the same
+    /// decoder or system renderer once on the way there and then again at the end of the refresh.
+    private var isRestoringSelection = false
+    private(set) var firstPreviewTimingForTesting: SessionAttachmentPreviewTiming?
+    private(set) var latestPreviewTimingForTesting = SessionAttachmentPreviewTiming()
+    private(set) var previewPresentationCountForTesting = 0
 
     /// The one row a caller has explicitly asked to be looking at, resolved on the next refresh.
     ///
@@ -141,6 +163,16 @@ final class SessionAttachmentsViewController: NSViewController {
     /// holds begins.
     private lazy var listFold = SeparatorView()
     private var htmlView: WKWebView?
+    private struct PendingHTMLNavigation {
+        let token: UUID
+        let fileURL: URL
+        let readAccessURL: URL
+    }
+    private var pendingHTMLNavigation: PendingHTMLNavigation?
+    private(set) var latestHTMLRendererInstallNanosecondsForTesting: UInt64 = 0
+    private(set) var latestHTMLNavigationNanosecondsForTesting: UInt64 = 0
+    var hasPendingHTMLNavigationForTesting: Bool { pendingHTMLNavigation != nil }
+    var hasInstalledHTMLRendererForTesting: Bool { htmlView != nil }
     private lazy var previewMessage: NSTextField = {
         let label = NSTextField(wrappingLabelWithString: "")
         label.applyFont(.detail())
@@ -544,6 +576,9 @@ final class SessionAttachmentsViewController: NSViewController {
 
     func refresh() {
         guard isViewLoaded else { return }
+        let wasRestoringSelection = isRestoringSelection
+        isRestoringSelection = true
+        defer { isRestoringSelection = wasRestoringSelection }
 
         let previous = selectedAttachment?.relativePath ?? selectedRelativePath
         // Before the list is read: widening the scope elsewhere — the Settings page, another
@@ -757,8 +792,32 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func showSelected() {
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "Attachment Preview Presentation",
+            category: "attachments"
+        )
+        let totalStarted = DispatchTime.now().uptimeNanoseconds
+        var timing = SessionAttachmentPreviewTiming()
+        previewPresentationCountForTesting += 1
+        defer {
+            timing.totalNanoseconds = DispatchTime.now().uptimeNanoseconds - totalStarted
+            if firstPreviewTimingForTesting == nil {
+                firstPreviewTimingForTesting = timing
+            }
+            latestPreviewTimingForTesting = timing
+            performanceSpan.end(metadata: [
+                "format": timing.format,
+                "metadata_ms": Self.milliseconds(timing.metadataNanoseconds),
+                "clear_ms": Self.milliseconds(timing.clearNanoseconds),
+                "prepare_ms": Self.milliseconds(timing.prepareNanoseconds),
+                "install_ms": Self.milliseconds(timing.installNanoseconds),
+                "present_ms": Self.milliseconds(timing.presentNanoseconds),
+            ])
+        }
+
         let selection = selectedAttachments
         if selection.count > 1 {
+            timing.format = "selection"
             showSelectionSummary(selection)
             return
         }
@@ -766,7 +825,9 @@ final class SessionAttachmentsViewController: NSViewController {
             clearPreview()
             return
         }
+        timing.format = String(describing: attachment.kind)
 
+        let metadataStarted = DispatchTime.now().uptimeNanoseconds
         selectedRelativePath = attachment.relativePath
         fileLabel.stringValue = attachment.name
         fileLabel.toolTip = attachment.url.path
@@ -777,6 +838,7 @@ final class SessionAttachmentsViewController: NSViewController {
         updatePrimaryAction()
 
         let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        timing.metadataNanoseconds = DispatchTime.now().uptimeNanoseconds - metadataStarted
         guard size <= SessionAttachmentsDefaults.maximumPreviewFileBytes else {
             showPreviewMessage(L10n.string("This file is too large to preview here."))
             return
@@ -784,24 +846,43 @@ final class SessionAttachmentsViewController: NSViewController {
 
         switch attachment.kind {
         case .image:
+            let prepareStarted = DispatchTime.now().uptimeNanoseconds
             guard let image = NSImage(contentsOf: attachment.url), image.isValid else {
+                timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
                 showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
             }
+            timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
             hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let installStarted = DispatchTime.now().uptimeNanoseconds
             let imageView = installedImageView()
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .pdf, .archive, .document:
             // One surface for all three: PDFKit draws the first, and Quick Look — already
             // contained inside the same named boundary — renders an office document's pages
             // and an archive's icon-and-metadata card, which is what the space bar shows in
             // Finder for the same file.
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
             hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let installStarted = DispatchTime.now().uptimeNanoseconds
             let documentView = installedDocumentView()
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
             guard documentView.display(attachment.url) else {
+                timing.prepareNanoseconds = documentView.latestDisplayTimingForTesting
+                    .prepareNanoseconds
+                timing.installNanoseconds += documentView.latestDisplayTimingForTesting
+                    .installNanoseconds
+                timing.presentNanoseconds = documentView.latestDisplayTimingForTesting
+                    .presentNanoseconds
                 showPreviewMessage(
                     attachment.kind == .pdf
                         ? L10n.string("The PDF could not be decoded.")
@@ -809,32 +890,47 @@ final class SessionAttachmentsViewController: NSViewController {
                 )
                 return
             }
+            timing.prepareNanoseconds = documentView.latestDisplayTimingForTesting
+                .prepareNanoseconds
+            timing.installNanoseconds += documentView.latestDisplayTimingForTesting
+                .installNanoseconds
+            timing.presentNanoseconds = documentView.latestDisplayTimingForTesting
+                .presentNanoseconds
             documentView.isHidden = false
 
         case .html:
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
             hideInstalledPreviews()
-            let htmlView = installedHTMLView()
-            htmlView.loadFileURL(
-                attachment.url,
-                allowingReadAccessTo: attachment.url.deletingLastPathComponent()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
+            scheduleHTMLNavigation(
+                to: attachment.url,
+                readAccessURL: attachment.url.deletingLastPathComponent()
             )
-            htmlView.isHidden = false
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .diagram:
             // A tighter cap than the general one: this lands in a text view, and a text view
             // handed tens of megabytes is a stall, not a preview.
+            let prepareStarted = DispatchTime.now().uptimeNanoseconds
             guard size <= SessionAttachmentsDefaults.maximumSourcePreviewBytes,
                   let data = try? Data(contentsOf: attachment.url) else {
+                timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
                 showPreviewMessage(L10n.string("This file could not be previewed."))
                 return
             }
+            let source = String(decoding: data, as: UTF8.self)
+            timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
             hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let installStarted = DispatchTime.now().uptimeNanoseconds
             let sourcePreview = installedSourcePreview()
-            (sourcePreview.documentView as? ThemedTextView)?.string = String(
-                decoding: data,
-                as: UTF8.self
-            )
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
+            (sourcePreview.documentView as? ThemedTextView)?.string = source
             sourcePreview.isHidden = false
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
     }
 
@@ -972,14 +1068,85 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func clearHTMLPreview() {
+        pendingHTMLNavigation = nil
         htmlView?.stopLoading()
         htmlView?.isHidden = true
+    }
+
+    /// WebKit navigation can synchronously spend a frame launching or reconnecting its content
+    /// process even though the actual page load is asynchronous. The pane's list, footer and
+    /// loading state are already complete, so let AppKit commit those before asking WebKit to
+    /// navigate. A token makes rapid row changes coalesce to the last file rather than loading
+    /// content that is no longer selected.
+    private func scheduleHTMLNavigation(
+        to fileURL: URL,
+        readAccessURL: URL
+    ) {
+        let token = UUID()
+        pendingHTMLNavigation = PendingHTMLNavigation(
+            token: token,
+            fileURL: fileURL,
+            readAccessURL: readAccessURL
+        )
+        latestHTMLRendererInstallNanosecondsForTesting = 0
+        latestHTMLNavigationNanosecondsForTesting = 0
+        previewMessage.stringValue = L10n.string("Loading…")
+        previewMessage.isHidden = false
+
+        DispatchQueue.main.async { [weak self] in
+            self?.performPendingHTMLNavigation(token: token)
+        }
+    }
+
+    private func performPendingHTMLNavigation(token: UUID) {
+        guard let pending = pendingHTMLNavigation, pending.token == token else { return }
+        pendingHTMLNavigation = nil
+        let span = PerformanceRecorder.shared.begin(
+            "Attachment HTML Navigation",
+            category: "attachments"
+        )
+        let installStarted = DispatchTime.now().uptimeNanoseconds
+        let webView = installedHTMLView()
+        latestHTMLRendererInstallNanosecondsForTesting =
+            DispatchTime.now().uptimeNanoseconds - installStarted
+        let started = DispatchTime.now().uptimeNanoseconds
+        webView.loadFileURL(
+            pending.fileURL,
+            allowingReadAccessTo: pending.readAccessURL
+        )
+        latestHTMLNavigationNanosecondsForTesting =
+            DispatchTime.now().uptimeNanoseconds - started
+        span.end(metadata: [
+            "install_ms": Self.milliseconds(latestHTMLRendererInstallNanosecondsForTesting),
+            "duration_ms": Self.milliseconds(latestHTMLNavigationNanosecondsForTesting)
+        ])
+
+        // The token was current at the beginning and this method is main-thread synchronous, so
+        // no selection can overtake it. Still check identity: a future renderer replacement must
+        // not be made visible by an old scheduled navigation.
+        guard htmlView === webView else { return }
+        previewMessage.stringValue = ""
+        previewMessage.isHidden = true
+        webView.isHidden = false
+    }
+
+    /// The stress fixture separates pane mount from the intentionally deferred WebKit handoff.
+    /// Ordinary code never needs to force it; the next main-loop turn performs it naturally.
+    @discardableResult
+    func flushPendingHTMLNavigationForTesting() -> UInt64 {
+        guard let token = pendingHTMLNavigation?.token else { return 0 }
+        performPendingHTMLNavigation(token: token)
+        return latestHTMLNavigationNanosecondsForTesting
     }
 
     private func detail(for attachment: SessionAttachment) -> String {
         let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
         return "\(attachment.relativePath) · \(bytes)"
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
     }
 
     // MARK: - Actions
@@ -1492,6 +1659,7 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isRestoringSelection else { return }
         showSelected()
     }
 }

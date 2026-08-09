@@ -985,9 +985,16 @@ final class MediaInspectorCanvas: ThemedControl {
 /// so the exception is explicit and cannot leak to siblings in the inspector.
 final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBoundary {
 
+    struct DisplayTiming {
+        var prepareNanoseconds: UInt64 = 0
+        var installNanoseconds: UInt64 = 0
+        var presentNanoseconds: UInt64 = 0
+    }
+
     private var pdfView: PDFView?
     private var quickLookView: QLPreviewView?
     private var themeRedraw: ThemeRedraw?
+    private(set) var latestDisplayTimingForTesting = DisplayTiming()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1016,16 +1023,28 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
 
     @discardableResult
     func display(_ url: URL) -> Bool {
+        var timing = DisplayTiming()
+        defer { latestDisplayTimingForTesting = timing }
         clear()
         if url.pathExtension.lowercased() == "pdf" {
+            let prepareStarted = DispatchTime.now().uptimeNanoseconds
             guard let document = PDFDocument(url: url) else { return false }
+            timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
+            let installStarted = DispatchTime.now().uptimeNanoseconds
             let pdfView = installedPDFView()
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
             pdfView.document = document
             pdfView.isHidden = false
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         } else {
+            let installStarted = DispatchTime.now().uptimeNanoseconds
             let quickLookView = installedQuickLookView()
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
             quickLookView.previewItem = url as NSURL
             quickLookView.isHidden = false
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
         return true
     }
