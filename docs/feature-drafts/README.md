@@ -27,3 +27,6 @@ short pointer to the durable record so this directory does not become a competin
   weekly window strands it.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
+- [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,
+  privacy-safe Paste action when Threading observed a recent pasteboard ownership change, while
+  leaving content reads to the user's ordinary Paste action.
