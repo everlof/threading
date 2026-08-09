@@ -218,6 +218,70 @@ final class GitReviewRenderTests: XCTestCase {
         print("Rendered the wrap comparison to \(directory.path)")
     }
 
+    /// Virtualized rows are built before they join the pane's window. Their opaque washes must
+    /// resolve in that window's appearance, not in whichever drawing appearance was ambient
+    /// while AppKit asked the table for a row.
+    func testTextKitDiffRepairsAmbientAppearanceWhenItJoinsAWindow() throws {
+        let previousTheme = AppThemePalette.current
+        let previousAppearance = NSApp.appearance
+        defer {
+            AppThemePalette.set(previousTheme)
+            NSApp.appearance = previousAppearance
+        }
+
+        AppThemePalette.set(.system)
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        NSApp.appearance = lightAppearance
+
+        var constructedDiff: GitReviewDiffTextView?
+        darkAppearance.performAsCurrentDrawingAppearance {
+            constructedDiff = GitReviewDiffTextView(
+                gitLines: [
+                    GitDiffLine(
+                        kind: .removed,
+                        text: "let oldValue = 1",
+                        oldNumber: 1,
+                        newNumber: nil
+                    ),
+                    GitDiffLine(
+                        kind: .added,
+                        text: "let newValue = 2",
+                        oldNumber: nil,
+                        newNumber: 1
+                    )
+                ],
+                displayCap: 2,
+                path: "Appearance.swift",
+                initialLayoutWidth: 320
+            )
+        }
+        let diff = try XCTUnwrap(constructedDiff)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 100),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = lightAppearance
+        window.backgroundColor = .white
+        let content = try XCTUnwrap(window.contentView)
+        diff.frame = content.bounds
+        content.addSubview(diff)
+        window.layoutIfNeeded()
+
+        var expectedInk: Design.DiffInk?
+        lightAppearance.performAsCurrentDrawingAppearance {
+            expectedInk = Design.Diff.on(.white)
+        }
+        let expected = try XCTUnwrap(expectedInk)
+        let actual = diff.washColorsForTesting
+
+        assertColor(actual.added, equals: expected.addedWash)
+        assertColor(actual.removed, equals: expected.removedWash)
+    }
+
     /// Highlighting must not change what a diff *is*: same row count, same order.
     func testHighlightingDoesNotChangeRowCount() {
         let lines = GitDiffParser.files(fromUnifiedDiff: fixture)[0].hunks.flatMap(\.lines)
@@ -449,5 +513,22 @@ final class GitReviewRenderTests: XCTestCase {
 
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private func assertColor(
+        _ actual: NSColor,
+        equals expected: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let actual = actual.usingColorSpace(.sRGB),
+              let expected = expected.usingColorSpace(.sRGB) else {
+            XCTFail("Could not resolve diff wash colours into sRGB", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actual.alphaComponent, expected.alphaComponent, accuracy: 0.001, file: file, line: line)
     }
 }

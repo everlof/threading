@@ -274,7 +274,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         textContainer?.widthTracksTextView = wraps
         textContainer?.heightTracksTextView = false
 
-        rebuildDocument()
+        applyCurrentTheme()
         let initialWidth = wraps
             ? max(initialLayoutWidth ?? Self.defaultLayoutWidth, 1)
             : Self.noWrapContainerWidth
@@ -295,8 +295,10 @@ final class GitReviewDiffTextView: ThemedTextView {
         height.priority = NSLayoutConstraint.Priority(999)
         height.isActive = true
         preferredHeightConstraint = height
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.rebuildDocument() }
-        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in self?.rebuildDocument() }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyCurrentTheme() }
+        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
+            self?.refreshWashColorsForCurrentAppearance()
+        }
     }
 
     @available(*, unavailable)
@@ -309,6 +311,40 @@ final class GitReviewDiffTextView: ThemedTextView {
             width: wraps ? NSView.noIntrinsicMetric : measuredContentWidth,
             height: NSView.noIntrinsicMetric
         )
+    }
+
+    /// Rebuilds the frozen TextKit attributes and diff washes in this view's own appearance.
+    ///
+    /// A virtual row is constructed before it joins the pane's window. Resolving the dynamic
+    /// theme colours in the ambient appearance at that point can therefore freeze dark washes
+    /// into a light window (or the reverse), while TextKit's dynamic foregrounds continue to
+    /// follow the window. Re-enter the view's effective appearance when that appearance or the
+    /// theme changes.
+    private func applyCurrentTheme() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            rebuildDocument()
+        }
+    }
+
+    /// Attachment makes the real recorded ground available, but it does not change the document.
+    /// Keep that hot virtual-table seam to two colour derivations rather than rebuilding and
+    /// remeasuring as many as 400 TextKit paragraphs.
+    private func refreshWashColorsForCurrentAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            refreshWashColors()
+        }
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        refreshWashColorsForCurrentAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyCurrentTheme()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -560,6 +596,10 @@ final class GitReviewDiffTextView: ThemedTextView {
         let diff = Design.Diff.on(resolvedGround())
         addedWash = diff.addedWash
         removedWash = diff.removedWash
+    }
+
+    var washColorsForTesting: (added: NSColor, removed: NSColor) {
+        (addedWash, removedWash)
     }
 
     private func lineIndex(at point: NSPoint) -> Int? {

@@ -201,8 +201,11 @@ Rendering shares the `NativeDiffCore` model with edit tools, but not their view-
 wrapping and exact per-line context anchors. Change washes are a cached vertical display list:
 TextKit fragments are merged into contiguous added/removed runs when width changes, and drawing
 binary-searches to the visible runs. Per-paragraph backgrounds made TextKit recompute wash geometry
-while scrolling. This distinction is load-bearing — 400 line views are acceptable nowhere in a
-disclosure that must change height synchronously.
+while scrolling. The washes are also frozen colours derived from the surface underneath, so a
+virtual row resolves them inside its own effective appearance and resolves them again when it joins
+a window or that appearance changes; ambient drawing state during row construction must never be
+cached into the document. This distinction is load-bearing — 400 line views are acceptable nowhere
+in a disclosure that must change height synchronously.
 
 `GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build only when a
 virtual table row is materialized**. In both views **the open body is excluded from the
