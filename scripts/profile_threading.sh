@@ -4,6 +4,7 @@
 #
 #   scripts/profile_threading.sh git-stress
 #   scripts/profile_threading.sh agent-work-stress
+#   scripts/profile_threading.sh chart-stress
 #   scripts/profile_threading.sh tools-settings-stress
 #   scripts/profile_threading.sh component-gallery-stress
 #   scripts/profile_threading.sh changed-files-stress
@@ -17,6 +18,7 @@
 #   scripts/profile_threading.sh sidebar-stress
 #   scripts/profile_threading.sh file-tree-stress
 #   scripts/profile_threading.sh attachment-stress
+#   scripts/profile_threading.sh attachment-format-stress
 #   scripts/profile_threading.sh window-resize-stress
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
@@ -41,7 +43,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,31p' "$0"
+  sed -n '3,33p' "$0"
 }
 
 resolve_pid() {
@@ -565,6 +567,44 @@ run_agent_work_stress() {
         -XCTest ThreadingTests.FileActivityMapTests/testAgentWorkProjectionStressBenchmark \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${output_directory}/agent-work-stress.log"
+}
+
+run_chart_stress() {
+  local output_directory="$1"
+  echo "Running maximum-contract agent-chart pipeline sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local workloads=(
+      "bar:0"
+      "bar:1"
+      "ranking:0"
+      "line:0"
+      "area:0"
+    )
+    if [[ -n "${THREADING_CHART_STRESS_KIND:-}" \
+       || -n "${THREADING_CHART_STRESS_STACKED:-}" ]]; then
+      workloads=(
+        "${THREADING_CHART_STRESS_KIND:-bar}:${THREADING_CHART_STRESS_STACKED:-0}"
+      )
+    fi
+
+    local workload kind stacked
+    for workload in "${workloads[@]}"; do
+      kind="${workload%%:*}"
+      stacked="${workload##*:}"
+      THREADING_CHART_STRESS=1 \
+      THREADING_CHART_STRESS_KIND="${kind}" \
+      THREADING_CHART_STRESS_STACKED="${stacked}" \
+      DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.UsageDashboardPerformanceTests/testStressAgentChartPipelineWhenEnabled \
+          "${THREADING_STRESS_TEST_BUNDLE}"
+    done
+  ) 2>&1 | tee "${output_directory}/chart-stress.log"
 }
 
 run_changed_files_stress() {
@@ -1108,6 +1148,32 @@ run_attachment_stress() {
   ) 2>&1 | tee "${output_directory}/attachment-stress.log"
 }
 
+run_attachment_format_stress() {
+  local output_directory="$1"
+  echo "Running capped attachment-format mount and preview sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local workloads=(image pdf html archive document diagram mixed)
+    if [[ -n "${THREADING_ATTACHMENT_FORMAT_STRESS_KIND:-}" ]]; then
+      workloads=("${THREADING_ATTACHMENT_FORMAT_STRESS_KIND}")
+    fi
+
+    local format
+    for format in "${workloads[@]}"; do
+      THREADING_ATTACHMENT_FORMAT_STRESS=1 \
+      THREADING_ATTACHMENT_FORMAT_STRESS_KIND="${format}" \
+      DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.SessionAttachmentsLayoutTests/testStressAttachmentFormatPipelineWhenEnabled \
+          "${THREADING_STRESS_TEST_BUNDLE}"
+    done
+  ) 2>&1 | tee "${output_directory}/attachment-format-stress.log"
+}
+
 run_file_tree_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
@@ -1268,6 +1334,11 @@ case "${command}" in
     run_agent_work_stress "${output_directory}"
     ;;
 
+  chart-stress)
+    output_directory="$(new_run_directory chart-stress)"
+    run_chart_stress "${output_directory}"
+    ;;
+
   tools-settings-stress)
     output_directory="$(new_run_directory tools-settings-stress)"
     run_tools_settings_stress "${output_directory}"
@@ -1331,6 +1402,11 @@ case "${command}" in
   attachment-stress)
     output_directory="$(new_run_directory attachment-stress)"
     run_attachment_stress "${output_directory}"
+    ;;
+
+  attachment-format-stress)
+    output_directory="$(new_run_directory attachment-format-stress)"
+    run_attachment_format_stress "${output_directory}"
     ;;
 
   window-resize-stress)
