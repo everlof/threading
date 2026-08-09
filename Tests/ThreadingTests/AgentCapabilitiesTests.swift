@@ -45,7 +45,8 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("transcriptUsageLimitRecord", .transcriptUsageLimitRecord),
             ("providerTitleMetadata", .providerTitleMetadata),
             ("providerArchive", .providerArchive),
-            ("transcriptInterruptedTurnRecord", .transcriptInterruptedTurnRecord)
+            ("transcriptInterruptedTurnRecord", .transcriptInterruptedTurnRecord),
+            ("transcriptRefusedTurnRecord", .transcriptRefusedTurnRecord)
         ]
 
         var seen: [Int: String] = [:]

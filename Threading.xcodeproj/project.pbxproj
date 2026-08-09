@@ -309,6 +309,7 @@
 		719CAE483D31CDA210275A94 /* ThemedTimeSeriesChartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AA1DCD7ECE46832EC743EC /* ThemedTimeSeriesChartTests.swift */; };
 		B35C01B9A82E32AC1BDC0EF1 /* UsageDashboardPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */; };
 		341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */; };
+		60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -666,6 +667,7 @@
 		01AA1DCD7ECE46832EC743EC /* ThemedTimeSeriesChartTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedTimeSeriesChartTests.swift; sourceTree = "<group>"; };
 		DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardPerformanceTests.swift; sourceTree = "<group>"; };
 		718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardRenderTests.swift; sourceTree = "<group>"; };
+		935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeTurnRefusalTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1092,6 +1094,7 @@
 				01AA1DCD7ECE46832EC743EC /* ThemedTimeSeriesChartTests.swift */,
 				DBD91D638EF544ED521DC585 /* UsageDashboardPerformanceTests.swift */,
 				718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */,
+				935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1796,6 +1799,7 @@
 				719CAE483D31CDA210275A94 /* ThemedTimeSeriesChartTests.swift in Sources */,
 				B35C01B9A82E32AC1BDC0EF1 /* UsageDashboardPerformanceTests.swift in Sources */,
 				341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */,
+				60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

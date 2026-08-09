@@ -63,6 +63,8 @@ final class AgentSessionViewController: NSViewController {
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
     private var codexTranscriptURL: URL?
     private var codexInterruptionRefreshWorkItem: DispatchWorkItem?
+    private var claudeTranscriptURL: URL?
+    private var claudeRefusalRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -243,7 +245,7 @@ final class AgentSessionViewController: NSViewController {
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
         guard isRunning else { return }
-        resetCodexTranscriptObservation()
+        resetTranscriptFallbackObservation()
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         session.terminate()
         isRunning = false
@@ -415,7 +417,7 @@ final class AgentSessionViewController: NSViewController {
 
         pendingLaunchPlan = nil
         isRunning = true
-        resetCodexTranscriptObservation()
+        resetTranscriptFallbackObservation()
         activityTracker.markRunning()
         if AppSettings.shared.remoteAccessEnabled {
             RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
@@ -513,6 +515,7 @@ final class AgentSessionViewController: NSViewController {
 
         codexTranscriptURL = url
         scheduleCodexInterruptionRefresh()
+        scheduleClaudeRefusalRefresh()
     }
 
     /// Revalidates once after an output burst settles. The transcript reader performs the stat
@@ -547,10 +550,87 @@ final class AgentSessionViewController: NSViewController {
         )
     }
 
-    private func resetCodexTranscriptObservation() {
+    /// Revalidates once after an output burst settles, for the boundary Claude omits when a
+    /// request fails outright.
+    ///
+    /// Gated on a turn actually being in flight, so a session sitting at its prompt does no work
+    /// at all: the tracker would refuse the result anyway, and this is a terminal-output callback.
+    /// The generation is read inside the work item rather than when it is scheduled, which is as
+    /// late as it can be read and still be the turn the scan is about — narrowing the window this
+    /// guards to the background read itself.
+    private func scheduleClaudeRefusalRefresh() {
+        guard agentKind.supports(.transcriptRefusedTurnRecord),
+              activityTracker.reportsOwnActivity,
+              activityTracker.activity.hasTurnInFlight,
+              let url = resolvedClaudeTranscriptURL() else {
+            return
+        }
+
+        claudeRefusalRefreshWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.claudeRefusalRefreshWorkItem = nil
+            let generation = self.activityTracker.turnGeneration
+
+            ClaudeTranscriptTurnRefusal.revalidate(at: url) { [weak self] refusal in
+                guard let self, self.isRunning, self.claudeTranscriptURL == url,
+                      let refusal,
+                      self.activityTracker.noteTurnRefused(turn: generation)
+                else { return }
+
+                ThreadingLogger.agent.info(
+                    "Recovered refused Claude turn (\(refusal.reason, privacy: .public)) from transcript"
+                )
+                EventLog.shared.record(.hooks, "Claude turn refusal recovered from transcript", [
+                    "session": self.sessionID.uuidString,
+                    "reason": refusal.reason,
+                    "message": refusal.message
+                ])
+            }
+        }
+        claudeRefusalRefreshWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ClaudeRefusalDefaults.quietDelay,
+            execute: item
+        )
+    }
+
+    /// Where this session's Claude transcript is, derived from the session's own record rather
+    /// than from a path a hook reported: the id is Threading's own, minted before launch, so
+    /// there is nothing here to validate an outside string against.
+    ///
+    /// Resolved once per launch and then remembered, because the last step of it asks
+    /// `AgentAccountDiscovery`, whose cache expires after seven seconds and rescans the config
+    /// directories when it does — which is not work a terminal-output callback may repeat. The
+    /// two store lookups are checked *first* for the same reason: a session whose identifier has
+    /// not been recorded yet answers nil without ever reaching the scan, and is asked again on
+    /// its next burst rather than being written off for the rest of the process.
+    private func resolvedClaudeTranscriptURL() -> URL? {
+        if let claudeTranscriptURL { return claudeTranscriptURL }
+
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              let transcriptID = session.resumeState.transcriptID,
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
+        else { return nil }
+
+        claudeTranscriptURL = ClaudeTranscript.url(
+            sessionID: transcriptID,
+            for: session,
+            in: project
+        )
+        return claudeTranscriptURL
+    }
+
+    /// Drops both transcript fallbacks. A new process re-earns them: its rollout path arrives on
+    /// its own hooks, and its transcript is resolved again from whatever the session record says
+    /// by then — a resumed conversation and a migrated account both change the answer.
+    private func resetTranscriptFallbackObservation() {
         codexInterruptionRefreshWorkItem?.cancel()
         codexInterruptionRefreshWorkItem = nil
         codexTranscriptURL = nil
+        claudeRefusalRefreshWorkItem?.cancel()
+        claudeRefusalRefreshWorkItem = nil
+        claudeTranscriptURL = nil
     }
 
     /// Persists the identifier needed to resume a fresh conversation. Codex and OpenCode assign
@@ -732,7 +812,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         attachmentObserver?.scanNow()
         agentTitleRefreshWorkItem?.cancel()
         agentTitleRefreshWorkItem = nil
-        resetCodexTranscriptObservation()
+        resetTranscriptFallbackObservation()
         if agentKind.supports(.providerTitleMetadata) {
             SessionNaming.refreshAgentTitle(forSessionID: sessionID)
         }

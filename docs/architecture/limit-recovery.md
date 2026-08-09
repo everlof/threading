@@ -33,6 +33,13 @@ Four facts fall out of it, and each is load-bearing:
 - **`Stop` does not fire on the refused turn.** The 20:12 turn carries `stop_hook_summary`; the
   429 turn does not. The activity tracker therefore never hears a boundary, which is why a
   limited session strands showing `working` — the stuck spinner this subsystem also fixes.
+  The same is true of *every other* failed request, and only the `429` half belongs here: an
+  expired login or a dropped connection writes the same record shape with a different `error`,
+  has no reset to wait for and no chooser to answer, and is ended by `ClaudeTranscriptTurnRefusal`
+  instead — see [`session-activity.md`](session-activity.md). The two readers partition one
+  record shape on `ClaudeTranscriptAPIError.isRateLimit`; detection here must stay narrow, because
+  a login failure recovered as if the account were spent schedules a continuation against a
+  window that was never the problem.
 - **The rendered text is the one source never parsed.** "resets 1:50am (Europe/Rome)" is
   locale-shaped prose; the authoritative reset instant is `resetsAt` from the usage sources
   [`accounts.md`](accounts.md) already ranks. The transcript proves *that* the limit hit;

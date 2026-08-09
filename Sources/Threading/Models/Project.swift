@@ -204,6 +204,16 @@ struct AgentCapabilities: OptionSet {
   /// `event_msg / turn_aborted / reason: interrupted` and returns to its prompt without firing
   /// `Stop`. Claude, Grok and OpenCode have no measured equivalent that this reader can consume.
   static let transcriptInterruptedTurnRecord = Self(rawValue: 1 << 25)
+
+  /// A turn the provider refused outright — an expired login, a dropped connection — is written
+  /// as a structured API-error record in the session's own transcript, and the runtime returns to
+  /// its prompt without firing the lifecycle hook that ends a reported turn. Claude only:
+  /// measured on 2.1.226, where an expired login recorded `error: "authentication_failed"` and a
+  /// `turn_duration` beside it, and fired no `Stop`. Distinct from
+  /// `transcriptUsageLimitRecord`, which is the one refusal that has a park and a recovery of its
+  /// own; this is every other way a request can fail, and all it needs is the turn ended. See
+  /// `ClaudeTranscriptTurnRefusal`.
+  static let transcriptRefusedTurnRecord = Self(rawValue: 1 << 26)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -260,7 +270,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .threadingBridge, .remoteControl, .statusLine, .transcriptTitles,
         .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
-        .anchoredUsageWindow, .transcriptUsageLimitRecord
+        .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord
       ]
     case .codex:
       return [

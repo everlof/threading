@@ -152,6 +152,19 @@ final class SessionActivityTracker {
     /// the read returned to main.
     private var reportedTurnID: String?
 
+    /// How many turns this session has begun.
+    ///
+    /// The same guard `reportedTurnID` provides, for a runtime that names no turn: Claude's
+    /// `UserPromptSubmit` payload carries a session and a prompt and no turn identity at all, so
+    /// a fallback read for one turn has nothing of the provider's to match against. A caller that
+    /// starts an asynchronous read records this and hands it back, and a result that outlived its
+    /// turn is refused — which is the whole rule either way, since a fallback admitted after the
+    /// turn it was read for has ended is a fallback that stops the wrong work.
+    ///
+    /// Monotonic and never reset. Relaunching clears `turnInFlight`, which already refuses a
+    /// stale result; restarting the count as well would let one collide with a live turn.
+    private(set) var turnGeneration = 0
+
     /// Whether the session is asking for something and cannot continue until it is answered.
     ///
     /// Held apart from the turn because the two are independent — the flag can be raised and
@@ -337,6 +350,7 @@ final class SessionActivityTracker {
         launchedUnattended = false
         adoptOwnReports()
         turnInFlight = true
+        turnGeneration += 1
         reportedTurnID = turnID
         awaitsUser = false
         // A new prompt is proof the user is past whatever the last turn was asking, so an ask
@@ -373,6 +387,30 @@ final class SessionActivityTracker {
     func noteTurnInterrupted(turnID: String) -> Bool {
         guard reportsOwnActivity, turnInFlight,
               let reportedTurnID, reportedTurnID == turnID else {
+            return false
+        }
+
+        finishReportedTurn(backgroundWork: [])
+        return true
+    }
+
+    /// Ends the active turn when the session's own transcript records a request the provider
+    /// refused for something other than the account's allowance — an expired login, a dropped
+    /// connection. See `ClaudeTranscriptTurnRefusal`, which is where that record and the
+    /// measurement behind it live.
+    ///
+    /// The same fallback contract as `noteTurnInterrupted`: it cannot latch an inferred session,
+    /// cannot end an idle one, and cannot end a turn other than the one it was read for. It
+    /// settles exactly like `Stop`, because that is what it is standing in for — the failed turn
+    /// genuinely ended, the CLI is back at its prompt, and the session is finished rather than
+    /// stopped on anything. A refusal seen off screen therefore takes the unread mark, which is
+    /// the only thing that will tell the user their login expired an hour ago.
+    ///
+    /// Deliberately **not** `limitReached`: nothing here says the account is spent, and a row
+    /// claiming so would send the user to a usage dashboard to explain a login.
+    @discardableResult
+    func noteTurnRefused(turn generation: Int) -> Bool {
+        guard reportsOwnActivity, turnInFlight, generation == turnGeneration else {
             return false
         }
 

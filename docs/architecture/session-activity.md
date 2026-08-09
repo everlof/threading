@@ -427,6 +427,34 @@ asynchronous, so a late result from turn A must not stop a newer turn B. The adm
 through `SessionActivityTracker`, exactly like `Stop`, which is why the sidebar, alerts, control
 plane and waiting deliveries all agree again.
 
+**A refused request is the same hole, on Claude.** Measured on CLI 2.1.226 against this app's own
+session `e7a26edf`: `UserPromptSubmit` fired at 12:26:02.464, an expired login was recorded 23 ms
+later as `{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed"}` carrying
+"Login expired · Please run /login", a `system`/`turn_duration` was written beside it, and no
+`Stop` ever came. The turn start had already latched the session, so the sidebar drew a spinner
+for a conversation that had stopped — the same stale fact, from a third direction. Neither
+existing fallback covered it: `.transcriptInterruptedTurnRecord` is Codex's and reads
+`turn_aborted`, and `ClaudeTranscriptUsageLimit` admits only `rate_limit`/`429`, deliberately, so
+a network fault or a login is not treated as a spent account.
+
+`.transcriptRefusedTurnRecord` gives Claude terminals the fallback, and it is the *complement* of
+the limit reader over one record shape: `ClaudeTranscriptAPIError` holds the parse and the
+newest-message walk, `ClaudeTranscriptUsageLimit` takes `isRateLimit`, `ClaudeTranscriptTurnRefusal`
+takes the rest. Split any other way, the two would disagree about what a rate limit is the first
+time a CLI version moved a key — and disagreement means a login failure recovered as if the
+account were spent, or a spent account quietly marked unread.
+
+Two rules are load-bearing there. The refusal carries the failing record's **`uuid`**, because the
+reader calls back only when the answer *moves* and an expired login refuses every turn with the
+same class and the same sentence; the intervening user record cannot be relied on to reset it,
+since the failure lands half a second after the prompt, inside one settled output burst. And
+admission is matched to the turn by a **generation count** rather than a provider turn id, because
+Claude's payload names no turn at all: `SessionActivityTracker.turnGeneration` counts turns begun,
+the output callback reads it when its background scan starts, and a result that outlived its turn
+is refused. It settles exactly like `Stop` — a visible session goes `idle`, an off-screen one takes
+the unread mark. Not `limitReached`: nothing here says the account is spent, and a row claiming so
+sends the user to a usage dashboard to explain a login.
+
 - **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
   `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,
   which is what lets one shared file attribute every session correctly. Verified that a hook
