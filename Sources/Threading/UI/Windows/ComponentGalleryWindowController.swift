@@ -1604,24 +1604,37 @@ final class ComponentGalleryViewController: NSViewController {
         let calendar = Calendar.autoupdatingCurrent
         let today = calendar.startOfDay(for: Date())
         let start = calendar.date(byAdding: .day, value: -20, to: today) ?? today
-        let primary = (0...20).map { index in
-            ThemedChartPoint(
-                at: calendar.date(byAdding: .day, value: index, to: start) ?? start,
-                value: alternate
-                    ? 12 + Double((index * 11 + 7) % 25)
-                    : 8 + Double((index * 7 + 3) % 19),
-                label: L10n.format("%lld requests", Int64(index + 12)),
-                detail: L10n.string("Observed")
+        var primary: [ThemedChartPoint] = []
+        primary.reserveCapacity(21)
+        for index in 0...20 {
+            let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
+            let value: Double = alternate
+                ? 12.0 + Double((index * 11 + 7) % 25)
+                : 8.0 + Double((index * 7 + 3) % 19)
+            primary.append(
+                ThemedChartPoint(
+                    at: date,
+                    value: value,
+                    label: L10n.format("%lld requests", Int64(index + 12)),
+                    detail: L10n.string("Observed")
+                )
             )
         }
-        let comparison = stride(from: 0, through: 20, by: 2).map { index in
-            ThemedChartPoint(
-                at: calendar.date(byAdding: .day, value: index, to: start) ?? start,
-                value: alternate
-                    ? 6 + Double((index * 5 + 9) % 14)
-                    : 10 + Double((index * 3 + 1) % 16),
-                label: L10n.format("%lld requests", Int64(index + 6)),
-                detail: L10n.string("Comparison")
+
+        var comparison: [ThemedChartPoint] = []
+        comparison.reserveCapacity(11)
+        for index in stride(from: 0, through: 20, by: 2) {
+            let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
+            let value: Double = alternate
+                ? 6.0 + Double((index * 5 + 9) % 14)
+                : 10.0 + Double((index * 3 + 1) % 16)
+            comparison.append(
+                ThemedChartPoint(
+                    at: date,
+                    value: value,
+                    label: L10n.format("%lld requests", Int64(index + 6)),
+                    detail: L10n.string("Comparison")
+                )
             )
         }
         let resetAt = calendar.date(byAdding: .day, value: 7, to: start) ?? start
