@@ -644,6 +644,9 @@ final class MCPWireTests: XCTestCase {
     )
     XCTAssertTrue(prefix.contains("may load lazily"))
     XCTAssertTrue(prefix.contains("discover a matching tool"))
+    XCTAssertTrue(prefix.contains("Threading's Browser"))
+    XCTAssertTrue(prefix.contains("browser_navigate"))
+    XCTAssertTrue(prefix.contains("browser_snapshot"))
     XCTAssertTrue(prefix.contains("another chat/session"))
     XCTAssertTrue(prefix.contains("list_sessions"))
     XCTAssertTrue(prefix.contains("send_to_session"))
@@ -657,10 +660,17 @@ final class MCPWireTests: XCTestCase {
   func testServerDecisionPrefixOnlyNamesEnabledExceptionalCapabilities() {
     let ordinaryPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.notifications])
     XCTAssertTrue(ordinaryPrefix.contains("discover a matching tool"))
+    XCTAssertFalse(ordinaryPrefix.contains("browser_navigate"))
     XCTAssertFalse(ordinaryPrefix.contains("display panel"))
     XCTAssertFalse(ordinaryPrefix.contains("archive_session"))
     XCTAssertFalse(ordinaryPrefix.contains("list_reclaimable_storage"))
     XCTAssertFalse(ordinaryPrefix.contains("watch_session"))
+
+    let browserPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.browser])
+    XCTAssertTrue(browserPrefix.contains("Threading's Browser"))
+    XCTAssertTrue(browserPrefix.contains("browser_navigate"))
+    XCTAssertTrue(browserPrefix.contains("browser_snapshot"))
+    XCTAssertFalse(browserPrefix.contains("watch_session"))
 
     let sessionPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.session])
     XCTAssertTrue(sessionPrefix.contains("close/archive/finish"))
@@ -673,6 +683,12 @@ final class MCPWireTests: XCTestCase {
     XCTAssertTrue(workspacePrefix.contains("send_to_session"))
     XCTAssertTrue(workspacePrefix.contains("watch_session"))
     XCTAssertFalse(workspacePrefix.contains("archive_session"))
+  }
+
+  func testBrowserNavigationExplainsThatItBootstrapsTheSessionTab() throws {
+    let definition = try XCTUnwrap(MCPTools.definition(for: .browserNavigate))
+    XCTAssertTrue(definition.description.contains("creates this session's browser tab"))
+    XCTAssertTrue(definition.description.contains("empty panel"))
   }
 
   /// The session the archive acts on is the one the call arrived on: the URL carries the

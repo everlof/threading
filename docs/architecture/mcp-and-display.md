@@ -112,9 +112,13 @@ The prefix is a routing layer, not a miniature copy of the catalogue. It always 
 that Threading tools may load lazily and that it must discover a matching tool before claiming an
 in-app action is unavailable. It conditionally names only exceptional triggers whose miss is
 costly or hard to recover from: cross-chat control (list, message, steer, wait, or inspect status),
-visual output, the user's explicit request to close this chat, and safe disk-full recovery. A
-disabled group contributes no promise. Reordering whole groups to put one workflow first merely
-trades that miss for another and is not a discovery fix.
+Threading's own Browser, visual output, the user's explicit request to close this chat, and safe
+disk-full recovery. The Browser route names `browser_navigate` and `browser_snapshot` because a
+generic browser integration can also be installed in the agent host; the word "browser" alone is
+not enough to select Threading's session-scoped surface. `browser_navigate` creates the session tab
+when none exists, so an empty panel is not a failed capability probe. A disabled group contributes
+no promise. Reordering whole groups to put one workflow first merely trades that miss for another
+and is not a discovery fix.
 
 The 512-character budget applies to the server instructions, not separately to every tool
 description. Individual descriptions still begin with the action and the words a user is likely

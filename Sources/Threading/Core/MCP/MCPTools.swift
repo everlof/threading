@@ -2890,11 +2890,12 @@ enum MCPTools {
       tool: .browserNavigate,
       description: """
         Open a URL in Threading's browser (a full pane beside this terminal), or run a \
-        search if the text is not a URL. By default it waits for the full load event; \
-        wait_until can return at commit or DOMContentLoaded for streaming or \
-        resource-heavy pages. It reports the current title, address, and semantic \
-        snapshot when available. Use this before the other browser tools to put the page \
-        on screen.
+        search if the text is not a URL. The call creates this session's browser tab if \
+        none is open; an empty panel does not mean the browser is unavailable. By default \
+        it waits for the full load event; wait_until can return at commit or \
+        DOMContentLoaded for streaming or resource-heavy pages. It reports the current \
+        title, address, and semantic snapshot when available. Use this before the other \
+        browser tools to put the page on screen.
         """,
       inputSchema: MCPInputSchema(
         properties: [

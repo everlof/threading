@@ -434,8 +434,10 @@ enum MCPToolCatalog {
     ],
     instruction: """
       Threading hosts a shared browser beside this terminal. You and the user see the same \
-      live page. browser_navigate opens a page; browser_snapshot returns a compact semantic \
-      tree whose interactive elements have refs; use those refs with browser_click, \
+      live page. browser_navigate opens a page and creates this session's browser tab when \
+      none exists, so do not require an open panel tab before calling it. browser_snapshot \
+      returns a compact semantic tree whose interactive elements have refs; use those refs \
+      with browser_click, \
       browser_hover, browser_drag, and browser_type rather than guessing CSS, and use \
       a scoped browser_snapshot when a large page truncates before the region you need. Use \
       browser_fill_form when filling several fields from one snapshot; it validates the \
@@ -1086,31 +1088,35 @@ enum MCPToolCatalog {
     let toolNames = Set(enabledGroups.flatMap { $0.tools.map(\.name) })
     var sentences = [
       "You are in Threading.",
-      "Tools may load lazily; before saying an in-app action is unavailable, discover a "
-        + "matching tool.",
+      "Tools may load lazily; discover a matching tool before saying an in-app action is "
+        + "unavailable.",
     ]
 
+    if toolNames.contains(MCPBuiltInTool.browserNavigate.rawValue) {
+      sentences.append(
+        "For Threading's Browser, discover browser_navigate and browser_snapshot."
+      )
+    }
     if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {
       sentences.append(
-        "For another chat/session—list, message, steer, wait, or inspect status—discover "
-          + "list_sessions, send_to_session, and watch_session first."
+        "For another chat/session—list, message, steer, wait, or inspect—discover "
+          + "list_sessions, send_to_session, and watch_session."
       )
     }
     if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
       sentences.append(
-        "Show rich visuals in the display panel, not just paths."
+        "Show visuals in the display panel."
       )
     }
     if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
       sentences.append(
-        "If asked to close/archive/finish this chat, call "
-          + "archive_session after prior work; it runs after your reply."
+        "For close/archive/finish, call "
+          + "archive_session after work; it runs after your reply."
       )
     }
     if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {
       sentences.append(
-        "On disk-full/ENOSPC, call list_reclaimable_storage; never delete build output "
-          + "directly."
+        "On ENOSPC, call list_reclaimable_storage; never delete build output directly."
       )
     }
 
