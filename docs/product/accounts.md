@@ -9,7 +9,9 @@ order: 60
 
 The app can make multiple Claude Code and Codex identities available when
 starting work. Credentials remain owned and stored by the corresponding
-provider CLI.
+provider CLI. Grok and OpenCode sessions are supported too, but their current
+integrations keep authentication and account selection inside the CLI rather
+than exposing multi-account routing in the app.
 
 ## Provider-owned authentication
 
@@ -43,4 +45,3 @@ A project is a local folder and review context. An account is the provider
 identity used by a session. Changing one does not automatically change the
 other, and existing sessions keep the provider context with which they were
 started.
-

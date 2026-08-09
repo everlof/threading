@@ -56,6 +56,17 @@ If a provider process exits, the session remains available for inspection.
 Whether it can resume depends on the provider and the state recorded by its
 CLI.
 
+## Coordinating sessions
+
+Supported sessions in the same project can discover one another, send a
+message, steer queued work, or wait for another session to finish. Every
+cross-session action stays visible in the transcript with its source, target,
+and result; coordination is not a hidden backchannel.
+
+The boundary is deliberately narrow. A session cannot coordinate with another
+project, and sending a message does not silently wake a dormant provider
+process. Those limits keep project scope and operator intent explicit.
+
 ## Practical habits
 
 - Name sessions by outcome rather than by provider.
@@ -63,4 +74,3 @@ CLI.
 - Treat **Needs you** as the primary inbox.
 - Review completed changes before reusing a working directory for a different
   task.
-

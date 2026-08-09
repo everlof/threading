@@ -18,10 +18,14 @@ Open a terminal and verify the tools you intend to use:
 ```sh
 claude --version
 codex --version
+grok --version
+opencode --version
 ```
 
 Authentication remains with the provider CLI. If a command asks you to sign
-in, complete that flow before returning to the app.
+in, complete that flow before returning to the app. You only need one
+supported provider to begin, and the available native controls can differ by
+runtime.
 
 ## 2. Open a project folder
 
@@ -63,4 +67,3 @@ last turn, branch, or commit—then inspect and stage only the work you want.
 
 Read [Sessions and attention](sessions-and-attention.md) for the status model,
 or [Git review](git-review.md) for the change-review workflow.
-
