@@ -1316,35 +1316,44 @@ final class AppThemeTests: XCTestCase {
     func testDesignTokensAreUnchangedUnderTheSystemTheme() {
         AppThemePalette.set(.system)
 
-        // Written out longhand so a revert to the replace-alpha expression fails this pin.
-        let halfStrengthSeparator = NSColor(name: nil) { _ in
-            guard let separator = NSColor.separatorColor.usingColorSpace(.sRGB) else {
-                return .separatorColor
+        // Build the expected colours under the same appearance `resolvedHex` uses below.
+        // Calling `withAlphaComponent` on a dynamic system colour resolves it immediately;
+        // constructing these in the test process's ambient (usually light) appearance and then
+        // comparing them under dark made the expected side light while the token side stayed
+        // correctly dynamic.
+        var expected: [(String, NSColor, NSColor)] = []
+        let appearance = NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing()
+        appearance.performAsCurrentDrawingAppearance {
+            // Written out longhand so a revert to the replace-alpha expression fails this pin.
+            let halfStrengthSeparator = NSColor(name: nil) { _ in
+                guard let separator = NSColor.separatorColor.usingColorSpace(.sRGB) else {
+                    return .separatorColor
+                }
+                return separator.withAlphaComponent(separator.alphaComponent * 0.5)
             }
-            return separator.withAlphaComponent(separator.alphaComponent * 0.5)
-        }
 
-        let expected: [(String, NSColor, NSColor)] = [
-            ("panel", Design.Surface.panel, .labelColor.withAlphaComponent(0.05)),
-            ("border", Design.Surface.border, .separatorColor),
-            ("accent", Design.Surface.accent, .controlAccentColor),
-            ("controlResting", Design.Surface.controlResting,
-             .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)),
-            ("controlHover", Design.Surface.controlHover,
-             .unemphasizedSelectedContentBackgroundColor),
-            ("bubbleFill", Design.Chat.bubbleFill, .controlAccentColor.withAlphaComponent(0.22)),
-            // Half the separator's *own* strength — resolve, then multiply. The expression
-            // this replaced, `.separatorColor.withAlphaComponent(0.5)`, hit the design
-            // system's documented trap: `withAlphaComponent` replaces alpha, and
-            // `separatorColor` carries its own 10%, so the "quieter" rule drew at 50% — the
-            // one bright line in a dark window.
-            ("turnDivider", Design.Chat.turnDivider, halfStrengthSeparator),
-            ("syntaxKeyword", Design.Syntax.keyword, .systemPurple),
-            ("syntaxComment", Design.Syntax.comment, .tertiaryLabelColor),
-            ("label", Design.Text.label, .labelColor),
-            ("secondary", Design.Text.secondary, .secondaryLabelColor),
-            ("tertiary", Design.Text.tertiary, .tertiaryLabelColor)
-        ]
+            expected = [
+                ("panel", Design.Surface.panel, .labelColor.withAlphaComponent(0.05)),
+                ("border", Design.Surface.border, .separatorColor),
+                ("accent", Design.Surface.accent, .controlAccentColor),
+                ("controlResting", Design.Surface.controlResting,
+                 .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)),
+                ("controlHover", Design.Surface.controlHover,
+                 .unemphasizedSelectedContentBackgroundColor),
+                ("bubbleFill", Design.Chat.bubbleFill, .controlAccentColor.withAlphaComponent(0.22)),
+                // Half the separator's *own* strength — resolve, then multiply. The expression
+                // this replaced, `.separatorColor.withAlphaComponent(0.5)`, hit the design
+                // system's documented trap: `withAlphaComponent` replaces alpha, and
+                // `separatorColor` carries its own 10%, so the "quieter" rule drew at 50% — the
+                // one bright line in a dark window.
+                ("turnDivider", Design.Chat.turnDivider, halfStrengthSeparator),
+                ("syntaxKeyword", Design.Syntax.keyword, .systemPurple),
+                ("syntaxComment", Design.Syntax.comment, .tertiaryLabelColor),
+                ("label", Design.Text.label, .labelColor),
+                ("secondary", Design.Text.secondary, .secondaryLabelColor),
+                ("tertiary", Design.Text.tertiary, .tertiaryLabelColor)
+            ]
+        }
 
         for (name, token, original) in expected {
             XCTAssertEqual(
