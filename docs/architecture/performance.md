@@ -340,6 +340,9 @@ scripts/profile_threading.sh attachment-format-stress
 # Deterministic whole-window drag with chrome, terminal-grid and Claude-repaint phases.
 scripts/profile_threading.sh window-resize-stress
 
+# Right-pane open/close beside a repainting Codex TUI, including remote-grid control.
+scripts/profile_threading.sh display-pane-stress
+
 # Lightweight stacks from an already-running app.
 scripts/profile_threading.sh sample 15 Threading
 
@@ -663,14 +666,35 @@ The immediate post-fix fresh-process sweep measured:
 | Diagram | 230.8 → 165.0 ms | 90.1 → 95.3 ms | 101.3 → 85.3 ms | 45 |
 | Mixed | 188.0 → 75.9 ms | 82.3 → 124.8 ms | 49.7 → 57.0 ms | 56 |
 
-Single-file controls land in the same format-specific bands: 71–72 ms for Quick Look documents,
-143 ms for an image, 147 ms for a PDF, 157 ms for a maximum source preview, and 165 ms for HTML.
-The former universal 188–243 ms tax is gone; one selected handler now owns cold time. The mixed
-first pass intentionally rises because it is the one workload that visits every family and now
-pays each one-time installation at first use instead of charging all six to pane open. Once every
-family has been touched, its 56 descendants match the old eager pane; single-family panes retain
-only 41–48. Further cold work must target the selected format itself — image/PDF decode, WebKit
-startup, or TextKit insertion — rather than prewarming renderers the reader may never use.
+Single-file controls initially landed in the same format-specific bands: 71–72 ms for Quick Look
+documents, 143 ms for an image, 147 ms for a PDF, 157 ms for a maximum source preview, and 165 ms
+for HTML. The former universal 188–243 ms tax was gone; one selected handler owned cold time. The
+mixed first pass intentionally rose because it is the one workload that visits every family and
+now pays each one-time installation at first use instead of charging all six to pane open. Once
+every family has been touched, its 56 descendants match the old eager pane; single-family panes
+retain only 41–48.
+
+That fresh-process number still combined two different things, so the fixture now reports
+controller init, view load, shell-minus-preview, preview metadata/clear/prepare/install/present,
+and a second same-process pane. It also asserts that refresh presents the restored selection once:
+`reloadData` and `selectRowIndexes` both notify the delegate, so the refresh suppresses those
+intermediate notifications and owns one final presentation.
+
+The phase split changed the diagnosis. At the 64-file cap, the first XCTest process spends
+roughly 76–107 ms loading AppKit/design-system classes before format work. A second pane in that
+same process mounts in 12.8–14.7 ms for image, PDF, archive, document, diagram and mixed fixtures;
+their selected preview adds at most 2.3 ms. This is the app-warm interaction, and it is already
+within one 60 Hz frame. Treating the fresh XCTest class-loader cost as repeatable pane work would
+lead to prewarming exactly the renderers the lazy boundary removed.
+
+HTML was the real exception: a warm capped pane took 47.4 ms, including about 3.9 ms to construct
+`WKWebView` and 30.7 ms synchronously inside `loadFileURL`. Both now wait until the pane's loading
+state can be committed on the next main-loop turn, and the request is tokened so a quick row change
+cancels stale work before WebKit is even constructed. Warm pane mount is 12.5 ms; the deferred
+system handoff remains separately visible as 3.5 ms installation plus 30.8 ms navigation. The
+stress fixture forces that deferred handoff after every selected HTML row, so switching results do
+not become artificially cheap. `Attachment Preview Presentation` and `Attachment HTML Navigation`
+spans carry the same split into self-profile traces and xctrace.
 
 ## Whole-window resize stress target
 
@@ -707,6 +731,38 @@ normal buffer only when it becomes visible again. The deliberately extreme fixtu
 once on alternate-screen exit instead of 117–253 ms on every drag tick. A generic debounce was not
 added: after removing invisible work, live grid updates and repaints fit within one 60 Hz frame and
 keep terminal content tracking the pointer.
+
+## Display-pane transition beside a live TUI
+
+Opening the right pane originally performed two consecutive 200 ms transitions: first the split
+item uncollapsed to its chrome floor, then its remembered divider width was restored. Every pixel
+width along both motions became a SwiftTerm character-grid resize, emulator reflow, PTY resize and
+SIGWINCH. A full-screen Codex or Claude process answers each SIGWINCH by repainting its alternate
+screen, so a visually small motion multiplied into layout plus process output at animation-frame
+frequency.
+
+The remembered divider position is now installed inside the same animation group as the
+uncollapse. While a visible animated pane moves, `EmojiFixedTerminalView` keeps its current grid
+and remembers only the last valid frame-derived grid. The completion re-enters SwiftTerm's normal
+frame-size route once at the stable frame, preserving its emulator, PTY, accessibility, search and
+scroller notifications. The hold is nested for rapid opposing actions, and an active remote grid
+continues to win if remote control begins during the motion.
+
+`WindowEdgeTests.testStressDisplayPaneTransitionBesideCodexWhenEnabled` drives the production pane
+route and a real alternate-screen terminal. Hosted XCTest does not commit split-view implicit
+animation frames, so the fixture deterministically proposes twelve terminal widths per transition
+— the 60 Hz frame count of a 200 ms motion — and makes Codex-like output repaint after every grid
+the terminal actually accepts. A five-cycle Debug run measured:
+
+| Grid owner | Proposed transition ticks | Refused transient grids | Accepted grids | Total fixture work |
+|---|---:|---:|---:|---:|
+| Natural Mac grid | 120 | 129 | **10** — one per open and close | 123.2 ms |
+| Remote/frozen control | 120 | 125 | **0** | 20.1 ms |
+
+The refused count includes the split controller's own synchronous geometry proposals in addition
+to the twelve synthetic animation ticks. The invariant is the accepted count: it scales with
+completed pane actions, not animation frames. Run the fixture through
+`scripts/profile_threading.sh display-pane-stress`; routine `full` includes it.
 
 ## Git Review as the first stress target
 

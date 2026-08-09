@@ -20,6 +20,7 @@
 #   scripts/profile_threading.sh attachment-stress
 #   scripts/profile_threading.sh attachment-format-stress
 #   scripts/profile_threading.sh window-resize-stress
+#   scripts/profile_threading.sh display-pane-stress
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh full [seconds] [process-name-or-pid]
@@ -1322,6 +1323,54 @@ run_window_resize_stress() {
   ) 2>&1 | tee "${output_directory}/${log_name}"
 }
 
+run_display_pane_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running Codex TUI display-pane transition sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    THREADING_DISPLAY_PANE_STRESS=1 \
+    THREADING_DISPLAY_PANE_STRESS_CYCLES="${THREADING_DISPLAY_PANE_STRESS_CYCLES:-3}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.WindowEdgeTests/testStressDisplayPaneTransitionBesideCodexWhenEnabled \
+        "${test_bundle}"
+  ) 2>&1 | tee "${output_directory}/display-pane-stress.log"
+}
+
 command="${1:-}"
 case "${command}" in
   git-stress)
@@ -1412,6 +1461,11 @@ case "${command}" in
   window-resize-stress)
     output_directory="$(new_run_directory window-resize-stress)"
     run_window_resize_stress "${output_directory}"
+    ;;
+
+  display-pane-stress)
+    output_directory="$(new_run_directory display-pane-stress)"
+    run_display_pane_stress "${output_directory}"
     ;;
 
   sample)
@@ -1514,6 +1568,7 @@ case "${command}" in
     run_attachment_stress "${output_directory}"
     run_attachment_format_stress "${output_directory}"
     run_window_resize_stress "${output_directory}"
+    run_display_pane_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
     full_templates=(
