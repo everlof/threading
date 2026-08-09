@@ -641,6 +641,18 @@ into it (see the `maxSize` rule under [Themed Controls](#themed-controls)). Whic
 is why the scroller is decided *before* the height guard in `updateHeight`: by the time text
 overflows, the box is already at its cap and the constant has stopped moving.
 
+**A drag the composer can take lights the whole box while it is over it**: the accent ring at
+focus width over a well tinted `Design.Surface.fieldDropTarget` — the row wash's accent-at-alpha
+sentence composited over the field fill, because `applySurface` records exactly one fill and a
+second layer would be a theme colour frozen outside the record. One state for two destinations:
+the rounded surface and the editor inside it are separately registered drag targets (AppKit
+routes to the deepest), so `PromptTextView` reports its own enters and exits up through
+`onDropTargetChange` the way it reports focus, and the box answers as one input. The state is
+reported by what the composer would *take* (`PromptAttachment.canRead`), not by what the editor
+would accept — a plain-text drag is inserted as text and must not light the attachment
+affordance — and it clears on `draggingEnded` as well as exit, because a drop or a cancel ends
+the gesture without the pointer ever leaving.
+
 **What Return does follows where the send control is** (`PromptView.SubmitPlacement`), because
 the two answer the same question and must not disagree:
 

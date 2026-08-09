@@ -304,6 +304,69 @@ final class PromptInputTests: XCTestCase {
         try? FileManager.default.removeItem(atPath: written)
     }
 
+    /// The whole rounded surface answers a drag it can take — the accent ring at focus width
+    /// over a tinted well — and lets go the moment the drag leaves or ends. Both registered
+    /// destinations are exercised: the box's own padding and the editor inside it light the
+    /// same one surface, or the composer reads as two drop targets where there is one.
+    func testADragTheComposerCanTakeLightsTheWholeSurfaceAndLetsGoWhenItLeaves() throws {
+        let prompt = PromptView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+        let window = makeWindow(hosting: prompt)
+        _ = window
+        let textView = try promptTextView(in: prompt)
+
+        let drag = DropFixture(writing: {
+            $0.writeObjects([URL(fileURLWithPath: "/tmp/threading-drop-affordance.png") as NSURL])
+        })
+
+        XCTAssertEqual(prompt.draggingEntered(drag), .copy)
+        XCTAssertEqual(prompt.layer?.borderWidth, Design.Accessibility.focusRingWidth)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.accent.cgColor)
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.fieldDropTarget.cgColor)
+
+        prompt.reapplyRecordedSurfaceForTesting()
+        XCTAssertEqual(
+            prompt.layer?.backgroundColor,
+            Design.Surface.fieldDropTarget.cgColor,
+            "a theme refresh discarded the drop state's well"
+        )
+
+        prompt.draggingExited(drag)
+        XCTAssertEqual(prompt.layer?.borderWidth, Design.Radius.border)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+
+        // Over the editor the *text view* is the drag destination; the box must still light.
+        XCTAssertEqual(textView.draggingEntered(drag), .copy)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.accent.cgColor)
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.fieldDropTarget.cgColor)
+
+        // A release or a cancel ends the drag without ever exiting; the accent well may not
+        // outlive the gesture it was describing.
+        textView.draggingEnded(drag)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+    }
+
+    /// A plain-text drag is one the *editor* will take and the attachment affordance must not
+    /// claim: the composer inserts it as text, and an accent well under it would promise a
+    /// drop the composer does not perform.
+    func testAPlainTextDragDoesNotLightTheDropAffordance() throws {
+        let prompt = PromptView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+        let window = makeWindow(hosting: prompt)
+        _ = window
+        let textView = try promptTextView(in: prompt)
+
+        let drag = DropFixture(writing: { $0.setString("not an attachment", forType: .string) })
+
+        _ = textView.draggingEntered(drag)
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+
+        XCTAssertEqual(prompt.draggingEntered(drag), [])
+        XCTAssertEqual(prompt.layer?.backgroundColor, Design.Surface.field.cgColor)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+    }
+
     func testImagesBecomeRemovablePreviewsAndOnlyJoinTheSubmittedValue() throws {
         let imageURL = try makeImageFile()
         defer { try? FileManager.default.removeItem(at: imageURL) }

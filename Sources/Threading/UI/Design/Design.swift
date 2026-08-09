@@ -827,6 +827,29 @@ enum Design {
             }
         }
 
+        /// The composer's well while a drag it can take is over it.
+        ///
+        /// The same sentence as `dropTarget` — the accent means "the one thing you are aiming
+        /// at", and the pointer is holding something that will land here — but composited over
+        /// the field fill rather than left translucent, because `applySurface` records exactly
+        /// one fill per surface and a wash laid on as a second layer would be a theme colour
+        /// frozen outside the record. Held to the same quiet alpha as the row wash: a draft may
+        /// be under the pointer, and the tint has to answer *where this lands* without covering
+        /// what is already written.
+        static var fieldDropTarget: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.fieldDropTarget")) { _ in
+                let palette = AppThemePalette.current
+                let field = palette.resolved(.fieldSurface)
+                let accent = palette.resolved(.accent)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.annotationTargetGroundIncreasedContrast
+                    : Opacity.annotationTargetGround
+                let base = field.usingColorSpace(.sRGB) ?? field
+                let wash = accent.usingColorSpace(.sRGB) ?? accent
+                return base.blended(withFraction: alpha, of: wash) ?? base
+            }
+        }
+
         /// The hover the pointer earns over a *picture* — the display panel's image, an
         /// attachment's thumbnail.
         ///

@@ -65,6 +65,21 @@ final class PromptView: NSView, ThemedComponent {
     private var attachments: [PromptImageAttachment] = []
     private(set) var contextAttachments: [ConversationContextAttachment] = []
     private var isTextFocused = false
+
+    /// Whether a drag the composer can take is over the box right now.
+    ///
+    /// One flag for two destinations: the rounded surface registers for drags (see
+    /// `viewDidMoveToWindow`) and the text view keeps its own registration, so a pointer
+    /// crossing from padding to editor moves between *views* without ever leaving the *box*.
+    /// Both report here, and the surface answers as one input — a state that lit only the half
+    /// the pointer happened to be over would read as two drop targets where there is one.
+    private var isDropTarget = false {
+        didSet {
+            guard isDropTarget != oldValue else { return }
+            updateSurface()
+        }
+    }
+
     private var completionSuggestions: [ComposerCapability] = []
     private var completionQuery: ComposerCompletionQuery?
     private var selectedCompletionIndex = 0
@@ -570,6 +585,7 @@ final class PromptView: NSView, ThemedComponent {
             self.updateSurface()
             if !focused { self.dismissCompletions() }
         }
+        textView.onDropTargetChange = { [weak self] active in self?.isDropTarget = active }
 
         scrollView.documentView = textView
         scrollView.drawsBackground = false
@@ -854,11 +870,24 @@ final class PromptView: NSView, ThemedComponent {
     // MARK: - Dragging
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        PromptAttachment.canRead(sender.draggingPasteboard) ? .copy : []
+        let canRead = PromptAttachment.canRead(sender.draggingPasteboard)
+        isDropTarget = canRead
+        return canRead ? .copy : []
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         draggingEntered(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        isDropTarget = false
+    }
+
+    /// `draggingExited` is only the pointer leaving; a drag released over the box, or cancelled
+    /// with it still inside, ends without ever exiting. Without this the accent well outlives
+    /// the gesture it was describing — the one state a drop affordance may never hold.
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        isDropTarget = false
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -866,6 +895,7 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isDropTarget = false
         let paths = PromptAttachment.paths(from: sender.draggingPasteboard)
         guard !paths.isEmpty else { return false }
         insertAttachments(paths)
@@ -1185,11 +1215,18 @@ final class PromptView: NSView, ThemedComponent {
     private func updateSurface() {
         // The prompt is where text is typed, so under a bevel material it reads sunken — a
         // carved well, like every text field.
+        //
+        // While a drag it can take is over it, the well tints with the drop wash and takes the
+        // accent ring at focus width: the ring is the focus ring's own geometry saying "aiming
+        // at", and the tinted fill is what tells the two states apart. Quiet on purpose — the
+        // travelling thumbnail already says a drop is happening, the surface only answers
+        // *here* — and a wash rather than a plate, because a draft may be under it.
+        let isEmphasized = isTextFocused || isDropTarget
         applySurface(
-            fill: Design.Surface.field,
+            fill: isDropTarget ? Design.Surface.fieldDropTarget : Design.Surface.field,
             radius: .panel,
-            border: isTextFocused ? Design.Surface.accent : Design.Surface.border,
-            borderWidth: isTextFocused
+            border: isEmphasized ? Design.Surface.accent : Design.Surface.border,
+            borderWidth: isEmphasized
                 ? Design.Accessibility.focusRingWidth
                 : Design.Radius.border,
             glow: true,
@@ -1669,6 +1706,12 @@ private final class PromptTextView: ThemedTextView {
     /// inside one descendant.
     var onFocusChange: ((Bool) -> Void)?
 
+    /// Lets the owning surface light as one drop target while a drag the composer can take is
+    /// over the editor — the same reason as `onFocusChange`: AppKit routes the drag to the
+    /// deepest registered view, so over the text this view is the destination and the box
+    /// around it would otherwise never hear about the pointer it is supposed to answer.
+    var onDropTargetChange: ((Bool) -> Void)?
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1808,6 +1851,25 @@ private final class PromptTextView: ThemedTextView {
 
     override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
         [.fileURL, .png, .tiff] + super.acceptableDragTypes
+    }
+
+    /// Reported by what the composer would *take*, not by what the editor would accept:
+    /// `super` answers yes to a plain-text drag too, and a box that lights its attachment
+    /// affordance for text it will simply insert is promising the wrong thing.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDropTargetChange?(PromptAttachment.canRead(sender.draggingPasteboard))
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onDropTargetChange?(false)
+        super.draggingExited(sender)
+    }
+
+    /// A drop or a cancel ends the drag without exiting — see `PromptView.draggingEnded`.
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        onDropTargetChange?(false)
+        super.draggingEnded(sender)
     }
 }
 
