@@ -370,6 +370,46 @@ final class ControlRowTests: XCTestCase {
         )
     }
 
+    /// The compact policy title can sound like an instruction to the coding agent. Its menu
+    /// carries the scope quietly, on the second line of each choice, where it is visible at the
+    /// moment somebody is comparing the policies without adding permanent chrome to the bar.
+    @MainActor
+    func testChangeRequestPolicyMenuExplainsEachChoice() throws {
+        let bar = GitReviewChangeRequestBar()
+        bar.configure(
+            title: "Publish feature/policy-copy",
+            detail: "feature/policy-copy → master",
+            status: "No checks",
+            statusColor: Design.Text.tertiary,
+            actionTitle: "Create pull request…",
+            actionEnabled: true,
+            showsOpen: false,
+            policy: .pushOnly
+        )
+
+        let chip = try XCTUnwrap(descendants(of: bar, type: ChipView.self).first)
+        let entries = try XCTUnwrap(chip.itemsProvider?())
+        let items: [ThemedMenuItem] = entries.compactMap { entry in
+            guard case .item(let item) = entry else { return nil }
+            return item
+        }
+
+        XCTAssertEqual(items.count, ChangeRequestPublishPolicy.allCases.count)
+        for policy in ChangeRequestPublishPolicy.allCases {
+            let item = try XCTUnwrap(items.first { $0.title == policy.title })
+            XCTAssertEqual(item.subtitle, policy.explanation)
+            XCTAssertTrue(
+                try XCTUnwrap(item.subtitle).hasPrefix("Git Review"),
+                "the explanation must name the surface whose behavior this policy controls"
+            )
+        }
+        XCTAssertEqual(chip.toolTip, ChangeRequestPublishPolicy.pushOnly.explanation)
+        XCTAssertEqual(
+            chip.accessibilityHelp(),
+            ChangeRequestPublishPolicy.pushOnly.explanation
+        )
+    }
+
     /// "Default branch" describes the repository; it does not do anything. Presenting it as a
     /// disabled primary button made Bauhaus correctly remove its action depth while the live
     /// policy chooser kept its shadow, leaving two neighbouring surfaces with different rules.

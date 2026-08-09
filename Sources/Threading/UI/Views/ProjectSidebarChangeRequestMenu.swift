@@ -25,6 +25,7 @@ extension ProjectSidebarViewController {
         let choices = ChangeRequestPublishPolicy.allCases.map { policy in
             ThemedMenuEntry.item(ThemedMenuItem(
                 title: policy.title,
+                subtitle: policy.explanation,
                 representedValue: policy.rawValue,
                 isSelected: policy == selected,
                 onChoose: {

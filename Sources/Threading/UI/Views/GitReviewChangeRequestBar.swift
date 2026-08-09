@@ -154,12 +154,14 @@ final class GitReviewChangeRequestBar: NSView {
         self.policy = policy
         policyChip.configure(symbolName: "slider.horizontal.3", title: policy.title)
         policyChip.toolTip = policy.explanation
+        policyChip.setAccessibilityHelp(policy.explanation)
     }
 
     private func policyEntries() -> [ThemedMenuEntry] {
         ChangeRequestPublishPolicy.allCases.map { policy in
             .item(ThemedMenuItem(
                 title: policy.title,
+                subtitle: policy.explanation,
                 representedValue: policy.rawValue,
                 isSelected: policy == self.policy
             ))

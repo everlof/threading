@@ -117,7 +117,9 @@ The publish policy is **repository scoped** and keyed by `git rev-parse --git-co
 linked worktrees share one answer. It is exposed from each project's sidebar menu because that is
 where its effect is legible. The default opens an editable native composer. Codex may fill the
 title and body, but the composer owns no credential and the text-composition type has no publish
-method. The user must still press Publish.
+method. The user must still press Publish. The compact chooser keeps the bar quiet; opening it
+shows one explanatory line under every choice, and each line names Git Review so the policy cannot
+be mistaken for an instruction to the coding agent.
 
 Every primary-button press advances exactly one external transition:
 

@@ -23,13 +23,13 @@ enum ChangeRequestPublishPolicy: String, Codable, CaseIterable, Sendable {
     var explanation: String {
         switch self {
         case .reviewBeforePublishing:
-            return L10n.string("Codex may draft the title and description. You review them and press Publish.")
+            return L10n.string("Git Review lets you edit the pull request title and description first.")
         case .createDraft:
-            return L10n.string("Pressing Create publishes a draft pull request with the proposed title and description.")
+            return L10n.string("Git Review creates a draft pull request when you press Create.")
         case .createReady:
-            return L10n.string("Pressing Create publishes a ready-for-review pull request with the proposed title and description.")
+            return L10n.string("Git Review creates a ready pull request when you press Create.")
         case .pushOnly:
-            return L10n.string("Git Review may push this project's branch, but never creates a pull request.")
+            return L10n.string("Git Review may push the branch, then stops there.")
         }
     }
 }
