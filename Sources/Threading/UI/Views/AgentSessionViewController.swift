@@ -57,6 +57,8 @@ final class AgentSessionViewController: NSViewController {
     private var nextIdentifierDiscoveryAt = Date.distantPast
     private let remoteViewportBanner = RemoteViewportBannerView()
     private var attachmentObserver: TerminalAttachmentObserver?
+    private var transcriptAttachmentObserver: TerminalTranscriptAttachmentObserver?
+    private var activityHadTurnInFlight = false
     private var selectedSubagentID: String?
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
@@ -104,11 +106,30 @@ final class AgentSessionViewController: NSViewController {
             },
             text: { [weak terminalSession] in
                 guard let terminal = terminalSession?.terminalView.getTerminal() else { return "" }
-                let rendered = terminal.getBufferAsData()
-                return String(
-                    decoding: rendered.suffix(SessionAttachmentDefaults.maximumTerminalScanBytes),
-                    as: UTF8.self
+                return terminal.getRecentLogicalBufferText(
+                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes
                 )
+            },
+            isEnabled: {
+                AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind)
+            }
+        )
+        transcriptAttachmentObserver = TerminalTranscriptAttachmentObserver(
+            sessionID: agentSession.id,
+            kind: agentSession.kind,
+            projectRoot: {
+                ProjectStore.shared.executionProject(forSessionID: agentSession.id).map {
+                    URL(fileURLWithPath: $0.folderPath, isDirectory: true)
+                }
+            },
+            currentDirectory: { [weak terminalSession] in
+                terminalSession?.effectiveWorkingDirectory()
+            },
+            transcriptURL: { [weak self] in
+                self?.attachmentTranscriptURL()
+            },
+            transcriptLookup: { [weak self] in
+                self?.attachmentTranscriptLookup()
             },
             isEnabled: {
                 AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind)
@@ -116,8 +137,19 @@ final class AgentSessionViewController: NSViewController {
         )
 
         activityTracker.markDormant()
-        activityTracker.onChange = { [weak self] _ in
+        activityTracker.onChange = { [weak self] activity in
             guard let self else { return }
+
+            // Hooks are the exact boundary when they arrive, while the activity tracker also
+            // owns the bounded quiet-period fallback for a provider whose hooks are missing.
+            // Observe the shared edge so both routes recover intact transcript paths. A reported
+            // turn with background work may remain visually `working`; AgentRuntime explicitly
+            // scans that boundary because there is intentionally no activity edge to observe.
+            let turnFinished = self.activityHadTurnInFlight && !activity.hasTurnInFlight
+            self.activityHadTurnInFlight = activity.hasTurnInFlight
+            if turnFinished {
+                self.noteTurnFinishedForAttachmentDetection()
+            }
             self.delegate?.agentSessionDidChangeState(self)
         }
         self.subagentState.onChange = { [weak self] in
@@ -245,11 +277,11 @@ final class AgentSessionViewController: NSViewController {
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
         guard isRunning else { return }
-        resetTranscriptFallbackObservation()
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         session.terminate()
         isRunning = false
         activityTracker.markDormant()
+        resetTranscriptFallbackObservation()
     }
 
     func focusTerminal() {
@@ -516,6 +548,48 @@ final class AgentSessionViewController: NSViewController {
         codexTranscriptURL = url
         scheduleCodexInterruptionRefresh()
         scheduleClaudeRefusalRefresh()
+    }
+
+    /// A completed terminal turn has an intact provider message even when its TUI painted that
+    /// message as independently positioned rows. The transcript observer reads it off-main and
+    /// feeds only assistant prose through the ordinary attachment admission door.
+    func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String? = nil) {
+        transcriptAttachmentObserver?.noteTurnFinished(
+            lastAssistantMessage: lastAssistantMessage
+        )
+    }
+
+    private func attachmentTranscriptURL() -> URL? {
+        switch agentKind {
+        case .codex:
+            // The reported hook path is exact and cached. Discovering it by walking Codex's
+            // externally growing session tree is background work; see the lookup below.
+            return codexTranscriptURL
+        case .claude:
+            return resolvedClaudeTranscriptURL()
+        case .grok, .openCode:
+            return nil
+        }
+    }
+
+    /// A value-only fallback the observer may execute away from the main actor when Codex's
+    /// lifecycle hook did not supply its rollout path.
+    private func attachmentTranscriptLookup()
+        -> TerminalTranscriptAttachmentObserver.TranscriptURLLookup? {
+        guard agentKind.supports(.transcriptInterruptedTurnRecord),
+              codexTranscriptURL == nil,
+              let stored = ProjectStore.shared.session(withID: sessionID),
+              let transcriptID = stored.resumeState.transcriptID,
+              let account = AgentAccountDiscovery.account(
+                  for: stored.kind,
+                  handle: stored.accountHandle
+              ) else {
+            return nil
+        }
+
+        return {
+            CodexTranscript.url(sessionID: transcriptID, account: account)
+        }
     }
 
     /// Revalidates once after an output burst settles. The transcript reader performs the stat
@@ -812,12 +886,12 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         attachmentObserver?.scanNow()
         agentTitleRefreshWorkItem?.cancel()
         agentTitleRefreshWorkItem = nil
-        resetTranscriptFallbackObservation()
         if agentKind.supports(.providerTitleMetadata) {
             SessionNaming.refreshAgentTitle(forSessionID: sessionID)
         }
         isRunning = false
         activityTracker.markDormant()
+        resetTranscriptFallbackObservation()
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
 
         EventLog.shared.record(.session, "Agent exited", [

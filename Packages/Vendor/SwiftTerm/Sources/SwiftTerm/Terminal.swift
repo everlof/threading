@@ -5382,6 +5382,76 @@ open class Terminal {
         }
         return result
     }
+
+    /// Returns the recent complete logical lines in the terminal buffer, bounded by their UTF-8
+    /// representation.
+    ///
+    /// `getBufferAsData` is a presentation export: it puts a newline after every grid row. That
+    /// is the right shape for a screen snapshot and the wrong one for consumers looking for
+    /// semantic text, because a terminal's automatic wrap is not a line break. This variant
+    /// joins rows whose `isWrapped` bit says they continue the preceding row, while preserving
+    /// real line breaks between logical lines.
+    ///
+    /// The bound is applied while walking backwards, before the complete buffer is materialized.
+    /// Only complete logical lines are returned. If the oldest line that would be included is
+    /// larger than the remaining budget, it and everything older are omitted rather than
+    /// returning a fragment that could be mistaken for complete text. The same rule drops a
+    /// continuation whose beginning has already fallen out of scrollback.
+    ///
+    /// - Parameters:
+    ///   - maximumUTF8Bytes: The largest UTF-8 representation the result may have.
+    ///   - kind: Which terminal buffer to inspect.
+    public func getRecentLogicalBufferText (
+        maximumUTF8Bytes: Int,
+        kind: BufferKind = .active
+    ) -> String
+    {
+        guard maximumUTF8Bytes > 0 else { return "" }
+
+        let b = bufferFromKind(kind: kind)
+        guard b.lines.count > 0 else { return "" }
+
+        // Each entry is one logical line, with its physical rows stored newest-first because the
+        // buffer itself is being walked backwards. Logical lines use the same order until the
+        // final assembly below.
+        var logicalLinesNewestFirst: [[String]] = []
+        var currentRowsNewestFirst: [String] = []
+        var currentBytes = 0
+        var acceptedBytes = 0
+
+        for row in stride(from: b.lines.count - 1, through: 0, by: -1) {
+            let bufferLine = b.lines[row]
+            let text = bufferLine.translateToString(trimRight: true)
+            let bytes = text.utf8.count
+            let separatorBytes = logicalLinesNewestFirst.isEmpty ? 0 : 1
+            let remaining = maximumUTF8Bytes - acceptedBytes - separatorBytes
+
+            // Stop at the first incomplete logical line. Skipping across it would no longer be a
+            // recent suffix, and returning its tail would manufacture path- or URL-shaped text.
+            guard remaining >= 0,
+                  currentBytes <= remaining,
+                  bytes <= remaining - currentBytes else {
+                break
+            }
+
+            currentRowsNewestFirst.append(text)
+            currentBytes += bytes
+
+            // `isWrapped` belongs to this row: true means it continues the row before it. Until
+            // a non-wrapped row is reached, the logical line has no known beginning and cannot
+            // be returned safely.
+            guard !bufferLine.isWrapped else { continue }
+
+            logicalLinesNewestFirst.append(currentRowsNewestFirst)
+            acceptedBytes += separatorBytes + currentBytes
+            currentRowsNewestFirst.removeAll(keepingCapacity: true)
+            currentBytes = 0
+        }
+
+        return logicalLinesNewestFirst.reversed().map { rowsNewestFirst in
+            rowsNewestFirst.reversed().joined()
+        }.joined(separator: "\n")
+    }
     
     /// Returns the text between the specified range
     ///

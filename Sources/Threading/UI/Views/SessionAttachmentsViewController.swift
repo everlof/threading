@@ -180,6 +180,19 @@ final class SessionAttachmentsViewController: NSViewController {
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
+
+    /// A diagram's *source*, in the theme's own code face. Text is what these files are —
+    /// rendering Graphviz or Mermaid would take an engine the app does not carry — and their
+    /// source is short, legible, and exactly what gets dragged into a chat box next.
+    private lazy var sourcePreview: ThemedScrollView = {
+        let scroll = ThemedTextView.scrolling()
+        scroll.isHidden = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }()
+    private var sourceTextView: ThemedTextView? {
+        sourcePreview.documentView as? ThemedTextView
+    }
     private lazy var fileLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.subheading)
@@ -266,7 +279,9 @@ final class SessionAttachmentsViewController: NSViewController {
     private var dropTargetRow = -1
     private lazy var emptyLabel: NSTextField = {
         let label = NSTextField(wrappingLabelWithString:
-            L10n.string("Images, documents, archives, and HTML from this session will appear here.")
+            L10n.string(
+                "Images, documents, archives, diagrams, and HTML from this session will appear here."
+            )
         )
         label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
@@ -367,6 +382,20 @@ final class SessionAttachmentsViewController: NSViewController {
         updateListHeight()
     }
 
+    /// Ends system preview work before the pane loses its window.
+    ///
+    /// Quick Look can still be completing a display-bundle request after the last selection.
+    /// Removing its view first leaves that request targeting a window whose screen/backing state
+    /// has already gone away; rapid archive/document switching made the late callback trap inside
+    /// `QLPreviewView.backingScaleFactor`.
+    func prepareForRemoval() {
+        guard isViewLoaded else { return }
+        documentView.close()
+        clearHTMLPreview()
+        clearSourcePreview()
+        imageView.image = nil
+    }
+
     // MARK: - Setup
 
     private func setupList() {
@@ -402,9 +431,18 @@ final class SessionAttachmentsViewController: NSViewController {
         previewHost.addSubview(imageView)
         previewHost.addSubview(documentView)
         previewHost.addSubview(htmlView)
+        previewHost.addSubview(sourcePreview)
         previewHost.addSubview(previewMessage)
         view.addSubview(previewHost)
 
+        if let text = sourceTextView {
+            text.isEditable = false
+            text.applyFont(.previewCode)
+            text.textContainerInset = NSSize(
+                width: Design.Spacing.medium,
+                height: Design.Spacing.medium
+            )
+        }
         applyPreviewTheme()
     }
 
@@ -469,6 +507,11 @@ final class SessionAttachmentsViewController: NSViewController {
             htmlView.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
             htmlView.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
             htmlView.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
+
+            sourcePreview.topAnchor.constraint(equalTo: previewHost.topAnchor),
+            sourcePreview.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
+            sourcePreview.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
+            sourcePreview.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
 
             previewMessage.centerXAnchor.constraint(equalTo: previewHost.centerXAnchor),
             previewMessage.centerYAnchor.constraint(equalTo: previewHost.centerYAnchor),
@@ -775,8 +818,8 @@ final class SessionAttachmentsViewController: NSViewController {
         }
         return L10n.string(
             """
-            Attachments this session exchanged appear here: images, PDFs, documents, and \
-            archives you send, and ones the agent shows or names.
+            Attachments this session exchanged appear here: images, PDFs, documents, \
+            archives, and diagrams you send, and ones the agent shows or names.
             """
         )
     }
@@ -831,6 +874,7 @@ final class SessionAttachmentsViewController: NSViewController {
             documentView.clear()
             documentView.isHidden = true
             clearHTMLPreview()
+            clearSourcePreview()
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
@@ -851,6 +895,7 @@ final class SessionAttachmentsViewController: NSViewController {
             imageView.image = nil
             imageView.isHidden = true
             clearHTMLPreview()
+            clearSourcePreview()
             documentView.isHidden = false
 
         case .html:
@@ -858,11 +903,28 @@ final class SessionAttachmentsViewController: NSViewController {
             imageView.isHidden = true
             documentView.clear()
             documentView.isHidden = true
+            clearSourcePreview()
             htmlView.loadFileURL(
                 attachment.url,
                 allowingReadAccessTo: attachment.url.deletingLastPathComponent()
             )
             htmlView.isHidden = false
+
+        case .diagram:
+            // A tighter cap than the general one: this lands in a text view, and a text view
+            // handed tens of megabytes is a stall, not a preview.
+            guard size <= SessionAttachmentsDefaults.maximumSourcePreviewBytes,
+                  let data = try? Data(contentsOf: attachment.url) else {
+                showPreviewMessage(L10n.string("This file could not be previewed."))
+                return
+            }
+            imageView.image = nil
+            imageView.isHidden = true
+            documentView.clear()
+            documentView.isHidden = true
+            clearHTMLPreview()
+            sourceTextView?.string = String(decoding: data, as: UTF8.self)
+            sourcePreview.isHidden = false
         }
     }
 
@@ -894,6 +956,7 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView.clear()
         documentView.isHidden = true
         clearHTMLPreview()
+        clearSourcePreview()
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
         fileLabel.stringValue = ""
@@ -906,8 +969,14 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView.clear()
         documentView.isHidden = true
         clearHTMLPreview()
+        clearSourcePreview()
         previewMessage.stringValue = message
         previewMessage.isHidden = false
+    }
+
+    private func clearSourcePreview() {
+        sourceTextView?.string = ""
+        sourcePreview.isHidden = true
     }
 
     private func applyPreviewTheme() {
@@ -1786,6 +1855,11 @@ enum SessionAttachmentsDefaults {
     static let menuWidth: CGFloat = 220
     static let iconSize: CGFloat = 26
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
+
+    /// The diagram-source cap, far under the general one: source lands in a text view, and a
+    /// text view is bounded by what it must lay out, not by what the disk can hold. Any real
+    /// dot or Mermaid file is kilobytes.
+    static let maximumSourcePreviewBytes = 512 * 1024
 
     /// How many pixels a row's thumbnail is decoded to, as a multiple of the well it sits in:
     /// enough for a Retina row, and nowhere near a full decode of the file behind it.

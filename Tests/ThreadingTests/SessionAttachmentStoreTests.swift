@@ -564,9 +564,29 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.docx")), .document)
         XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.odt")), .document)
         XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.rtf")), .document)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.dot")), .diagram)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.gv")), .diagram)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.mmd")), .diagram)
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.mermaid")), .diagram)
         XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.png")), .image)
         XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.pdf")), .pdf)
         XCTAssertNil(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/a/b.swift")))
+    }
+
+    /// A Mermaid file named in output is filed like any other supported reference.
+    func testAScannedDiagramInsideTheCheckoutIsRecorded() throws {
+        let store = makeStore()
+        let session = SessionID()
+        try write(Array("graph TD; A-->B".utf8), to: checkout.appendingPathComponent("flow.mmd"))
+
+        store.recordReferences(
+            in: "sketched the flow in `flow.mmd`",
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        XCTAssertEqual(store.attachments(for: session).map { [$0.name: $0.kind] },
+                       [["flow.mmd": .diagram]])
     }
 
     /// An archive named in output is filed like any other supported reference.
@@ -600,6 +620,49 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(store.attachments(for: session).map(\.name), ["shot.tiff"])
+    }
+
+    /// Full-screen TUIs paint pre-wrapped grid rows, so their terminal buffer cannot reconstruct
+    /// the provider's original prose. The completed-turn transcript route must carry an intact
+    /// long path through the same detector and store, including the hook-vs-writer flush retry.
+    func testTranscriptObserverRecoversALongPathWrittenAfterTheTurnHook() throws {
+        let session = SessionID()
+        let image = checkout.appendingPathComponent(
+            "managed-workspace-a-very-long-name-that-the-terminal-ui-would-wrap.png"
+        )
+        try write([0x89, 0x50], to: image)
+        let transcript = checkout.appendingPathComponent("rollout.jsonl")
+        try Data().write(to: transcript)
+
+        let observer = TerminalTranscriptAttachmentObserver(
+            sessionID: session,
+            kind: .codex,
+            projectRoot: { [checkout] in checkout },
+            currentDirectory: { [checkout] in checkout },
+            transcriptURL: { transcript }
+        )
+        observer.noteTurnFinished()
+
+        // The zero-delay read intentionally sees an empty file. The first stability retry must
+        // see the final provider record once its writer catches up with the lifecycle hook.
+        let record = """
+        {"type":"event_msg","payload":{"type":"agent_message","message":"Saved \(image.path)"}}
+        """
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            try? Data((record + "\n").utf8).write(to: transcript)
+        }
+
+        let deadline = Date().addingTimeInterval(1.5)
+        while SessionAttachmentStore.shared.attachments(for: session).isEmpty,
+              Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.025)))
+        }
+
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: session).map(\.name),
+            [image.lastPathComponent]
+        )
+        _ = observer // Keep the retry generation alive through the assertion.
     }
 
     // MARK: - Custody Ends

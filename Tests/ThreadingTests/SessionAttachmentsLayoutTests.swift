@@ -560,6 +560,61 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
+    /// A file over the preview cap is refused before any surface touches it: the size is read
+    /// from metadata, the message is the whole preview, and neither Quick Look nor the image
+    /// decoder is ever asked. Pinned with an archive because archives are where multi-gigabyte
+    /// files live — and nothing in the app ever unpacks one.
+    func testAFileOverThePreviewCapIsRefusedBeforeAnySurfaceTouchesIt() throws {
+        let huge = root.appendingPathComponent("release.zip")
+        FileManager.default.createFile(atPath: huge.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: huge)
+        // Sparse on purpose: the *reported* size is what the gate reads, and a fixture that
+        // wrote 65 MB of zeros would be paying for bytes the test exists to prove untouched.
+        try handle.truncate(
+            atOffset: UInt64(SessionAttachmentsDefaults.maximumPreviewFileBytes) + 1
+        )
+        try handle.close()
+        let pane = try laidOutPane(showing: huge, size: NSSize(width: 353, height: 700))
+
+        let labels = descendants(of: pane.view).compactMap { $0 as? NSTextField }
+        XCTAssertTrue(
+            labels.contains {
+                $0.stringValue == L10n.string("This file is too large to preview here.")
+                    && !$0.isHidden
+            },
+            "an oversized file was not refused with the message"
+        )
+        let document = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first
+        )
+        XCTAssertTrue(document.isHidden, "an oversized archive still reached Quick Look")
+    }
+
+    /// Diagram source previews as itself: the pane carries no Graphviz or Mermaid engine, and
+    /// the source — short, legible, and what gets dragged into a chat box next — beats an icon
+    /// card claiming there is nothing to see.
+    func testADiagramPreviewsItsOwnSource() throws {
+        let source = "graph TD; Composer-->Terminal"
+        let mermaid = root.appendingPathComponent("flow.mmd")
+        try Data(source.utf8).write(to: mermaid)
+        let pane = try laidOutPane(showing: mermaid, size: NSSize(width: 353, height: 700))
+
+        let text = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedTextView }.first,
+            "the pane grew no source preview"
+        )
+        XCTAssertEqual(text.string, source, "the preview is not the file's own source")
+        XCTAssertFalse(text.isEditable, "a preview must not take edits")
+        XCTAssertFalse(
+            try XCTUnwrap(text.enclosingScrollView).isHidden,
+            "the source preview is built but not shown"
+        )
+        let image = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first
+        )
+        XCTAssertTrue(image.isHidden, "a diagram was sent to the image decoder")
+    }
+
     private func items(in entries: [ThemedMenuEntry]) -> [ThemedMenuItem] {
         entries.compactMap {
             if case .item(let item) = $0 { return item }
@@ -808,6 +863,110 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         _ = try button(titled: L10n.string("Hide"), in: band)
     }
 
+    // MARK: - Stress
+
+    /// Opt-in end-to-end workload for every attachment preview family at the session cap.
+    ///
+    /// Detection-only profiling cannot see the expensive half of a format handler: row icons,
+    /// full-image decode, PDFKit construction, Quick Look handoff, WebKit navigation, or source
+    /// insertion into TextKit. Fixture files are generated and admitted before the clock starts;
+    /// the reported phases cover the production pane's cold mount, layout/draw, and two complete
+    /// selection passes so cold decoder cost stays distinguishable from warm switching.
+    func testStressAttachmentFormatPipelineWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_ATTACHMENT_FORMAT_STRESS"] == "1",
+            "Set THREADING_ATTACHMENT_FORMAT_STRESS=1 to run the format-preview sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let format = AttachmentStressFormat(
+            rawValue: environment["THREADING_ATTACHMENT_FORMAT_STRESS_KIND"] ?? "mixed"
+        ) ?? .mixed
+        let requestedCount = environment["THREADING_ATTACHMENT_FORMAT_STRESS_FILES"]
+            .flatMap(Int.init) ?? SessionAttachmentDefaults.maximumPerSession
+        let fileCount = max(1, min(SessionAttachmentDefaults.maximumPerSession, requestedCount))
+        let urls = try makeAttachmentStressFiles(format: format, count: fileCount)
+        let sourceBytes = urls.reduce(UInt64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return total + UInt64(max(size, 0))
+        }
+        let sessionID = SessionID()
+        let recorded = SessionAttachmentStore.shared.record(
+            urls: urls,
+            sessionID: sessionID,
+            projectRoot: root
+        )
+        XCTAssertEqual(recorded.count, fileCount)
+        let baselineMemory = Self.physicalFootprintBytes()
+
+        let constructStarted = DispatchTime.now().uptimeNanoseconds
+        let pane = SessionAttachmentsViewController(sessionID: sessionID)
+        _ = pane.view
+        let constructEnded = DispatchTime.now().uptimeNanoseconds
+        let warmConstructNanoseconds: UInt64 = autoreleasepool {
+            let started = DispatchTime.now().uptimeNanoseconds
+            let warmPane = SessionAttachmentsViewController(sessionID: sessionID)
+            _ = warmPane.view
+            let ended = DispatchTime.now().uptimeNanoseconds
+            warmPane.prepareForRemoval()
+            return ended - started
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 760),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = pane
+        let layoutStarted = DispatchTime.now().uptimeNanoseconds
+        pane.view.layoutSubtreeIfNeeded()
+        pane.view.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let table = try attachmentsTable(in: pane.view)
+        XCTAssertEqual(table.numberOfRows, fileCount)
+        let bitmap = try XCTUnwrap(pane.view.bitmapImageRepForCachingDisplay(in: pane.view.bounds))
+        let coldDrawStarted = DispatchTime.now().uptimeNanoseconds
+        pane.view.cacheDisplay(in: pane.view.bounds, to: bitmap)
+        let coldDrawEnded = DispatchTime.now().uptimeNanoseconds
+
+        let coldSwitchStarted = DispatchTime.now().uptimeNanoseconds
+        for row in 0..<table.numberOfRows {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            pane.view.layoutSubtreeIfNeeded()
+        }
+        let coldSwitchEnded = DispatchTime.now().uptimeNanoseconds
+
+        let warmSwitchStarted = DispatchTime.now().uptimeNanoseconds
+        for row in (0..<table.numberOfRows).reversed() {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            pane.view.layoutSubtreeIfNeeded()
+        }
+        let warmSwitchEnded = DispatchTime.now().uptimeNanoseconds
+        let warmDrawStarted = DispatchTime.now().uptimeNanoseconds
+        pane.view.cacheDisplay(in: pane.view.bounds, to: bitmap)
+        let warmDrawEnded = DispatchTime.now().uptimeNanoseconds
+
+        let finalMemory = Self.physicalFootprintBytes()
+        let footprint = finalMemory >= baselineMemory ? finalMemory - baselineMemory : 0
+        print(
+            "THREADING_PERF attachment-formats "
+                + "format=\(format.rawValue) files=\(fileCount) "
+                + "source_mb=\(Self.megabytes(sourceBytes)) "
+                + "construct_ms=\(Self.milliseconds(constructEnded - constructStarted)) "
+                + "warm_construct_ms=\(Self.milliseconds(warmConstructNanoseconds)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - layoutStarted)) "
+                + "cold_draw_ms=\(Self.milliseconds(coldDrawEnded - coldDrawStarted)) "
+                + "cold_switch_ms=\(Self.milliseconds(coldSwitchEnded - coldSwitchStarted)) "
+                + "warm_switch_ms=\(Self.milliseconds(warmSwitchEnded - warmSwitchStarted)) "
+                + "warm_draw_ms=\(Self.milliseconds(warmDrawEnded - warmDrawStarted)) "
+                + "descendants=\(descendants(of: pane.view).count) "
+                + "footprint_delta_mb=\(Self.megabytes(footprint))"
+        )
+        pane.prepareForRemoval()
+        _ = window
+    }
+
     // MARK: - The Rows
 
     /// A row shows the picture it is about. This list is the panel's visual history now — the
@@ -964,5 +1123,106 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
         let pixel = try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2))
         return try XCTUnwrap(pixel.usingColorSpace(.sRGB))
+    }
+
+    private enum AttachmentStressFormat: String, CaseIterable {
+        case image
+        case pdf
+        case html
+        case archive
+        case document
+        case diagram
+        case mixed
+    }
+
+    private func makeAttachmentStressFiles(
+        format: AttachmentStressFormat,
+        count: Int
+    ) throws -> [URL] {
+        try (0..<count).map { index in
+            let resolved: AttachmentStressFormat
+            if format == .mixed {
+                let families: [AttachmentStressFormat] = [
+                    .image, .pdf, .html, .archive, .document, .diagram
+                ]
+                resolved = families[index % families.count]
+            } else {
+                resolved = format
+            }
+
+            switch resolved {
+            case .image:
+                return try writePNG(
+                    named: "stress-\(index).png",
+                    size: NSSize(width: 1_600, height: 1_000),
+                    color: index.isMultiple(of: 2) ? .systemBlue : .systemOrange
+                )
+            case .pdf:
+                return try writePDF(named: "stress-\(index).pdf", pages: 12)
+            case .html:
+                let url = root.appendingPathComponent("stress-\(index).html")
+                let rows = (0..<300).map {
+                    "<tr><td>\($0)</td><td>Attachment preview row \(index)</td></tr>"
+                }.joined()
+                try Data("<html><body><table>\(rows)</table></body></html>".utf8).write(to: url)
+                return url
+            case .archive:
+                let url = root.appendingPathComponent("stress-\(index).zip")
+                var bytes = Data([0x50, 0x4B, 0x05, 0x06])
+                bytes.append(Data(repeating: 0, count: 1_024))
+                try bytes.write(to: url)
+                return url
+            case .document:
+                let url = root.appendingPathComponent("stress-\(index).rtf")
+                let paragraphs = String(
+                    repeating: "\\par Attachment document performance row \(index). ",
+                    count: 800
+                )
+                try Data("{\\rtf1\\ansi \(paragraphs)}".utf8).write(to: url)
+                return url
+            case .diagram:
+                let url = root.appendingPathComponent("stress-\(index).mmd")
+                let line = "node\(index) --> node\(index + 1)\n"
+                let repetitions = max(
+                    1,
+                    (SessionAttachmentsDefaults.maximumSourcePreviewBytes - 1) / line.utf8.count
+                )
+                var source = Data(String(repeating: line, count: repetitions).utf8)
+                if source.count >= SessionAttachmentsDefaults.maximumSourcePreviewBytes {
+                    source = source.prefix(SessionAttachmentsDefaults.maximumSourcePreviewBytes - 1)
+                }
+                try source.write(to: url)
+                return url
+            case .mixed:
+                preconditionFailure("mixed resolves to a concrete format before file creation")
+            }
+        }
+    }
+
+    private func writePDF(named name: String, pages: Int) throws -> URL {
+        let url = root.appendingPathComponent(name)
+        var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let context = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &mediaBox, nil))
+        for page in 0..<pages {
+            context.beginPDFPage(nil)
+            context.setFillColor(CGColor(gray: CGFloat(page % 5) / 8 + 0.2, alpha: 1))
+            context.fill(mediaBox.insetBy(dx: 36, dy: 36))
+            context.endPDFPage()
+        }
+        context.closePDF()
+        return url
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
     }
 }

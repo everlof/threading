@@ -60,6 +60,91 @@ final class TranscriptReplayTests: XCTestCase {
         XCTAssertNil(TranscriptReplay.codexEvent(from: record))
     }
 
+    /// Codex's TUI wraps markdown into separately painted terminal rows. The rollout retains the
+    /// original message, and only that prose — not tool output or reasoning beside it — belongs
+    /// in terminal attachment detection.
+    func testLatestCodexAssistantTextsRecoverIntactProseFromTheNewestTurn() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("rollout.jsonl")
+        try write(
+            [
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"old"}}"#,
+                #"{"type":"event_msg","payload":{"type":"agent_message","message":"old.png"}}"#,
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"render"}}"#,
+                #"{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"incidental-tool.png"}}"#,
+                #"{"type":"event_msg","payload":{"type":"agent_reasoning","text":"private-reasoning.png"}}"#,
+                #"{"type":"event_msg","payload":{"type":"agent_message","message":"First /tmp/a-very-long-render-name.png"}}"#,
+                #"{"type":"event_msg","payload":{"type":"agent_message","message":"Done."}}"#
+            ].joined(separator: "\n") + "\n",
+            to: transcript
+        )
+
+        XCTAssertEqual(
+            TranscriptReplay.latestAssistantTexts(
+                at: transcript,
+                kind: .codex,
+                scanLimit: 64 * 1024
+            ),
+            ["First /tmp/a-very-long-render-name.png", "Done."]
+        )
+    }
+
+    /// Claude records tool results as user-role rows. They are not a new human turn and must not
+    /// stop the backwards walk; their paths are also not assistant prose and must not be scanned.
+    func testLatestClaudeAssistantTextsCrossToolResultsButStopAtTheHumanPrompt() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("session.jsonl")
+        try write(
+            [
+                #"{"type":"user","message":{"role":"user","content":"old"}}"#,
+                #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"old.png"}]}}"#,
+                #"{"type":"user","message":{"role":"user","content":"make the render"}}"#,
+                #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"tool-input.png"}}]}}"#,
+                #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"tool-output.png"}]}}"#,
+                #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning.png"},{"type":"text","text":"Saved /tmp/final-render.png"}]}}"#
+            ].joined(separator: "\n") + "\n",
+            to: transcript
+        )
+
+        XCTAssertEqual(
+            TranscriptReplay.latestAssistantTexts(
+                at: transcript,
+                kind: .claude,
+                scanLimit: 64 * 1024
+            ),
+            ["Saved /tmp/final-render.png"]
+        )
+    }
+
+    /// A tail cap may answer nothing, but it may not jump over an unreadable newest record and
+    /// return an older turn as though it were the one that just completed.
+    func testLatestAssistantTextTailLimitDoesNotLeakAnOlderTurn() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("rollout.jsonl")
+        let oversized = String(repeating: "x", count: JSONLDefaults.chunkBytes * 2)
+        try write(
+            [
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"old"}}"#,
+                #"{"type":"event_msg","payload":{"type":"agent_message","message":"old.png"}}"#,
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"new"}}"#,
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"\(oversized)\"}}"
+            ].joined(separator: "\n") + "\n",
+            to: transcript
+        )
+
+        XCTAssertEqual(
+            TranscriptReplay.latestAssistantTexts(
+                at: transcript,
+                kind: .codex,
+                scanLimit: JSONLDefaults.chunkBytes
+            ),
+            []
+        )
+    }
+
     func testClaudeTaskProgressSurvivesTranscriptReplay() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

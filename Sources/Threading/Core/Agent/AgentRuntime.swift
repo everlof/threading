@@ -204,6 +204,12 @@ final class AgentRuntime {
                 )
             }
             tracker.noteTurnFinished(backgroundWork: report.backgroundWork)
+            // Usually the activity edge above has already scheduled this scan. Starting the
+            // generation again here preserves the hook's intact fast-path message and also
+            // covers turns that remain visually `working` because they left background work.
+            controller.noteTurnFinishedForAttachmentDetection(
+                lastAssistantMessage: report.lastAssistantMessage
+            )
         case .awaitingUser: tracker.noteAwaitingUser()
         case .blockingAskOpened: tracker.noteBlockingAskOpened(id: report.toolCallID)
         case .blockingAskClosed: tracker.noteBlockingAskClosed(id: report.toolCallID)

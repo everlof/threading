@@ -18,6 +18,9 @@ struct SessionAttachment: Equatable, Identifiable {
         case html
         case archive
         case document
+        /// Diagram *source* — Graphviz dot, Mermaid. Text, not pixels: the pane previews the
+        /// source itself, since rendering would take a diagram engine the app does not carry.
+        case diagram
     }
 
     /// Which side of the conversation put the file in front of the other.
@@ -972,9 +975,15 @@ enum AttachmentReferenceDetector {
     private static let documentExtensions: Set<String> = [
         "odt", "ods", "odp", "docx", "xlsx", "pptx", "rtf"
     ]
+    /// `.dot` is also the legacy Word-template extension; the filesystem check keeps it honest,
+    /// and a template named in a coding session's output is the rarer reading by far.
+    private static let diagramExtensions: Set<String> = [
+        "dot", "gv", "mmd", "mermaid"
+    ]
     private static let extensions =
         imageExtensions.sorted() + ["pdf", "html", "htm"]
             + archiveExtensions.sorted() + documentExtensions.sorted()
+            + diagramExtensions.sorted()
     /// Longest first, because the alternation is ordered and nothing after it requires a word
     /// boundary: with `tif` offered before `tiff`, `shot.tiff` matched as `shot.tif`, a file
     /// that does not exist, and the real one was never recorded.
@@ -1059,6 +1068,7 @@ enum AttachmentReferenceDetector {
         if ext == "html" || ext == "htm" { return .html }
         if archiveExtensions.contains(ext) { return .archive }
         if documentExtensions.contains(ext) { return .document }
+        if diagramExtensions.contains(ext) { return .diagram }
         return nil
     }
 
@@ -1145,7 +1155,7 @@ enum AttachmentReferenceDetector {
 
 // MARK: - Terminal Observation
 
-/// Debounces terminal repaints and inspects SwiftTerm's bounded recent rendered buffer.
+/// Debounces terminal repaints and inspects SwiftTerm's bounded recent logical buffer.
 ///
 /// Reading the emulator buffer avoids treating ANSI cursor commands as path text while retaining
 /// recent scrollback that has moved just above the viewport. A path is recorded only when it
@@ -1263,6 +1273,152 @@ final class TerminalAttachmentObserver {
     }
 }
 
+// MARK: - Terminal Transcript Observation
+
+/// Recovers assistant prose that a full-screen agent TUI painted as already-wrapped grid rows.
+///
+/// The ordinary terminal observer remains necessary for shell output, providers whose transcript
+/// is not readable, and paths printed before a turn ends. It can join emulator-owned soft wraps,
+/// but no emulator can infer that two independently painted rows came from one provider message.
+/// Claude and Codex transcripts retain that message intact, so their completed terminal turns get
+/// one bounded, background tail scan through the same provider normalization Native Chat replays.
+///
+/// A turn boundary schedules stability retries because the hook and the transcript writer are two
+/// processes: the hook can arrive while the final record is still being flushed. Resolutions are
+/// deduplicated within the turn before returning to the main actor, so retries neither recopy an
+/// outside file nor move an existing row repeatedly.
+@MainActor
+final class TerminalTranscriptAttachmentObserver {
+
+    typealias TranscriptURLLookup = @Sendable () -> URL?
+
+    private let sessionID: SessionID
+    private let kind: AgentKind
+    private let projectRoot: () -> URL?
+    private let currentDirectory: () -> URL?
+    private let transcriptURL: () -> URL?
+    private let transcriptLookup: () -> TranscriptURLLookup?
+    private let isEnabled: () -> Bool
+
+    private var generation = 0
+    // Dispatch work items are not Sendable. All mutation is main-actor isolated; deinit only
+    // cancels the now-unreachable weak-self callbacks, matching TerminalAttachmentObserver.
+    nonisolated(unsafe) private var pendingScans: [DispatchWorkItem] = []
+    private var pathsRecordedThisTurn: Set<String> = []
+
+    init(
+        sessionID: SessionID,
+        kind: AgentKind,
+        projectRoot: @escaping () -> URL?,
+        currentDirectory: @escaping () -> URL?,
+        transcriptURL: @escaping () -> URL?,
+        transcriptLookup: @escaping () -> TranscriptURLLookup? = { nil },
+        isEnabled: @escaping () -> Bool = { true }
+    ) {
+        self.sessionID = sessionID
+        self.kind = kind
+        self.projectRoot = projectRoot
+        self.currentDirectory = currentDirectory
+        self.transcriptURL = transcriptURL
+        self.transcriptLookup = transcriptLookup
+        self.isEnabled = isEnabled
+    }
+
+    deinit {
+        pendingScans.forEach { $0.cancel() }
+    }
+
+    /// Starts a new bounded scan generation for the turn that just settled.
+    ///
+    /// `lastAssistantMessage` is a provider-supplied fast path where a hook carries one. It is
+    /// still combined with the transcript rather than treated as complete: a turn may contain
+    /// several assistant text blocks around tool calls.
+    func noteTurnFinished(lastAssistantMessage: String? = nil) {
+        pendingScans.forEach { $0.cancel() }
+        pendingScans.removeAll(keepingCapacity: true)
+        generation += 1
+        pathsRecordedThisTurn.removeAll(keepingCapacity: true)
+
+        guard isEnabled() else { return }
+        let thisGeneration = generation
+        // Capture the provider identity before a terminating process clears its per-launch
+        // caches. The file itself remains live for the delayed stability reads.
+        let transcript = transcriptURL()
+        // Codex's hook normally supplies the exact immutable rollout path. If hooks are absent,
+        // capture a value-only lookup now and perform its account-tree enumeration off-main.
+        let lookup = transcript == nil ? transcriptLookup() : nil
+
+        for delay in TranscriptAttachmentDefaults.stabilityDelays {
+            let work = DispatchWorkItem { [weak self] in
+                self?.scan(
+                    generation: thisGeneration,
+                    transcript: transcript,
+                    transcriptLookup: lookup,
+                    lastAssistantMessage: lastAssistantMessage
+                )
+            }
+            pendingScans.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func scan(
+        generation expectedGeneration: Int,
+        transcript: URL?,
+        transcriptLookup: TranscriptURLLookup?,
+        lastAssistantMessage: String?
+    ) {
+        guard generation == expectedGeneration,
+              isEnabled(),
+              let root = projectRoot() else { return }
+
+        let current = currentDirectory()
+        let kind = kind
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let resolvedTranscript = transcript ?? transcriptLookup?()
+            var texts = resolvedTranscript.map {
+                TranscriptReplay.latestAssistantTexts(
+                    at: $0,
+                    kind: kind,
+                    scanLimit: TranscriptAttachmentDefaults.transcriptScanBytes
+                )
+            } ?? []
+            if let lastAssistantMessage, !lastAssistantMessage.isEmpty {
+                texts.append(lastAssistantMessage)
+            }
+            guard !texts.isEmpty else { return }
+
+            let resolution = AttachmentReferenceDetector.resolve(
+                text: texts.joined(separator: "\n"),
+                projectRoot: root,
+                currentDirectory: current
+            )
+            guard !resolution.isEmpty else { return }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.generation == expectedGeneration,
+                      self.isEnabled() else { return }
+
+                let fresh = AttachmentReferenceDetector.Resolution(
+                    insideProject: resolution.insideProject.filter {
+                        self.pathsRecordedThisTurn.insert($0.path).inserted
+                    },
+                    outsideProject: resolution.outsideProject.filter {
+                        self.pathsRecordedThisTurn.insert($0.path).inserted
+                    }
+                )
+                guard !fresh.isEmpty else { return }
+                SessionAttachmentStore.shared.record(
+                    resolved: fresh,
+                    sessionID: self.sessionID,
+                    projectRoot: root
+                )
+            }
+        }
+    }
+}
+
 // MARK: - Defaults
 
 enum SessionAttachmentDefaults {
@@ -1278,4 +1434,11 @@ enum SessionAttachmentDefaults {
     /// couple of seconds during sustained output and nothing when the terminal is idle.
     static let terminalBusyScanInterval: TimeInterval = 2.0
     static let maximumTerminalScanBytes = 256 * 1024
+}
+
+enum TranscriptAttachmentDefaults {
+    /// A tail large enough for a tool-heavy final turn without walking a conversation-sized file.
+    static let transcriptScanBytes = 2 * 1024 * 1024
+    /// The first read is normally complete; the later reads close the hook-vs-writer flush race.
+    static let stabilityDelays: [TimeInterval] = [0, 0.5, 1.5]
 }

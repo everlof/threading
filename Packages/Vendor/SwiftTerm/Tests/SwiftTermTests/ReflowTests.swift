@@ -83,6 +83,73 @@ final class ReflowTests: XCTestCase {
             }
         )
     }
+
+    /// A consumer looking for paths or URLs needs the line the process wrote, not the physical
+    /// rows the current terminal width happened to lay it over.
+    func testRecentLogicalBufferTextJoinsAutomaticallyWrappedRows ()
+    {
+        let options = TerminalOptions(cols: 12, rows: 6, scrollback: 100)
+        let h = HeadlessTerminal(queue: SwiftTermTests.queue, options: options) { _ in }
+        let t = h.terminal!
+        let path = "/tmp/a-very-long-render-name.png"
+
+        t.feed(text: path)
+
+        let text = t.getRecentLogicalBufferText(maximumUTF8Bytes: 4_096)
+        XCTAssertTrue(text.contains(path))
+        XCTAssertFalse(text.contains("render-na\nme.png"))
+    }
+
+    /// A hard newline is semantic and must not be erased while automatic wraps are joined.
+    func testRecentLogicalBufferTextPreservesHardLineBreaks ()
+    {
+        let options = TerminalOptions(cols: 40, rows: 6, scrollback: 100)
+        let h = HeadlessTerminal(queue: SwiftTermTests.queue, options: options) { _ in }
+        let t = h.terminal!
+
+        t.feed(text: "first line\r\nsecond line")
+
+        XCTAssertTrue(
+            t.getRecentLogicalBufferText(maximumUTF8Bytes: 4_096)
+                .contains("first line\nsecond line")
+        )
+    }
+
+    /// Reflow changes physical rows and keeps the logical line. The extraction must follow the
+    /// reflow metadata rather than preserving the width at which output first arrived.
+    func testRecentLogicalBufferTextSurvivesResizeReflow ()
+    {
+        let options = TerminalOptions(cols: 80, rows: 8, scrollback: 100)
+        let h = HeadlessTerminal(queue: SwiftTermTests.queue, options: options) { _ in }
+        let t = h.terminal!
+        let path = "/tmp/a-render-that-will-wrap-after-the-terminal-is-narrowed.png"
+        // Finish the line before resizing. Reflow deliberately leaves the live cursor row to
+        // cursor-preservation logic; completed output is the scrollback contract exercised here.
+        t.feed(text: path + "\r\n")
+
+        t.resize(cols: 14, rows: 8)
+
+        XCTAssertTrue(
+            t.getRecentLogicalBufferText(maximumUTF8Bytes: 4_096).contains(path)
+        )
+    }
+
+    /// The scanner's budget is a construction bound, not a suffix applied after allocating the
+    /// complete scrollback. An oversized logical line is omitted whole so its tail cannot be
+    /// mistaken for an independently printed path.
+    func testRecentLogicalBufferTextIsBoundedAndReturnsNoPartialLogicalLine ()
+    {
+        let options = TerminalOptions(cols: 8, rows: 6, scrollback: 100)
+        let h = HeadlessTerminal(queue: SwiftTermTests.queue, options: options) { _ in }
+        let t = h.terminal!
+        t.feed(text: "/tmp/this-logical-line-is-larger-than-the-budget.png")
+
+        let text = t.getRecentLogicalBufferText(maximumUTF8Bytes: 16)
+
+        XCTAssertLessThanOrEqual(text.utf8.count, 16)
+        XCTAssertFalse(text.contains(".png"), "a truncated path escaped as complete text")
+        XCTAssertFalse(text.contains("budget"), "the oversized logical line was returned in part")
+    }
     
     static var allTests = [
           ("testDoesNotCrashWhenReflowingToTinyWidth", testDoesNotCrashWhenReflowingToTinyWidth),
@@ -93,6 +160,22 @@ final class ReflowTests: XCTestCase {
           (
               "testAlternateScreenDefersNormalScrollbackReflowUntilReturn",
               testAlternateScreenDefersNormalScrollbackReflowUntilReturn
+          ),
+          (
+              "testRecentLogicalBufferTextJoinsAutomaticallyWrappedRows",
+              testRecentLogicalBufferTextJoinsAutomaticallyWrappedRows
+          ),
+          (
+              "testRecentLogicalBufferTextPreservesHardLineBreaks",
+              testRecentLogicalBufferTextPreservesHardLineBreaks
+          ),
+          (
+              "testRecentLogicalBufferTextSurvivesResizeReflow",
+              testRecentLogicalBufferTextSurvivesResizeReflow
+          ),
+          (
+              "testRecentLogicalBufferTextIsBoundedAndReturnsNoPartialLogicalLine",
+              testRecentLogicalBufferTextIsBoundedAndReturnsNoPartialLogicalLine
           ),
     ]
 }

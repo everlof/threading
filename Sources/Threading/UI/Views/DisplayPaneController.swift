@@ -1709,6 +1709,7 @@ final class DisplayPaneController: NSViewController {
   /// has to kill the shell, or the process outlives every view that could reach it.
   private func teardownHosted(_ tab: DisplayTab) {
     tab.terminal?.terminate()
+    tab.attachments?.prepareForRemoval()
 
     guard let controller = tab.hostedController else { return }
     if installedController === controller { installHosted(nil) }

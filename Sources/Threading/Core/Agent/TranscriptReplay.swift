@@ -127,6 +127,45 @@ enum TranscriptReplay {
         return (events, dropped > 0)
     }
 
+    /// The assistant prose in the newest transcript turn, in conversational order.
+    ///
+    /// Terminal TUIs do not necessarily let the emulator perform wrapping. Codex, for example,
+    /// lays markdown out to the current width and paints each visual row with cursor movement, so
+    /// `BufferLine.isWrapped` cannot reconstruct the source sentence. The transcript is the one
+    /// place that still has it intact.
+    ///
+    /// Reads backwards under a byte budget and stops at the newest real user-message boundary.
+    /// Tool results, reasoning and duplicated response-item messages are excluded by the same
+    /// provider normalization replay uses, so attachment detection cannot turn incidental tool
+    /// output into something the assistant presented to the user.
+    static func latestAssistantTexts(
+        at url: URL,
+        kind: AgentKind,
+        scanLimit: Int
+    ) -> [String] {
+        guard scanLimit > 0 else { return [] }
+
+        var newestFirst: [String] = []
+        JSONLReader.forEachRecordFromEnd(at: url, limit: scanLimit) { record in
+            guard let event = event(from: record, kind: kind) else { return true }
+
+            switch event {
+            case .userMessage:
+                return false
+            case .assistantMessage(let blocks):
+                newestFirst += blocks.reversed().compactMap { block in
+                    guard case .text(let text) = block, !text.isEmpty else { return nil }
+                    return text
+                }
+            default:
+                break
+            }
+            return true
+        }
+
+        return newestFirst.reversed()
+    }
+
     /// The reasoning effort a turn actually ran at, where the record says.
     ///
     /// Read beside `contextReading` and for the same reason: the fact rides records the event

@@ -157,6 +157,7 @@ private struct RemoteAttachmentRow: View {
         case "html": "safari"
         case "archive": "archivebox"
         case "document": "doc.text"
+        case "diagram": "point.3.connected.trianglepath.dotted"
         default: "photo"
         }
     }
@@ -238,10 +239,11 @@ struct RemoteAttachmentPreview: View {
 
     var body: some View {
         Group {
-            // Decided before any bytes move: the phone has no renderer for an archive or an
-            // office document, and downloading one only to say "the image could not be decoded"
-            // spends the attachment byte cap on a file it was never going to show.
-            if attachment.kind == "archive" || attachment.kind == "document" {
+            // Decided before any bytes move: the phone has no renderer for an archive, an
+            // office document, or diagram source, and downloading one only to say "the image
+            // could not be decoded" spends the attachment byte cap on a file it was never
+            // going to show.
+            if Self.previewsOnMacOnly.contains(attachment.kind) {
                 unavailable("This file previews on your Mac.")
             } else if let data {
                 if attachment.kind == "pdf" {
@@ -300,12 +302,15 @@ struct RemoteAttachmentPreview: View {
         )
     }
 
+    private static let previewsOnMacOnly: Set<String> = ["archive", "document", "diagram"]
+
     private var unavailableIconName: String {
         switch attachment.kind {
         case "pdf": "doc.richtext"
         case "html": "safari"
         case "archive": "archivebox"
         case "document": "doc.text"
+        case "diagram": "point.3.connected.trianglepath.dotted"
         default: "photo"
         }
     }
@@ -313,7 +318,7 @@ struct RemoteAttachmentPreview: View {
     @MainActor
     private func load() async {
         // The body never renders these kinds, so their bytes are never asked for.
-        guard attachment.kind != "archive", attachment.kind != "document" else { return }
+        guard !Self.previewsOnMacOnly.contains(attachment.kind) else { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
