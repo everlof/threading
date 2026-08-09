@@ -18,10 +18,10 @@ import XCTest
 @MainActor
 final class SessionAttachmentsLayoutTests: XCTestCase {
 
-    /// Quick Look completes display-bundle activation asynchronously. The stress commands run
-    /// one workload per process, so retaining their offscreen window until process exit avoids
-    /// turning XCTest's immediate local teardown into a lifecycle the production pane never has.
-    private static var parkedStressWindows: [NSWindow] = []
+    /// Quick Look completes display-bundle activation asynchronously. Focused Quick Look fixtures
+    /// and the one-workload-per-process stress command retain their offscreen windows until exit,
+    /// avoiding an immediate XCTest teardown lifecycle the production pane never has.
+    private static var parkedQuickLookWindows: [NSWindow] = []
 
     private var root: URL!
     private var outside: URL?
@@ -554,6 +554,14 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let zip = root.appendingPathComponent("bundle.zip")
         try Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18)).write(to: zip)
         let pane = try laidOutPane(showing: zip, size: NSSize(width: 353, height: 700))
+        let quickLookWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 353, height: 700),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        quickLookWindow.contentViewController = pane
+        Self.parkedQuickLookWindows.append(quickLookWindow)
 
         let document = try XCTUnwrap(
             descendants(of: pane.view).compactMap { $0 as? MediaInspectorDocumentView }.first,
@@ -974,7 +982,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 + "descendants=\(descendants(of: pane.view).count) "
                 + "footprint_delta_mb=\(Self.megabytes(footprint))"
         )
-        Self.parkedStressWindows.append(window)
+        Self.parkedQuickLookWindows.append(window)
     }
 
     // MARK: - The Rows

@@ -172,9 +172,9 @@ the first repair, followed in the outstanding queue by the changed-files card an
 library; maximum-contract extension panels are measurable but smaller. Archived settings remains
 the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
 at both lazy boundaries: the pane installs one format surface, then the document surface installs
-PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement before a rewrite;
-their correctness/caching constraints make an unmeasured "optimization" more likely to move the
-cost or show stale data than remove it.
+PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement
+before a rewrite; their correctness/caching constraints make an unmeasured "optimization" more
+likely to move the cost or show stale data than remove it.
 
 ### Scaling-audit stress baselines
 
@@ -649,9 +649,28 @@ lazy merely because it is hidden.
 That finding is now repaired. The pane installs only the selected image, document, WebKit or
 TextKit surface and retains surfaces that have actually been used. The document surface applies
 the same boundary again, installing PDFKit for a PDF or Quick Look for other documents without
-constructing its unused sibling. Layout tests pin both halves of that contract. The table remains
-the pre-fix baseline that motivated the change; rerun `attachment-format-stress` before claiming a
-new cold-open budget.
+constructing its unused sibling. Layout tests pin both halves of that contract.
+
+The immediate post-fix fresh-process sweep measured:
+
+| Format | Cold pane, before → after | First all-row pass, before → after | Warm pass, before → after | Live descendants after |
+|---|---:|---:|---:|---:|
+| Image | 209.7 → 146.2 ms | 47.3 → 36.9 ms | 47.8 → 36.5 ms | 41 |
+| PDF | 219.1 → 154.7 ms | 250.9 → 79.1 ms | 126.1 → 65.9 ms | 48 |
+| HTML | 206.8 → 171.1 ms | 16.2 → 12.0 ms | 12.5 → 8.9 ms | 42 |
+| Archive | 207.3 → 83.6 ms | 19.0 → 15.5 ms | 15.1 → 10.6 ms | 43 |
+| Document | 200.8 → 90.1 ms | 19.5 → 14.3 ms | 14.8 → 12.0 ms | 43 |
+| Diagram | 230.8 → 165.0 ms | 90.1 → 95.3 ms | 101.3 → 85.3 ms | 45 |
+| Mixed | 188.0 → 75.9 ms | 82.3 → 124.8 ms | 49.7 → 57.0 ms | 56 |
+
+Single-file controls land in the same format-specific bands: 71–72 ms for Quick Look documents,
+143 ms for an image, 147 ms for a PDF, 157 ms for a maximum source preview, and 165 ms for HTML.
+The former universal 188–243 ms tax is gone; one selected handler now owns cold time. The mixed
+first pass intentionally rises because it is the one workload that visits every family and now
+pays each one-time installation at first use instead of charging all six to pane open. Once every
+family has been touched, its 56 descendants match the old eager pane; single-family panes retain
+only 41–48. Further cold work must target the selected format itself — image/PDF decode, WebKit
+startup, or TextKit insertion — rather than prewarming renderers the reader may never use.
 
 ## Whole-window resize stress target
 
