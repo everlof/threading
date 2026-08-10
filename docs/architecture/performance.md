@@ -151,11 +151,11 @@ external data reaches eager AppKit work.
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
 | Resolved | Browser baseline library | The 200-record value model is presented by reusable table rows. Only a viewport of cards exists; screenshot reads, SHA-256 and source inspection run off-main with reuse cancellation, while the main actor performs only a row-sized decode and assignment. The before/after measurements are below. |
 | Resolved | File pane refresh | Directory enumeration, resource-value reads, natural sorting and snapshot signatures now run off-main for initial load, hot refresh and disclosure. Main-actor reconciliation preserves node identity with a sorted merge; equal signatures skip both reconciliation and AppKit reload. The before/after measurements are below. |
-| Medium | Archived settings | `reload()` maps every archived session to an AppKit row and only then takes the recent prefix. The "Older" fold currently reduces visible rows but not cold construction. |
-| Medium | Tools dynamic sections | Tool rows and extension-contributed settings are virtualized at their repeating unit. Browser Sign-In and Website Access remain one coarse table row each, so a large credential or origin inventory can still defeat the outer table's bound. |
+| Resolved | Archived settings | The archive is a cheap value-row model in one grouped table. The recent fold owns ten session identities; expansion inserts the older identities, and project events recycle only the viewport while preserving the clip origin. The before/after measurements are below. |
+| Medium | Tools dynamic sections | Tool rows, extension-contributed settings and persistent website origins are virtualized at their repeating unit. Browser Sign-In remains one coarse row, so a large credential inventory can still defeat the outer table's bound. |
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
-| Medium | Git Review during live resize | Each meaningful width change calls `noteHeightOfRows` for the complete file table so offscreen wrapping estimates and scrollbar extent stay correct. That is correctness-preserving but total-row work at resize frequency; add a large-index live-resize phase before changing it. |
-| Medium | Account settings cold discovery | `AgentAccountDiscovery` is `@MainActor`; an expired cache reads the home directory, login markers and shell aliases synchronously, then Accounts constructs every row. Account counts are normally small, but cold filesystem latency is externally controlled. |
+| Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
+| Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
@@ -173,13 +173,13 @@ File and project trees use virtual outline cells; conversation Markdown uses vir
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 
 The stress sweep below replaced that risk-only ordering with measurements. Extensions preferences,
-extension settings, the changed-files card, browser baseline library and maximum-contract extension
-panels are repaired. Archived settings remains
-the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
+extension settings, the changed-files card, browser baseline library, Archived settings and
+maximum-contract extension panels are repaired. Archived settings became the smallest proof case
+for the cosmetic-laziness rule. Attachment preview cold open was repaired
 at both lazy boundaries: the pane installs one format surface, then the document surface installs
-PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement
-before a rewrite; their correctness/caching constraints make an unmeasured "optimization" more
-likely to move the cost or show stale data than remove it.
+PDFKit or Quick Look. Account discovery's fresh-process measurement stays below one 60 Hz frame
+for the filesystem phase; its caching and presentation split should remain until a controlled
+fixture proves a real slow-filesystem case rather than adding placeholder state speculatively.
 
 ### Scaling-audit stress baselines
 
@@ -194,6 +194,7 @@ the UI times. The 2026-08-08 Debug sweep used the local Apple-silicon Mac:
 | Changed-files previews, 174 files × 400 retained lines | 42–46 ms construction + 103–107 ms layout | Preview derivation: 0.9 ms | 13.6–13.7 MB model + 20.8 MB views |
 | Extension panel, 500 semantic nodes | 29 ms render + 232–245 ms layout | Generation replacement: 261–275 ms; draw: 55–58 ms/frame | 707 descendants; 51–67 MB |
 | Extensions preferences, 256 installed packages | 457–509 ms construction + **5,317–5,478 ms layout** | One disclosure: **6,017–6,282 ms** | 3,601 descendants; 197–198 MB |
+| Archived settings, 250 conversations | 74.0 ms construction + 31.7 ms layout | Expand: 146.4 ms mutation + **1,912.8 ms layout**; unchanged event: 303.0 ms + 1,897.1 ms | 2,776 expanded descendants; 96.6 MB |
 | Extension settings, one 128-field extension | 63–77 ms render + 941–945 ms layout | Draw: 30–35 ms/frame | 1,169 descendants; 54–61 MB |
 | Extension settings, four 128-field extensions | 211–215 ms render + **56,841–61,485 ms layout** | Draw: 47 ms System / 121 ms Neo Brutalism | 4,640 descendants; 292–307 MB |
 | Browser baseline library, 200 records | 170–178 ms render + 507–559 ms layout | One permission toggle: 679–742 ms; draw: 24 ms System / **544 ms Neo Brutalism** | 2,411 descendants; 119 MB System / 217 MB Neo Brutalism |
@@ -267,6 +268,40 @@ bounded viewport-mount cost when new content becomes visible. The invariant is t
 longer owns construction, layout or memory. Do not put package detail views back in
 `makePresentationRows()`, call `render()` from disclosure, wrap this table in `SettingsUI.page(_:)`,
 or turn contributed settings into one opaque section row.
+
+#### Archived-settings repair
+
+`ArchivedPreferencesViewController` now keeps the complete archive as value tuples and presents
+one `PresentationRow` per visible identity through `ThemedGroupedTableView`. Collapsed mode owns the
+explanation, ten recent session identities and one disclosure identity. Expanding inserts the
+older identities without replacing the fixed header, scroll view or existing cells; only rows that
+intersect the viewport construct labels, relative-date formatting, Restore/Delete controls and
+constraints. Project and extension-settings events refresh the value model and recycle the
+viewport. Extension-contributed fields targeting Archived remain individual rows in the same
+scroll owner rather than becoming a nested page.
+
+`SettingsDisclosureRenderTests.testStressArchivedPreferencesWhenEnabled` manufactures its archive
+before the clock starts, then reports controller/view load, model render, first layout, disclosure,
+jump to the end, an unchanged project event at that end, hierarchy size and footprint. It also
+asserts the clip origin is unchanged. Run both themes with
+`scripts/profile_threading.sh archived-settings-stress`; the workload is part of `full`.
+
+Fresh Debug processes measured:
+
+| Archived workload | Before | After |
+|---|---:|---:|
+| Cold collapsed page | 250 rows: 74.0 ms render + 31.7 ms layout | 1,000 rows: **10.0–10.1 ms view load + 0.24 ms model render + 42.7–45.7 ms layout** |
+| Expand older conversations | 250 rows: 146.4 ms mutation + **1,912.8 ms layout** | 1,000 rows: **3.6–3.9 ms mutation + 0.22–0.23 ms layout** |
+| Jump to final conversation | 0.25 ms after retaining all 250 views | **15.9–18.1 ms**, including mounting the final viewport |
+| Unchanged project event at end | 250 rows: 303.0 ms render + **1,897.1 ms layout** | **2.3–2.6 ms reload + 19.0–19.6 ms viewport layout**; clip origin unchanged |
+| Retained UI | 250 rows: 2,776 descendants; 96.6 MB | 1,000 rows: **158 descendants, 13 of 1,002 rows; 8.7–8.8 MB** |
+
+The old 1,000-row expansion was terminated after more than two minutes without completing, so the
+before table deliberately reports the smaller completed 250-row point rather than inventing a
+number. The repaired run uses four times the archive. As with the other virtual repairs, the old
+jump itself was cheap only because all row construction and layout had already happened. Do not
+put `makeRow` back in the presentation-model pass, rebuild the page from disclosure or project
+events, wrap this table in `SettingsUI.page(_:)`, or aggregate contributed settings into one row.
 
 #### Changed-files-card repair
 
@@ -409,7 +444,7 @@ scripts/profile_threading.sh git-stress
 # Maximum-contract agent charts: decode/model, cold pane, updates, and rendered frames.
 scripts/profile_threading.sh chart-stress
 
-# Deterministic Tools settings cold open, disclosure, full expansion, and rendered scroll.
+# Deterministic Tools settings cold open, disclosure, full expansion, website origins, and scroll.
 scripts/profile_threading.sh tools-settings-stress
 
 # Changed-files card at 10–1,000 files, with collapsed trees and aggregate capped previews.
@@ -945,6 +980,7 @@ Debug run at 620×760 measured:
 |---|---:|
 | Cold model-to-table render | 17.1 ms |
 | Initial layout | 30.2 ms |
+| 48-width live-resize layout, average / p95 / max | 6.08 / 6.66 / 10.49 ms |
 | Height-discovery document drift | 0 pt |
 | Continuous 24-viewport sweep, forced bitmap p95 | 14.7 ms/frame |
 | Full-index 120-step sweep, forced bitmap p95 | 33.4 ms/frame |
@@ -953,6 +989,11 @@ Debug run at 620×760 measured:
 
 The full-index sweep deliberately jumps about 75 expanded files per frame and is closer to dragging
 the scroller thumb through the whole document than trackpad reading; it remains a useful red limit.
+The resize phase drives a 420–820-point triangle wave through `viewDidLayout`, so every frame takes
+the width-change branch and invalidates all 8,985 cheap height estimates. Its measured maximum is
+still below one 60 Hz frame. Keep the complete invalidation unless a future fixture crosses that
+budget: invalidating only visible rows leaves the scrollbar extent and offscreen wrap estimates at
+the old width, producing a jump later rather than removing work.
 The continuous workload stays inside a 60 Hz frame while also forcing software bitmap capture.
 More importantly, neither a watcher refresh nor exact-height discovery is allowed to land during
 live momentum: both coalesce until `didEndLiveScroll`, which protects velocity independently of
@@ -1469,8 +1510,9 @@ Tools settings page without opening the app or Instruments: cold construction an
 and collapse of the largest tool group, all-group expansion, and 48 rendered scroll positions.
 `scripts/profile_threading.sh tools-settings-stress` builds an isolated test product and runs the
 fixture under System and Neo Brutalism. Set `THREADING_TOOLS_SETTINGS_STRESS_THEME` to one theme ID
-for a focused run. The baseline catalog had 12 groups and 66 tools; the post-change tree has 67.
-Browser is the largest group in both at 34 tools.
+for a focused run. It then runs the theme-independent 1,000-origin Website Access fixture; override
+that count with `THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS`. The baseline catalog had 12 groups
+and 66 tools; the post-change tree has 67. Browser is the largest group in both at 34 tools.
 
 Two fresh-process Debug runs per theme, with `NSApplication` initialized as it is before an in-app
 settings navigation and the page attached to an offscreen `NSWindow`, measured:
@@ -1536,3 +1578,16 @@ These boundaries are load-bearing: do not replace the table with a stack, wrap i
 `SettingsUI.page(_:)`, or turn disclosure back into `render()`. Extension-contributed Tools fields
 must remain individual rows in that same table; do not regress them to opaque section rows, nest a
 second table/scroll view, or hide a total-content rebuild behind a debounce.
+
+The same boundary applies inside dynamic sections. Website Access originally occupied one outer
+table cell containing a nested `SettingsCard` with every persistent origin. At only 250 origins,
+that cosmetic row took **53.4 ms to construct + 2,076.9 ms to lay out**, retained 2,313 descendants
+and added 117.3 MB to the fresh test process. `PresentationRow.websiteAccessOrigin` now gives every
+origin its own stable table identity; the caption, empty state and Revoke All action are separate
+rows, while a single table-card decoration preserves the visual section.
+
+At 1,000 origins, the repaired fresh process measured **63.9 ms load + 43.6 ms first layout**, with
+10 of 1,005 rows materialized, 112 descendants and 7.7 MB added. Revoke tags index the same sorted
+origin snapshot used to build the row identities, and every mutation refreshes that snapshot before
+recycling the viewport. Do not put the origins back inside one section view. Browser Sign-In still
+has the same coarse-row risk for credentials and remains the next bounded Tools audit target.

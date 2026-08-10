@@ -6,15 +6,29 @@ import AppKit
 /// archived ones live — to be restored to the sidebar or deleted for good. Nothing is created
 /// here; the list only reflects what has been archived.
 ///
-/// Built from the settings kit (`SettingsUI`, `SettingsCard`, `ThemedButton`) rather than an
-/// `NSTableView`: each archived conversation is a flat card row carrying its own Restore and
-/// Delete actions, so there is no selection state and no footer button bar.
+/// Each archived conversation is a flat card row carrying its own Restore and Delete actions,
+/// so there is no selection state and no footer button bar. The complete archive is a value-row
+/// model; AppKit constructs only the rows intersecting the viewport.
 final class ArchivedPreferencesViewController: NSViewController {
+    typealias Entry = (project: Project, session: AgentSession)
+
+    private enum PresentationRow {
+        case note
+        case empty
+        case session(Int)
+        case olderDisclosure(Int)
+        case extensionCaption(Int)
+        case extensionField(section: Int, field: Int)
+    }
 
     // MARK: - Properties
 
-    private var rows: [(project: Project, session: AgentSession)] = []
+    private let rowsProvider: @MainActor () -> [Entry]
+    private var rows: [Entry] = []
     private let appEvents = AppEventObservations()
+    private var extensionSections: [ExtensionSettingsSectionModel] = []
+    private var presentationRows: [PresentationRow] = []
+    private var pageView: SettingsPageView?
 
     /// Whether the fold past the recent slice is open. A view state, kept for the session.
     private var showsOlder = false
@@ -25,10 +39,63 @@ final class ArchivedPreferencesViewController: NSViewController {
         return formatter
     }()
 
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("ArchivedSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = ArchivedDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
+
+    init(rowsProvider: (@MainActor () -> [Entry])? = nil) {
+        self.rowsProvider = rowsProvider ?? { ProjectStore.shared.archivedSessions() }
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
+        let page = SettingsUI.listPage(
+            title: "Archived",
+            summary: ArchivedPreferencesStrings.count(0),
+            body: scrollView
+        )
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        pageView = page
     }
 
     override func viewWillAppear() {
@@ -41,63 +108,55 @@ final class ArchivedPreferencesViewController: NSViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.reload()
         }
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
     }
 
     // MARK: - Build
 
-    /// Rebuilds the whole page from the current archived list. Cheap enough to do wholesale:
-    /// the list is short, and a fresh build keeps each row's button tags in step with `rows`.
+    /// Refreshes the cheap value model. An unchanged event recycles only the viewport and keeps
+    /// its scroll position; no project notification rebuilds the page header or the full archive.
     private func reload() {
-        rows = ProjectStore.shared.archivedSessions()
+        rows = rowsProvider()
+        extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .archived)
+        presentationRows = makePresentationRows()
+        pageView?.updateSummary(ArchivedPreferencesStrings.count(rows.count))
+        updateCardDecorations()
+        tableView.reloadData()
+    }
 
-        view.subviews.forEach { $0.removeFromSuperview() }
-
-        var sections: [NSView] = [
-            SettingsUI.note(ArchivedPreferencesStrings.explanation)
-        ]
-
+    private func makePresentationRows() -> [PresentationRow] {
+        var result: [PresentationRow] = [.note]
         if rows.isEmpty {
-            sections.append(SettingsUI.note(ArchivedPreferencesStrings.empty))
+            result.append(.empty)
         } else {
-            // The list arrives most-recent-first, and the recent slice is what restoring is
-            // for; an archive that has grown for months folds behind one row instead of
-            // stretching the page by its whole history.
-            let all = rows.enumerated().map { index, entry in
-                makeRow(entry: entry, index: index)
-            }
-            var rowViews = Array(all.prefix(ArchivedDefaults.recentLimit))
-            let older = all.count - rowViews.count
-            if older > 0 {
-                if showsOlder {
-                    rowViews += all.suffix(older)
-                }
-                rowViews.append(SettingsUI.disclosureRow(
-                    title: ArchivedPreferencesStrings.older(older),
-                    isExpanded: showsOlder,
-                    localizes: false,
-                    onToggle: { [weak self] nowOpen in
-                        self?.showsOlder = nowOpen
-                        self?.reload()
-                    }
-                ))
-            }
-            sections.append(SettingsUI.section(nil, SettingsCard(rows: rowViews)))
+            let visibleCount = showsOlder
+                ? rows.count
+                : min(rows.count, ArchivedDefaults.recentLimit)
+            result.append(contentsOf: (0 ..< visibleCount).map(PresentationRow.session))
+            let older = max(rows.count - ArchivedDefaults.recentLimit, 0)
+            if older > 0 { result.append(.olderDisclosure(older)) }
         }
-
-        let page = SettingsUI.page(
-            title: "Archived",
-            summary: ArchivedPreferencesStrings.count(rows.count),
-            sections: sections,
-            hostPage: .archived
-        )
-        page.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(page)
-        NSLayoutConstraint.activate([
-            page.topAnchor.constraint(equalTo: view.topAnchor),
-            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
+        for (sectionIndex, section) in extensionSections.enumerated() {
+            if section.visibleTitle != nil {
+                result.append(.extensionCaption(sectionIndex))
+            }
+            result.append(contentsOf: section.fields.indices.map {
+                .extensionField(section: sectionIndex, field: $0)
+            })
+        }
+        return result
     }
 
     /// One archived conversation: a title over a "<project> · <archived when>" caption, with
@@ -153,7 +212,7 @@ final class ArchivedPreferencesViewController: NSViewController {
             content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Design.Spacing.medium),
             content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Design.Spacing.inset),
             content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Design.Spacing.inset),
-            container.heightAnchor.constraint(greaterThanOrEqualToConstant: SettingsUIDefaults.rowHeight)
+            container.heightAnchor.constraint(greaterThanOrEqualToConstant: SettingsUIDefaults.rowHeight),
         ])
 
         return container
@@ -174,7 +233,7 @@ final class ArchivedPreferencesViewController: NSViewController {
             switch result {
             case .success:
                 self?.reload()
-            case .failure(let failure):
+            case let .failure(failure):
                 sender?.isEnabled = true
                 NoticeAlert.show(NoticeRequest(
                     title: L10n.format("Couldn’t restore “%@”", entry.session.displayTitle),
@@ -213,6 +272,193 @@ final class ArchivedPreferencesViewController: NSViewController {
         AgentRuntime.shared.discard(sessionID: entry.session.id)
         reload()
     }
+
+    /// Stress-fixture observability: the complete cheap model versus the live AppKit viewport.
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+}
+
+// MARK: - Virtualized Page
+
+extension ArchivedPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in _: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("ArchivedSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(forRowAt: tableRow),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .note:
+            return SettingsUI.note(ArchivedPreferencesStrings.explanation)
+        case .empty:
+            return SettingsUI.note(ArchivedPreferencesStrings.empty)
+        case let .session(index):
+            guard rows.indices.contains(index) else { return NSView() }
+            return makeRow(entry: rows[index], index: index)
+        case let .olderDisclosure(older):
+            return SettingsUI.disclosureRow(
+                title: ArchivedPreferencesStrings.older(older),
+                isExpanded: showsOlder,
+                localizes: false,
+                accessibilityIdentifier: "settings.archived.older",
+                onToggle: { [weak self] nowOpen in
+                    self?.setShowsOlder(nowOpen)
+                }
+            )
+        case let .extensionCaption(sectionIndex):
+            guard extensionSections.indices.contains(sectionIndex),
+                  let title = extensionSections[sectionIndex].visibleTitle else { return NSView() }
+            let caption = SettingsUI.caption(title, localizes: false)
+            caption.setAccessibilityIdentifier(
+                extensionSections[sectionIndex].accessibilityIdentifier
+            )
+            return caption
+        case let .extensionField(sectionIndex, fieldIndex):
+            guard extensionSections.indices.contains(sectionIndex) else { return NSView() }
+            return ExtensionSettingsRenderer.fieldRow(
+                in: extensionSections[sectionIndex],
+                fieldIndex: fieldIndex
+            )
+        }
+    }
+
+    /// The fold changes only cheap row identities. Existing page/header/scroll owners survive,
+    /// and AppKit constructs the newly intersecting archive cells on demand.
+    private func setShowsOlder(_ expanded: Bool) {
+        guard showsOlder != expanded,
+              rows.count > ArchivedDefaults.recentLimit else { return }
+        let firstOlder = 1 + ArchivedDefaults.recentLimit
+        let olderCount = rows.count - ArchivedDefaults.recentLimit
+        showsOlder = expanded
+
+        if expanded {
+            presentationRows.insert(
+                contentsOf: (ArchivedDefaults.recentLimit ..< rows.count).map(
+                    PresentationRow.session
+                ),
+                at: firstOlder
+            )
+            tableView.insertRows(
+                at: IndexSet(integersIn: firstOlder ..< (firstOlder + olderCount)),
+                withAnimation: []
+            )
+        } else {
+            let range = firstOlder ..< (firstOlder + olderCount)
+            presentationRows.removeSubrange(range)
+            tableView.removeRows(at: IndexSet(integersIn: range), withAnimation: [])
+        }
+
+        updateCardDecorations()
+        let disclosureRow = firstOlder + (expanded ? olderCount : 0)
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integer: disclosureRow),
+            columnIndexes: IndexSet(integer: 0)
+        )
+    }
+
+    private func updateCardDecorations() {
+        var archiveBounds: (first: Int, last: Int)?
+        var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        for (index, row) in presentationRows.enumerated() {
+            switch row {
+            case .session, .olderDisclosure:
+                if var bounds = archiveBounds {
+                    bounds.last = index
+                    archiveBounds = bounds
+                } else {
+                    archiveBounds = (index, index)
+                }
+            case let .extensionField(sectionIndex, _):
+                if var bounds = extensionBounds[sectionIndex] {
+                    bounds.last = index
+                    extensionBounds[sectionIndex] = bounds
+                } else {
+                    extensionBounds[sectionIndex] = (index, index)
+                }
+            case .note, .empty, .extensionCaption:
+                break
+            }
+        }
+
+        var decorations: [ThemedTableCardDecoration] = []
+        if let archiveBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: archiveBounds.first ... archiveBounds.last,
+                topInset: Design.Spacing.large,
+                bottomInset: archiveBounds.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            ))
+        }
+        decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
+            let section = extensionSections[$0.key]
+            return ThemedTableCardDecoration(
+                rows: $0.value.first ... $0.value.last,
+                topInset: section.visibleTitle == nil ? Design.Spacing.large : 0,
+                bottomInset: $0.value.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            )
+        })
+        tableView.cardDecorations = decorations
+    }
+
+    private func topInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case let .session(sourceIndex):
+            return sourceIndex == 0 ? Design.Spacing.large : 0
+        case .olderDisclosure:
+            return rows.isEmpty ? Design.Spacing.large : 0
+        case let .extensionField(sectionIndex, fieldIndex):
+            guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
+                return 0
+            }
+            return extensionSections[sectionIndex].visibleTitle == nil
+                ? Design.Spacing.large
+                : 0
+        case .note, .empty, .extensionCaption:
+            return Design.Spacing.large
+        }
+    }
+
+    private func bottomInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        if case .extensionCaption = presentationRows[index] {
+            return Design.Spacing.small
+        }
+        return index == presentationRows.count - 1 ? Design.Spacing.large : 0
+    }
 }
 
 // MARK: - Archived Preferences Strings
@@ -249,4 +495,5 @@ private enum ArchivedDefaults {
     /// How many conversations show before the rest fold — restoring reaches for something
     /// recent, and a long archive should cost one row, not the page's whole height.
     static let recentLimit = 10
+    static let estimatedRowHeight: CGFloat = 64
 }

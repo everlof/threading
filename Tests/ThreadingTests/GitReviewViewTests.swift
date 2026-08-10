@@ -1211,6 +1211,36 @@ final class GitReviewViewTests: XCTestCase {
         let bitmap = try XCTUnwrap(scroll.bitmapImageRepForCachingDisplay(in: viewport))
         let initialDocumentHeight = table.frame.height
         let frames = 120
+
+        // Width changes run through the controller's real `viewDidLayout`, including the
+        // complete-index height invalidation used to keep the scrollbar extent honest. A
+        // triangle wave avoids measuring the no-op guard at a repeated width.
+        let resizeFrames = 48
+        var resizeMutationNanoseconds: UInt64 = 0
+        var resizeLayoutNanoseconds: UInt64 = 0
+        var resizeFrameNanoseconds: [UInt64] = []
+        for frame in 0..<resizeFrames {
+            let phase = CGFloat(frame) / CGFloat(max(resizeFrames - 1, 1))
+            let fraction = phase <= 0.5 ? phase * 2 : (1 - phase) * 2
+            let width = 420 + 400 * fraction
+            let started = DispatchTime.now().uptimeNanoseconds
+            controller.view.setFrameSize(NSSize(width: width, height: 760))
+            let mutated = DispatchTime.now().uptimeNanoseconds
+            controller.view.layoutSubtreeIfNeeded()
+            let laidOut = DispatchTime.now().uptimeNanoseconds
+            resizeMutationNanoseconds += mutated - started
+            resizeLayoutNanoseconds += laidOut - mutated
+            resizeFrameNanoseconds.append(laidOut - started)
+        }
+        controller.view.setFrameSize(NSSize(width: 620, height: 760))
+        controller.view.layoutSubtreeIfNeeded()
+        let sortedResizeFrames = resizeFrameNanoseconds.sorted()
+        let resizeP95 = sortedResizeFrames[
+            min(
+                Int(Double(sortedResizeFrames.count - 1) * 0.95),
+                sortedResizeFrames.count - 1
+            )
+        ]
         func measureSweep(distance: CGFloat) -> (
             scroll: UInt64,
             layout: UInt64,
@@ -1290,6 +1320,16 @@ final class GitReviewViewTests: XCTestCase {
                 + "render_ms=\(Self.milliseconds(renderEnded - renderStarted)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
                 + "document_delta=\(Int(finalDocumentHeight - initialDocumentHeight))"
+        )
+        print(
+            "THREADING_PERF git-review-massive-resize "
+                + "files=\(fileCount) frames=\(resizeFrames) "
+                + "mutation_ms="
+                + "\(Self.milliseconds(resizeMutationNanoseconds / UInt64(resizeFrames))) "
+                + "layout_ms="
+                + "\(Self.milliseconds(resizeLayoutNanoseconds / UInt64(resizeFrames))) "
+                + "p95_frame_ms=\(Self.milliseconds(resizeP95)) "
+                + "max_frame_ms=\(Self.milliseconds(sortedResizeFrames.last ?? 0))"
         )
         for (kind, measurement) in [("continuous", continuous), ("full-index", fullIndex)] {
             print(

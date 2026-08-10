@@ -7,6 +7,7 @@
 #   scripts/profile_threading.sh chart-stress
 #   scripts/profile_threading.sh tools-settings-stress
 #   scripts/profile_threading.sh extensions-preferences-stress
+#   scripts/profile_threading.sh archived-settings-stress
 #   scripts/profile_threading.sh component-gallery-stress
 #   scripts/profile_threading.sh changed-files-stress
 #   scripts/profile_threading.sh extension-ui-stress
@@ -45,7 +46,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,33p' "$0"
+  sed -n '3,36p' "$0"
 }
 
 resolve_pid() {
@@ -498,6 +499,14 @@ run_tools_settings_stress() {
           -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsPreferencesWhenEnabled \
           "${test_bundle}"
     done
+
+    THREADING_TOOLS_WEBSITE_ACCESS_STRESS=1 \
+    THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS="${THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS:-1000}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsWebsiteAccessWhenEnabled \
+        "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/tools-settings-stress.log"
 }
 
@@ -555,6 +564,32 @@ run_extensions_preferences_stress() {
           "${test_bundle}"
     done
   ) 2>&1 | tee "${output_directory}/extensions-preferences-stress.log"
+}
+
+run_archived_settings_stress() {
+  local output_directory="$1"
+  echo "Running deterministic Archived settings cold, disclosure and scroll sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_ARCHIVED_SETTINGS_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_ARCHIVED_SETTINGS_STRESS_THEME}")
+    fi
+    local theme
+    for theme in "${themes[@]}"; do
+      THREADING_ARCHIVED_SETTINGS_STRESS=1 \
+      THREADING_ARCHIVED_SETTINGS_STRESS_ROWS="${THREADING_ARCHIVED_SETTINGS_STRESS_ROWS:-1000}" \
+      THREADING_ARCHIVED_SETTINGS_STRESS_THEME="${theme}" \
+      DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressArchivedPreferencesWhenEnabled \
+          "${THREADING_STRESS_TEST_BUNDLE}"
+    done
+  ) 2>&1 | tee "${output_directory}/archived-settings-stress.log"
 }
 
 build_macos_stress_test_bundle() {
@@ -1455,6 +1490,11 @@ case "${command}" in
     run_extensions_preferences_stress "${output_directory}"
     ;;
 
+  archived-settings-stress)
+    output_directory="$(new_run_directory archived-settings-stress)"
+    run_archived_settings_stress "${output_directory}"
+    ;;
+
   component-gallery-stress)
     output_directory="$(new_run_directory component-gallery-stress)"
     run_component_gallery_stress "${output_directory}"
@@ -1624,6 +1664,7 @@ case "${command}" in
     run_chart_stress "${output_directory}"
     run_tools_settings_stress "${output_directory}"
     run_extensions_preferences_stress "${output_directory}"
+    run_archived_settings_stress "${output_directory}"
     run_conversation_stress "${output_directory}"
     run_subagent_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"

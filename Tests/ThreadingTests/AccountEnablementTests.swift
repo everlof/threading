@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Threading
 
@@ -130,6 +131,48 @@ final class AccountEnablementTests: XCTestCase {
         XCTAssertNil(AgentAccountDiscovery.preferred(among: discovered))
     }
 
+    /// Fresh-process measurement of the real home-directory and shell-alias path. Discovery is
+    /// separated from page construction so a slow filesystem cannot hide behind AppKit work.
+    func testStressColdAccountDiscoveryWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_ACCOUNT_DISCOVERY_STRESS"] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_ACCOUNT_DISCOVERY_STRESS=1 to run cold account discovery."
+            )
+        }
+        _ = NSApplication.shared
+
+        let discoveryStarted = DispatchTime.now().uptimeNanoseconds
+        let accounts = AgentKind.allCases
+            .filter(\.supportsAccounts)
+            .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
+        let discoveryEnded = DispatchTime.now().uptimeNanoseconds
+
+        let controller = AccountsPreferencesViewController()
+        let page = controller.view
+        let viewLoaded = DispatchTime.now().uptimeNanoseconds
+        controller.viewWillAppear()
+        let rendered = DispatchTime.now().uptimeNanoseconds
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 720, height: 700))
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+        let laidOut = DispatchTime.now().uptimeNanoseconds
+
+        print(
+            "THREADING_PERF account-discovery-cold accounts=\(accounts.count) "
+                + "discovery_ms=\(Self.milliseconds(discoveryEnded - discoveryStarted)) "
+                + "view_load_ms=\(Self.milliseconds(viewLoaded - discoveryEnded)) "
+                + "render_ms=\(Self.milliseconds(rendered - viewLoaded)) "
+                + "layout_ms=\(Self.milliseconds(laidOut - rendered))"
+        )
+    }
+
     // MARK: - Helpers
 
     private func account(
@@ -142,5 +185,9 @@ final class AccountEnablementTests: XCTestCase {
             configPath: "/tmp/\(handle.name)",
             isEnabled: isEnabled
         )
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
     }
 }

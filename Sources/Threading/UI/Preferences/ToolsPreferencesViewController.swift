@@ -40,7 +40,10 @@ final class ToolsPreferencesViewController: NSViewController {
         case tool(group: Int, tool: Int)
         case browserSignIn
         case chromeAutomation
-        case websiteAccess
+        case websiteAccessCaption
+        case websiteAccessEmpty
+        case websiteAccessOrigin(Int)
+        case websiteAccessRevokeAll
         case extensionCaption(Int)
         case extensionField(section: Int, field: Int)
     }
@@ -136,6 +139,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private func render() {
         guard isViewLoaded else { return }
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .tools)
+        persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
         presentationRows = makePresentationRows()
         updateCardDecorations()
 
@@ -180,7 +184,15 @@ final class ToolsPreferencesViewController: NSViewController {
                 })
             }
         }
-        rows.append(contentsOf: [.browserSignIn, .chromeAutomation, .websiteAccess])
+        rows.append(contentsOf: [.browserSignIn, .chromeAutomation, .websiteAccessCaption])
+        if persistentOriginKeys.isEmpty {
+            rows.append(.websiteAccessEmpty)
+        } else {
+            rows.append(contentsOf: persistentOriginKeys.indices.map(
+                PresentationRow.websiteAccessOrigin
+            ))
+            rows.append(.websiteAccessRevokeAll)
+        }
         for (sectionIndex, section) in extensionSections.enumerated() {
             if section.visibleTitle != nil {
                 rows.append(.extensionCaption(sectionIndex))
@@ -205,14 +217,32 @@ final class ToolsPreferencesViewController: NSViewController {
             )
         }
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        var websiteBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
-            guard case .extensionField(let sectionIndex, _) = row else { continue }
-            if var bounds = extensionBounds[sectionIndex] {
-                bounds.last = rowIndex
-                extensionBounds[sectionIndex] = bounds
-            } else {
-                extensionBounds[sectionIndex] = (rowIndex, rowIndex)
+            switch row {
+            case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
+                if var bounds = websiteBounds {
+                    bounds.last = rowIndex
+                    websiteBounds = bounds
+                } else {
+                    websiteBounds = (rowIndex, rowIndex)
+                }
+            case .extensionField(let sectionIndex, _):
+                if var bounds = extensionBounds[sectionIndex] {
+                    bounds.last = rowIndex
+                    extensionBounds[sectionIndex] = bounds
+                } else {
+                    extensionBounds[sectionIndex] = (rowIndex, rowIndex)
+                }
+            case .note, .group, .tool, .browserSignIn, .chromeAutomation,
+                 .websiteAccessCaption, .extensionCaption:
+                break
             }
+        }
+        if let websiteBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: websiteBounds.first...websiteBounds.last
+            ))
         }
         decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
             let section = extensionSections[$0.key]
@@ -566,37 +596,33 @@ final class ToolsPreferencesViewController: NSViewController {
         }
     }
 
-    private func websiteAccessSection() -> NSView {
-        persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
-        guard !persistentOriginKeys.isEmpty else {
-            return SettingsUI.section(
-                "Website Access",
-                SettingsCard(rows: [
-                    SettingsUI.row(
-                        title: "No websites always allowed",
-                        subtitle: """
-                            Agents can still ask for one-time access. Persistent website grants \
-                            will appear here.
-                            """
-                    )
-                ])
-            )
-        }
+    private func websiteAccessEmptyRow() -> NSView {
+        SettingsUI.row(
+            title: "No websites always allowed",
+            subtitle: """
+                Agents can still ask for one-time access. Persistent website grants will appear \
+                here.
+                """
+        )
+    }
 
-        var rows = persistentOriginKeys.enumerated().map { index, origin -> NSView in
-            let revoke = SettingsUI.button(
-                "Revoke",
-                target: self,
-                action: #selector(revokeWebsiteAccess(_:))
-            )
-            revoke.tag = index
-            return SettingsUI.row(
-                title: origin,
-                subtitle: "Agents may use this origin in Threading's signed-in browser.",
-                control: revoke
-            )
-        }
-        rows.append(SettingsUI.row(
+    private func websiteAccessOriginRow(at index: Int) -> NSView {
+        guard persistentOriginKeys.indices.contains(index) else { return NSView() }
+        let revoke = SettingsUI.button(
+            "Revoke",
+            target: self,
+            action: #selector(revokeWebsiteAccess(_:))
+        )
+        revoke.tag = index
+        return SettingsUI.row(
+            title: persistentOriginKeys[index],
+            subtitle: "Agents may use this origin in Threading's signed-in browser.",
+            control: revoke
+        )
+    }
+
+    private func websiteAccessRevokeAllRow() -> NSView {
+        SettingsUI.row(
             title: "All persistent access",
             subtitle: "One-time grants end with the running app and are not listed here.",
             control: SettingsUI.button(
@@ -604,8 +630,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 target: self,
                 action: #selector(revokeAllWebsiteAccess)
             )
-        ))
-        return SettingsUI.section("Website Access", SettingsCard(rows: rows))
+        )
     }
 
     // MARK: - Actions
@@ -941,6 +966,9 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         if case .extensionCaption = presentationRows[row] {
             return Design.Spacing.small
         }
+        if case .websiteAccessCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
         return row == presentationRows.count - 1 ? Design.Spacing.large : 0
     }
 
@@ -948,7 +976,9 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         switch row {
         case .tool:
             return 0
-        case .note, .group, .browserSignIn, .chromeAutomation, .websiteAccess,
+        case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
+            return 0
+        case .note, .group, .browserSignIn, .chromeAutomation, .websiteAccessCaption,
              .extensionCaption:
             return Design.Spacing.large
         case .extensionField(let sectionIndex, let fieldIndex):
@@ -985,8 +1015,14 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
             return browserSignInSection()
         case .chromeAutomation:
             return chromeAutomationSection()
-        case .websiteAccess:
-            return websiteAccessSection()
+        case .websiteAccessCaption:
+            return SettingsUI.caption("Website Access")
+        case .websiteAccessEmpty:
+            return websiteAccessEmptyRow()
+        case .websiteAccessOrigin(let index):
+            return websiteAccessOriginRow(at: index)
+        case .websiteAccessRevokeAll:
+            return websiteAccessRevokeAllRow()
         case .extensionCaption(let index):
             guard extensionSections.indices.contains(index),
                   let title = extensionSections[index].visibleTitle else { return NSView() }

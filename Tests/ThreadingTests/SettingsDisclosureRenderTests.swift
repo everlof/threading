@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -85,6 +86,81 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             "the expanded Tools page retained rows far outside its viewport"
         )
         withExtendedLifetime(host) {}
+    }
+
+    @MainActor
+    func testArchivedFoldMutatesTheVirtualRowsWithoutReplacingThePage() throws {
+        let entries = archivedEntries(count: 80)
+        let controller = ArchivedPreferencesViewController(rowsProvider: { entries })
+        let page = controller.view
+        controller.viewWillAppear()
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(firstScrollView(in: page))
+        let collapsedRows = controller.virtualRowCountForTesting
+        let disclosure = try XCTUnwrap(
+            descendants(of: page, type: ThemedDisclosureRow.self).first
+        )
+
+        XCTAssertTrue(disclosure.performPrimaryAction())
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(firstScrollView(in: page) === scroll)
+        XCTAssertEqual(controller.virtualRowCountForTesting, collapsedRows + 70)
+        XCTAssertLessThan(
+            controller.materializedRowCountForTesting,
+            controller.virtualRowCountForTesting / 2
+        )
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
+    func testArchivedVirtualPagePreservesContributedSettingsFields() throws {
+        let field = ExtensionSettingField(
+            id: "archive-label",
+            title: "Archive label",
+            control: .text(
+                defaultValue: "Filed",
+                placeholder: "Filed",
+                maximumLength: 40
+            )
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.archived-settings",
+            name: "Archive Settings",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/archive-settings",
+            capabilities: [.settings],
+            settings: .init(sections: [
+                .init(
+                    id: "archive-host",
+                    page: .archived,
+                    title: "Archive additions",
+                    fields: [field]
+                )
+            ])
+        )
+        _ = ExtensionManager.shared
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: [manifest])
+        defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
+
+        let controller = ArchivedPreferencesViewController(rowsProvider: { [] })
+        let page = controller.view
+        controller.viewWillAppear()
+        let window = performanceWindow(page)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let identifiers = Set(descendants(of: page, type: NSView.self).compactMap {
+            $0.accessibilityIdentifier()
+        })
+
+        XCTAssertTrue(identifiers.contains(
+            "settings.extension.com.example.archived-settings.archive-label"
+        ))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
     }
 
     // MARK: - The Header Stays Put
@@ -438,6 +514,175 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         withExtendedLifetime((window, expandedWindow)) {}
     }
 
+    /// Archived conversations can grow without a product cap. Keep the cold collapsed page,
+    /// disclosure, scrolling and a same-data project event separate: the original implementation
+    /// made every AppKit row before taking its ten-row prefix, which a collapsed screenshot hid.
+    @MainActor
+    func testStressArchivedPreferencesWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["THREADING_ARCHIVED_SETTINGS_STRESS"] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_ARCHIVED_SETTINGS_STRESS=1 to run the Archived settings stress case"
+            )
+        }
+        let rowCount = max(
+            Int(environment["THREADING_ARCHIVED_SETTINGS_STRESS_ROWS"] ?? "") ?? 1_000,
+            ArchivedDefaultsForTesting.recentLimit + 1
+        )
+        let themeID = AppThemeID(
+            environment["THREADING_ARCHIVED_SETTINGS_STRESS_THEME"] ?? "system"
+        )
+        let theme = try XCTUnwrap(AppThemeLibrary.theme(withID: themeID))
+        let previousTheme = AppThemePalette.current
+        let application = NSApplication.shared
+        let previousAppearance = application.appearance
+        AppThemePalette.set(theme)
+        application.appearance = theme.mode.appearance
+        defer {
+            AppThemePalette.set(previousTheme)
+            application.appearance = previousAppearance
+        }
+
+        let fixtureStarted = DispatchTime.now().uptimeNanoseconds
+        let entries = archivedEntries(count: rowCount)
+        let fixtureEnded = DispatchTime.now().uptimeNanoseconds
+        let memoryBefore = physicalFootprintBytes()
+        let controllerStarted = DispatchTime.now().uptimeNanoseconds
+        let controller = ArchivedPreferencesViewController(rowsProvider: { entries })
+        let controllerEnded = DispatchTime.now().uptimeNanoseconds
+        let page = controller.view
+        let viewLoaded = DispatchTime.now().uptimeNanoseconds
+        controller.viewWillAppear()
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+        let collapsedDescendants = descendantCount(in: page)
+        let collapsedVirtualRows = controller.virtualRowCountForTesting
+        let collapsedMaterializedRows = controller.materializedRowCountForTesting
+
+        let disclosure = try XCTUnwrap(
+            descendants(of: page, type: ThemedDisclosureRow.self).first
+        )
+        let expandStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(disclosure.performPrimaryAction())
+        let expandRenderEnded = DispatchTime.now().uptimeNanoseconds
+        host.layoutSubtreeIfNeeded()
+        let expandLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        let expandedDescendants = descendantCount(in: page)
+        let expandedVirtualRows = controller.virtualRowCountForTesting
+        let expandedMaterializedRows = controller.materializedRowCountForTesting
+
+        let scroll = try XCTUnwrap(firstScrollView(in: page))
+        let scrollStarted = DispatchTime.now().uptimeNanoseconds
+        let overflow = max(
+            (scroll.documentView?.bounds.height ?? 0) - scroll.contentView.bounds.height,
+            0
+        )
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: overflow))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        host.layoutSubtreeIfNeeded()
+        let scrollEnded = DispatchTime.now().uptimeNanoseconds
+        let originBeforeRefresh = scroll.contentView.bounds.origin
+
+        let refreshStarted = DispatchTime.now().uptimeNanoseconds
+        NotificationCenter.default.post(ProjectsDidChange())
+        let refreshRenderEnded = DispatchTime.now().uptimeNanoseconds
+        host.layoutSubtreeIfNeeded()
+        let refreshLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        let originAfterRefresh = scroll.contentView.bounds.origin
+        let memoryAfter = physicalFootprintBytes()
+        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
+
+        print(
+            "THREADING_PERF archived-settings "
+                + "theme=\(themeID.rawValue) rows=\(rowCount) "
+                + "fixture_ms=\(Self.milliseconds(fixtureEnded - fixtureStarted)) "
+                + "controller_ms=\(Self.milliseconds(controllerEnded - controllerStarted)) "
+                + "view_load_ms=\(Self.milliseconds(viewLoaded - controllerEnded)) "
+                + "render_ms=\(Self.milliseconds(renderEnded - viewLoaded)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "expand_render_ms=\(Self.milliseconds(expandRenderEnded - expandStarted)) "
+                + "expand_layout_ms=\(Self.milliseconds(expandLayoutEnded - expandRenderEnded)) "
+                + "scroll_to_end_ms=\(Self.milliseconds(scrollEnded - scrollStarted)) "
+                + "refresh_render_ms=\(Self.milliseconds(refreshRenderEnded - refreshStarted)) "
+                + "refresh_layout_ms=\(Self.milliseconds(refreshLayoutEnded - refreshRenderEnded)) "
+                + "collapsed_descendants=\(collapsedDescendants) "
+                + "expanded_descendants=\(expandedDescendants) "
+                + "collapsed_virtual_rows=\(collapsedVirtualRows) "
+                + "collapsed_materialized_rows=\(collapsedMaterializedRows) "
+                + "expanded_virtual_rows=\(expandedVirtualRows) "
+                + "expanded_materialized_rows=\(expandedMaterializedRows) "
+                + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
+        )
+
+        XCTAssertGreaterThanOrEqual(expandedVirtualRows, rowCount + 2)
+        XCTAssertGreaterThan(collapsedMaterializedRows, 0)
+        XCTAssertLessThan(expandedMaterializedRows, expandedVirtualRows)
+        XCTAssertEqual(originAfterRefresh.x, originBeforeRefresh.x, accuracy: 0.5)
+        XCTAssertEqual(originAfterRefresh.y, originBeforeRefresh.y, accuracy: 0.5)
+        withExtendedLifetime(window) {}
+    }
+
+    /// Exercises the coarse Website Access row independently of the tool catalog. The outer
+    /// table cannot provide a viewport bound when one cell itself retains every origin row.
+    @MainActor
+    func testStressToolsWebsiteAccessWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["THREADING_TOOLS_WEBSITE_ACCESS_STRESS"] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_TOOLS_WEBSITE_ACCESS_STRESS=1 to run Website Access stress."
+            )
+        }
+        let originCount = max(
+            Int(environment["THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS"] ?? "") ?? 1_000,
+            1
+        )
+        let suite = "ToolsWebsiteAccessStress-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(
+            (0..<originCount).map { "https://stress-\($0).example.test" },
+            forKey: "browser.allowedOrigins"
+        )
+        let previousProvider = BrowserCredentialPreference.provider
+        BrowserCredentialPreference.provider = .systemAutoFill
+        defer { BrowserCredentialPreference.provider = previousProvider }
+
+        let memoryBefore = physicalFootprintBytes()
+        let controller = ToolsPreferencesViewController(
+            groups: [],
+            browserAccessStore: BrowserAccessStore(defaults: defaults)
+        )
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        let page = controller.view
+        let loaded = DispatchTime.now().uptimeNanoseconds
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let laidOut = DispatchTime.now().uptimeNanoseconds
+        let descendants = descendantCount(in: page)
+        let memoryAfter = physicalFootprintBytes()
+        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
+
+        print(
+            "THREADING_PERF tools-website-access origins=\(originCount) "
+                + "load_ms=\(Self.milliseconds(loaded - loadStarted)) "
+                + "layout_ms=\(Self.milliseconds(laidOut - loaded)) "
+                + "virtual_rows=\(controller.virtualRowCount) "
+                + "materialized_rows=\(controller.materializedRowCount) "
+                + "descendants=\(descendants) "
+                + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
+        )
+
+        XCTAssertGreaterThanOrEqual(controller.virtualRowCount, originCount + 5)
+        XCTAssertGreaterThan(controller.materializedRowCount, 0)
+        XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
     @MainActor
     private func labels(in root: NSView) -> [NSTextField] {
         descendants(of: root, type: NSTextField.self)
@@ -535,6 +780,29 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     }
 
     @MainActor
+    private func archivedEntries(count: Int) -> [ArchivedPreferencesViewController.Entry] {
+        let project = Project(
+            name: "Archive stress",
+            folderURL: URL(fileURLWithPath: "/tmp/threading-archive-stress")
+        )
+        let now = Date()
+        return (0..<count).map { index in
+            var session = AgentSession(
+                kind: .codex,
+                title: "Archived conversation \(index) with a representative long title"
+            )
+            session.isArchived = true
+            session.lastActiveAt = now.addingTimeInterval(TimeInterval(-index * 60))
+            return (project, session)
+        }
+    }
+
+    private func physicalFootprintBytes() -> UInt64 {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    @MainActor
     private func descendants<T: NSView>(of root: NSView, type: T.Type) -> [T] {
         var found: [T] = []
         for view in root.subviews {
@@ -557,4 +825,12 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     private static func milliseconds(_ nanoseconds: UInt64) -> String {
         String(format: "%.2f", Double(nanoseconds) / 1_000_000)
     }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
+    }
+}
+
+private enum ArchivedDefaultsForTesting {
+    static let recentLimit = 10
 }
