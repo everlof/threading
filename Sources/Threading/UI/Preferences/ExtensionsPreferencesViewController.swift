@@ -28,14 +28,86 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case session
     }
 
+    private enum PackageDetailRow {
+        case type
+        case status
+        case packageOrigin
+        case contributions
+        case services
+        case serviceDependencies
+        case capabilities
+        case companions
+        case actions
+    }
+
+    /// Cheap ordering state for the whole page. Package snapshots and extension fields are values;
+    /// AppKit creates controls only for rows intersecting the viewport.
+    private enum PresentationRow {
+        case note
+        case identityResolvers
+        case inventoryProblem
+        case emptyInventory
+        case packageHeader(Int)
+        case packageDetail(package: Int, detail: PackageDetailRow)
+        case extensionCaption(Int)
+        case extensionField(section: Int, field: Int)
+    }
+
     private let manager: ExtensionManager
     private let identityRegistry: ExtensionIdentityResolverRegistry
     private let componentRegistry: ComponentCustomizationRegistry?
     private let appEvents = AppEventObservations()
-    private var pageView: NSView?
+    private var pageView: SettingsPageView?
     private var controlActions: [ObjectIdentifier: ControlAction] = [:]
     private var identityMenus: [ObjectIdentifier: IdentityFamily] = [:]
     private var isImporting = false
+    private var installedExtensions: [InstalledExtensionSnapshot] = []
+    private var installedNames: [String: String] = [:]
+    private var inventoryProblem: String?
+    private var providerCandidates: [String] = []
+    private var accountCandidates: [String] = []
+    private var sessionCandidates: [String] = []
+    private var extensionSections: [ExtensionSettingsSectionModel] = []
+    private var presentationRows: [PresentationRow] = []
+
+    private lazy var importButton: ThemedButton = {
+        let button = SettingsUI.button(
+            "Import…",
+            target: self,
+            action: #selector(importExtension)
+        )
+        button.setAccessibilityIdentifier("settings.extensions.import")
+        return button
+    }()
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("ExtensionsSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = ExtensionsPreferencesDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
 
     /// The packages whose manifest detail the user has unfolded, by identifier. A view state,
     /// kept for the session only.
@@ -68,6 +140,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in
             self?.render()
         }
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.render()
+        }
         appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
             guard event.targets == nil || event.targets?.contains(where: {
                 $0.component == .sidebarSessionIdentity
@@ -76,70 +151,49 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
+    }
+
     private func render() {
         guard isViewLoaded else { return }
-        pageView?.removeFromSuperview()
         controlActions.removeAll()
         identityMenus.removeAll()
-
-        let importButton = SettingsUI.button(
-            isImporting ? "Importing…" : "Import…",
-            target: self,
-            action: #selector(importExtension)
+        installedExtensions = manager.installedExtensions
+        installedNames = Dictionary(
+            uniqueKeysWithValues: installedExtensions.map { ($0.identifier, $0.name) }
         )
+        inventoryProblem = manager.inventoryErrorDescription
+        providerCandidates = identityRegistry.providerCandidates()
+        accountCandidates = identityRegistry.accountCandidates()
+        sessionCandidates = componentRegistry?.replacementCandidates(
+            for: .sidebarSessionIdentity
+        ) ?? []
+        extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .extensions)
+        expandedExtensions.formIntersection(installedExtensions.map(\.identifier))
+        presentationRows = makePresentationRows()
+        updateCardDecorations()
+
+        importButton.title = L10n.string(isImporting ? "Importing…" : "Import…")
         importButton.isEnabled = !isImporting
-        importButton.setAccessibilityIdentifier("settings.extensions.import")
 
-        var sections: [NSView] = [
-            SettingsUI.note(
-                "Extensions are copied into Threading before they can run. Import a "
-                    + ".threadingextension package or an unpacked development directory; "
-                    + "importing leaves one disabled, and enabling it starts a supervised "
-                    + "process with the capabilities declared in its manifest."
-            )
-        ]
-
-        if let identitySection = identityResolverSection() {
-            sections.append(identitySection)
+        if let pageView {
+            pageView.updateSummary(installedSummary(installedExtensions.count))
+            tableView.reloadData()
+            return
         }
 
-        if let problem = manager.inventoryErrorDescription {
-            sections.append(
-                SettingsUI.section(
-                    "Installed",
-                    SettingsCard(rows: [
-                        SettingsUI.row(
-                            title: "Extensions could not be read",
-                            subtitle: problem
-                        )
-                    ])
-                )
-            )
-        }
-
-        let installed = manager.installedExtensions
-        if installed.isEmpty, manager.inventoryErrorDescription == nil {
-            sections.append(
-                SettingsUI.section(
-                    "Installed",
-                    SettingsCard(rows: [
-                        SettingsUI.row(
-                            title: "No extensions installed",
-                            subtitle: "Imported packages appear here with their permissions and runtime state."
-                        )
-                    ])
-                )
-            )
-        } else {
-            sections.append(contentsOf: installed.map(extensionSection))
-        }
-
-        let page = SettingsUI.page(
+        let page = SettingsUI.listPage(
             title: "Extensions",
-            summary: installedSummary(installed.count),
+            summary: installedSummary(installedExtensions.count),
             actions: [importButton],
-            sections: sections,
-            hostPage: .extensions
+            body: scrollView
         )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -152,12 +206,40 @@ final class ExtensionsPreferencesViewController: NSViewController {
         pageView = page
     }
 
+    private func makePresentationRows() -> [PresentationRow] {
+        var rows: [PresentationRow] = [.note]
+        if providerCandidates.count > 1
+            || accountCandidates.count > 1
+            || sessionCandidates.count > 1 {
+            rows.append(.identityResolvers)
+        }
+        if inventoryProblem != nil {
+            rows.append(.inventoryProblem)
+        }
+        if installedExtensions.isEmpty, inventoryProblem == nil {
+            rows.append(.emptyInventory)
+        } else {
+            for (packageIndex, item) in installedExtensions.enumerated() {
+                rows.append(.packageHeader(packageIndex))
+                if expandedExtensions.contains(item.identifier) {
+                    rows.append(contentsOf: packageDetailRows(for: item).map {
+                        .packageDetail(package: packageIndex, detail: $0)
+                    })
+                }
+            }
+        }
+        for (sectionIndex, section) in extensionSections.enumerated() {
+            if section.visibleTitle != nil {
+                rows.append(.extensionCaption(sectionIndex))
+            }
+            rows.append(contentsOf: section.fields.indices.map {
+                .extensionField(section: sectionIndex, field: $0)
+            })
+        }
+        return rows
+    }
+
     private func identityResolverSection() -> NSView? {
-        let providerCandidates = identityRegistry.providerCandidates()
-        let accountCandidates = identityRegistry.accountCandidates()
-        let sessionCandidates = componentRegistry?.replacementCandidates(
-            for: .sidebarSessionIdentity
-        ) ?? []
         guard providerCandidates.count > 1
                 || accountCandidates.count > 1
                 || sessionCandidates.count > 1 else {
@@ -209,11 +291,6 @@ final class ExtensionsPreferencesViewController: NSViewController {
         selected: String?,
         family: IdentityFamily
     ) -> ThemedPopUp {
-        let names = Dictionary(
-            uniqueKeysWithValues: manager.installedExtensions.map {
-                ($0.identifier, $0.name)
-            }
-        )
         let menu = SettingsUI.popUp(
             target: self,
             action: #selector(identityResolverChanged(_:))
@@ -221,7 +298,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         menu.addItem(ThemedMenuItem(title: L10n.string("No extension"), representedValue: ""))
         for identifier in candidates {
             menu.addItem(ThemedMenuItem(
-                title: names[identifier] ?? identifier,
+                title: installedNames[identifier] ?? identifier,
                 representedValue: identifier
             ))
         }
@@ -282,7 +359,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
     }
 
-    private func extensionSection(_ item: InstalledExtensionSnapshot) -> NSView {
+    private func extensionHeader(_ item: InstalledExtensionSnapshot) -> NSView {
         let toggle = SettingsUI.toggle(
             isOn: item.isEnabled,
             target: self,
@@ -302,114 +379,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
             ?? item.identifier
 
-        var rows: [NSView] = [
-            SettingsUI.row(
-                title: "Type",
-                subtitle: localizedName(item.profile)
-            ),
-            statusRow(item.status)
-        ]
-        rows.append(
-            SettingsUI.row(
-                title: "Package",
-                subtitle: item.provenance?.presentation
-                    ?? L10n.string("Origin not recorded · containment still enforced")
-            )
-        )
-
-        if !item.contributionKinds.isEmpty {
-            rows.append(
-                SettingsUI.row(
-                    title: "Provides",
-                    subtitle: item.contributionKinds
-                        .map(localizedName)
-                        .joined(separator: ", ")
-                )
-            )
-        }
-        if !item.services.isEmpty {
-            rows.append(
-                SettingsUI.row(
-                    title: "Provides services",
-                    subtitle: item.services
-                        .sorted {
-                            ($0.title, $0.version) < ($1.title, $1.version)
-                        }
-                        .map { "\($0.title) v\($0.version)" }
-                        .joined(separator: ", ")
-                )
-            )
-        }
-        if !item.serviceDependencies.isEmpty {
-            let names = Dictionary(
-                uniqueKeysWithValues: manager.installedExtensions.map {
-                    ($0.identifier, $0.name)
-                }
-            )
-            rows.append(
-                SettingsUI.row(
-                    title: "Uses services",
-                    subtitle: item.serviceDependencies
-                        .sorted {
-                            ($0.providerIdentifier, $0.serviceID, $0.version)
-                                < ($1.providerIdentifier, $1.serviceID, $1.version)
-                        }
-                        .map { dependency in
-                            let provider = names[dependency.providerIdentifier]
-                                ?? dependency.providerIdentifier
-                            let availability = manager.isServiceAvailable(dependency)
-                                ? L10n.string("available")
-                                : dependency.required
-                                    ? L10n.string("required · unavailable")
-                                    : L10n.string("unavailable")
-                            return "\(provider) / \(dependency.serviceID) v\(dependency.version) · \(availability)"
-                        }
-                        .joined(separator: "\n")
-                )
-            )
-        }
-        if !item.capabilities.isEmpty {
-            rows.append(
-                SettingsUI.row(
-                    title: "Declared capabilities",
-                    subtitle: item.capabilities.joined(separator: ", ")
-                )
-            )
-        }
-        if !item.companions.isEmpty {
-            rows.append(
-                SettingsUI.row(
-                    title: "Advanced companions",
-                    subtitle: item.companions.map { companion in
-                        let activation = companion.activation == .onDemand
-                            ? L10n.string("on demand")
-                            : L10n.string("while enabled")
-                        let capabilities = companion.capabilities.isEmpty
-                            ? L10n.string("no OS-facing capabilities")
-                            : companion.capabilities
-                                .map(\.rawValue)
-                                .sorted()
-                                .joined(separator: ", ")
-                        let status = item.companionStatuses[companion.id]?.summary
-                            ?? L10n.string("unknown")
-                        let operations = companion.operations.isEmpty
-                            ? L10n.string("no operations")
-                            : companion.operations.map(\.id).sorted().joined(separator: ", ")
-                        let surfaces = companion.surfaces.isEmpty
-                            ? L10n.string("no surfaces")
-                            : companion.surfaces.map(\.id).sorted().joined(separator: ", ")
-                        return "\(companion.id) · \(activation) · \(status) · "
-                            + "\(capabilities) · \(operations) · \(surfaces)"
-                    }
-                    .joined(separator: "\n")
-                )
-            )
-        }
-        rows.append(SettingsUI.fullRow(actionRow(for: item)))
-
         let identifier = item.identifier
         let status = shortStatus(item.status)
-        return SettingsUI.disclosureCard(
+        return SettingsUI.disclosureHeader(
             title: item.name,
             subtitle: version,
             summary: status.label,
@@ -419,16 +391,22 @@ final class ExtensionsPreferencesViewController: NSViewController {
             localizes: false,
             accessibilityIdentifier: "settings.extensions.card.\(identifier)",
             onToggle: { [weak self] nowExpanded in
-                guard let self else { return }
-                if nowExpanded {
-                    self.expandedExtensions.insert(identifier)
-                } else {
-                    self.expandedExtensions.remove(identifier)
-                }
-                self.render()
-            },
-            detailRows: rows
+                self?.setExtension(identifier, expanded: nowExpanded)
+            }
         )
+    }
+
+    private func packageDetailRows(
+        for item: InstalledExtensionSnapshot
+    ) -> [PackageDetailRow] {
+        var rows: [PackageDetailRow] = [.type, .status, .packageOrigin]
+        if !item.contributionKinds.isEmpty { rows.append(.contributions) }
+        if !item.services.isEmpty { rows.append(.services) }
+        if !item.serviceDependencies.isEmpty { rows.append(.serviceDependencies) }
+        if !item.capabilities.isEmpty { rows.append(.capabilities) }
+        if !item.companions.isEmpty { rows.append(.companions) }
+        rows.append(.actions)
+        return rows
     }
 
     private func localizedName(_ profile: ExtensionProfile) -> String {
@@ -782,4 +760,314 @@ final class ExtensionsPreferencesViewController: NSViewController {
             alert.runModal()
         }
     }
+
+    /// Stress-fixture observability: the cheap complete model versus the live AppKit viewport.
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+}
+
+// MARK: - Virtualized Page
+
+extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("ExtensionsSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(for: presentationRows[tableRow]),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .note:
+            return SettingsUI.note(
+                "Extensions are copied into Threading before they can run. Import a "
+                    + ".threadingextension package or an unpacked development directory; "
+                    + "importing leaves one disabled, and enabling it starts a supervised "
+                    + "process with the capabilities declared in its manifest."
+            )
+        case .identityResolvers:
+            return identityResolverSection() ?? NSView()
+        case .inventoryProblem:
+            return SettingsUI.section(
+                "Installed",
+                SettingsCard(rows: [
+                    SettingsUI.row(
+                        title: "Extensions could not be read",
+                        subtitle: inventoryProblem ?? ""
+                    )
+                ])
+            )
+        case .emptyInventory:
+            return SettingsUI.section(
+                "Installed",
+                SettingsCard(rows: [
+                    SettingsUI.row(
+                        title: "No extensions installed",
+                        subtitle: "Imported packages appear here with their permissions and runtime state."
+                    )
+                ])
+            )
+        case .packageHeader(let packageIndex):
+            guard installedExtensions.indices.contains(packageIndex) else { return NSView() }
+            return extensionHeader(installedExtensions[packageIndex])
+        case .packageDetail(let packageIndex, let detail):
+            guard installedExtensions.indices.contains(packageIndex) else { return NSView() }
+            return packageDetail(detail, for: installedExtensions[packageIndex])
+        case .extensionCaption(let sectionIndex):
+            guard extensionSections.indices.contains(sectionIndex),
+                  let title = extensionSections[sectionIndex].visibleTitle else { return NSView() }
+            let caption = SettingsUI.caption(title, localizes: false)
+            caption.setAccessibilityIdentifier(
+                extensionSections[sectionIndex].accessibilityIdentifier
+            )
+            return caption
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard extensionSections.indices.contains(sectionIndex) else { return NSView() }
+            return ExtensionSettingsRenderer.fieldRow(
+                in: extensionSections[sectionIndex],
+                fieldIndex: fieldIndex
+            )
+        }
+    }
+
+    private func packageDetail(
+        _ detail: PackageDetailRow,
+        for item: InstalledExtensionSnapshot
+    ) -> NSView {
+        switch detail {
+        case .type:
+            return SettingsUI.row(
+                title: "Type",
+                subtitle: localizedName(item.profile)
+            )
+        case .status:
+            return statusRow(item.status)
+        case .packageOrigin:
+            return SettingsUI.row(
+                title: "Package",
+                subtitle: item.provenance?.presentation
+                    ?? L10n.string("Origin not recorded · containment still enforced")
+            )
+        case .contributions:
+            return SettingsUI.row(
+                title: "Provides",
+                subtitle: item.contributionKinds.map(localizedName).joined(separator: ", ")
+            )
+        case .services:
+            return SettingsUI.row(
+                title: "Provides services",
+                subtitle: item.services
+                    .sorted { ($0.title, $0.version) < ($1.title, $1.version) }
+                    .map { "\($0.title) v\($0.version)" }
+                    .joined(separator: ", ")
+            )
+        case .serviceDependencies:
+            return SettingsUI.row(
+                title: "Uses services",
+                subtitle: item.serviceDependencies
+                    .sorted {
+                        ($0.providerIdentifier, $0.serviceID, $0.version)
+                            < ($1.providerIdentifier, $1.serviceID, $1.version)
+                    }
+                    .map { dependency in
+                        let provider = installedNames[dependency.providerIdentifier]
+                            ?? dependency.providerIdentifier
+                        let availability = manager.isServiceAvailable(dependency)
+                            ? L10n.string("available")
+                            : dependency.required
+                                ? L10n.string("required · unavailable")
+                                : L10n.string("unavailable")
+                        return "\(provider) / \(dependency.serviceID) "
+                            + "v\(dependency.version) · \(availability)"
+                    }
+                    .joined(separator: "\n")
+            )
+        case .capabilities:
+            return SettingsUI.row(
+                title: "Declared capabilities",
+                subtitle: item.capabilities.joined(separator: ", ")
+            )
+        case .companions:
+            return SettingsUI.row(
+                title: "Advanced companions",
+                subtitle: item.companions.map { companion in
+                    let activation = companion.activation == .onDemand
+                        ? L10n.string("on demand")
+                        : L10n.string("while enabled")
+                    let capabilities = companion.capabilities.isEmpty
+                        ? L10n.string("no OS-facing capabilities")
+                        : companion.capabilities
+                            .map(\.rawValue)
+                            .sorted()
+                            .joined(separator: ", ")
+                    let status = item.companionStatuses[companion.id]?.summary
+                        ?? L10n.string("unknown")
+                    let operations = companion.operations.isEmpty
+                        ? L10n.string("no operations")
+                        : companion.operations.map(\.id).sorted().joined(separator: ", ")
+                    let surfaces = companion.surfaces.isEmpty
+                        ? L10n.string("no surfaces")
+                        : companion.surfaces.map(\.id).sorted().joined(separator: ", ")
+                    return "\(companion.id) · \(activation) · \(status) · "
+                        + "\(capabilities) · \(operations) · \(surfaces)"
+                }
+                .joined(separator: "\n")
+            )
+        case .actions:
+            return SettingsUI.fullRow(actionRow(for: item))
+        }
+    }
+
+    /// Inserts or removes only one package's cheap detail identities. Visible cells outside that
+    /// run retain their controls and the clip view retains its momentum and exact origin.
+    private func setExtension(_ identifier: String, expanded: Bool) {
+        guard let packageIndex = installedExtensions.firstIndex(where: {
+            $0.identifier == identifier
+        }), let header = presentationRows.firstIndex(where: {
+            if case .packageHeader(let index) = $0 { return index == packageIndex }
+            return false
+        }) else { return }
+
+        let wasExpanded = expandedExtensions.contains(identifier)
+        guard wasExpanded != expanded else { return }
+        if expanded {
+            expandedExtensions.insert(identifier)
+            let details = packageDetailRows(for: installedExtensions[packageIndex])
+            presentationRows.insert(
+                contentsOf: details.map {
+                    .packageDetail(package: packageIndex, detail: $0)
+                },
+                at: header + 1
+            )
+            if !details.isEmpty {
+                tableView.insertRows(
+                    at: IndexSet(integersIn: (header + 1)..<(header + 1 + details.count)),
+                    withAnimation: []
+                )
+            }
+        } else {
+            expandedExtensions.remove(identifier)
+            var end = header + 1
+            while presentationRows.indices.contains(end) {
+                guard case .packageDetail(let index, _) = presentationRows[end],
+                      index == packageIndex else { break }
+                end += 1
+            }
+            if end > header + 1 {
+                let range = (header + 1)..<end
+                presentationRows.removeSubrange(range)
+                tableView.removeRows(at: IndexSet(integersIn: range), withAnimation: [])
+            }
+        }
+
+        updateCardDecorations()
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integer: header),
+            columnIndexes: IndexSet(integer: 0)
+        )
+    }
+
+    private func updateCardDecorations() {
+        var packageBounds: [Int: (first: Int, last: Int)] = [:]
+        var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        for (rowIndex, row) in presentationRows.enumerated() {
+            switch row {
+            case .packageHeader(let packageIndex):
+                packageBounds[packageIndex] = (rowIndex, rowIndex)
+            case .packageDetail(let packageIndex, _):
+                if var bounds = packageBounds[packageIndex] {
+                    bounds.last = rowIndex
+                    packageBounds[packageIndex] = bounds
+                }
+            case .extensionField(let sectionIndex, _):
+                if var bounds = extensionBounds[sectionIndex] {
+                    bounds.last = rowIndex
+                    extensionBounds[sectionIndex] = bounds
+                } else {
+                    extensionBounds[sectionIndex] = (rowIndex, rowIndex)
+                }
+            case .note, .identityResolvers, .inventoryProblem, .emptyInventory,
+                 .extensionCaption:
+                break
+            }
+        }
+
+        var decorations = packageBounds.sorted { $0.key < $1.key }.map {
+            ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: Design.Spacing.large,
+                bottomInset: $0.value.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            )
+        }
+        decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
+            let section = extensionSections[$0.key]
+            return ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: section.visibleTitle == nil ? Design.Spacing.large : 0,
+                bottomInset: $0.value.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            )
+        })
+        tableView.cardDecorations = decorations
+    }
+
+    private func topInset(for row: PresentationRow) -> CGFloat {
+        switch row {
+        case .packageDetail:
+            return 0
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
+                return 0
+            }
+            return extensionSections[sectionIndex].visibleTitle == nil
+                ? Design.Spacing.large
+                : 0
+        case .note, .identityResolvers, .inventoryProblem, .emptyInventory,
+             .packageHeader, .extensionCaption:
+            return Design.Spacing.large
+        }
+    }
+
+    private func bottomInset(forRowAt row: Int) -> CGFloat {
+        guard presentationRows.indices.contains(row) else { return 0 }
+        if case .extensionCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        return row == presentationRows.count - 1 ? Design.Spacing.large : 0
+    }
+}
+
+private enum ExtensionsPreferencesDefaults {
+    static let estimatedRowHeight: CGFloat = 64
 }

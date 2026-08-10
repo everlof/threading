@@ -505,6 +505,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let manager = ExtensionManager(store: store)
         let controller = ExtensionsPreferencesViewController(manager: manager)
         _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
 
         var identifiers = Set(
             descendants(in: controller.view).compactMap { $0.accessibilityIdentifier() }
@@ -520,6 +522,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             }
         )
         XCTAssertTrue(card.accessibilityPerformPress())
+        window.contentView?.layoutSubtreeIfNeeded()
         identifiers = Set(
             descendants(in: controller.view).compactMap { $0.accessibilityIdentifier() }
         )
@@ -556,6 +559,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let manager = ExtensionManager(store: store)
         let controller = ExtensionsPreferencesViewController(manager: manager)
         _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
 
         let card = try XCTUnwrap(
             descendants(in: controller.view).first {
@@ -564,6 +569,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             }
         )
         XCTAssertTrue(card.accessibilityPerformPress())
+        window.contentView?.layoutSubtreeIfNeeded()
         let labels = descendants(in: controller.view)
             .compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(labels.contains("Provides services"))
@@ -573,6 +579,151 @@ final class ExtensionPackageStoreTests: XCTestCase {
             "com.example.other / status v1 · required · unavailable"
         ))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+    }
+
+    func testExtensionsSettingsPreservesContributedHostFieldsInVirtualPage() throws {
+        let source = try makePackage()
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("settings-host-fields"))
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        let field = ExtensionSettingField(
+            id: "host-label",
+            title: "Host label",
+            control: .text(
+                defaultValue: "Build",
+                placeholder: "Build",
+                maximumLength: 40
+            )
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.settings-host",
+            name: "Settings Host",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/settings-host",
+            capabilities: [.settings],
+            settings: .init(sections: [
+                .init(
+                    id: "extensions-host",
+                    page: .extensions,
+                    title: "Host additions",
+                    fields: [field]
+                )
+            ])
+        )
+        _ = ExtensionManager.shared
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: [manifest])
+        defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
+
+        let controller = ExtensionsPreferencesViewController(manager: manager)
+        _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let identifiers = Set(descendants(in: controller.view).compactMap {
+            $0.accessibilityIdentifier()
+        })
+
+        XCTAssertTrue(identifiers.contains(
+            "settings.extension.com.example.settings-host.host-label"
+        ))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+    }
+
+    func testStressExtensionsPreferencesWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["THREADING_EXTENSIONS_PREFERENCES_STRESS"] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_EXTENSIONS_PREFERENCES_STRESS=1 to run the installed-package sweep."
+            )
+        }
+        let packageCount = min(
+            Int(environment["THREADING_EXTENSIONS_PREFERENCES_STRESS_PACKAGES"] ?? "")
+                ?? ExtensionPackageStore.maximumInstalledPackages,
+            ExtensionPackageStore.maximumInstalledPackages
+        )
+        let themeID = AppThemeID(
+            environment["THREADING_EXTENSIONS_PREFERENCES_STRESS_THEME"] ?? "system"
+        )
+        let theme = try XCTUnwrap(AppThemeLibrary.theme(withID: themeID))
+        _ = NSApplication.shared
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(theme)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        let store = ExtensionPackageStore(
+            rootURL: temporaryDirectory("settings-stress")
+        )
+        try makeStressPackages(count: packageCount, in: store)
+        let managerStarted = DispatchTime.now().uptimeNanoseconds
+        let manager = ExtensionManager(store: store)
+        let managerReady = DispatchTime.now().uptimeNanoseconds
+        defer { manager.terminateAll() }
+
+        let memoryBefore = physicalFootprintBytes()
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        let controller = ExtensionsPreferencesViewController(manager: manager)
+        _ = controller.view
+        let loadReady = DispatchTime.now().uptimeNanoseconds
+        let window = settingsWindow(controller.view)
+        window.appearance = theme.mode.appearance ?? NSAppearance(named: .aqua)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let layoutReady = DispatchTime.now().uptimeNanoseconds
+
+        let initialViews = descendants(in: controller.view).count
+        let initialRows = controller.virtualRowCountForTesting
+        let initialMaterialized = controller.materializedRowCountForTesting
+        let card = try XCTUnwrap(
+            descendants(in: controller.view).first {
+                $0.accessibilityIdentifier().hasPrefix("settings.extensions.card.")
+            }
+        )
+        let disclosureStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(card.accessibilityPerformPress())
+        window.contentView?.layoutSubtreeIfNeeded()
+        let disclosureReady = DispatchTime.now().uptimeNanoseconds
+
+        let scroll = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? NSScrollView }.first
+        )
+        let scrollStarted = DispatchTime.now().uptimeNanoseconds
+        let documentHeight = scroll.documentView?.bounds.height ?? 0
+        scroll.contentView.scroll(
+            to: NSPoint(x: 0, y: max(0, documentHeight - scroll.contentView.bounds.height))
+        )
+        scroll.reflectScrolledClipView(scroll.contentView)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let scrollReady = DispatchTime.now().uptimeNanoseconds
+        let originBeforeRefresh = scroll.contentView.bounds.origin
+        let refreshStarted = DispatchTime.now().uptimeNanoseconds
+        NotificationCenter.default.post(ExtensionsDidChange())
+        let refreshRendered = DispatchTime.now().uptimeNanoseconds
+        window.contentView?.layoutSubtreeIfNeeded()
+        let refreshReady = DispatchTime.now().uptimeNanoseconds
+        let originAfterRefresh = scroll.contentView.bounds.origin
+        let finalViews = descendants(in: controller.view).count
+        let memoryAfter = physicalFootprintBytes()
+        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
+
+        XCTAssertEqual(manager.installedExtensions.count, packageCount)
+        XCTAssertGreaterThan(initialRows, 0)
+        XCTAssertGreaterThan(initialMaterialized, 0)
+        XCTAssertLessThanOrEqual(initialMaterialized, initialRows)
+        XCTAssertEqual(originAfterRefresh.x, originBeforeRefresh.x, accuracy: 0.5)
+        XCTAssertEqual(originAfterRefresh.y, originBeforeRefresh.y, accuracy: 0.5)
+        print(
+            "THREADING_PERF extensions-preferences "
+                + "theme=\(theme.id.rawValue) packages=\(packageCount) "
+                + "manager_ms=\(milliseconds(managerReady - managerStarted)) "
+                + "load_ms=\(milliseconds(loadReady - loadStarted)) "
+                + "layout_ms=\(milliseconds(layoutReady - loadReady)) "
+                + "disclosure_ms=\(milliseconds(disclosureReady - disclosureStarted)) "
+                + "scroll_to_end_ms=\(milliseconds(scrollReady - scrollStarted)) "
+                + "hot_refresh_render_ms=\(milliseconds(refreshRendered - refreshStarted)) "
+                + "hot_refresh_layout_ms=\(milliseconds(refreshReady - refreshRendered)) "
+                + "virtual_rows=\(initialRows) materialized_rows=\(initialMaterialized) "
+                + "initial_views=\(initialViews) final_views=\(finalViews) "
+                + "footprint_delta_mb=\(megabytes(memoryDelta))"
+        )
     }
 
     func testExtensionImageResourcesStayInsideTheInstalledPackage() throws {
@@ -701,6 +852,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
             componentRegistry: componentRegistry
         )
         _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
         let menu = try XCTUnwrap(
             descendants(in: controller.view).first {
                 $0.accessibilityIdentifier() == "settings.extensions.identity.provider"
@@ -720,6 +873,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             "com.example.other"
         )
 
+        window.contentView?.layoutSubtreeIfNeeded()
         let sessionMenu = try XCTUnwrap(
             descendants(in: controller.view).first {
                 $0.accessibilityIdentifier() == "settings.extensions.identity.session"
@@ -2816,6 +2970,49 @@ final class ExtensionPackageStoreTests: XCTestCase {
         return root
     }
 
+    private func makeStressPackages(
+        count: Int,
+        in store: ExtensionPackageStore
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: store.packagesURL,
+            withIntermediateDirectories: true
+        )
+        for index in 0..<count {
+            let identifier = String(format: "com.example.stress%03d", index)
+            let root = store.packagesURL.appendingPathComponent(
+                "\(identifier).threadingextension",
+                isDirectory: true
+            )
+            let bin = root.appendingPathComponent("bin", isDirectory: true)
+            try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+            let manifest = ExtensionManifest(
+                identifier: identifier,
+                name: String(format: "Stress Extension %03d", index),
+                version: "1.0.\(index)",
+                runtime: .native,
+                executable: "bin/extension",
+                capabilities: [.commands, .mcpTools],
+                mcpTools: [
+                    .init(
+                        id: "lookup",
+                        title: "Lookup",
+                        description: "Look up one value."
+                    )
+                ]
+            )
+            try JSONEncoder().encode(manifest).write(
+                to: root.appendingPathComponent(ExtensionBundleInspector.manifestName)
+            )
+            let executable = bin.appendingPathComponent("extension")
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: executable.path
+            )
+        }
+    }
+
     private func temporaryDirectory(_ label: String) -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "ThreadingExtensionPackageTests-\(label)-\(UUID().uuidString)",
@@ -2859,6 +3056,19 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    private func physicalFootprintBytes() -> UInt64 {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
     }
 
     /// Table-backed settings intentionally materialize nothing for a detached zero-size view.

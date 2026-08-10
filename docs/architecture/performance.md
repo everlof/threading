@@ -147,7 +147,7 @@ external data reaches eager AppKit work.
 |---|---|---|
 | Resolved | `ChangedFilesCardView` | The tree is a value projection rendered by reusable table cells against the conversation's outer viewport; collapsed descendants own no views, and one retained card shares a 2,000-line preview budget across files. The before/after measurements are below. |
 | Resolved | Extension panels | The complete 500-node value is still validated atomically, but nested vertical stacks are flattened into reusable table rows. A maximum-contract panel retains only a viewport of native controls, and replacement updates reload value rows instead of rebuilding the whole recursive view tree. The before/after measurements are below. |
-| High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
+| Resolved | Extensions preferences | The 256-package inventory is a value-row model in one grouped table. Collapsed packages own only row identities; disclosure inserts one package's detail identities, and inventory/status events recycle only the viewport while preserving the clip origin. The before/after measurements are below. |
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
 | Resolved | Browser baseline library | The 200-record value model is presented by reusable table rows. Only a viewport of cards exists; screenshot reads, SHA-256 and source inspection run off-main with reuse cancellation, while the main actor performs only a row-sized decode and assignment. The before/after measurements are below. |
 | Resolved | File pane refresh | Directory enumeration, resource-value reads, natural sorting and snapshot signatures now run off-main for initial load, hot refresh and disclosure. Main-actor reconciliation preserves node identity with a sorted merge; equal signatures skip both reconciliation and AppKit reload. The before/after measurements are below. |
@@ -160,11 +160,10 @@ external data reaches eager AppKit work.
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
 
-Installed-extension discovery has a separate refusal boundary from that remaining presentation
-cost: enumeration stops one entry past 1,024 visible names and inventory refuses more than 256
-package directories before loading any manifest. Those are safety/cardinality ceilings, not a claim
-that eagerly constructing 256 preference cards is frame-cheap; the High item above still requires
-virtualization.
+Installed-extension discovery has a separate refusal boundary from presentation: enumeration stops
+one entry past 1,024 visible names and inventory refuses more than 256 package directories before
+loading any manifest. Those safety/cardinality ceilings now feed a viewport-owned preferences
+table; they are not used as an excuse to retain 256 AppKit cards.
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
 search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
@@ -173,9 +172,9 @@ and bounds both retained report cells and chart geometry;
 File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 
-The stress sweep below replaced that risk-only ordering with measurements. Extension settings, the
-changed-files card, browser baseline library and maximum-contract extension panels are repaired.
-Archived settings remains
+The stress sweep below replaced that risk-only ordering with measurements. Extensions preferences,
+extension settings, the changed-files card, browser baseline library and maximum-contract extension
+panels are repaired. Archived settings remains
 the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
 at both lazy boundaries: the pane installs one format surface, then the document surface installs
 PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement
@@ -194,6 +193,7 @@ the UI times. The 2026-08-08 Debug sweep used the local Apple-silicon Mac:
 | Changed-files card, 1,000 files, collapsed | 184–189 ms construction + 1,676–1,679 ms layout | Expand all: 244–249 ms | 1 visible of 1,001 row views; 5,016 descendants; 245–246 MB |
 | Changed-files previews, 174 files × 400 retained lines | 42–46 ms construction + 103–107 ms layout | Preview derivation: 0.9 ms | 13.6–13.7 MB model + 20.8 MB views |
 | Extension panel, 500 semantic nodes | 29 ms render + 232–245 ms layout | Generation replacement: 261–275 ms; draw: 55–58 ms/frame | 707 descendants; 51–67 MB |
+| Extensions preferences, 256 installed packages | 457–509 ms construction + **5,317–5,478 ms layout** | One disclosure: **6,017–6,282 ms** | 3,601 descendants; 197–198 MB |
 | Extension settings, one 128-field extension | 63–77 ms render + 941–945 ms layout | Draw: 30–35 ms/frame | 1,169 descendants; 54–61 MB |
 | Extension settings, four 128-field extensions | 211–215 ms render + **56,841–61,485 ms layout** | Draw: 47 ms System / 121 ms Neo Brutalism | 4,640 descendants; 292–307 MB |
 | Browser baseline library, 200 records | 170–178 ms render + 507–559 ms layout | One permission toggle: 679–742 ms; draw: 24 ms System / **544 ms Neo Brutalism** | 2,411 descendants; 119 MB System / 217 MB Neo Brutalism |
@@ -230,6 +230,43 @@ views; the higher post-traversal footprint is allocator high-water after visitin
 a 512-row view hierarchy. A production-host regression also mounts 128 contributed fields through
 the real Tools controller, reaches the final field, and verifies its recycled control still owns a
 live target.
+
+#### Extensions-preferences repair
+
+`ExtensionsPreferencesViewController` now owns one `ThemedGroupedTableView` and a cheap ordering
+model. A collapsed package is one header identity; its manifest detail rows do not exist as AppKit
+objects until disclosure inserts them and the viewport asks for them. The table paints the card
+behind each header/detail run, so this is the same visual hierarchy without a retained hierarchy.
+The fixed page header, import button and scroll view survive updates. Status, identity-resolver and
+settings-registry events rebuild value snapshots and recycle only visible cells rather than
+replacing the page. A disclosure mutates only its contiguous row run, preserving the clip view and
+scroll momentum. Extension-contributed fields targeting the Extensions page remain individual
+virtual rows in the same scroll owner.
+
+`ExtensionPackageStoreTests.testStressExtensionsPreferencesWhenEnabled` manufactures exactly the
+256-package product ceiling before its clocks start. Package inventory/manifest inspection is
+reported separately from the UI, and the fixture measures cold construction, first layout,
+disclosure, a jump to the end, an unchanged inventory event at that end, hierarchy size and
+footprint under System and Neo Brutalism. Run both themes with
+`scripts/profile_threading.sh extensions-preferences-stress`; the workload is also part of `full`.
+
+Fresh Debug processes before and after the repair measured:
+
+| 256-package workload | Before | After |
+|---|---:|---:|
+| Cold System UI | 509.1 ms construction + 5,478.3 ms layout | **22.7–25.7 ms construction + 48.2–58.5 ms layout** |
+| Cold Neo Brutalism UI | 456.8 ms construction + 5,316.9 ms layout | **19.8–30.1 ms construction + 45.3–55.5 ms layout** |
+| Expand one package | 6,282.4 ms System / 6,016.9 ms Neo | **9.5–11.5 ms** |
+| Jump to final package | 0.4–0.5 ms over the retained stack | **16.1–22.7 ms**, including mounting a new viewport |
+| Unchanged inventory event at the end | same whole-page construction path as disclosure | **10.1–10.3 ms model/reload + 16.0–17.8 ms viewport layout**; clip origin unchanged |
+| Retained UI | 3,601 descendants; 197–198 MB | **144 descendants, 10 of 257 rows; 9.1–9.5 MB** |
+
+The jump comparison is intentionally not presented as a speedup: the old page had already paid six
+seconds and 198 MB to mount everything, so moving its clip was cheap. The repaired page pays a
+bounded viewport-mount cost when new content becomes visible. The invariant is total cardinality no
+longer owns construction, layout or memory. Do not put package detail views back in
+`makePresentationRows()`, call `render()` from disclosure, wrap this table in `SettingsUI.page(_:)`,
+or turn contributed settings into one opaque section row.
 
 #### Changed-files-card repair
 

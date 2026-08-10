@@ -6,6 +6,7 @@
 #   scripts/profile_threading.sh agent-work-stress
 #   scripts/profile_threading.sh chart-stress
 #   scripts/profile_threading.sh tools-settings-stress
+#   scripts/profile_threading.sh extensions-preferences-stress
 #   scripts/profile_threading.sh component-gallery-stress
 #   scripts/profile_threading.sh changed-files-stress
 #   scripts/profile_threading.sh extension-ui-stress
@@ -498,6 +499,62 @@ run_tools_settings_stress() {
           "${test_bundle}"
     done
   ) 2>&1 | tee "${output_directory}/tools-settings-stress.log"
+}
+
+run_extensions_preferences_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic Extensions preferences package-ceiling sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    local themes=(system neo-brutalism)
+    if [[ -n "${THREADING_EXTENSIONS_PREFERENCES_STRESS_THEME:-}" ]]; then
+      themes=("${THREADING_EXTENSIONS_PREFERENCES_STRESS_THEME}")
+    fi
+    local theme
+    for theme in "${themes[@]}"; do
+      THREADING_EXTENSIONS_PREFERENCES_STRESS=1 \
+      THREADING_EXTENSIONS_PREFERENCES_STRESS_PACKAGES="${THREADING_EXTENSIONS_PREFERENCES_STRESS_PACKAGES:-256}" \
+      THREADING_EXTENSIONS_PREFERENCES_STRESS_THEME="${theme}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.ExtensionPackageStoreTests/testStressExtensionsPreferencesWhenEnabled \
+          "${test_bundle}"
+    done
+  ) 2>&1 | tee "${output_directory}/extensions-preferences-stress.log"
 }
 
 build_macos_stress_test_bundle() {
@@ -1393,6 +1450,11 @@ case "${command}" in
     run_tools_settings_stress "${output_directory}"
     ;;
 
+  extensions-preferences-stress)
+    output_directory="$(new_run_directory extensions-preferences-stress)"
+    run_extensions_preferences_stress "${output_directory}"
+    ;;
+
   component-gallery-stress)
     output_directory="$(new_run_directory component-gallery-stress)"
     run_component_gallery_stress "${output_directory}"
@@ -1561,6 +1623,7 @@ case "${command}" in
     run_git_stress "${output_directory}"
     run_chart_stress "${output_directory}"
     run_tools_settings_stress "${output_directory}"
+    run_extensions_preferences_stress "${output_directory}"
     run_conversation_stress "${output_directory}"
     run_subagent_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"
