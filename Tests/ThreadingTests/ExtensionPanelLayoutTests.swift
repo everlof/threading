@@ -13,6 +13,7 @@ final class ExtensionPanelLayoutTests: XCTestCase {
 
     private final class FakeRouter: ExtensionPanelRouting {
         var item: ExtensionPanelInventoryItem?
+        var actions: [String] = []
 
         var extensionPanelInventory: [ExtensionPanelInventoryItem] {
             item.map { [$0] } ?? []
@@ -40,7 +41,8 @@ final class ExtensionPanelLayoutTests: XCTestCase {
             completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
         ) -> Bool {
             // Deliberately never completes: the test reads the panel's *registered* value.
-            true
+            actions.append(actionID)
+            return true
         }
     }
 
@@ -144,6 +146,62 @@ final class ExtensionPanelLayoutTests: XCTestCase {
         XCTAssertEqual(
             frame.maxX, host.bounds.width - Design.Spacing.pane, accuracy: 0.5
         )
+    }
+
+    func testNestedVerticalPanelStacksMaterializeOnlyAViewportAndKeepCurrentActions() throws {
+        let children = (0..<100).map { index in
+            ExtensionNode.button(
+                id: "action-\(index)",
+                title: "Action \(index)",
+                role: .standard,
+                isEnabled: true
+            )
+        }
+        let panel = ExtensionPanel(
+            id: "virtual",
+            title: "Virtual",
+            root: .stack(
+                axis: .vertical,
+                spacing: .small,
+                children: [
+                    .stack(axis: .vertical, spacing: .small, children: Array(children[..<50])),
+                    .stack(axis: .vertical, spacing: .small, children: Array(children[50...]))
+                ]
+            )
+        )
+        let router = FakeRouter()
+        router.item = ExtensionPanelInventoryItem(
+            extensionIdentifier: "com.example.virtual",
+            extensionName: "Virtual",
+            processGeneration: "generation-one",
+            panel: panel
+        )
+        let controller = ExtensionPanelViewController(
+            extensionIdentifier: "com.example.virtual",
+            panelID: panel.id,
+            title: panel.title,
+            context: ExtensionCommandContext(),
+            router: router
+        )
+        let window = performanceWindow(controller.view, width: 420, height: 420)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+
+        let table = try XCTUnwrap(firstTableView(in: controller.view))
+        XCTAssertEqual(controller.virtualRowCountForTesting, 100)
+        XCTAssertLessThan(controller.materializedRowCountForTesting, 100)
+        table.scrollRowToVisible(99)
+        host.layoutSubtreeIfNeeded()
+
+        let cell = try XCTUnwrap(table.view(atColumn: 0, row: 99, makeIfNecessary: false))
+        let button = try XCTUnwrap(
+            view(withIdentifierPrefix: "extension.action.action-99", under: cell)
+                as? ThemedButton
+        )
+        button.performClick()
+        XCTAssertEqual(router.actions, ["action-99"])
+        XCTAssertLessThan(controller.materializedRowCountForTesting, 100)
+        withExtendedLifetime((window, controller, router)) {}
     }
 
     func testExtensionSettingsMaterializeOnlyVisibleFieldsAndRetainTheirTargets() throws {
@@ -296,6 +354,8 @@ final class ExtensionPanelLayoutTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
         let coldDescendants = descendantCount(in: page)
+        let virtualRows = controller.virtualRowCountForTesting
+        let materializedRows = controller.materializedRowCountForTesting
 
         router.item = stressInventory(
             panel: stressPanel(childCount: nodeCount - 1, generation: 2),
@@ -321,6 +381,7 @@ final class ExtensionPanelLayoutTests: XCTestCase {
                 + "mutation_render_ms=\(Self.milliseconds(mutationRendered - mutationStarted)) "
                 + "mutation_layout_ms=\(Self.milliseconds(mutationLaidOut - mutationRendered)) "
                 + "document_height=\(Int(documentHeight)) descendants=\(coldDescendants) "
+                + "virtual_rows=\(virtualRows) materialized_rows=\(materializedRows) "
                 + "scroll_ms=\(Self.milliseconds(draw.scroll / 48)) "
                 + "scroll_layout_ms=\(Self.milliseconds(draw.layout / 48)) "
                 + "draw_ms=\(Self.milliseconds(draw.draw / 48)) "
@@ -328,7 +389,9 @@ final class ExtensionPanelLayoutTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(documentHeight, scroll.contentSize.height)
-        XCTAssertGreaterThan(coldDescendants, nodeCount)
+        XCTAssertEqual(virtualRows, nodeCount - 1)
+        XCTAssertLessThan(materializedRows, virtualRows)
+        XCTAssertLessThan(coldDescendants, 150)
         withExtendedLifetime((window, router)) {}
     }
 

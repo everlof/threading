@@ -72,6 +72,23 @@ enum BoundedImageDecoder {
         return decodedImage(from: source, policy: policy)
     }
 
+    /// The same bounded thumbnail decode for bytes a caller has already read and authenticated.
+    ///
+    /// Baseline-library rows use the store's hash-verifying read before reaching this overload:
+    /// going back through the URL would either skip that integrity check or read the screenshot a
+    /// second time. ImageIO still owns the rendered-size bound, so an approved full-page capture
+    /// cannot become a full-size bitmap merely because it is shown in a list.
+    static func thumbnail(_ data: Data, policy: BoundedImageDecodePolicy) -> NSImage? {
+        guard data.count <= policy.maximumBytes,
+              let source = CGImageSourceCreateWithData(
+                  data as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary
+              ) else {
+            return nil
+        }
+        return decodedImage(from: source, policy: policy)
+    }
+
     private static func decodedImage(
         from source: CGImageSource,
         policy: BoundedImageDecodePolicy

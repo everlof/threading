@@ -146,10 +146,10 @@ external data reaches eager AppKit work.
 | Priority | Surface | Concrete risk |
 |---|---|---|
 | Resolved | `ChangedFilesCardView` | The tree is a value projection rendered by reusable table cells against the conversation's outer viewport; collapsed descendants own no views, and one retained card shares a 2,000-line preview budget across files. The before/after measurements are below. |
-| High | Extension panels | `ExtensionPanel` accepts 500 semantic nodes / 1,000 rendered elements; `ExtensionNodeRenderer` turns the whole recursive value into stacks, and `ExtensionPanelViewController.render()` replaces the whole tree after updates. The validation cap is a transport/safety bound, not an eager-render budget. |
+| Resolved | Extension panels | The complete 500-node value is still validated atomically, but nested vertical stacks are flattened into reusable table rows. A maximum-contract panel retains only a viewport of native controls, and replacement updates reload value rows instead of rebuilding the whole recursive view tree. The before/after measurements are below. |
 | High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
-| High | Browser baseline library | Up to a couple hundred rich rows are rebuilt in one stack, with every thumbnail synchronously hash-verified and downsampled. The decode policy bounds each row, but the explicit record cap still does not make aggregate eager work frame-cheap. |
+| Resolved | Browser baseline library | The 200-record value model is presented by reusable table rows. Only a viewport of cards exists; screenshot reads, SHA-256 and source inspection run off-main with reuse cancellation, while the main actor performs only a row-sized decode and assignment. The before/after measurements are below. |
 | High | File pane refresh | The outline virtualizes cells, but directory enumeration, resource-value reads, natural sorting, and reconciliation remain synchronous in `refresh()`. The existing 20,000-entry fixture measures about 200–230 ms for the correct refresh, already above a frame and near the stall threshold. |
 | Medium | Archived settings | `reload()` maps every archived session to an AppKit row and only then takes the recent prefix. The "Older" fold currently reduces visible rows but not cold construction. |
 | Medium | Tools dynamic sections | Tool rows and extension-contributed settings are virtualized at their repeating unit. Browser Sign-In and Website Access remain one coarse table row each, so a large credential or origin inventory can still defeat the outer table's bound. |
@@ -173,9 +173,9 @@ and bounds both retained report cells and chart geometry;
 File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 
-The stress sweep below replaced that risk-only ordering with measurements. Extension settings and
-the changed-files card are repaired; browser baseline library is the next measured high-priority
-item, while maximum-contract extension panels are measurable but smaller. Archived settings remains
+The stress sweep below replaced that risk-only ordering with measurements. Extension settings, the
+changed-files card, browser baseline library and maximum-contract extension panels are repaired.
+Archived settings remains
 the smallest proof case for the cosmetic-laziness rule. Attachment preview cold open was repaired
 at both lazy boundaries: the pane installs one format surface, then the document surface installs
 PDFKit or Quick Look. Git Review resize and Account discovery still need a focused measurement
@@ -260,12 +260,57 @@ viewport. The 174-file preview case is 11.4 ms + 29.8 ms and retains the same 2,
 root-only 1,000-file regression separately proves that a tree with no directory available to fold
 still binds at most 80 cells after entering the outer viewport.
 
-The baseline library's synchronous image-backed rich rows make both cold mount and a one-record
-change total-content operations. Its authored-theme draw gap needs an Animation Hitches/Time
-Profiler capture before changing paint code, but list virtualization is independently justified by
-the 2,411-view hierarchy and 0.7-second full rebuild. The maximum extension panel is a smaller but
-still visible whole-tree replacement; give it stable node identities or a virtual flat row model
-before raising its public contract ceiling.
+#### Browser baseline-library repair
+
+`BrowserBaselineLibraryViewController` now retains the 200-record value model but presents it with
+reusable fixed-height table rows. A store event reloads only the viewport instead of reconstructing
+every card. Each control's callbacks are replaced with the displayed record's stable id during
+reuse; a regression scrolls to a recycled row, activates its permission checkbox, and asserts that
+the displayed baseline — not the cell's former owner — changed.
+
+Thumbnails keep the durable-image trust boundary. `BrowserBaselineImage.authenticatedData` performs
+the same bounded read, SHA-256, source-size and declared-dimension checks as the store's public read,
+but needs only a URL and immutable revision value, so rows can call it off-main. Reuse cancels the
+row task. The main actor decodes at most a 192-pixel ImageIO thumbnail, caches it by content hash,
+and assigns it only if the cell still represents that revision.
+
+The stress fixture was corrected at the same time: all 200 records now contain distinct, valid
+320×200 PNGs whose declared dimensions match their bytes. Previously it reused one PNG and declared
+4×3 dimensions, so damaged-image refusal meant the benchmark did not actually exercise successful
+thumbnail loading. The repaired after-numbers therefore include more real image work than the old
+baseline:
+
+| 200-record workload | Before | After |
+|---|---:|---:|
+| Cold System mount | 187.1 ms render + 478.8 ms layout | **46.3 ms render + 33.4 ms layout**; visible thumbnails ready asynchronously in 26.4 ms |
+| Cold Neo Brutalism mount | 170–178 ms render + 507–559 ms layout | **42.6 ms render + 31.9 ms layout**; thumbnails ready in 28.7 ms |
+| One permission change | 255.9 ms render + 414.2 ms layout | **2.0–2.3 ms render + 6.4–6.8 ms layout** |
+| 48-position stress frame | 24 ms System / 544 ms Neo draw before layout | **16.3 ms System / 12.1 ms Neo** for scroll + layout + draw |
+| Retained UI | 2,411 descendants; 119–217 MB | **53 descendants, 3 materialized rows; 14–19 MB** |
+
+#### Extension-panel repair
+
+`ExtensionPanelViewController` validates the entire semantic tree before publication, then flattens
+nested vertical stacks into presentation values owned by an automatic-height reusable table. The
+flattening carries each stack's spacing and parent axis into the visible row, preserving divider,
+spacer and control geometry. Horizontal stacks, overlays, scenes and disclosures remain atomic
+two-dimensional rows. Each materialized row owns a fresh action bridge, and a regression scrolls
+through reuse before activating the final button to prove the current semantic id is routed.
+
+At the public maximum of 500 semantic nodes, the host now retains 24 of 499 presentation rows and
+112 descendants instead of 707. Fresh before/after runs on the same fixture measured:
+
+| 500-node panel workload | Before | After |
+|---|---:|---:|
+| Cold System layout | 243.7 ms | **40.2 ms** |
+| Cold Neo Brutalism layout | 242.0 ms | **38.3 ms** |
+| One complete value replacement | 61.3 ms render + 203.3–204.9 ms layout | **1.8–2.0 ms render + 12.3–12.8 ms layout** |
+| 48-position stress frame | 56.8–57.5 ms draw | **13.4–14.0 ms** for scroll + layout + draw |
+| Retained UI | 707 descendants | **112 descendants; 24 materialized rows** |
+
+The 500-node/1,000-element contract remains a safety bound rather than permission to put an
+unbounded repeated collection inside one horizontal, overlay, scene or disclosure row. Long linear
+documents should remain vertical semantic stacks so the host can keep ownership viewport-bounded.
 
 ### The payloads are read back into the support report
 

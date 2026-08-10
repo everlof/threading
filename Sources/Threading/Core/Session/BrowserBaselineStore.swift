@@ -627,28 +627,7 @@ final class BrowserBaselineStore {
             throw BrowserBaselineStoreError.revisionNotFound
         }
         let url = pngURL(forRevision: revisionID, of: baselineID, in: projectID)
-        let data: Data
-        do {
-            data = try BoundedFileReader.read(
-                url,
-                maximumBytes: BrowserBaselineDefaults.maximumImageBytes
-            )
-        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
-            throw BrowserBaselineStoreError.imageTooLarge(
-                bytes: BrowserBaselineDefaults.maximumImageBytes + 1,
-                limit: BrowserBaselineDefaults.maximumImageBytes
-            )
-        } catch {
-            throw BrowserBaselineStoreError.revisionNotFound
-        }
-        guard BrowserBaselineImage.hash(data) == revision.contentHash,
-              let size = BrowserBaselineImage.pixelSize(of: data),
-              BrowserBaselineImage.isWithinComparisonLimits(size),
-              size.width == revision.conditions.pixelWidth,
-              size.height == revision.conditions.pixelHeight else {
-            throw BrowserBaselineStoreError.storedRevisionDamaged
-        }
-        return data
+        return try BrowserBaselineImage.authenticatedData(at: url, matching: revision)
     }
 
     /// The bounded page state stored beside one revision's pixels, when it has any.
@@ -1534,6 +1513,38 @@ extension BrowserBaselineConditions {
 /// The two questions the store asks of a PNG, in one place so the staging validation and the
 /// caller's own check cannot answer them differently.
 enum BrowserBaselineImage {
+
+    /// Reads and authenticates one durable revision without consulting mutable store state.
+    /// Keeping this value-only boundary outside the main-actor store lets viewport rows do file
+    /// I/O and SHA-256 work away from event handling while preserving exactly the same integrity
+    /// checks as `pngData`.
+    static func authenticatedData(
+        at url: URL,
+        matching revision: BrowserBaselineRevision
+    ) throws -> Data {
+        let data: Data
+        do {
+            data = try BoundedFileReader.read(
+                url,
+                maximumBytes: BrowserBaselineDefaults.maximumImageBytes
+            )
+        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+            throw BrowserBaselineStoreError.imageTooLarge(
+                bytes: BrowserBaselineDefaults.maximumImageBytes + 1,
+                limit: BrowserBaselineDefaults.maximumImageBytes
+            )
+        } catch {
+            throw BrowserBaselineStoreError.revisionNotFound
+        }
+        guard hash(data) == revision.contentHash,
+              let size = pixelSize(of: data),
+              isWithinComparisonLimits(size),
+              size.width == revision.conditions.pixelWidth,
+              size.height == revision.conditions.pixelHeight else {
+            throw BrowserBaselineStoreError.storedRevisionDamaged
+        }
+        return data
+    }
 
     static func hash(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

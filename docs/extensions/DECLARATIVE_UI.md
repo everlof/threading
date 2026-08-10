@@ -154,6 +154,13 @@ disallow these nodes unless their published constraints opt in:
 - `maximumPickerOptions == 0` disallows pickers;
 - `maximumSceneItems == 0` disallows scenes.
 
+The host validates that complete tree before showing any part of it, then virtualizes the direct
+and nested children of vertical stacks as reusable viewport rows. Express a long linear document
+or repeated collection as vertical-stack children so hidden rows do not own AppKit controls.
+Horizontal stacks, overlays, scenes and disclosures are intentionally atomic compositions: putting
+hundreds of repeated elements inside one of those nodes still creates one large eager row and the
+aggregate contract limit does not make that work frame-cheap.
+
 This is why a rich ArtifactKit map belongs in its display-pane panel while a sidebar contribution
 remains a compact reading or action. The vocabulary can grow without silently turning every
 small host surface into a miniature application.

@@ -237,7 +237,8 @@ enum BrowserBaselineUI {
 /// different things: a record the user captured in a private tab is theirs, exists, and is still not
 /// something the agent may read until they say so here.
 @MainActor
-final class BrowserBaselineLibraryViewController: NSViewController {
+final class BrowserBaselineLibraryViewController: NSViewController,
+    NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: - Properties
 
@@ -269,28 +270,54 @@ final class BrowserBaselineLibraryViewController: NSViewController {
         action: #selector(done)
     )
 
-    private lazy var rows: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
+    private lazy var tableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(identifier: BrowserBaselineLibraryDefaults.columnIdentifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.small)
+        table.rowHeight = BrowserBaselineLibraryDefaults.rowHeight
+        table.autoresizingMask = [.width]
+        table.dataSource = self
+        table.delegate = self
+        return table
     }()
 
     private lazy var scrollView: ThemedScrollView = {
-        let clip = FlippedClipView()
-        clip.drawsBackground = false
         let scroll = ThemedScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.contentView = clip
-        scroll.documentView = rows
+        scroll.documentView = tableView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
         return scroll
     }()
 
     private let events = AppEventObservations()
+    private var baselines: [BrowserBaseline] = []
+
+    /// Logical and retained rows are deliberately observable separately. A timing can look fast
+    /// on one machine while still keeping all 200 cards alive; the stress test asserts ownership.
+    var baselineCountForTesting: Int { baselines.count }
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+    var materializedThumbnailCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            count += rowView.subviews
+                .compactMap { $0 as? BrowserBaselineLibraryRowView }
+                .filter(\.hasThumbnail)
+                .count
+        }
+        return count
+    }
 
     // MARK: - Initialization
 
@@ -353,7 +380,6 @@ final class BrowserBaselineLibraryViewController: NSViewController {
             scrollView.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor, constant: -Design.Spacing.pane
             ),
-            rows.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
         ])
 
         events.observe(BrowserBaselinesDidChange.self) { [weak self] event in
@@ -365,12 +391,11 @@ final class BrowserBaselineLibraryViewController: NSViewController {
 
     // MARK: - Private Methods
 
-    /// Rebuilt rather than diffed. The list is capped at a couple of hundred rows, it changes only
-    /// when someone acts on it, and a rebuild cannot leave a row wired to a record that has gone.
+    /// Refreshes cheap value models and lets AppKit reconcile the visible viewport. A store event
+    /// must not construct one card per durable record: the production cap is a storage boundary,
+    /// not permission to put 2,000+ views on the main thread for one checkbox change.
     private func reload() {
-        rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        let baselines = store.baselines(for: projectID)
+        baselines = store.baselines(for: projectID)
         var summary = L10n.format(
             "%lld baselines in %@",
             Int64(baselines.count),
@@ -388,135 +413,63 @@ final class BrowserBaselineLibraryViewController: NSViewController {
             )
         }
         subtitleLabel.stringValue = summary
-
-        guard !baselines.isEmpty else {
-            let empty = NSTextField(
-                wrappingLabelWithString: L10n.string(
-                    "Nothing here yet. Use Save as Baseline in Browser Options to keep a picture of a page you have decided is correct."
-                )
-            )
-            empty.applyFont(.body)
-            empty.textColor = Design.Text.tertiary
-            empty.translatesAutoresizingMaskIntoConstraints = false
-            rows.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-            return
-        }
-
-        for baseline in baselines {
-            let row = makeRow(for: baseline)
-            rows.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        }
+        tableView.reloadData()
     }
 
-    private func makeRow(for baseline: BrowserBaseline) -> NSView {
-        let surface = ThemedSurfaceView()
-        surface.applySurface(fill: Design.Surface.panel, radius: .panel, pattern: .none)
-        surface.translatesAutoresizingMaskIntoConstraints = false
+    // MARK: - Virtual Rows
 
-        let thumbnail = ThemedImagePreview()
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        max(baselines.count, 1)
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard baselines.indices.contains(tableRow) else {
+            let identifier = BrowserBaselineLibraryDefaults.emptyIdentifier
+            let cell = tableView.makeView(withIdentifier: identifier, owner: self)
+                as? BrowserBaselineEmptyRowView ?? BrowserBaselineEmptyRowView()
+            cell.identifier = identifier
+            return cell
+        }
+
+        let baseline = baselines[tableRow]
+        let identifier = BrowserBaselineLibraryDefaults.rowIdentifier
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self)
+            as? BrowserBaselineLibraryRowView ?? BrowserBaselineLibraryRowView()
+        cell.identifier = identifier
+
+        let thumbnailRequest: BrowserBaselineThumbnailRequest?
         if let revision = baseline.activeRevision {
-            let url = store.pngURL(
-                forRevision: revision.id,
-                of: baseline.id,
-                in: projectID
+            thumbnailRequest = BrowserBaselineThumbnailRequest(
+                url: store.pngURL(
+                    forRevision: revision.id,
+                    of: baseline.id,
+                    in: projectID
+                ),
+                revision: revision
             )
-            if let data = try? store.pngData(
-                forRevision: revision.id,
-                of: baseline.id,
-                in: projectID
-            ) {
-                thumbnail.image = NSImage(data: data)
-            }
-            thumbnail.fileURL = url
+        } else {
+            thumbnailRequest = nil
         }
 
-        let name = NSTextField(labelWithString: baseline.name)
-        name.applyFont(.emphasizedBody)
-        name.textColor = Design.Text.label
-        name.lineBreakMode = .byTruncatingTail
-
-        let detail = NSTextField(wrappingLabelWithString: describe(baseline))
-        detail.applyFont(.caption)
-        detail.textColor = Design.Text.secondary
-        detail.maximumNumberOfLines = 3
-
-        // Every control carries the record's *id*, never its index in the list: rows are rebuilt
-        // whenever anything changes, and an index would quietly come to mean a different baseline.
-        // A record that has gone by the time a control fires simply resolves to nothing.
         let id = baseline.id
-        let readable = ThemedCheckbox(
-            title: L10n.string("Agent can read this"),
-            state: baseline.isAgentReadable ? .on : .off,
-            accessibility: L10n.string("Agent can read this baseline")
-        ) { [weak self] state in
-            self?.setReadable(state == .on, for: id)
-        }
-        readable.toolTip = L10n.string(
-            "Private-tab captures start user-only, because provenance is not permission to disclose signed-in pixels."
+        cell.configure(
+            baseline: baseline,
+            detail: describe(baseline),
+            thumbnailRequest: thumbnailRequest,
+            onReadableChange: { [weak self] readable in
+                self?.setReadable(readable, for: id)
+            },
+            onRename: { [weak self] in self?.rename(id) },
+            onReveal: { [weak self] in self?.reveal(id) },
+            onDelete: { [weak self] in self?.delete(id) }
         )
-
-        let rename = ThemedButton(
-            title: L10n.string("Rename…"),
-            target: self,
-            action: #selector(renameClicked(_:))
-        )
-        let reveal = ThemedButton(
-            title: L10n.string("Reveal in Finder"),
-            target: self,
-            action: #selector(revealClicked(_:))
-        )
-        let delete = ThemedButton(
-            title: L10n.string("Delete"),
-            target: self,
-            action: #selector(deleteClicked(_:))
-        )
-        for button in [rename, reveal, delete] {
-            button.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
-        }
-
-        let actions = NSStackView(views: [readable, rename, reveal, delete])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = Design.Spacing.small
-
-        let text = NSStackView(views: [name, detail, actions])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = Design.Spacing.tight
-        text.translatesAutoresizingMaskIntoConstraints = false
-
-        surface.addSubview(thumbnail)
-        surface.addSubview(text)
-        NSLayoutConstraint.activate([
-            thumbnail.leadingAnchor.constraint(
-                equalTo: surface.leadingAnchor, constant: Design.Spacing.medium
-            ),
-            thumbnail.topAnchor.constraint(
-                equalTo: surface.topAnchor, constant: Design.Spacing.medium
-            ),
-            thumbnail.widthAnchor.constraint(
-                equalToConstant: BrowserBaselineLibraryDefaults.thumbnailWidth
-            ),
-            thumbnail.heightAnchor.constraint(
-                equalToConstant: BrowserBaselineLibraryDefaults.thumbnailHeight
-            ),
-            text.leadingAnchor.constraint(
-                equalTo: thumbnail.trailingAnchor, constant: Design.Spacing.medium
-            ),
-            text.topAnchor.constraint(equalTo: surface.topAnchor, constant: Design.Spacing.medium),
-            text.trailingAnchor.constraint(
-                equalTo: surface.trailingAnchor, constant: -Design.Spacing.medium
-            ),
-            surface.bottomAnchor.constraint(
-                greaterThanOrEqualTo: text.bottomAnchor, constant: Design.Spacing.medium
-            ),
-            surface.bottomAnchor.constraint(
-                greaterThanOrEqualTo: thumbnail.bottomAnchor, constant: Design.Spacing.medium
-            )
-        ])
-        return surface
+        return cell
     }
 
     /// What the row says about a record. Everything here came from a page, so it is shown as the
@@ -560,26 +513,6 @@ final class BrowserBaselineLibraryViewController: NSViewController {
         } catch {
             report(error)
         }
-    }
-
-    @objc private func renameClicked(_ sender: Any?) {
-        guard let id = identifiedBaseline(sender) else { return }
-        rename(id)
-    }
-
-    @objc private func revealClicked(_ sender: Any?) {
-        guard let id = identifiedBaseline(sender) else { return }
-        reveal(id)
-    }
-
-    @objc private func deleteClicked(_ sender: Any?) {
-        guard let id = identifiedBaseline(sender) else { return }
-        delete(id)
-    }
-
-    private func identifiedBaseline(_ sender: Any?) -> BrowserBaselineID? {
-        guard let view = sender as? NSView, let raw = view.identifier?.rawValue else { return nil }
-        return BrowserBaselineID(uuidString: raw)
     }
 
     private func rename(_ id: BrowserBaselineID) {
@@ -638,11 +571,257 @@ final class BrowserBaselineLibraryViewController: NSViewController {
     }()
 }
 
+// MARK: - Virtual Row Views
+
+/// One reusable baseline card. Its controls call closures replaced on every configuration, so a
+/// recycled row can never act on the record that previously occupied this viewport slot.
+@MainActor
+private final class BrowserBaselineLibraryRowView: NSTableCellView {
+    private let surface = ThemedSurfaceView()
+    private let thumbnail = ThemedImagePreview()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "")
+
+    private var onReadableChange: ((Bool) -> Void)?
+    private var onRename: (() -> Void)?
+    private var onReveal: (() -> Void)?
+    private var onDelete: (() -> Void)?
+    private var representedThumbnailKey: String?
+    private var thumbnailTask: Task<Void, Never>?
+
+    var hasThumbnail: Bool { thumbnail.image != nil }
+
+    private lazy var readable = ThemedCheckbox(
+        title: L10n.string("Agent can read this"),
+        accessibility: L10n.string("Agent can read this baseline")
+    ) { [weak self] state in
+        self?.onReadableChange?(state == .on)
+    }
+    private lazy var renameButton = ThemedButton(
+        title: L10n.string("Rename…"),
+        target: self,
+        action: #selector(rename)
+    )
+    private lazy var revealButton = ThemedButton(
+        title: L10n.string("Reveal in Finder"),
+        target: self,
+        action: #selector(reveal)
+    )
+    private lazy var deleteButton = ThemedButton(
+        title: L10n.string("Delete"),
+        target: self,
+        action: #selector(deleteBaseline)
+    )
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        surface.applySurface(fill: Design.Surface.panel, radius: .panel, pattern: .none)
+        surface.translatesAutoresizingMaskIntoConstraints = false
+
+        nameLabel.applyFont(.emphasizedBody)
+        nameLabel.textColor = Design.Text.label
+        nameLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.applyFont(.caption)
+        detailLabel.textColor = Design.Text.secondary
+        detailLabel.maximumNumberOfLines = 3
+        readable.toolTip = L10n.string(
+            "Private-tab captures start user-only, because provenance is not permission to disclose signed-in pixels."
+        )
+
+        let actions = NSStackView(
+            views: [readable, renameButton, revealButton, deleteButton]
+        )
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
+
+        let text = NSStackView(views: [nameLabel, detailLabel, actions])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = Design.Spacing.tight
+        text.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(surface)
+        surface.addSubview(thumbnail)
+        surface.addSubview(text)
+        NSLayoutConstraint.activate([
+            surface.topAnchor.constraint(equalTo: topAnchor),
+            surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+            surface.leadingAnchor.constraint(equalTo: leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            thumbnail.leadingAnchor.constraint(
+                equalTo: surface.leadingAnchor, constant: Design.Spacing.medium
+            ),
+            thumbnail.topAnchor.constraint(
+                equalTo: surface.topAnchor, constant: Design.Spacing.medium
+            ),
+            thumbnail.widthAnchor.constraint(
+                equalToConstant: BrowserBaselineLibraryDefaults.thumbnailWidth
+            ),
+            thumbnail.heightAnchor.constraint(
+                equalToConstant: BrowserBaselineLibraryDefaults.thumbnailHeight
+            ),
+            text.leadingAnchor.constraint(
+                equalTo: thumbnail.trailingAnchor, constant: Design.Spacing.medium
+            ),
+            text.topAnchor.constraint(equalTo: surface.topAnchor, constant: Design.Spacing.medium),
+            text.trailingAnchor.constraint(
+                equalTo: surface.trailingAnchor, constant: -Design.Spacing.medium
+            ),
+            text.bottomAnchor.constraint(
+                lessThanOrEqualTo: surface.bottomAnchor, constant: -Design.Spacing.medium
+            )
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        baseline: BrowserBaseline,
+        detail: String,
+        thumbnailRequest: BrowserBaselineThumbnailRequest?,
+        onReadableChange: @escaping (Bool) -> Void,
+        onRename: @escaping () -> Void,
+        onReveal: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        thumbnailTask?.cancel()
+        nameLabel.stringValue = baseline.name
+        detailLabel.stringValue = detail
+        readable.state = baseline.isAgentReadable ? .on : .off
+        self.onReadableChange = onReadableChange
+        self.onRename = onRename
+        self.onReveal = onReveal
+        self.onDelete = onDelete
+
+        guard let thumbnailRequest else {
+            representedThumbnailKey = nil
+            thumbnail.image = nil
+            return
+        }
+        representedThumbnailKey = thumbnailRequest.cacheKey
+        if let image = BrowserBaselineThumbnails.cached(thumbnailRequest) {
+            thumbnail.image = image
+            thumbnail.fileURL = thumbnailRequest.url
+            return
+        }
+
+        // File I/O, SHA-256, and source inspection scale with durable screenshot bytes, not the
+        // viewport. Keep them away from scroll dispatch; only the bounded 192px ImageIO decode and
+        // view assignment return to the main actor. Reuse cancellation prevents a departed row
+        // from painting into the record that inherited its cell.
+        thumbnail.image = nil
+        thumbnailTask = Task { @MainActor [weak self] in
+            let data = await Task.detached(priority: .utility) {
+                try? BrowserBaselineImage.authenticatedData(
+                    at: thumbnailRequest.url,
+                    matching: thumbnailRequest.revision
+                )
+            }.value
+            guard !Task.isCancelled,
+                  let data,
+                  let image = BoundedImageDecoder.thumbnail(
+                      data,
+                      policy: .thumbnail(
+                          maximumPixelDimension: thumbnailRequest.maximumPixelDimension
+                      )
+                  ) else {
+                return
+            }
+            BrowserBaselineThumbnails.insert(image, for: thumbnailRequest)
+            guard self?.representedThumbnailKey == thumbnailRequest.cacheKey else { return }
+            self?.thumbnail.image = image
+            self?.thumbnail.fileURL = thumbnailRequest.url
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        thumbnailTask?.cancel()
+        thumbnailTask = nil
+        representedThumbnailKey = nil
+        thumbnail.image = nil
+        onReadableChange = nil
+        onRename = nil
+        onReveal = nil
+        onDelete = nil
+    }
+
+    @objc private func rename() { onRename?() }
+    @objc private func reveal() { onReveal?() }
+    @objc private func deleteBaseline() { onDelete?() }
+}
+
+@MainActor
+private final class BrowserBaselineEmptyRowView: NSTableCellView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let label = NSTextField(
+            wrappingLabelWithString: L10n.string(
+                "Nothing here yet. Use Save as Baseline in Browser Options to keep a picture of a page you have decided is correct."
+            )
+        )
+        label.applyFont(.body)
+        label.textColor = Design.Text.tertiary
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.medium),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+private struct BrowserBaselineThumbnailRequest: Sendable {
+    let url: URL
+    let revision: BrowserBaselineRevision
+
+    var maximumPixelDimension: Int {
+        Int(
+            max(
+                BrowserBaselineLibraryDefaults.thumbnailWidth,
+                BrowserBaselineLibraryDefaults.thumbnailHeight
+            ) * 2
+        )
+    }
+
+    var cacheKey: String { "\(revision.contentHash)|\(maximumPixelDimension)" }
+}
+
+/// Hash-authenticated, row-sized thumbnails. A store mutation reloads visible cells, so the key is
+/// the revision content hash rather than a row index or path; unchanged screenshots decode once.
+@MainActor
+private enum BrowserBaselineThumbnails {
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = BrowserBaselineDefaults.maximumBaselinesPerProject
+        return cache
+    }()
+
+    static func cached(_ request: BrowserBaselineThumbnailRequest) -> NSImage? {
+        cache.object(forKey: request.cacheKey as NSString)
+    }
+
+    static func insert(_ image: NSImage, for request: BrowserBaselineThumbnailRequest) {
+        cache.setObject(image, forKey: request.cacheKey as NSString)
+    }
+}
+
 // MARK: - Defaults
 
 enum BrowserBaselineLibraryDefaults {
     static let width: CGFloat = 620
     static let height: CGFloat = 480
+    static let rowHeight: CGFloat = 112
     static let thumbnailWidth: CGFloat = 96
     static let thumbnailHeight: CGFloat = 64
+    static let columnIdentifier = NSUserInterfaceItemIdentifier("BrowserBaselineLibraryColumn")
+    static let rowIdentifier = NSUserInterfaceItemIdentifier("BrowserBaselineLibraryRow")
+    static let emptyIdentifier = NSUserInterfaceItemIdentifier("BrowserBaselineLibraryEmptyRow")
 }

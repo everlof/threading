@@ -151,10 +151,14 @@ final class BrowserBaselineUITests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = BrowserBaselineStore(root: root)
         let projectID = ProjectID()
+        let png = try BrowserBaselineStoreTests.png(width: 40, height: 30, red: 120)
         _ = try store.createBaseline(
-            BrowserBaselineStoreTests.request(
+            BrowserBaselineCaptureRequest(
                 name: "Signed-in dashboard",
-                png: try BrowserBaselineStoreTests.png(width: 40, height: 30, red: 120)
+                pngData: png,
+                conditions: BrowserBaselineStoreTests.conditions(width: 40, height: 30),
+                provenance: .userCaptured,
+                isAgentReadable: true
             ),
             in: projectID
         )
@@ -180,6 +184,58 @@ final class BrowserBaselineUITests: XCTestCase {
         // A sheet states its own size, so the narrow-pane rule is not this surface's to meet —
         // it is the comparison tab's, which is asserted below.
         XCTAssertEqual(library.view.frame.width, BrowserBaselineLibraryDefaults.width)
+    }
+
+    func testARecycledLibraryRowActsOnItsCurrentBaseline() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BaselineRowReuse-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BrowserBaselineStore(root: root)
+        let projectID = ProjectID()
+        for index in 0..<12 {
+            let png = try BrowserBaselineStoreTests.png(width: 4, height: 3, red: index)
+            _ = try store.createBaseline(
+                BrowserBaselineStoreTests.request(
+                    name: String(format: "Baseline %03d", index),
+                    png: png
+                ),
+                in: projectID
+            )
+        }
+
+        let library = BrowserBaselineLibraryViewController(
+            projectID: projectID,
+            projectName: "Threading",
+            store: store
+        )
+        let window = performanceWindow(library.view)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let table = try XCTUnwrap(
+            Self.descendants(of: library.view).compactMap { $0 as? ThemedTableView }.first
+        )
+        table.scrollRowToVisible(11)
+        host.layoutSubtreeIfNeeded()
+
+        let cell = try XCTUnwrap(table.view(atColumn: 0, row: 11, makeIfNecessary: false))
+        let readable = try XCTUnwrap(
+            Self.descendants(of: cell).compactMap { $0 as? ThemedCheckbox }.first
+        )
+        let displayedName = try XCTUnwrap(
+            Self.descendants(of: cell)
+                .compactMap { $0 as? NSTextField }
+                .map(\.stringValue)
+                .first { $0.hasPrefix("Baseline ") }
+        )
+        let target = try XCTUnwrap(store.baseline(named: displayedName, in: projectID))
+        XCTAssertTrue(target.isAgentReadable)
+        XCTAssertTrue(readable.performPrimaryAction())
+        XCTAssertFalse(
+            try XCTUnwrap(store.baseline(id: target.id, in: projectID)).isAgentReadable,
+            "A recycled control must carry the id of the row it shows now"
+        )
+        XCTAssertLessThanOrEqual(library.materializedRowCountForTesting, 8)
+        withExtendedLifetime((window, library, store)) {}
     }
 
     /// Loads the library through a fresh store so disk discovery, thumbnail construction, the
@@ -210,15 +266,23 @@ final class BrowserBaselineUITests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: root) }
         let projectID = ProjectID()
-        let png = try BrowserBaselineStoreTests.png(width: 320, height: 200, red: 120)
+        // Every row owns different authenticated bytes. Reusing one flat PNG for all records
+        // makes a content-hash cache turn a 200-thumbnail scroll into a one-thumbnail scroll and
+        // hides the very work this fixture exists to bound.
+        let pngs = try (0..<baselineCount).map {
+            try BrowserBaselineStoreTests.png(width: 320, height: 200, red: $0 % 256)
+        }
 
         let fixtureStarted = DispatchTime.now().uptimeNanoseconds
         var writer: BrowserBaselineStore? = BrowserBaselineStore(root: root)
         for index in 0..<baselineCount {
             _ = try writer?.createBaseline(
-                BrowserBaselineStoreTests.request(
+                BrowserBaselineCaptureRequest(
                     name: String(format: "Baseline %03d", index),
-                    png: png
+                    pngData: pngs[index],
+                    conditions: BrowserBaselineStoreTests.conditions(width: 320, height: 200),
+                    provenance: .agentCaptured,
+                    isAgentReadable: true
                 ),
                 in: projectID
             )
@@ -242,12 +306,16 @@ final class BrowserBaselineUITests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
         let coldDescendants = Self.descendants(of: page).count
+        let coldMaterializedRows = library.materializedRowCountForTesting
+        let thumbnailsReady = waitForMaterializedThumbnails(in: library)
+        let thumbnailsReadyEnded = DispatchTime.now().uptimeNanoseconds
 
         let scroll = try XCTUnwrap(
             Self.descendants(of: page).compactMap { $0 as? NSScrollView }.first
         )
         let documentHeight = scroll.documentView?.bounds.height ?? 0
         let draw = try scrollAndDraw(scroll, host: host, frames: 48)
+        let deepThumbnailsReady = waitForMaterializedThumbnails(in: library)
 
         let first = try XCTUnwrap(store.baselines(for: projectID).first)
         let mutationStarted = DispatchTime.now().uptimeNanoseconds
@@ -264,9 +332,12 @@ final class BrowserBaselineUITests: XCTestCase {
                 + "controller_ms=\(Self.milliseconds(controllerEnded - controllerStarted)) "
                 + "render_ms=\(Self.milliseconds(renderEnded - controllerEnded)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "thumbnail_ready_ms=\(Self.milliseconds(thumbnailsReadyEnded - layoutEnded)) "
                 + "mutation_render_ms=\(Self.milliseconds(mutationRendered - mutationStarted)) "
                 + "mutation_layout_ms=\(Self.milliseconds(mutationLaidOut - mutationRendered)) "
                 + "document_height=\(Int(documentHeight)) descendants=\(coldDescendants) "
+                + "logical_rows=\(library.baselineCountForTesting) "
+                + "materialized_rows=\(coldMaterializedRows) "
                 + "scroll_ms=\(Self.milliseconds(draw.scroll / 48)) "
                 + "scroll_layout_ms=\(Self.milliseconds(draw.layout / 48)) "
                 + "draw_ms=\(Self.milliseconds(draw.draw / 48)) "
@@ -274,7 +345,19 @@ final class BrowserBaselineUITests: XCTestCase {
         )
 
         XCTAssertGreaterThan(documentHeight, scroll.contentSize.height)
-        XCTAssertGreaterThan(coldDescendants, baselineCount)
+        XCTAssertEqual(library.baselineCountForTesting, baselineCount)
+        XCTAssertTrue(thumbnailsReady, "The first viewport's authenticated thumbnails must arrive")
+        XCTAssertTrue(deepThumbnailsReady, "Recycled rows must load their new thumbnails")
+        XCTAssertLessThanOrEqual(
+            coldMaterializedRows,
+            8,
+            "Only a viewport of baseline cards may be retained"
+        )
+        XCTAssertLessThan(
+            coldDescendants,
+            100,
+            "The view tree must remain bounded independently of the durable-record quota"
+        )
         withExtendedLifetime((window, library, store)) {}
     }
 
@@ -373,6 +456,60 @@ final class BrowserBaselineUITests: XCTestCase {
         }
     }
 
+    func testRendersTheBaselineLibraryLightAndDark() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BaselineLibraryRender-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BrowserBaselineStore(root: root)
+        let projectID = ProjectID()
+        for (index, name) in ["Signed-in dashboard", "Checkout — empty cart"].enumerated() {
+            let png = try BrowserBaselineStoreTests.png(
+                width: 160,
+                height: 90,
+                red: 80 + index * 80
+            )
+            _ = try store.createBaseline(
+                BrowserBaselineCaptureRequest(
+                    name: name,
+                    pngData: png,
+                    conditions: BrowserBaselineStoreTests.conditions(width: 160, height: 90),
+                    provenance: index == 0 ? .userCaptured : .agentCaptured,
+                    isAgentReadable: index != 0
+                ),
+                in: projectID
+            )
+        }
+        try FileManager.default.createDirectory(
+            at: Render.directory,
+            withIntermediateDirectories: true
+        )
+
+        for (name, appearance) in [
+            ("light", NSAppearance(named: .aqua)),
+            ("dark", NSAppearance(named: .darkAqua))
+        ] {
+            let library = BrowserBaselineLibraryViewController(
+                projectID: projectID,
+                projectName: "Threading",
+                store: store
+            )
+            let window = performanceWindow(library.view)
+            let host = try XCTUnwrap(window.contentView)
+            host.appearance = appearance
+            host.layoutSubtreeIfNeeded()
+            XCTAssertTrue(waitForMaterializedThumbnails(in: library))
+
+            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+            try data.write(
+                to: Render.directory.appendingPathComponent("browser-baseline-library-\(name).png")
+            )
+            XCTAssertGreaterThan(data.count, 0)
+            withExtendedLifetime((window, library)) {}
+        }
+    }
+
     // MARK: - Helpers
 
     private static func content(
@@ -443,6 +580,20 @@ final class BrowserBaselineUITests: XCTestCase {
             drawNanoseconds += drawn - laidOut
         }
         return (scrollNanoseconds, layoutNanoseconds, drawNanoseconds)
+    }
+
+    private func waitForMaterializedThumbnails(
+        in library: BrowserBaselineLibraryViewController,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while library.materializedThumbnailCountForTesting
+            < library.materializedRowCountForTesting,
+            Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        return library.materializedThumbnailCountForTesting
+            == library.materializedRowCountForTesting
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {

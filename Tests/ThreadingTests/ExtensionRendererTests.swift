@@ -16,6 +16,32 @@ final class ExtensionRendererTests: XCTestCase {
     super.tearDown()
   }
 
+  private func panelWindow(
+    hosting controller: ExtensionPanelViewController,
+    width: CGFloat = 640,
+    height: CGFloat = 400
+  ) -> NSWindow {
+    let page = controller.view
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+    page.translatesAutoresizingMaskIntoConstraints = false
+    host.addSubview(page)
+    NSLayoutConstraint.activate([
+      page.topAnchor.constraint(equalTo: host.topAnchor),
+      page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+      page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+      page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+    ])
+    let window = NSWindow(
+      contentRect: host.bounds,
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    window.contentView = host
+    host.layoutSubtreeIfNeeded()
+    return window
+  }
+
   func testFixtureIsAValidExtensionContract() throws {
     XCTAssertNoThrow(try ExtensionExperimentFixture.manifest.validate())
     XCTAssertNoThrow(
@@ -4759,7 +4785,7 @@ final class ExtensionRendererTests: XCTestCase {
       context: context,
       router: router
     )
-    _ = controller.view
+    let window = panelWindow(hosting: controller)
 
     let refresh = try XCTUnwrap(
       descendants(in: controller.view)
@@ -4767,6 +4793,7 @@ final class ExtensionRendererTests: XCTestCase {
         .first { $0.accessibilityIdentifier() == "extension.action.refresh" }
     )
     refresh.performClick()
+    window.contentView?.layoutSubtreeIfNeeded()
 
     XCTAssertEqual(router.actions.map(\.context), [context])
     XCTAssertTrue(
@@ -4778,11 +4805,13 @@ final class ExtensionRendererTests: XCTestCase {
 
     router.item = nil
     NotificationCenter.default.post(ExtensionsDidChange())
+    window.contentView?.layoutSubtreeIfNeeded()
     XCTAssertTrue(
       descendants(in: controller.view).contains {
         $0.accessibilityIdentifier() == "extension.panel.unavailable"
       }
     )
+    withExtendedLifetime(window) {}
   }
 
   func testProductionExtensionPanelRoutesAControlValue() throws {
@@ -4818,7 +4847,7 @@ final class ExtensionRendererTests: XCTestCase {
       context: context,
       router: router
     )
-    _ = controller.view
+    let window = panelWindow(hosting: controller)
 
     let search = try XCTUnwrap(
       descendants(in: controller.view).compactMap { $0 as? ThemedSearchField }.first
@@ -4829,6 +4858,7 @@ final class ExtensionRendererTests: XCTestCase {
     XCTAssertEqual(router.actions.map(\.actionID), ["filter-artifacts"])
     XCTAssertEqual(router.actions.map(\.value), [.string("dyld")])
     XCTAssertEqual(router.actions.map(\.context), [context])
+    withExtendedLifetime(window) {}
   }
 
   func testProductionExtensionPanelLoadsContextOncePerProcessGeneration() throws {
@@ -4865,7 +4895,7 @@ final class ExtensionRendererTests: XCTestCase {
       router: router
     )
 
-    _ = controller.view
+    let window = panelWindow(hosting: controller)
 
     XCTAssertEqual(router.actions.map(\.actionID), ["load-session"])
     XCTAssertEqual(router.actions.map(\.context), [context])
@@ -4889,6 +4919,7 @@ final class ExtensionRendererTests: XCTestCase {
       router.actions.map(\.actionID),
       ["load-session", "load-session"]
     )
+    withExtendedLifetime(window) {}
   }
 
   func testProductionExtensionPanelHostsCompanionPixelsWithSemanticFallback() throws {
@@ -4926,8 +4957,7 @@ final class ExtensionRendererTests: XCTestCase {
       context: context,
       router: router
     )
-    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 400)
-    controller.view.layoutSubtreeIfNeeded()
+    let window = panelWindow(hosting: controller)
 
     let surface = try XCTUnwrap(
       descendants(in: controller.view)
@@ -4955,6 +4985,7 @@ final class ExtensionRendererTests: XCTestCase {
     XCTAssertNotNil(surface.layer?.contents)
 
     surface.remoteSurfaceDidDisconnect(message: "Worker stopped.")
+    window.contentView?.layoutSubtreeIfNeeded()
     XCTAssertTrue(
       descendants(in: controller.view).contains {
         $0.accessibilityIdentifier() == "extension.remote-surface.fallback"
@@ -4965,6 +4996,7 @@ final class ExtensionRendererTests: XCTestCase {
         .compactMap { ($0 as? NSTextField)?.stringValue }
         .contains("Device display unavailable")
     )
+    withExtendedLifetime(window) {}
   }
 
   func testCornerCardShowsExtensionRowsAndRestoresItsSingleLine() throws {

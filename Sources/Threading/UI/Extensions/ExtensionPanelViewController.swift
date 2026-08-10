@@ -8,7 +8,8 @@ import ThreadingExtensionKit
 /// semantic renderer. If that generation disappears, the tab remains as a recoverable place and
 /// shows an unavailable state until the same contribution returns.
 @MainActor
-final class ExtensionPanelViewController: NSViewController {
+final class ExtensionPanelViewController: NSViewController,
+    NSTableViewDataSource, NSTableViewDelegate {
     let extensionIdentifier: String
     let panelID: String
 
@@ -28,7 +29,59 @@ final class ExtensionPanelViewController: NSViewController {
     private var isPanelVisible = false
 
     private let scrollView = ThemedScrollView()
-    private let contentStack = NSStackView()
+    private lazy var tableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(identifier: Self.contentColumnIdentifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = Design.Size.fieldHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.dataSource = self
+        table.delegate = self
+        return table
+    }()
+
+    private enum MessageTone {
+        case status
+        case unavailable
+        case failure
+    }
+
+    private enum RowContent {
+        case message(text: String, tone: MessageTone, identifier: String)
+        case node(
+            ExtensionNode,
+            parentAxis: ExtensionAxis?,
+            fillsContentWidth: Bool
+        )
+    }
+
+    private struct PresentationRow {
+        let content: RowContent
+        let topInset: CGFloat
+    }
+
+    private var presentationRows: [PresentationRow] = []
+
+    private static let contentColumnIdentifier = NSUserInterfaceItemIdentifier(
+        "ExtensionPanelContent"
+    )
+    private static let contentRowIdentifier = NSUserInterfaceItemIdentifier(
+        "ExtensionPanelVirtualRow"
+    )
+
+    var virtualRowCountForTesting: Int { presentationRows.count }
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
 
     var onChange: (() -> Void)?
 
@@ -74,28 +127,28 @@ final class ExtensionPanelViewController: NSViewController {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
 
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = Design.Spacing.medium
-        contentStack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.pane,
-            left: Design.Spacing.pane,
-            bottom: Design.Spacing.pane,
-            right: Design.Spacing.pane
-        )
-        scrollView.documentView = contentStack
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.documentView = tableView
         view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contentStack.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
         render()
         loadPanelIfNeeded()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
     }
 
     override func viewDidAppear() {
@@ -157,53 +210,38 @@ final class ExtensionPanelViewController: NSViewController {
         invoke(actionID, pendingMessage: "Loading…")
     }
 
-    /// Adds one row spanning the panel's readable width — the stack's width *minus* its edge
-    /// insets. A child pinned to the stack's own width overflows the trailing inset, and when
-    /// the solver must break something it breaks the leading pin, which is how panel content
-    /// ended up flush against the pane's edge.
-    private func addFullWidthRow(_ row: NSView) {
-        contentStack.addArrangedSubview(row)
-        row.widthAnchor.constraint(
-            equalTo: contentStack.widthAnchor,
-            constant: -(Design.Spacing.pane * 2)
-        ).isActive = true
-    }
-
     private func render() {
-        for arranged in contentStack.arrangedSubviews {
-            contentStack.removeArrangedSubview(arranged)
-            arranged.removeFromSuperview()
-        }
+        presentationRows.removeAll(keepingCapacity: true)
 
         if let statusMessage {
-            let status = NSTextField(wrappingLabelWithString: statusMessage)
-            status.applyFont(.detail())
-            status.textColor = Design.Text.secondary
-            status.setAccessibilityIdentifier("extension.panel.status")
-            addFullWidthRow(status)
+            appendMessage(
+                statusMessage,
+                tone: .status,
+                identifier: "extension.panel.status"
+            )
         }
 
         guard let panel else {
             disconnectRemoteSurface()
             scrollView.isHidden = false
             let owner = extensionName ?? extensionIdentifier
-            let unavailable = NSTextField(
-                wrappingLabelWithString: L10n.format(
+            appendMessage(
+                L10n.format(
                     "“%@” is unavailable because %@ is not running or no longer registers this panel.",
                     fallbackTitle,
                     owner
-                )
+                ),
+                tone: .unavailable,
+                identifier: "extension.panel.unavailable"
             )
-            unavailable.applyFont(.body)
-            unavailable.textColor = Design.Text.tertiary
-            unavailable.setAccessibilityIdentifier("extension.panel.unavailable")
-            addFullWidthRow(unavailable)
+            tableView.reloadData()
             return
         }
 
         if panel.remoteSurface != nil, remoteFailureMessage == nil,
            renderRemoteSurface() {
             scrollView.isHidden = true
+            tableView.reloadData()
             return
         }
         if panel.remoteSurface == nil {
@@ -213,39 +251,176 @@ final class ExtensionPanelViewController: NSViewController {
         remoteSurfaceView?.isHidden = true
 
         if let remoteFailureMessage {
-            let failure = NSTextField(wrappingLabelWithString: remoteFailureMessage)
-            failure.applyFont(.detail())
-            failure.textColor = Design.Text.secondary
-            failure.setAccessibilityIdentifier("extension.remote-surface.fallback")
-            addFullWidthRow(failure)
+            appendMessage(
+                remoteFailureMessage,
+                tone: .status,
+                identifier: "extension.remote-surface.fallback"
+            )
         }
 
         do {
-            let rendered = try ExtensionNodeRenderer.render(
+            try ExtensionNodeRenderer.validate(panel.root)
+            appendSemanticNode(
                 panel.root,
-                imageResolver: { [weak self] reference in
-                    self?.resolveImage(reference)
-                },
-                onEvent: { [weak self] actionID, value in
-                    self?.invoke(actionID, value: value)
-                }
+                parentAxis: nil,
+                topInset: presentationRows.isEmpty
+                    ? Design.Spacing.pane
+                    : Design.Spacing.medium,
+                fillsContentWidth: true
             )
-            rendered.setAccessibilityIdentifier(
-                "extension.panel.\(extensionIdentifier).\(panelID)"
-            )
-            addFullWidthRow(rendered)
         } catch {
-            let failure = NSTextField(
-                wrappingLabelWithString: L10n.format(
+            appendMessage(
+                L10n.format(
                     "This extension panel could not be rendered: %@",
                     error.localizedDescription
-                )
+                ),
+                tone: .failure,
+                identifier: "extension.panel.render-error"
             )
-            failure.applyFont(.body)
-            failure.textColor = Design.Status.negative
-            failure.setAccessibilityIdentifier("extension.panel.render-error")
-            addFullWidthRow(failure)
         }
+        tableView.reloadData()
+    }
+
+    private func appendMessage(_ text: String, tone: MessageTone, identifier: String) {
+        presentationRows.append(PresentationRow(
+            content: .message(text: text, tone: tone, identifier: identifier),
+            topInset: presentationRows.isEmpty ? Design.Spacing.pane : Design.Spacing.medium
+        ))
+    }
+
+    /// Vertical stacks are layout grouping, not one indivisible view. Flattening them preserves
+    /// their order and spacing while making the semantic child the table's reuse unit. Nodes whose
+    /// meaning depends on two-dimensional composition remain intact inside that one visible row.
+    private func appendSemanticNode(
+        _ node: ExtensionNode,
+        parentAxis: ExtensionAxis?,
+        topInset: CGFloat,
+        fillsContentWidth: Bool
+    ) {
+        if case .stack(.vertical, let spacing, let children) = node {
+            for (index, child) in children.enumerated() {
+                appendSemanticNode(
+                    child,
+                    parentAxis: .vertical,
+                    topInset: index == 0 ? topInset : Self.spacingValue(spacing),
+                    fillsContentWidth: Self.fillsWidthInsideVerticalStack(child)
+                )
+            }
+            return
+        }
+        presentationRows.append(PresentationRow(
+            content: .node(
+                node,
+                parentAxis: parentAxis,
+                fillsContentWidth: fillsContentWidth
+            ),
+            topInset: topInset
+        ))
+    }
+
+    private static func fillsWidthInsideVerticalStack(_ node: ExtensionNode) -> Bool {
+        switch node {
+        case .textInput, .scene, .divider:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func spacingValue(_ spacing: ExtensionSpacing) -> CGFloat {
+        switch spacing {
+        case .none: 0
+        case .tight: Design.Spacing.tight
+        case .small: Design.Spacing.small
+        case .medium: Design.Spacing.medium
+        case .large: Design.Spacing.large
+        }
+    }
+
+    // MARK: - Virtual Semantic Rows
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let row = presentationRows[tableRow]
+        let cell = tableView.makeView(
+            withIdentifier: Self.contentRowIdentifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        cell.identifier = Self.contentRowIdentifier
+
+        let content: NSView
+        switch row.content {
+        case .message(let text, let tone, let identifier):
+            content = messageView(text, tone: tone, identifier: identifier)
+
+        case .node(let node, let parentAxis, let fillsContentWidth):
+            do {
+                let rendered = try ExtensionNodeRenderer.renderValidatedRow(
+                    node,
+                    parentAxis: parentAxis,
+                    fillsContentWidth: fillsContentWidth,
+                    imageResolver: { [weak self] reference in
+                        self?.resolveImage(reference)
+                    },
+                    onEvent: { [weak self] actionID, value in
+                        self?.invoke(actionID, value: value)
+                    }
+                )
+                rendered.setAccessibilityIdentifier(
+                    "extension.panel.\(extensionIdentifier).\(panelID)"
+                )
+                content = rendered
+            } catch {
+                content = messageView(
+                    L10n.format(
+                        "This extension panel could not be rendered: %@",
+                        error.localizedDescription
+                    ),
+                    tone: .failure,
+                    identifier: "extension.panel.render-error"
+                )
+            }
+        }
+
+        cell.install(
+            content,
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Spacing.pane,
+            topInset: row.topInset,
+            bottomInset: tableRow == presentationRows.count - 1 ? Design.Spacing.pane : 0
+        )
+        return cell
+    }
+
+    private func messageView(
+        _ text: String,
+        tone: MessageTone,
+        identifier: String
+    ) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        switch tone {
+        case .status:
+            label.applyFont(.detail())
+            label.textColor = Design.Text.secondary
+        case .unavailable:
+            label.applyFont(.body)
+            label.textColor = Design.Text.tertiary
+        case .failure:
+            label.applyFont(.body)
+            label.textColor = Design.Status.negative
+        }
+        label.setAccessibilityIdentifier(identifier)
+        return label
     }
 
     private func renderRemoteSurface() -> Bool {

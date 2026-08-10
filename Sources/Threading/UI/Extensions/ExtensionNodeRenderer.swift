@@ -66,6 +66,19 @@ enum ExtensionNodeRenderer {
         customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
         onEvent: @escaping (String, ExtensionJSONValue?) -> Void
     ) throws -> ExtensionNodeHostView {
+        try validate(node)
+        return try ExtensionNodeHostView(
+            node: node,
+            imageResolver: imageResolver,
+            customSurfaceRenderer: customSurfaceRenderer,
+            onEvent: onEvent
+        )
+    }
+
+    /// Validates the complete semantic value before a virtual panel starts materializing rows.
+    /// A viewport boundary changes view ownership, not the extension contract: invalid content is
+    /// rejected atomically rather than appearing valid until the user happens to scroll to it.
+    static func validate(_ node: ExtensionNode) throws {
         var count = 0
         var renderedElementCount = 0
         try validate(
@@ -74,8 +87,26 @@ enum ExtensionNodeRenderer {
             count: &count,
             renderedElementCount: &renderedElementCount
         )
-        return try ExtensionNodeHostView(
+    }
+
+    /// Renders one already-validated child of a vertical semantic stack.
+    ///
+    /// Parent axis remains part of rendering because it decides divider orientation and spacer
+    /// geometry. The host itself fills its table cell; `fillsContentWidth` preserves the original
+    /// stack's `.leading` alignment for intrinsic controls while text inputs, scenes and dividers
+    /// continue to span the readable width.
+    static func renderValidatedRow(
+        _ node: ExtensionNode,
+        parentAxis: ExtensionAxis?,
+        fillsContentWidth: Bool,
+        imageResolver: @escaping ImageResolver = defaultImageResolver,
+        customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
+        onEvent: @escaping (String, ExtensionJSONValue?) -> Void
+    ) throws -> ExtensionNodeHostView {
+        try ExtensionNodeHostView(
             node: node,
+            parentAxis: parentAxis,
+            fillsContentWidth: fillsContentWidth,
             imageResolver: imageResolver,
             customSurfaceRenderer: customSurfaceRenderer,
             onEvent: onEvent
@@ -181,6 +212,8 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
     init(
         node: ExtensionNode,
+        parentAxis: ExtensionAxis? = nil,
+        fillsContentWidth: Bool = true,
         imageResolver: @escaping ExtensionNodeRenderer.ImageResolver,
         customSurfaceRenderer: @escaping ExtensionNodeRenderer.CustomSurfaceRenderer,
         onEvent: @escaping (String, ExtensionJSONValue?) -> Void
@@ -192,16 +225,20 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("extension.node.host")
 
-        let content = try makeView(for: node, parentAxis: nil)
+        let content = try makeView(for: node, parentAxis: parentAxis)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
-        NSLayoutConstraint.activate([
+        var constraints = [
             content.topAnchor.constraint(equalTo: topAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor)
-        ])
+            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor)
+        ]
+        if fillsContentWidth {
+            constraints.append(content.trailingAnchor.constraint(equalTo: trailingAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
     }
 
     @available(*, unavailable)
