@@ -327,6 +327,7 @@ final class ThemedGroupedTableView: ThemedTableView {
 /// all — run *during* `NSTableView.init`, before a subclass's stored properties would exist. A
 /// property with a default value is initialized in phase one, so it is the one piece of state that
 /// is always there to read.
+@MainActor
 protocol SoleColumnFitting: NSTableView {
 
     /// The list width the sole column was last fitted to; negative until it has been.
@@ -342,6 +343,7 @@ protocol SoleColumnFitting: NSTableView {
     var soleColumnFitWidth: CGFloat { get set }
 }
 
+@MainActor
 extension SoleColumnFitting {
 
     func fitSoleColumnToWidth() {
@@ -451,14 +453,10 @@ final class ListSelectionStrength {
     }
 
     private weak var table: NSTableView?
-    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+    private let windowStateObservations = AppEventObservations()
 
     init(_ table: NSTableView) {
         self.table = table
-    }
-
-    deinit {
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
     }
 
     /// Re-asserted from `viewWillDraw`, which is the last moment before any row of this list
@@ -481,8 +479,7 @@ final class ListSelectionStrength {
     /// and no row to invalidate. Applied directly rather than by invalidating the list, because
     /// raising a row's emphasis is what marks that row for display.
     func followWindow() {
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
-        windowStateObservations = []
+        windowStateObservations.removeAll()
 
         defer { apply() }
         guard let window = table?.window else { return }
@@ -491,13 +488,9 @@ final class ListSelectionStrength {
             NSWindow.didBecomeKeyNotification,
             NSWindow.didResignKeyNotification
         ] {
-            windowStateObservations.append(NotificationCenter.default.addObserver(
-                forName: name,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.apply() }
-            })
+            windowStateObservations.observe(name, object: window) { [weak self] in
+                self?.apply()
+            }
         }
     }
 

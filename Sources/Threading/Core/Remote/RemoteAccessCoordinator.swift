@@ -430,7 +430,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     ) -> CreatedShare? {
         guard invitationOrigin != nil else { return nil }
 
-        let invitationToken = Self.randomToken()
+        guard let invitationToken = Self.randomToken() else { return nil }
         let id = UUID().uuidString.lowercased()
         let createdAt = Date()
         let expiresAt = createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
@@ -488,7 +488,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             return cached.redemption
         }
         if token == pairingBootstrapToken {
-            let accessToken = Self.randomToken()
+            guard let accessToken = Self.randomToken() else { return nil }
             if persistsOwnerDevice {
                 let previousToken = ownerDevices.devices.first(where: {
                     $0.deviceID == normalizedDeviceID
@@ -530,7 +530,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
             var share = shares[index]
             let memberID = UUID().uuidString.lowercased()
-            let accessToken = Self.randomToken()
+            guard let accessToken = Self.randomToken() else { return nil }
             let member = RemoteMember(
                 id: memberID,
                 displayName: normalizedName,
@@ -611,6 +611,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             redemption: redemption,
             expiresAt: now.addingTimeInterval(RemoteAccessDefaults.pairingRetrySeconds)
         )
+        // The consumed bootstrap must never remain valid because rotation failed. Nil leaves
+        // existing device bearers working while refusing another pairing until a restart can
+        // obtain fresh entropy.
         pairingBootstrapToken = Self.pairingToken()
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         return redemption
@@ -971,7 +974,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
         // The photographed value is a bootstrap, never the durable capability. It is consumed
         // and rotated when a device exchanges it for its own 256-bit bearer.
-        let token = Self.pairingToken()
+        guard let token = Self.pairingToken() else {
+            status = .failed(reason: L10n.string("A secure remote access token could not be created."))
+            return
+        }
         lifecycleGeneration += 1
         let generation = lifecycleGeneration
         pairingBootstrapToken = token
@@ -1224,8 +1230,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
     /// 32 bytes of entropy, base64url, no padding — the `ExtensionHostService.randomToken`
     /// primitive. A share link's whole security rests on this being unguessable.
-    static func randomToken() -> String {
-        Data(entropy(bytes: 32)).base64EncodedString()
+    typealias EntropySource = (_ byteCount: Int) -> [UInt8]?
+
+    static func randomToken(using source: EntropySource = secureEntropy) -> String? {
+        guard let bytes = source(32), bytes.count == 32 else { return nil }
+        return Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
@@ -1252,14 +1261,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     ///
     /// `randomToken` stays as it was for invitations and device bearers. Those travel by
     /// copied link and never by camera, so they have nothing to buy with the change.
-    static func pairingToken() -> String {
-        base32(entropy(bytes: 16))
+    static func pairingToken(using source: EntropySource = secureEntropy) -> String? {
+        guard let bytes = source(16), bytes.count == 16 else { return nil }
+        return base32(bytes)
     }
 
-    private static func entropy(bytes count: Int) -> [UInt8] {
+    /// Security.framework owns this operation; it does not touch coordinator state and is safe
+    /// to pass through the nonisolated entropy seam without erasing a main-actor function type.
+    nonisolated private static func secureEntropy(bytes count: Int) -> [UInt8]? {
         var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        precondition(status == errSecSuccess, "Could not generate a remote access token")
+        guard status == errSecSuccess else {
+            ThreadingLogger.remote.fault(
+                "Could not generate remote access entropy: \(status, privacy: .public)"
+            )
+            return nil
+        }
         return bytes
     }
 

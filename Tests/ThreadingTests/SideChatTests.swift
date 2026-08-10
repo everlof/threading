@@ -187,7 +187,7 @@ final class SideChatTests: XCTestCase {
         let project = try makeProject()
         let session = AgentSession(kind: .claude, title: "Claude")
         let source = try XCTUnwrap(
-            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+            try AgentLauncher.streamPlan(for: session, in: project).arguments.last
         )
 
         XCTAssertTrue(source.contains("'--forward-subagent-text'"), source)
@@ -200,7 +200,7 @@ final class SideChatTests: XCTestCase {
         session.fastMode = true
 
         let source = try XCTUnwrap(
-            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+            try AgentLauncher.streamPlan(for: session, in: project).arguments.last
         )
 
         XCTAssertTrue(source.contains("'--model' 'future-fast-model'"), source)
@@ -216,7 +216,7 @@ final class SideChatTests: XCTestCase {
         session.fastMode = false
 
         let source = try XCTUnwrap(
-            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+            try AgentLauncher.streamPlan(for: session, in: project).arguments.last
         )
 
         XCTAssertTrue(source.contains("'--config' 'service_tier=\"default\"'"), source)
@@ -234,7 +234,7 @@ final class SideChatTests: XCTestCase {
         session.resumeState = .resumable(TranscriptID("thread-ultra"))
 
         let source = try XCTUnwrap(
-            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+            try AgentLauncher.streamPlan(for: session, in: project).arguments.last
         )
 
         XCTAssertTrue(
@@ -517,6 +517,56 @@ final class SideChatTests: XCTestCase {
         XCTAssertEqual(payload["source_provider"] as? String, "OpenCode")
         XCTAssertEqual(payload["replay_window_truncated"] as? Bool, true)
         XCTAssertEqual(payload["next_cursor"] as? String, "1")
+    }
+
+    func testHandoffSnapshotsRefuseOversizedWritesAndReads() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-bounded-handoff-\(UUID().uuidString)")
+        let writeID = SessionID()
+        let readID = SessionID()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let oversized = String(
+            repeating: "x",
+            count: ConversationHandoffStore.maximumSnapshotBytes
+        )
+        XCTAssertThrowsError(
+            try ConversationHandoffStore.save(
+                snapshot: ConversationHandoffSnapshot(
+                    sourceProvider: "Fixture",
+                    sourceTitle: "Oversized",
+                    wasTruncated: false,
+                    segments: [oversized]
+                ),
+                for: writeID,
+                rootDirectory: root
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: ConversationHandoffStore.url(for: writeID, rootDirectory: root).path
+        ))
+
+        let readURL = ConversationHandoffStore.url(for: readID, rootDirectory: root)
+        try FileManager.default.createDirectory(
+            at: readURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: readURL.path, contents: Data())
+        let handle = try FileHandle(forWritingTo: readURL)
+        try handle.truncate(
+            atOffset: UInt64(ConversationHandoffStore.maximumSnapshotBytes + 1)
+        )
+        try handle.close()
+
+        XCTAssertThrowsError(
+            try ConversationHandoffStore.loadSnapshot(
+                at: readURL,
+                legacySourceKind: nil,
+                legacySourceTitle: ""
+            )
+        ) { error in
+            XCTAssertTrue(error.localizedDescription.contains("too large"), "\(error)")
+        }
     }
 
     func testOpenCodeExportKeepsVisibleContextAndDropsReasoning() throws {

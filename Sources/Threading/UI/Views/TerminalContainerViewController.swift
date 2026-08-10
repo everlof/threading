@@ -1023,9 +1023,12 @@ final class TerminalContainerViewController: NSViewController {
         let openingPrompt = initialPrompt
             ?? ConversationContinuation.openingPrompt(for: agentSession)
 
-        if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
-           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
-            let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
+        if agentSession.usesNativeUI,
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+           let conversation = AgentRuntime.shared.makeConversation(
+               for: agentSession,
+               in: project
+           ) {
             conversation.delegate = self
             conversation.view.frame = frame
             conversation.view.layoutSubtreeIfNeeded()
@@ -1213,7 +1216,15 @@ final class TerminalContainerViewController: NSViewController {
         handoff: ComposerHandoffAnimator.Snapshot? = nil
     ) {
         let isNew = AgentRuntime.shared.conversation(for: agentSession.id) == nil
-        let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
+        guard let conversation = AgentRuntime.shared.makeConversation(
+            for: agentSession,
+            in: project
+        ) else {
+            ThreadingLogger.agent.error(
+                "Refused native conversation for unsupported runtime \(agentSession.kind.rawValue)"
+            )
+            return
+        }
         conversation.delegate = self
 
         // See the terminal path above: the runtime must own the surface before visibility is

@@ -17,7 +17,10 @@ enum ShellAliasReader {
         var result: [String: String] = [:]
 
         for file in shellConfigFiles() {
-            guard let contents = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            guard let data = try? BoundedFileReader.read(
+                file,
+                maximumBytes: AliasDefaults.maximumConfigBytes
+            ), let contents = String(data: data, encoding: .utf8) else { continue }
 
             for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
                 guard let alias = parseAlias(String(line)) else { continue }
@@ -112,6 +115,7 @@ enum ShellAliasReader {
 
 enum AliasDefaults {
     static let keyword = "alias "
+    static let maximumConfigBytes = 2 * 1024 * 1024
 
     /// Environment variables that redirect an agent CLI to an alternate account.
     static let accountEnvironmentKeys = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"]

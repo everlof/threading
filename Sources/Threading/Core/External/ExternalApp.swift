@@ -540,30 +540,12 @@ final class ExternalAppLauncher {
     }
 
     private nonisolated static func locate(_ commands: [String], shell: String) -> String? {
-        let joined = commands.joined(separator: " ")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", "command -v \(joined) 2>/dev/null | head -1"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return nil
+        for command in commands {
+            if let path = AgentCLIProbe.locate(command, shell: shell) {
+                return path
+            }
         }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        let path = String(decoding: data, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else {
-            return nil
-        }
-        return path
+        return nil
     }
 }
 

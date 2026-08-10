@@ -85,9 +85,18 @@ rotated segments. Records are SHA-256 linked. Verification distinguishes a compl
 verified retained suffix after rotation and from malformed or altered data. This is tamper-evident,
 not tamper-proof: an attacker able to rewrite the whole directory can recompute the chain.
 
+The segment cap is an allocation boundary as well as a rotation target. One encoded record larger
+than a segment is refused before append, rotation arithmetic cannot overflow, and verification
+reads at most one segment's allowance. An externally enlarged segment is reported as malformed and
+the chain as broken; it is never skipped as though no audit evidence existed. Rotation count is
+also capped (three in production, eight as the absolute policy ceiling), so a constructed policy
+cannot turn rotation, verification or deletion into unbounded filesystem work.
+
 Deleting a session or project deletes its current and rotated audit files synchronously before the
-model disappears. Reset Everything moves the whole Application Support directory aside under the
-existing recoverable reset policy. Provider transcripts remain provider-owned and are unaffected.
+model disappears. Removal addresses that session's closed set of filenames directly; it neither
+enumerates every other session's ledger nor claims an arbitrary `session.audit.jsonl.*` file as
+owned. Reset Everything moves the whole Application Support directory aside under the existing
+recoverable reset policy. Provider transcripts remain provider-owned and are unaffected.
 
 ## Surface
 

@@ -756,10 +756,14 @@ extension ProjectSidebarViewController {
         // *following* it, so muting the project later still reaches here. An explicit value is
         // written only where it actually differs — which is the whole point of the field being
         // optional rather than a plain flag.
-        projectStore.setNotificationsMuted(
+        guard projectStore.setNotificationsMuted(
             wanted == inherited ? nil : wanted,
             forSessionID: sessionID
-        )
+        ).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
         // The store knows nothing about notifications, so anything already on screen for this
         // session is still there until the alert center is asked to look again.
         AttentionAlertCenter.shared.preferencesChanged()
@@ -946,7 +950,11 @@ extension ProjectSidebarViewController {
     /// meaning for the same item.
     private func setRemoteControl(_ choice: RemoteControlChoice) {
         guard let sessionID = actionSessionID else { return }
-        projectStore.setRemoteControl(choice.sessionValue, for: sessionID)
+        guard projectStore.setRemoteControl(choice.sessionValue, for: sessionID).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
     }
 
     /// Records the choice only, for the same reason Remote Control does: the mode is stated in
@@ -957,7 +965,11 @@ extension ProjectSidebarViewController {
     /// Nil is the inherit row, not a missing value.
     private func setPermissionMode(_ mode: AgentPermissionMode?) {
         guard let sessionID = actionSessionID else { return }
-        projectStore.setPermissionMode(mode, for: sessionID)
+        guard projectStore.setPermissionMode(mode, for: sessionID).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
     }
 
     @objc private func newSideChatClicked() {
@@ -1013,7 +1025,11 @@ extension ProjectSidebarViewController {
     @objc private func togglePinnedClicked() {
         guard let sessionID = actionSessionID,
               let session = projectStore.session(withID: sessionID) else { return }
-        projectStore.setPinned(!session.isPinned, for: sessionID)
+        guard projectStore.setPinned(!session.isPinned, for: sessionID).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
         reload()
     }
 
@@ -1046,7 +1062,11 @@ extension ProjectSidebarViewController {
             placeholder: session.displayTitle,
             allowsEmpty: true
         ) { newTitle in
-            self.projectStore.renameSession(id: sessionID, to: newTitle)
+            guard self.projectStore.renameSession(id: sessionID, to: newTitle).succeeded else {
+                self.reload()
+                self.presentProjectNotice(L10n.string("The project data could not be saved."))
+                return
+            }
             self.reload()
         }
     }

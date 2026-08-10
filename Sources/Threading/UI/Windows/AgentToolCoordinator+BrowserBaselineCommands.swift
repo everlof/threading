@@ -577,10 +577,10 @@ extension AgentToolCoordinator {
                     message: "baseline_path is not a readable regular file."
                 )
             }
-            guard (values.fileSize ?? 0) <= BrowserDefaults.maximumVisualBaselineBytes else {
+            guard (values.fileSize ?? 0) <= BrowserBaselineDefaults.maximumImageBytes else {
                 throw BaselineResolutionFailure(
                     message: "The PNG baseline exceeds the "
-                        + "\(BrowserDefaults.maximumVisualBaselineBytes) byte comparison limit."
+                        + "\(BrowserBaselineDefaults.maximumImageBytes) byte comparison limit."
                 )
             }
             return .path(url)
@@ -749,11 +749,21 @@ extension AgentToolCoordinator {
             baselineData = otherCapture.pngData
 
         case .path(let url):
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+            do {
+                baselineData = try BoundedFileReader.read(
+                    url,
+                    maximumBytes: BrowserBaselineDefaults.maximumImageBytes
+                )
+            } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+                completion(.failure(
+                    "The PNG baseline exceeds the "
+                        + "\(BrowserBaselineDefaults.maximumImageBytes) byte comparison limit."
+                ))
+                return
+            } catch {
                 completion(.failure("Could not read the PNG baseline."))
                 return
             }
-            baselineData = data
         case .stored(let projectID, let baseline, let revision):
             if let baselineURL = URL(string: revision.conditions.url),
                BrowserOrigin(url: baselineURL) != nil,

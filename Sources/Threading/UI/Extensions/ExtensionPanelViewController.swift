@@ -320,7 +320,7 @@ final class ExtensionPanelViewController: NSViewController {
                 extensionIdentifier: extensionIdentifier,
                 relativePath: path
             ) else { return nil }
-            return NSImage(contentsOf: url)
+            return ExtensionImageResourceLoader.image(at: url)
         case .hostAsset:
             // Host assets are scoped to documented component contracts. A standalone panel
             // receives semantic snapshots and package resources instead of private view assets.

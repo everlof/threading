@@ -5,12 +5,15 @@ import ThreadingExtensionKit
 
 enum ExtensionHostServiceError: Error, LocalizedError {
     case unavailable
+    case secureTokenUnavailable
     case missingCapability(String)
 
     var errorDescription: String? {
         switch self {
         case .unavailable:
             return L10n.string("Threading’s extension host service is unavailable.")
+        case .secureTokenUnavailable:
+            return L10n.string("A secure extension authorization token could not be created.")
         case .missingCapability(let capability):
             return L10n.format(
                 "The extension did not declare the required “%@” capability.",
@@ -170,6 +173,7 @@ final class ExtensionHostService {
     private let runtimeSnapshotProvider: ExtensionSessionRuntimeSnapshotProviding?
     private let secretStore: ExtensionSecretStoring
     private let networkBroker: ExtensionNetworkBrokering
+    private let entropySource: EntropySource
     private weak var keyValueStore: ExtensionKeyValueStoring?
     private weak var cacheStore: ExtensionCacheStoring?
     private let storageRouter = ExtensionHostStorageRouter()
@@ -198,6 +202,7 @@ final class ExtensionHostService {
         runtimeSnapshotProvider = provider
         secretStore = KeychainExtensionSecretStore.shared
         networkBroker = ExtensionNetworkBroker.live()
+        entropySource = Self.secureEntropy
     }
 
     /// Test seam which exercises authentication and routing without opening a listener.
@@ -212,7 +217,8 @@ final class ExtensionHostService {
         secretStore: ExtensionSecretStoring? = nil,
         keyValueStore: ExtensionKeyValueStoring? = nil,
         cacheStore: ExtensionCacheStoring? = nil,
-        networkBroker: ExtensionNetworkBrokering? = nil
+        networkBroker: ExtensionNetworkBrokering? = nil,
+        entropySource: @escaping EntropySource = ExtensionHostService.secureEntropy
     ) {
         self.registry = registry
         self.identityRegistry = identityRegistry ?? .shared
@@ -225,6 +231,7 @@ final class ExtensionHostService {
             ?? (snapshots as? ExtensionSessionRuntimeSnapshotProviding)
         self.secretStore = secretStore ?? KeychainExtensionSecretStore.shared
         self.networkBroker = networkBroker ?? ExtensionNetworkBroker.live()
+        self.entropySource = entropySource
         self.keyValueStore = keyValueStore
         self.cacheStore = cacheStore
         storageRouter.install(keyValue: keyValueStore, cache: cacheStore)
@@ -361,12 +368,13 @@ final class ExtensionHostService {
             : nil) else {
             throw ExtensionHostServiceError.unavailable
         }
+        guard let token = Self.randomToken(using: entropySource) else {
+            throw ExtensionHostServiceError.secureTokenUnavailable
+        }
         if !capabilities.isDisjoint(with: Self.hostDataCapabilities) {
             beginObservingHostData()
             refreshSnapshotJournal()
         }
-
-        let token = randomToken()
         authorities[token] = Authority(
             extensionIdentifier: extensionIdentifier,
             processGeneration: processGeneration,
@@ -2036,13 +2044,27 @@ final class ExtensionHostService {
         }
     }
 
-    private func randomToken() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        precondition(status == errSecSuccess, "Could not generate extension host token")
+    typealias EntropySource = (_ byteCount: Int) -> [UInt8]?
+
+    static func randomToken(using source: EntropySource = secureEntropy) -> String? {
+        guard let bytes = source(32), bytes.count == 32 else { return nil }
         return Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Security.framework owns this operation; it does not touch host state and is safe to pass
+    /// through the nonisolated entropy seam without erasing a main-actor function type.
+    nonisolated private static func secureEntropy(bytes count: Int) -> [UInt8]? {
+        var bytes = [UInt8](repeating: 0, count: count)
+        let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        guard status == errSecSuccess else {
+            ThreadingLogger.extensions.fault(
+                "Could not generate extension host entropy: \(status, privacy: .public)"
+            )
+            return nil
+        }
+        return bytes
     }
 }

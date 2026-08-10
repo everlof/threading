@@ -586,6 +586,10 @@ enum SubagentDefaults {
     static let snapshotExtension = "json"
     static let persistenceDelay: TimeInterval = 0.35
     static let activityCharacterLimit = 1_000
+    /// The snapshot is a compact navigator index, not a second transcript. A file beyond this
+    /// is corrupt or has escaped that contract and must be quarantined before decode allocates
+    /// provider-controlled arrays and strings.
+    static let maximumSnapshotBytes = 16 * 1_024 * 1_024
 
     static func compactActivity(_ text: String) -> String {
         let presented = providerActivityPresentation(text)
@@ -815,7 +819,10 @@ final class SubagentStateStore {
         guard fileManager.fileExists(atPath: file.path) else { return nil }
 
         do {
-            let data = try Data(contentsOf: file)
+            let data = try BoundedFileReader.read(
+                file,
+                maximumBytes: SubagentDefaults.maximumSnapshotBytes
+            )
             let snapshot = try JSONDecoder().decode(
                 SubagentTimeline.Snapshot.self,
                 from: data
@@ -868,7 +875,13 @@ final class SubagentStateStore {
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(snapshot).write(to: url(for: sessionID), options: .atomic)
+            let data = try encoder.encode(snapshot)
+            guard data.count <= SubagentDefaults.maximumSnapshotBytes else {
+                throw BoundedFileReadError.exceedsLimit(
+                    maximumBytes: SubagentDefaults.maximumSnapshotBytes
+                )
+            }
+            try data.write(to: url(for: sessionID), options: .atomic)
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to save subagents for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
@@ -976,7 +989,12 @@ enum SubagentTranscriptLoader {
             return
         }
 
-        switch kind {
+        guard let format = TranscriptReplayFormat(kind: kind) else {
+            completion([], false)
+            return
+        }
+
+        switch format {
         case .claude:
             ClaudeSubagentTranscriptReplay.loadConversation(at: url, completion: completion)
         case .codex:
@@ -994,8 +1012,6 @@ enum SubagentTranscriptLoader {
                     completion(replay.0, replay.1)
                 }
             }
-        case .grok, .openCode:
-            completion([], false)
         }
     }
 
@@ -1081,7 +1097,8 @@ enum SubagentUsageReader {
     }
 
     static func read(at url: URL, kind: AgentKind) -> Int? {
-        switch kind {
+        guard let format = TranscriptReplayFormat(kind: kind) else { return nil }
+        switch format {
         case .claude:
             var seen: Set<String> = []
             let total = TranscriptUsageIndex
@@ -1093,8 +1110,6 @@ enum SubagentUsageReader {
 
         case .codex:
             return readCodex(at: url)
-        case .grok, .openCode:
-            return nil
         }
     }
 

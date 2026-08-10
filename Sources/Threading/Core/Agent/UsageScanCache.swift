@@ -61,7 +61,10 @@ final class UsageScanCache {
         let cacheURL = url(forSourcePath: source.path, parserID: parserID)
         usedFiles.insert(cacheURL.lastPathComponent)
 
-        if let data = try? Data(contentsOf: cacheURL, options: .mappedIfSafe),
+        if let data = try? BoundedFileReader.read(
+            cacheURL,
+            maximumBytes: UsageScanCacheDefaults.maximumEntryBytes
+        ),
            let envelope = try? decoder.decode(Envelope.self, from: data),
            envelope.schemaVersion == UsageScanCacheDefaults.schemaVersion,
            envelope.parserID == parserID,
@@ -78,7 +81,8 @@ final class UsageScanCache {
             fingerprint: fingerprint,
             records: parsed
         )
-        if let data = try? encoder.encode(envelope) {
+        if let data = try? encoder.encode(envelope),
+           data.count <= UsageScanCacheDefaults.maximumEntryBytes {
             try? data.write(to: cacheURL, options: .atomic)
         }
         return Result(records: parsed, wasCacheHit: false)
@@ -96,7 +100,10 @@ final class UsageScanCache {
         let cacheURL = url(forSourcePath: key, parserID: parserID)
         usedFiles.insert(cacheURL.lastPathComponent)
 
-        if let data = try? Data(contentsOf: cacheURL, options: .mappedIfSafe),
+        if let data = try? BoundedFileReader.read(
+            cacheURL,
+            maximumBytes: UsageScanCacheDefaults.maximumEntryBytes
+        ),
            let envelope = try? decoder.decode(Envelope.self, from: data),
            envelope.schemaVersion == UsageScanCacheDefaults.schemaVersion,
            envelope.parserID == parserID,
@@ -113,7 +120,8 @@ final class UsageScanCache {
             fingerprint: fingerprint,
             records: parsed
         )
-        if let data = try? encoder.encode(envelope) {
+        if let data = try? encoder.encode(envelope),
+           data.count <= UsageScanCacheDefaults.maximumEntryBytes {
             try? data.write(to: cacheURL, options: .atomic)
         }
         return Result(records: parsed, wasCacheHit: false)
@@ -171,6 +179,7 @@ enum UsageScanCacheDefaults {
     static let directoryName = "UsageScanCache"
     static let schemaVersion = 1
     static let extensionName = "usagecache"
+    static let maximumEntryBytes = 64 * 1024 * 1024
     static let claudeParserID = "claude-v2"
     static let codexParserID = "codex-v1"
     static let openCodeParserID = "opencode-export-v1"

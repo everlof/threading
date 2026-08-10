@@ -38,7 +38,7 @@ final class SessionSharingViewController: NSViewController {
     var onCopyInvitation: ((String) -> Void)?
 
     private let appEvents = AppEventObservations()
-    nonisolated(unsafe) private var tickTimer: Timer?
+    private let tickTimer = MainRunLoopTimer()
 
     /// What is on screen, so an event that changed nothing does not throw away the scroll
     /// position or the pointer's hover. Ages are written into the rows already there.
@@ -111,10 +111,6 @@ final class SessionSharingViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        tickTimer?.invalidate()
     }
 
     // MARK: - Lifecycle
@@ -593,7 +589,7 @@ final class SessionSharingViewController: NSViewController {
     /// tab is on screen keeps "watching 4 min" honest without rebuilding anything: the rows are
     /// written in place, so the pointer keeps its hover and the pane its scroll position.
     private func startTicking() {
-        guard tickTimer == nil else { return }
+        guard !tickTimer.isInstalled else { return }
         refresh()
         let timer = Timer.scheduledTimer(
             withTimeInterval: SessionSharingDefaults.tickInterval,
@@ -602,12 +598,11 @@ final class SessionSharingViewController: NSViewController {
             Task { @MainActor [weak self] in self?.refresh() }
         }
         timer.tolerance = SessionSharingDefaults.tickTolerance
-        tickTimer = timer
+        tickTimer.install(timer)
     }
 
     private func stopTicking() {
-        tickTimer?.invalidate()
-        tickTimer = nil
+        tickTimer.invalidate()
     }
 
     // MARK: - Stack helpers

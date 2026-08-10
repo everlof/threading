@@ -408,17 +408,18 @@ enum SessionNaming {
                 }
 
                 guard let transcriptID = session.resumeState.transcriptID else { continue }
+                guard let replayFormat = TranscriptReplayFormat(kind: session.kind) else {
+                    continue
+                }
 
                 let transcript: Transcript?
-                switch session.kind {
+                switch replayFormat {
                 case .claude:
                     transcript = ClaudeTranscript
                         .url(sessionID: transcriptID, for: session, in: project)
                         .map(Transcript.at)
                 case .codex:
                     transcript = account.map { .codexRollout($0, transcriptID) }
-                case .grok, .openCode:
-                    transcript = nil
                 }
 
                 guard let transcript else { continue }
@@ -448,11 +449,13 @@ enum SessionNaming {
                 let agentTitle = reading.kind.supports(.transcriptTitles)
                     ? claudeTranscriptTitle(at: url)
                     : nil
+                guard let replayFormat = TranscriptReplayFormat(kind: reading.kind) else {
+                    continue
+                }
                 let promptTitle: String?
-                switch reading.kind {
+                switch replayFormat {
                 case .claude: promptTitle = SessionImporter.claudeFirstPrompt(at: url)
                 case .codex: promptTitle = SessionImporter.codexTitle(at: url)
-                case .grok, .openCode: promptTitle = nil
                 }
 
                 guard agentTitle != nil || promptTitle != nil else { continue }

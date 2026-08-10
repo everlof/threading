@@ -5,6 +5,40 @@ final class AccountUsageSummaryTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// The cache has four real states, not two unrelated optional values. In particular, a
+    /// failed refresh after a success must preserve the last good usage while naming it stale.
+    func testCachedReadingTransitionsKeepLastGoodUsageWithoutInventingInvalidPairs() {
+        let first = makeUsage(windows: [
+            window(id: "5h", fraction: 0.43, resetsIn: 3600)
+        ])
+        let replacement = makeUsage(windows: [
+            window(id: "5h", fraction: 0.48, resetsIn: 3600)
+        ])
+        let offline = UsageFetchError.network("offline")
+
+        var reading = AccountUsageReading.notFetched
+        XCTAssertFalse(reading.hasResult)
+        XCTAssertNil(reading.usage)
+        XCTAssertNil(reading.error)
+
+        reading = reading.recording(.failure(offline))
+        XCTAssertTrue(reading.hasResult)
+        XCTAssertNil(reading.usage)
+        XCTAssertEqual(reading.error, offline)
+
+        reading = reading.recording(.success(first))
+        XCTAssertEqual(reading, .current(first))
+
+        reading = reading.recording(.failure(offline))
+        XCTAssertEqual(reading, .stale(first, error: offline))
+        XCTAssertEqual(reading.usage, first)
+        XCTAssertEqual(reading.error, offline)
+
+        reading = reading.recording(.success(replacement))
+        XCTAssertEqual(reading, .current(replacement))
+        XCTAssertNil(reading.error)
+    }
+
     func testSummaryNamesEveryWindowWithItsValue() {
         let usage = makeUsage(windows: [
             window(id: "5h", fraction: 0.43, resetsIn: 3600),

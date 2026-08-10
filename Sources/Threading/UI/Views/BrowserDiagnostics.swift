@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import WebKit
 
 typealias BrowserOpenPanelProvider = (
@@ -385,6 +386,10 @@ enum BrowserVisualComparator {
         guard (0...1).contains(options.maximumDifferentRatio) else {
             throw BrowserVisualComparisonError.invalidRatio
         }
+        guard baseline.count <= BrowserBaselineDefaults.maximumImageBytes,
+              actual.count <= BrowserBaselineDefaults.maximumImageBytes else {
+            throw BrowserVisualComparisonError.imageTooLarge
+        }
         let baselinePixels = try decodeRGBA(baseline)
         let actualPixels = try decodeRGBA(actual)
         return compare(baseline: baselinePixels, actual: actualPixels, options: options)
@@ -756,17 +761,24 @@ enum BrowserVisualComparator {
     }
 
     static func decodeRGBA(_ data: Data) throws -> Pixels {
-        guard let representation = NSBitmapImageRep(data: data),
-              let image = representation.cgImage else {
+        guard data.count <= BrowserBaselineDefaults.maximumImageBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0,
+              height > 0 else {
             throw BrowserVisualComparisonError.invalidPNG
         }
-        let width = image.width
-        let height = image.height
-        guard width > 0, height > 0,
-              width <= BrowserDefaults.maximumVisualComparisonDimension,
-              height <= BrowserDefaults.maximumVisualComparisonDimension,
-              width * height <= BrowserDefaults.maximumVisualComparisonPixels else {
+        guard BrowserBaselineImage.isWithinComparisonLimits((width, height)) else {
             throw BrowserVisualComparisonError.imageTooLarge
+        }
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              image.width == width,
+              image.height == height else {
+            throw BrowserVisualComparisonError.invalidPNG
         }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {

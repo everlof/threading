@@ -2,27 +2,39 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for Ollama (local LLM).
-final class OllamaProvider: AIProvider, @unchecked Sendable {
+final class OllamaProvider: AIProvider {
 
     // MARK: - Properties
 
-    private let baseURL: URL
+    private let baseURL: URL?
     private let model: String
     private let session: URLSession
 
     var name: String { "Ollama" }
 
-    var isConfigured: Bool { true }
+    var isConfigured: Bool { baseURL != nil }
 
     // MARK: - Initialization
 
     init(baseURL: String = AIDefaults.ollamaDefaultURL, model: String = AIDefaults.ollamaDefaultModel) {
-        self.baseURL = URL(string: baseURL) ?? URL(string: AIDefaults.ollamaDefaultURL)!
+        self.baseURL = Self.validatedBaseURL(baseURL)
         self.model = model
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = AIDefaults.requestTimeout
         self.session = URLSession(configuration: config)
+    }
+
+    /// A relative URL is syntactically valid to Foundation, but it is not an Ollama endpoint.
+    /// Reject it at the configuration boundary instead of letting URLSession fail later with a
+    /// request whose destination no longer resembles what Settings displayed.
+    private static func validatedBaseURL(_ value: String) -> URL? {
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host?.isEmpty == false
+        else { return nil }
+        return url
     }
 
     // MARK: - AIProvider
@@ -50,6 +62,7 @@ final class OllamaProvider: AIProvider, @unchecked Sendable {
     // MARK: - Private Methods
 
     private func sendMessage(prompt: String) async throws -> String {
+        guard let baseURL else { throw AIError.notConfigured }
         let url = baseURL.appendingPathComponent("api/generate")
 
         var request = URLRequest(url: url)
@@ -125,6 +138,7 @@ final class OllamaProvider: AIProvider, @unchecked Sendable {
 
     /// Tests if Ollama is running and accessible.
     func testConnection() async -> Bool {
+        guard let baseURL else { return false }
         let url = baseURL.appendingPathComponent("api/tags")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"

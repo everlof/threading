@@ -33,7 +33,7 @@ final class SessionInfoViewController: NSViewController {
     var onOpenURL: ((URL) -> Void)?
 
     private let reader = SessionInfoReader()
-    nonisolated(unsafe) private var pollTimer: Timer?
+    private let pollTimer = MainRunLoopTimer()
 
     /// What the rows currently on screen are drawn from. A reading with the same shape updates
     /// them in place; a different one rebuilds.
@@ -129,10 +129,6 @@ final class SessionInfoViewController: NSViewController {
         refresh()
     }
 
-    deinit {
-        pollTimer?.invalidate()
-    }
-
     // MARK: - Setup
 
     private func setupHeader() {
@@ -204,7 +200,7 @@ final class SessionInfoViewController: NSViewController {
     // MARK: - Polling
 
     private func startPolling() {
-        guard pollTimer == nil else { return }
+        guard !pollTimer.isInstalled else { return }
 
         // A fresh rate measurement: the gap while the tab was hidden is not a sample.
         reader.reset()
@@ -218,12 +214,11 @@ final class SessionInfoViewController: NSViewController {
         // `.common`, or the panel stops updating for as long as a menu is open or a scroll is
         // in progress — which is exactly when someone is reading it.
         RunLoop.main.add(timer, forMode: .common)
-        pollTimer = timer
+        pollTimer.install(timer)
     }
 
     private func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        pollTimer.invalidate()
     }
 
     // MARK: - Rendering

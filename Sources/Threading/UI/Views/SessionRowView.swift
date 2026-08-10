@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import ThreadingExtensionKit
 
 // MARK: - Session Row View
@@ -836,20 +835,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             guard let url = ExtensionManager.shared.imageResourceURL(
                 relativePath: relativePath,
                 extensionIdentifier: extensionIdentifier
-            ),
-            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-            CGImageSourceGetCount(source) == 1,
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-                as? [CFString: Any],
-            let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
-            let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
-            width.intValue > 0,
-            height.intValue > 0,
-            width.intValue <= ExtensionIdentityImageDefaults.maximumPixelDimension,
-            height.intValue <= ExtensionIdentityImageDefaults.maximumPixelDimension else {
+            ) else {
                 return nil
             }
-            return NSImage(contentsOf: url)
+            return ExtensionImageResourceLoader.image(at: url)
 
         case .hostAsset(let assetID):
             if let providerID = ExtensionIdentityAssetID.providerID(from: assetID),
@@ -950,10 +939,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
     }
-}
-
-private enum ExtensionIdentityImageDefaults {
-    static let maximumPixelDimension = 1_024
 }
 
 // MARK: - Agent Kind Symbols

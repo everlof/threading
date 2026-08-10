@@ -2198,6 +2198,29 @@ final class ExtensionContractTests: XCTestCase {
         XCTAssertNil(try store.jsonValue(forKey: "too-large"))
     }
 
+    func testKeyValueStorageRefusesAnOversizedExistingFileBeforeDecode() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "ThreadingExtensionStorageReadQuotaTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent(ExtensionKeyValueStore.stateFileName)
+        XCTAssertTrue(FileManager.default.createFile(atPath: stateURL.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: stateURL)
+        try handle.truncate(
+            atOffset: UInt64(ExtensionKeyValueStore.maximumStoreBytes + 1)
+        )
+        try handle.close()
+
+        XCTAssertThrowsError(try ExtensionKeyValueStore(directoryURL: directory)) { error in
+            XCTAssertEqual(
+                error as? ExtensionStorageError,
+                .quotaExceeded(maximumBytes: ExtensionKeyValueStore.maximumStoreBytes)
+            )
+        }
+    }
+
     func testBrokeredKeyValueStorageSpeaksTheHostWireContract() throws {
         var descriptors: [Int32] = [-1, -1]
         XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
@@ -2357,6 +2380,22 @@ final class ExtensionContractTests: XCTestCase {
                 .quotaExceeded(maximumBytes: ExtensionCacheStore.maximumEntryBytes)
             )
         }
+    }
+
+    func testCacheStoreTreatsAnOversizedExternalEntryAsAMissWithoutAllocatingIt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "ThreadingCacheStoreReadQuotaTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = try ExtensionCacheStore(directoryURL: directory)
+        let entryURL = directory.appendingPathComponent("oversized.bin")
+        XCTAssertTrue(FileManager.default.createFile(atPath: entryURL.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: entryURL)
+        try handle.truncate(atOffset: UInt64(ExtensionCacheStore.maximumEntryBytes + 1))
+        try handle.close()
+
+        XCTAssertNil(try cache.data(forName: "oversized.bin"))
     }
 
     func testBrokeredCacheStorageSpeaksTheHostWireContract() throws {

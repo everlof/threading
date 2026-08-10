@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for OpenAI's API.
-final class OpenAIProvider: AIProvider, @unchecked Sendable {
+final class OpenAIProvider: AIProvider {
 
     // MARK: - Constants
 

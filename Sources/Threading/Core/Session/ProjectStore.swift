@@ -1,5 +1,45 @@
 import Foundation
 
+enum ProjectIconMutationError: Error {
+    case projectNotFound
+    case unusableImage
+    case storageFailed
+    case persistenceRefused
+}
+
+/// What happened to an agent-supplied conversation title.
+///
+/// A boolean used to collapse every refusal into "that was probably a noisy title". That was
+/// especially unsafe for `set_session_name`: its `.chosen` mutation was acknowledged before the
+/// coalesced database write, so recovery mode or a failed store could roll it back after the agent
+/// had already told the user the rename succeeded.
+enum AgentTitleMutationResult: Equatable {
+    case accepted
+    case cleared
+    case sessionNotFound
+    case refusedAsNoise
+    case protectedByStrongerSource
+    case persistenceRefused
+}
+
+/// The durable outcome of a project-graph mutation whose caller has work to do afterwards.
+///
+/// UI-only setters can repaint from the store after `save()` rolls a refused write back. Remote
+/// callers and process-owning callers cannot: acknowledging the request or killing the old
+/// process is an irreversible second step, so they need to know whether SQLite accepted the
+/// first one. `unchanged` is success — the requested durable state already stands.
+enum ProjectMutationResult: Equatable {
+    case applied
+    case unchanged
+    case targetNotFound
+    case unsupportedValue
+    case persistenceRefused
+
+    var succeeded: Bool {
+        self == .applied || self == .unchanged
+    }
+}
+
 /// Owns the project list and its persistence.
 ///
 /// This is the model layer only: it knows nothing about running processes. Live agent surfaces
@@ -7,6 +47,18 @@ import Foundation
 /// `ProjectTerminalRuntime`, each keyed by the durable identifiers stored here.
 @MainActor
 final class ProjectStore {
+
+    private enum StateWritePolicy {
+        case allowed
+        case recoveryMode
+        case failedLoad
+        case failedWrite
+
+        var allowsWrites: Bool {
+            if case .allowed = self { return true }
+            return false
+        }
+    }
 
     // MARK: - Singleton
 
@@ -23,16 +75,22 @@ final class ProjectStore {
     /// A failed load is never followed by writes in the same launch. Even when quarantine
     /// succeeded, the empty in-memory graph is not authoritative replacement state.
     ///
-    /// A recovery launch seeds it false for a different reason with the same shape: the store is
-    /// read so the sidebar can show that the projects survived, and nothing about a launch that
-    /// started no session is worth writing back over them. It is seeded at construction rather
-    /// than set afterwards because `load()` runs inside `init` and takes a write of its own —
-    /// the legacy theme-assignment migration — so a flag set on the finished object would arrive
+    /// A recovery launch seeds a different refusal for a different reason: the store is read so
+    /// the sidebar can show that the projects survived, and nothing about a launch that started
+    /// no session is worth writing back over them. The reason is seeded at construction rather
+    /// than set afterwards because `load()` runs inside `init` and takes a write of its own — the
+    /// legacy theme-assignment migration — so a policy set on the finished object would arrive
     /// one save too late.
-    private var stateWritesAllowed: Bool
+    private var stateWritePolicy: StateWritePolicy
 
     private let stateManager: StateManager
     private var isRestoringState = false
+
+    /// The last graph SQLite accepted. Mutations are presented from `projects`, but a refused
+    /// write restores this snapshot before callers announce the change. Array/struct copy-on-
+    /// write keeps the steady-state cost small and gives every mutation one rollback boundary.
+    private var persistedProjects: [Project] = []
+    private var persistedSelectedSessionID: SessionID?
 
     /// Identity indexes for the model's hot lookup paths. Project/session identifiers do not
     /// change; the indexes are rebuilt only after a structural edit, while title, activity and
@@ -48,6 +106,11 @@ final class ProjectStore {
     /// Pending coalesced write, see `scheduleSave()`.
     private var saveTimer: Timer?
 
+    /// Whether a multi-system transaction may safely begin a side effect that it will later
+    /// need this store to record. This is a preflight, not a promise that the next disk write
+    /// cannot fail; callers must still inspect the mutation result.
+    var acceptsDurableMutations: Bool { stateWritePolicy.allowsWrites }
+
     /// The session currently shown in the terminal pane.
     var selectedSessionID: SessionID? {
         didSet {
@@ -57,8 +120,17 @@ final class ProjectStore {
             // here made sidebar clicks progressively slower as the store grew. A recovery launch
             // still lists and selects — the sidebar is the evidence somebody came for — and must
             // not record where they browsed as the selection the next normal launch restores.
-            guard stateWritesAllowed else { return }
-            stateManager.saveSelectedSessionID(selectedSessionID)
+            guard stateWritePolicy.allowsWrites else {
+                restorePersistedSelection()
+                return
+            }
+            if stateManager.saveSelectedSessionID(selectedSessionID) {
+                persistedSelectedSessionID = selectedSessionID
+            } else {
+                stateWritePolicy = .failedWrite
+                restorePersistedSelection()
+                notifyChanged()
+            }
         }
     }
 
@@ -69,7 +141,7 @@ final class ProjectStore {
         refusesWrites: Bool = RecoveryMode.isActive
     ) {
         self.stateManager = stateManager
-        self.stateWritesAllowed = !refusesWrites
+        self.stateWritePolicy = refusesWrites ? .recoveryMode : .allowed
         load()
         rebuildLookupIndexes()
     }
@@ -79,7 +151,7 @@ final class ProjectStore {
     /// Adds a project for a folder, naming it after the enclosing git repository when there
     /// is one. Returns the existing project if the folder was already added.
     @discardableResult
-    func addProject(folderURL: URL) -> Project {
+    func addProject(folderURL: URL) -> Project? {
         let normalizedPath = folderURL.standardizedFileURL.resolvingSymlinksInPath().path
 
         if let existing = projects.first(where: { $0.folderPath == normalizedPath }) {
@@ -94,46 +166,72 @@ final class ProjectStore {
 
         projects.append(project)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return nil
+        }
         notifyChanged()
 
         return project
     }
 
-    func removeProject(id: ProjectID) {
-        let removedProject = project(withID: id)
+    @discardableResult
+    func removeProject(id: ProjectID) -> ProjectMutationResult {
+        guard let removedProject = project(withID: id) else { return .targetNotFound }
+
+        projects.removeAll { $0.id == id }
+        if let selectedSessionID,
+           removedProject.sessions.contains(where: { $0.id == selectedSessionID }) {
+            setSelectedSessionWithoutPersistence(nil)
+        }
+        rebuildLookupIndexes()
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+
+        // Destructive auxiliary cleanup follows the authoritative commit. Doing it first can
+        // restore a project whose icon, handoff, audit and scheduled work were already erased
+        // when SQLite refuses the deletion.
         AgentWorkTraceStore.shared.remove(projectID: id)
-        if let icon = removedProject?.icon {
+        if let icon = removedProject.icon {
             ProjectIconStore.remove(fileName: icon.fileName)
         }
-        for session in removedProject?.sessions ?? [] {
+        for session in removedProject.sessions {
             ConversationHandoffStore.remove(for: session.id)
             ExecutionAuditStore.shared.remove(sessionID: session.id)
             ScheduledMessageStore.shared.forget(sessionID: session.id)
         }
-
         DraftStore.shared.clear(for: id)
         // Session starts waiting on this project would otherwise fire into a folder the app no
         // longer knows, or be re-armed forever against a project id nothing can resolve.
         ScheduledMessageStore.shared.forget(projectID: id)
-
-        projects.removeAll { $0.id == id }
-        rebuildLookupIndexes()
-        save()
         notifyChanged()
+        return .applied
     }
 
-    func renameProject(id: ProjectID, to name: String) {
-        guard let index = index(ofProject: id) else { return }
+    @discardableResult
+    func renameProject(id: ProjectID, to name: String) -> ProjectMutationResult {
+        guard let index = index(ofProject: id) else { return .targetNotFound }
+        guard projects[index].name != name else { return .unchanged }
         projects[index].name = name
-        save()
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     func setProject(id: ProjectID, expanded: Bool) {
         guard let index = index(ofProject: id),
               projects[index].isExpanded != expanded else { return }
         projects[index].isExpanded = expanded
+        guard stateWritePolicy.allowsWrites else {
+            restorePersistedSnapshot()
+            notifyChanged()
+            return
+        }
         let persistenceSpan = PerformanceRecorder.shared.begin(
             "sidebar.disclosure.persist",
             category: "sidebar",
@@ -141,23 +239,65 @@ final class ProjectStore {
         )
         let saved = stateManager.saveProject(projects[index], position: index)
         persistenceSpan.end(metadata: ["saved": String(saved)])
+        if saved {
+            recordPersistedProject(at: index)
+        } else {
+            stateWritePolicy = .failedWrite
+            restorePersistedSnapshot()
+            notifyChanged()
+        }
     }
 
     /// Records a project's sidebar icon, or clears it. The icon's image file is owned by
     /// `ProjectIconStore`; this only records which file and where it came from.
-    func setIcon(_ icon: ProjectIcon?, for projectID: ProjectID) {
-        guard let index = index(ofProject: projectID),
-              projects[index].icon != icon else { return }
+    @discardableResult
+    func setIcon(_ icon: ProjectIcon?, for projectID: ProjectID) -> Bool {
+        guard let index = index(ofProject: projectID) else { return false }
+        guard projects[index].icon != icon else { return true }
 
-        // Replacement rewrites the same file (it is named after the project), so only a
-        // record pointing at a *different* file leaves one to clean up.
-        if let old = projects[index].icon, old.fileName != icon?.fileName {
+        // Candidate icon writes use fresh names. Retire the standing file only after the
+        // replacement record commits; removing it earlier would turn rollback into a record
+        // that points at bytes which no longer exist.
+        let old = projects[index].icon
+        projects[index].icon = icon
+        guard save() else {
+            notifyChanged()
+            return false
+        }
+        if let old, old.fileName != icon?.fileName {
             ProjectIconStore.remove(fileName: old.fileName)
         }
-
-        projects[index].icon = icon
-        save()
         notifyChanged()
+        return true
+    }
+
+    /// Commits icon bytes and their project record as one candidate transaction.
+    ///
+    /// The candidate has a fresh file name, so a refused database write can remove it without
+    /// reconstructing bytes it overwrote. Only after the record commits does `setIcon` remove
+    /// the previous file.
+    func setIcon(
+        imageData: Data,
+        source: ProjectIconSource,
+        for projectID: ProjectID
+    ) -> Result<ProjectIcon, ProjectIconMutationError> {
+        guard project(withID: projectID) != nil else { return .failure(.projectNotFound) }
+
+        let fileName: String
+        do {
+            fileName = try ProjectIconStore.store(imageData: imageData, for: projectID)
+        } catch ProjectIconStoreError.unusableImage {
+            return .failure(.unusableImage)
+        } catch {
+            return .failure(.storageFailed)
+        }
+
+        let icon = ProjectIcon(source: source, fileName: fileName)
+        guard setIcon(icon, for: projectID) else {
+            ProjectIconStore.remove(fileName: fileName)
+            return .failure(.persistenceRefused)
+        }
+        return .success(icon)
     }
 
     // MARK: - Session Management
@@ -220,7 +360,10 @@ final class ProjectStore {
 
         projects[index].sessions.append(session)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return nil
+        }
         notifyChanged()
 
         return session
@@ -259,7 +402,10 @@ final class ProjectStore {
 
         projects[location.projectIndex].sessions.append(session)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return nil
+        }
         notifyChanged()
 
         return session
@@ -306,7 +452,10 @@ final class ProjectStore {
         guard !adopted.isEmpty else { return [] }
         projects[index].sessions.append(contentsOf: adopted)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return []
+        }
         notifyChanged()
 
         return adopted
@@ -318,15 +467,25 @@ final class ProjectStore {
     /// only for runtimes without a reversible provider archive. Keeping the primitive local is
     /// intentional: a capability-less runtime must never turn Archive into its destructive
     /// Delete command, and tests/import migrations sometimes need to construct local state.
-    func setArchived(_ archived: Bool, for sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.isArchived = archived }
+    @discardableResult
+    func setArchived(_ archived: Bool, for sessionID: SessionID) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].isArchived
+            != archived else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].isArchived = archived
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Commits values that have been observed or applied on both sides of provider archive sync.
     /// One save and notification for a launch reconciliation, however many retained sessions it
     /// initializes, rather than rewriting the whole project graph once per conversation.
-    func synchronizeArchiveStates(_ states: [SessionID: Bool]) {
+    @discardableResult
+    func synchronizeArchiveStates(_ states: [SessionID: Bool]) -> ProjectMutationResult {
         var changed = false
         for (sessionID, archived) in states {
             guard let location = locate(sessionID: sessionID) else { continue }
@@ -334,23 +493,70 @@ final class ProjectStore {
                 .synchronizeArchiveState(archived) || changed
         }
 
-        guard changed else { return }
-        save()
+        guard changed else { return .unchanged }
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
-    func setPinned(_ pinned: Bool, for sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.isPinned = pinned }
+    @discardableResult
+    func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].isPinned != pinned
+        else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].isPinned = pinned
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Switches which surface renders a session: Threading's own conversation view, or the
     /// agent's terminal. The conversation itself is untouched — both surfaces resume it by
     /// the same id. Stopping whatever is running belongs to the caller, since this store
     /// knows nothing about live processes.
-    func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.usesNativeUI = usesNative }
+    @discardableResult
+    func setUsesNativeUI(
+        _ usesNative: Bool,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let session = projects[location.projectIndex].sessions[location.sessionIndex]
+        guard !usesNative || session.kind.supportsNativeUI else { return .unsupportedValue }
+        guard session.usesNativeUI != usesNative else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].usesNativeUI = usesNative
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
+    }
+
+    /// Re-points a resumable conversation at another routed account after its transcript copy
+    /// has been installed there. `SessionMigration` owns that file transaction; this is its
+    /// durable commitment point.
+    @discardableResult
+    func setAccountHandle(
+        _ accountHandle: AccountHandle,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let session = projects[location.projectIndex].sessions[location.sessionIndex]
+        guard session.kind.supportsAccounts else { return .unsupportedValue }
+        guard session.accountHandle != accountHandle else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].accountHandle = accountHandle
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
     }
 
     /// Records this conversation's own answer about Claude's Remote Control bridge. Nil clears
@@ -360,9 +566,25 @@ final class ProjectStore {
     /// Applied on the session's next launch, where the settings file is written. Nothing here
     /// disconnects a bridge that is already open; that is `/remote-control` inside the session,
     /// or a relaunch.
-    func setRemoteControl(_ remoteControl: Bool?, for sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.setClaudeRemoteControl(remoteControl) }
+    @discardableResult
+    func setRemoteControl(
+        _ remoteControl: Bool?,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex]
+            .kind.supports(.remoteControl)
+        else { return .unsupportedValue }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].remoteControl
+            != remoteControl else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex]
+            .setClaudeRemoteControl(remoteControl)
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Records how much this conversation may do before it has to ask. Nil clears it, so the
@@ -372,25 +594,59 @@ final class ProjectStore {
     /// Applied on the session's next launch, where the flags are built. Nothing here changes the
     /// mode of a session that is already running: Claude's own Shift+Tab does that, and the CLI
     /// does not report the result back.
-    func setPermissionMode(_ mode: AgentPermissionMode?, for sessionID: SessionID) {
-        guard session(withID: sessionID)?.kind.supportsPermissionModes == true else { return }
-        update(sessionID: sessionID) { $0.permissionMode = mode }
+    @discardableResult
+    func setPermissionMode(
+        _ mode: AgentPermissionMode?,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex]
+            .kind.supportsPermissionModes else { return .unsupportedValue }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].permissionMode != mode
+        else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].permissionMode = mode
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Records which theme a session's terminal draws with. Nil clears the assignment, so the
     /// session inherits its project's theme — and the app default beyond that — again.
-    func setThemeID(_ themeID: TerminalThemeID?, forSessionID sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.themeID = themeID }
+    @discardableResult
+    func setThemeID(
+        _ themeID: TerminalThemeID?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].themeID != themeID
+        else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].themeID = themeID
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// The same for a project, which every session inside it follows unless it chooses its own.
-    func setThemeID(_ themeID: TerminalThemeID?, forProjectID projectID: ProjectID) {
-        guard let index = index(ofProject: projectID) else { return }
+    @discardableResult
+    func setThemeID(
+        _ themeID: TerminalThemeID?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        guard projects[index].themeID != themeID else { return .unchanged }
         projects[index].themeID = themeID
-        save()
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     // MARK: - Standalone Terminal Management
@@ -407,26 +663,41 @@ final class ProjectStore {
         )
         projects[projectIndex].terminals.append(terminal)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return nil
+        }
         notifyChanged()
         return terminal
     }
 
-    func removeTerminal(id terminalID: TerminalID) {
-        guard let location = locate(terminalID: terminalID) else { return }
+    @discardableResult
+    func removeTerminal(id terminalID: TerminalID) -> ProjectMutationResult {
+        guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
         projects[location.projectIndex].terminals.remove(at: location.terminalIndex)
         rebuildLookupIndexes()
-        save()
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
-    func renameTerminal(id terminalID: TerminalID, to title: String?) {
-        guard let location = locate(terminalID: terminalID) else { return }
+    @discardableResult
+    func renameTerminal(id terminalID: TerminalID, to title: String?) -> ProjectMutationResult {
+        guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        projects[location.projectIndex].terminals[location.terminalIndex].customTitle =
-            (trimmed?.isEmpty ?? true) ? nil : trimmed
-        save()
+        let stored = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        guard projects[location.projectIndex].terminals[location.terminalIndex].customTitle != stored
+        else { return .unchanged }
+        projects[location.projectIndex].terminals[location.terminalIndex].customTitle = stored
+        guard save() else {
+            notifyChanged(sidebarImpact: .terminalRow(terminalID))
+            return .persistenceRefused
+        }
         notifyChanged(sidebarImpact: .terminalRow(terminalID))
+        return .applied
     }
 
     /// Records a shell-reported title without displacing an explicit user rename.
@@ -472,28 +743,59 @@ final class ProjectStore {
 
     /// Records a terminal-only override. Nil returns to the project at its current cwd, and
     /// then the app theme.
-    func setThemeID(_ themeID: TerminalThemeID?, forTerminalID terminalID: TerminalID) {
-        guard let location = locate(terminalID: terminalID) else { return }
+    @discardableResult
+    func setThemeID(
+        _ themeID: TerminalThemeID?,
+        forTerminalID terminalID: TerminalID
+    ) -> ProjectMutationResult {
+        guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
+        guard projects[location.projectIndex].terminals[location.terminalIndex].themeID != themeID
+        else { return .unchanged }
         projects[location.projectIndex].terminals[location.terminalIndex].themeID = themeID
-        save()
+        guard save() else {
+            notifyChanged(sidebarImpact: .terminalRow(terminalID))
+            return .persistenceRefused
+        }
         notifyChanged(sidebarImpact: .terminalRow(terminalID))
+        return .applied
     }
 
     /// Silences one conversation's notifications, or lets it speak. Nil returns it to
     /// following its project — the same three scopes as the theme above, and the reason both
     /// setters take an optional. Withdrawing anything already on screen belongs to the caller:
     /// this store knows nothing about notifications.
-    func setNotificationsMuted(_ muted: Bool?, forSessionID sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.notificationsMuted = muted }
+    @discardableResult
+    func setNotificationsMuted(
+        _ muted: Bool?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].notificationsMuted
+            != muted else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].notificationsMuted = muted
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// The same for a whole checkout.
-    func setNotificationsMuted(_ muted: Bool?, forProjectID projectID: ProjectID) {
-        guard let index = index(ofProject: projectID) else { return }
+    @discardableResult
+    func setNotificationsMuted(
+        _ muted: Bool?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        guard projects[index].notificationsMuted != muted else { return .unchanged }
         projects[index].notificationsMuted = muted
-        save()
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Every archived session, newest first, paired with the project it belongs to.
@@ -504,37 +806,51 @@ final class ProjectStore {
             .sorted { $0.1.lastActiveAt > $1.1.lastActiveAt }
     }
 
-    func removeSession(id sessionID: SessionID) {
-        guard let location = locate(sessionID: sessionID) else { return }
-        AgentWorkTraceStore.shared.remove(
-            sessionID: sessionID,
-            projectID: projects[location.projectIndex].id
-        )
+    @discardableResult
+    func removeSession(id sessionID: SessionID) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let projectID = projects[location.projectIndex].id
+        projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
+        rebuildLookupIndexes()
+
+        if selectedSessionID == sessionID {
+            // Selection and graph are one transaction. The observer's optimized scalar write
+            // cannot persist the session deletion and was the reason a selected deleted session
+            // returned after relaunch.
+            setSelectedSessionWithoutPersistence(nil)
+        }
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+
+        AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
         ConversationHandoffStore.remove(for: sessionID)
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
         // Here rather than in the sidebar's delete gesture: this is the one door every deletion
         // route passes through, and Settings ▸ Archived removes sessions without going near the
         // sidebar at all. A scheduled send left behind would keep naming a session that is gone.
         ScheduledMessageStore.shared.forget(sessionID: sessionID)
-        projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
-        rebuildLookupIndexes()
-
-        if selectedSessionID == sessionID {
-            // The property's observer persists the removal together with the selection change.
-            selectedSessionID = nil
-        } else {
-            save()
-        }
-
         notifyChanged()
+        return .applied
     }
 
     /// Applies an explicit name to a session. Pass nil or blank to fall back to the
     /// terminal's own title again.
-    func renameSession(id sessionID: SessionID, to title: String?) {
+    @discardableResult
+    func renameSession(id sessionID: SessionID, to title: String?) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        update(sessionID: sessionID) { $0.customTitle = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+        let stored = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        guard projects[location.projectIndex].sessions[location.sessionIndex].customTitle != stored
+        else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].customTitle = stored
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         notifyChanged()
+        return .applied
     }
 
     /// Records the agent's own name for a conversation: a transient transport report, canonical
@@ -553,19 +869,17 @@ final class ProjectStore {
     /// Agents update this frequently, so the write is coalesced rather than hitting disk on
     /// every change.
     ///
-    /// Returns whether the session's agent title now reads as `title` — true when it was
-    /// stored and when it already said so, false when the session is gone, the name was
-    /// refused as noise, or a weaker title lost to a stronger one. Automatic transports ignore
-    /// the answer, because a terminal that reports "Claude Code" every second is not
-    /// asking a question. `set_session_name` is, and an agent told its call succeeded when
-    /// the name was dropped would go on to tell the user the same thing.
+    /// Automatic transports ignore the result, because a terminal that reports "Claude Code"
+    /// every second is not asking a question. `set_session_name` is: `.chosen` changes therefore
+    /// bypass coalescing and return `.accepted` only after SQLite commits. Each refusal stays
+    /// distinct so the tool cannot turn a storage failure into advice to choose different words.
     @discardableResult
     func updateAgentTitle(
         _ title: String,
         for sessionID: SessionID,
         source: AgentTitleSource = .reported
-    ) -> Bool {
-        guard let location = locate(sessionID: sessionID) else { return false }
+    ) -> AgentTitleMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .sessionNotFound }
 
         let project = projects[location.projectIndex]
         let session = project.sessions[location.sessionIndex]
@@ -577,15 +891,22 @@ final class ProjectStore {
             // same words through Threading must still pin them.
             if source.canReplace(session.agentTitleSource),
                source != session.agentTitleSource,
-               cleaned != nil {
+                cleaned != nil {
+                guard stateWritePolicy.allowsWrites else { return .persistenceRefused }
                 projects[location.projectIndex].sessions[location.sessionIndex]
                     .agentTitleSource = source
-                scheduleSave()
+                if source == .chosen {
+                    guard save() else { return .persistenceRefused }
+                } else {
+                    scheduleSave()
+                }
             }
-            return cleaned != nil
+            return cleaned == nil ? .cleared : .accepted
         }
 
-        guard source.canReplace(session.agentTitleSource) else { return false }
+        guard source.canReplace(session.agentTitleSource) else {
+            return .protectedByStrongerSource
+        }
 
         if let cleaned {
             let account = AgentAccountDiscovery.account(
@@ -598,20 +919,26 @@ final class ProjectStore {
                 accountDisplayName: account?.displayName,
                 projectName: project.name,
                 folderBasename: project.folderURL.lastPathComponent
-            ) else { return false }
+            ) else { return .refusedAsNoise }
         }
+
+        guard stateWritePolicy.allowsWrites else { return .persistenceRefused }
 
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitle = cleaned
         // A cleared title has no provenance left to defend.
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitleSource =
             cleaned == nil ? nil : source
-        scheduleSave()
+        if source == .chosen {
+            guard save() else { return .persistenceRefused }
+        } else {
+            scheduleSave()
+        }
         let titleCanReorderSidebar = AppSettings.sidebarSessionOrder == .name
             && AppSettings.usesAgentTitleInSidebar
         notifyChanged(
             sidebarImpact: titleCanReorderSidebar ? .structure : .sessionRow(sessionID)
         )
-        return cleaned != nil
+        return cleaned == nil ? .cleared : .accepted
     }
 
     /// Names a session after its first prompt, once.
@@ -731,10 +1058,15 @@ final class ProjectStore {
     }
 
     /// Applies a mutation to a stored session and persists the result.
-    func update(sessionID: SessionID, _ mutate: (inout AgentSession) -> Void) {
-        guard let location = locate(sessionID: sessionID) else { return }
+    @discardableResult
+    func update(
+        sessionID: SessionID,
+        _ mutate: (inout AgentSession) -> Void
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         mutate(&projects[location.projectIndex].sessions[location.sessionIndex])
-        save()
+        guard save() else { return .persistenceRefused }
+        return .applied
     }
 
     // MARK: - Lookup
@@ -845,6 +1177,39 @@ final class ProjectStore {
         }
     }
 
+    private func setSelectedSessionWithoutPersistence(_ id: SessionID?) {
+        isRestoringState = true
+        selectedSessionID = id
+        isRestoringState = false
+    }
+
+    private func recordPersistedSnapshot() {
+        persistedProjects = projects
+        persistedSelectedSessionID = selectedSessionID
+    }
+
+    /// `saveProject` deliberately does not rewrite session rows. Record only the project payload
+    /// it committed while keeping the last durable sessions in the rollback snapshot.
+    private func recordPersistedProject(at index: Int) {
+        guard projects.indices.contains(index),
+              let persistedIndex = persistedProjects.firstIndex(where: {
+                  $0.id == projects[index].id
+              }) else { return }
+        var committed = projects[index]
+        committed.sessions = persistedProjects[persistedIndex].sessions
+        persistedProjects[persistedIndex] = committed
+    }
+
+    private func restorePersistedSelection() {
+        setSelectedSessionWithoutPersistence(persistedSelectedSessionID)
+    }
+
+    private func restorePersistedSnapshot() {
+        projects = persistedProjects
+        restorePersistedSelection()
+        rebuildLookupIndexes()
+    }
+
     private func notifyChanged(
         sidebarImpact: ProjectsDidChange.SidebarImpact = .structure
     ) {
@@ -864,7 +1229,8 @@ final class ProjectStore {
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.save()
+                guard let self, !self.save() else { return }
+                self.notifyChanged()
             }
         }
     }
@@ -877,29 +1243,44 @@ final class ProjectStore {
         save()
     }
 
-    private func save() {
+    @discardableResult
+    private func save() -> Bool {
         saveTimer?.invalidate()
         saveTimer = nil
 
-        guard stateWritesAllowed else {
-            // Two reasons reach here and only one of them is a fault, so the line says which:
-            // a failed load whose quarantine did not take, and a recovery launch that reads the
-            // store to show it and writes nothing back.
-            if RecoveryMode.isActive {
+        guard stateWritePolicy.allowsWrites else {
+            // The reason is stored with the refusal. Consulting the process-global recovery
+            // flag here made an injected recovery store report a fictional failed quarantine,
+            // and collapsed a failed write into a failed load in real diagnostics.
+            switch stateWritePolicy {
+            case .recoveryMode:
                 RecoveryMode.refuse("a projects-state save")
-            } else {
+            case .failedLoad:
                 ThreadingLogger.agent.error(
-                    "Refusing to save projects state because its failed load could not be quarantined"
+                    "Refusing to save projects state because its earlier load was not authoritative"
                 )
+            case .failedWrite:
+                ThreadingLogger.agent.error(
+                    "Refusing to save projects state because an earlier write failed"
+                )
+            case .allowed:
+                break
             }
-            return
+            restorePersistedSnapshot()
+            return false
         }
 
         let state = ProjectsState(
             projects: projects,
             selectedSessionID: selectedSessionID
         )
-        stateManager.saveProjectsState(state)
+        guard stateManager.saveProjectsState(state) else {
+            stateWritePolicy = .failedWrite
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSnapshot()
+        return true
     }
 
     /// Reads the store, and records that it was read.
@@ -916,6 +1297,7 @@ final class ProjectStore {
             LaunchLedger.shared.record(.persistenceOpened, detail: [
                 StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeMissing
             ])
+            recordPersistedSnapshot()
             return
         case .loaded(let state):
             LaunchLedger.shared.record(.persistenceOpened, detail: [
@@ -925,6 +1307,7 @@ final class ProjectStore {
             projects = state.projects
             selectedSessionID = state.selectedSessionID
             isRestoringState = false
+            recordPersistedSnapshot()
             if migrateLegacyThemeAssignments() {
                 save()
             }
@@ -933,7 +1316,7 @@ final class ProjectStore {
                 StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeFailed
             ])
             didLoadStateSuccessfully = false
-            stateWritesAllowed = false
+            stateWritePolicy = .failedLoad
             if let quarantinedAt {
                 ThreadingLogger.agent.error(
                     "Projects state requires recovery from \(quarantinedAt.path, privacy: .public)"

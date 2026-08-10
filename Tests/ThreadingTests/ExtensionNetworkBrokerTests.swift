@@ -237,6 +237,26 @@ final class ExtensionHostBrokeredFetchRouteTests: XCTestCase {
         return authorization.connection.bearerToken
     }
 
+    func testAuthorizationFailsClosedWhenSecureTokenEntropyIsUnavailable() throws {
+        let service = ExtensionHostService(
+            registry: ComponentCustomizationRegistry(),
+            baseURL: try XCTUnwrap(URL(string: "http://127.0.0.1:1/v1")),
+            entropySource: { _ in nil }
+        )
+
+        XCTAssertThrowsError(try service.authorize(
+            extensionIdentifier: "com.example.no-entropy",
+            processGeneration: "generation-one",
+            order: 0,
+            capabilities: [.networkBrokered]
+        )) { error in
+            guard case ExtensionHostServiceError.secureTokenUnavailable = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+        XCTAssertNil(ExtensionHostService.randomToken(using: { _ in [0] }))
+    }
+
     private func post(
         _ call: ExtensionBrokeredFetchRequest,
         token: String,

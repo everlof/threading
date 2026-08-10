@@ -20,16 +20,27 @@ enum AppDataResetFlow {
     /// **Returns `Never` on success**: the restart is not a convenience. Every store here is a
     /// singleton holding its state in memory, so a running app carries on from what it read at
     /// launch and would write that back over the reset at the first save. See
-    /// `AppRelaunch.discardingState`, which is also why nothing is offered to reset *without*
-    /// restarting.
+    /// `AppRelaunch.PreparedRelaunch.commit`, which is also why nothing is offered to reset
+    /// *without* restarting.
     ///
     /// The date is passed in rather than read, so a test names the folder it expects instead of
     /// racing the clock.
     static func perform(
         _ scope: AppDataReset.Scope,
         at date: Date = Date(),
-        reason: IntentionalExitReason = .reset
+        reason: IntentionalExitReason = .reset,
+        prepareRelaunch: () throws -> AppRelaunch.PreparedRelaunch = {
+            try AppRelaunch.prepare()
+        },
+        reset: (AppDataReset.Scope, Date) throws -> AppDataReset.Outcome = { scope, date in
+            try AppDataReset.perform(scope, at: date)
+        }
     ) throws -> Never {
+        // Prove that the helper can start before deleting credentials, closing the database or
+        // moving anything. It waits behind a pipe until `commit`; an error below releases this
+        // owner and cancels the helper without ever asking it to reopen the app.
+        let relaunch = try prepareRelaunch()
+
         if case .everything = scope {
             // An app-data reset must not leave durable owner credentials behind. Stop the
             // listener first, then erase the one app-owned Keychain item before moving the file
@@ -45,12 +56,18 @@ enum AppDataResetFlow {
             // them outright if the reset went on to fail. The Keychain calls above are not
             // symmetric with that: keychain items are in neither the domain nor the support
             // directory, so nothing else would ever remove them.
+
+            // The SQLite store and its WAL/SHM files are inside the directory about to move.
+            // Close the cached connection first: moving an open vnode works at the filesystem
+            // layer but violates SQLite's lifetime contract and can leave its final checkpoint
+            // targeting paths that no longer name the database. A failed move may reopen later.
+            StateManager.shared.closeDatabase()
         }
 
-        let outcome = try AppDataReset.perform(scope, at: date)
+        let outcome = try reset(scope, date)
         ThreadingLogger.agent.info(
             "Reset app data into \(outcome.backup.lastPathComponent, privacy: .public)"
         )
-        AppRelaunch.discardingState(reason: reason)
+        try relaunch.commit(reason: reason)
     }
 }

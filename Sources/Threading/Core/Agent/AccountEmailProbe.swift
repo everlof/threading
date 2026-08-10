@@ -22,11 +22,13 @@ enum AccountEmailProbe {
 
     /// Addresses learned from the CLI, keyed by account id. Persisted, because the cost being
     /// avoided is a process launch rather than a file read.
+    @MainActor
     private static var cache: [String: String] {
         get { UserDefaults.standard.dictionary(forKey: Keys.cache) as? [String: String] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: Keys.cache) }
     }
 
+    @MainActor
     static func cachedEmail(for account: AgentAccount) -> String? {
         cache[account.id.rawValue]
     }
@@ -76,34 +78,33 @@ enum AccountEmailProbe {
     /// The account is selected the same way a launch selects one — `CLAUDE_CONFIG_DIR`, unset
     /// for the default — so this asks about exactly the login a session would run as.
     private static func probe(_ account: AgentAccount, shell: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
+        var environment = AgentEnvironment.launchEnvironment()
+        if account.isDefault {
+            environment.removeValue(forKey: AgentKind.claude.accountEnvironmentKey)
+        } else {
+            environment[AgentKind.claude.accountEnvironmentKey] = account.configPath
+        }
+        var command = ShellCommand(word: AgentDefaults.claudeExecutable)
+        command.append(word: "auth")
+        command.append(word: "status")
+        command.append(word: "--json")
 
-        let redirect = account.isDefault
-            ? "env -u \(AgentKind.claude.accountEnvironmentKey)"
-            : "env \(AgentKind.claude.accountEnvironmentKey)='\(account.configPath)'"
-
-        process.arguments = [
-            "-l", "-c",
-            "\(redirect) \(AgentDefaults.claudeExecutable) auth status --json"
-        ]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: shell,
+                arguments: ["-l", "-c", command.source],
+                environment: environment,
+                timeout: AccountProbeDefaults.timeout,
+                maximumOutputBytes: AccountProbeDefaults.maximumOutputBytes,
+                output: .standardOutput
+            )
         } catch {
             ThreadingLogger.agent.error("Could not ask claude for its account: \(error.localizedDescription)")
             return nil
         }
-
-        // Read before waiting: a full pipe buffer with nobody draining it deadlocks the child.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard result.termination == .exited(0), !result.outputWasTruncated,
+              let json = try? JSONSerialization.jsonObject(with: result.output) as? [String: Any],
               let email = json[AccountProbeDefaults.emailKey] as? String,
               !email.isEmpty
         else { return nil }
@@ -114,4 +115,6 @@ enum AccountEmailProbe {
 
 enum AccountProbeDefaults {
     static let emailKey = "email"
+    static let timeout: TimeInterval = 10
+    static let maximumOutputBytes = 64 * 1024
 }

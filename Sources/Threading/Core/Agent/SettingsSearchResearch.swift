@@ -236,23 +236,20 @@ enum SettingsSearchResearch {
         return answer
     }
 
-    /// `CommitMessageComposer.execute`'s shape: one merged pipe, a terminate-on-timeout work
-    /// item, and the uncaught-signal check that tells our timeout from the child's failure.
+    /// The process-group runner bounds provider output and records whether its own timeout fired,
+    /// rather than guessing from a signal that may have been the child's crash.
     private static func execute(
         _ plan: AgentLaunchPlan
     ) -> (output: String?, failure: ResearchError?) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: SettingsResearchDefaults.timeout,
+                maximumOutputBytes: SettingsResearchDefaults.maximumOutputBytes
+            )
         } catch {
             ThreadingLogger.agent.error(
                 "Settings research launch failed: \(error.localizedDescription, privacy: .public)"
@@ -260,29 +257,19 @@ enum SettingsSearchResearch {
             return (nil, .launchFailed)
         }
 
-        let timeout = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global().asyncAfter(
-            deadline: .now() + SettingsResearchDefaults.timeout,
-            execute: timeout
-        )
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeout.cancel()
-
-        let output = String(data: data, encoding: .utf8)
+        let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Settings research child exited: status \(process.terminationStatus), \(data.count) output bytes"
+            "Settings research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
-        if process.terminationReason == .uncaughtSignal {
+        switch result.termination {
+        case .timedOut:
             return (output, .timedOut)
+        case .exited(let status) where status != 0:
+            return (output, .exitedAbnormally(status))
+        case .exited:
+            return (output, nil)
         }
-        guard process.terminationStatus == 0 else {
-            return (output, .exitedAbnormally(process.terminationStatus))
-        }
-
-        return (output, nil)
     }
 }
 
@@ -296,6 +283,7 @@ enum SettingsResearchDefaults {
     /// a background task. A fast model answers well inside this; a wedged one should not hold
     /// the pane for a minute and a half.
     static let timeout: TimeInterval = 60
+    static let maximumOutputBytes = 8 * 1024 * 1024
 
     /// The key carrying the reply in Claude's `--print --output-format json` envelope.
     static let claudeResultKey = "result"

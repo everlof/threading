@@ -155,6 +155,23 @@ final class BrowserBaselineStoreTests: XCTestCase {
         )
     }
 
+    func testEmptyOptionalArtifactsAreCanonicalizedAsAbsent() throws {
+        let png = try Self.png(width: 2, height: 2, red: 5)
+        var request = Self.request(name: "Empty state", png: png)
+        request.attributionJSON = Data()
+        request.diagnosticsJSON = Data()
+
+        let created = try store.createBaseline(request, in: projectID)
+
+        XCTAssertEqual(created.activeRevision?.hasAttribution, false)
+        XCTAssertEqual(created.activeRevision?.hasDiagnostics, false)
+        XCTAssertNil(store.attributionJSON(
+            forRevision: try XCTUnwrap(created.activeRevision).id,
+            of: created.id,
+            in: projectID
+        ))
+    }
+
     // MARK: - Failure states
 
     func testRejectsSomethingThatIsNotAPNG() throws {
@@ -192,6 +209,79 @@ final class BrowserBaselineStoreTests: XCTestCase {
         )
         let contents = try FileManager.default.subpathsOfDirectory(atPath: quarantine.path)
         XCTAssertTrue(contents.contains { $0.hasSuffix(BrowserBaselineDefaults.imageFileName) })
+    }
+
+    func testAnOversizedRecordIsQuarantinedBeforeItIsDecoded() throws {
+        let png = try Self.png(width: 2, height: 2, red: 9)
+        let created = try store.createBaseline(
+            Self.request(name: "Oversized record", png: png),
+            in: projectID
+        )
+        let record = baselineDirectory(created.id)
+            .appendingPathComponent(BrowserBaselineDefaults.recordFileName)
+        try Data(count: BrowserBaselineDefaults.maximumRecordBytes + 1).write(to: record)
+
+        let reloaded = BrowserBaselineStore(root: root)
+        XCTAssertTrue(reloaded.baselines(for: projectID).isEmpty)
+
+        let quarantine = root.appendingPathComponent(
+            BrowserBaselineDefaults.quarantineDirectoryName,
+            isDirectory: true
+        )
+        XCTAssertTrue(
+            try FileManager.default.subpathsOfDirectory(atPath: quarantine.path)
+                .contains { $0.hasSuffix(BrowserBaselineDefaults.recordFileName) }
+        )
+    }
+
+    func testStoredPixelsAreRevalidatedAgainstTheApprovedRevision() throws {
+        let original = try Self.png(width: 2, height: 2, red: 9)
+        let created = try store.createBaseline(
+            Self.request(name: "Changed behind our back", png: original),
+            in: projectID
+        )
+        let revision = try XCTUnwrap(created.activeRevision)
+        let replacement = try Self.png(width: 2, height: 2, red: 10)
+        try replacement.write(
+            to: revisionDirectory(revision.id, baselineID: created.id)
+                .appendingPathComponent(BrowserBaselineDefaults.imageFileName)
+        )
+
+        XCTAssertThrowsError(
+            try store.pngData(
+                forRevision: revision.id,
+                of: created.id,
+                in: projectID
+            )
+        ) { error in
+            XCTAssertEqual(error as? BrowserBaselineStoreError, .storedRevisionDamaged)
+        }
+    }
+
+    func testOversizedStoredPixelsAreRefusedWithoutAWholeFileRead() throws {
+        let png = try Self.png(width: 2, height: 2, red: 9)
+        let created = try store.createBaseline(
+            Self.request(name: "Grown behind our back", png: png),
+            in: projectID
+        )
+        let revision = try XCTUnwrap(created.activeRevision)
+        let imageURL = revisionDirectory(revision.id, baselineID: created.id)
+            .appendingPathComponent(BrowserBaselineDefaults.imageFileName)
+        let handle = try FileHandle(forWritingTo: imageURL)
+        try handle.truncate(atOffset: UInt64(BrowserBaselineDefaults.maximumImageBytes + 1))
+        try handle.close()
+
+        XCTAssertThrowsError(
+            try store.pngData(
+                forRevision: revision.id,
+                of: created.id,
+                in: projectID
+            )
+        ) { error in
+            guard case .imageTooLarge = error as? BrowserBaselineStoreError else {
+                return XCTFail("Expected a bounded-read refusal, got \(error)")
+            }
+        }
     }
 
     func testARecordFromANewerBuildIsLeftAloneRatherThanQuarantined() throws {
@@ -344,5 +434,19 @@ final class BrowserBaselineStoreTests: XCTestCase {
             bytes[index * 4 + 3] = 255
         }
         return try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+    }
+
+    private func baselineDirectory(_ baselineID: BrowserBaselineID) -> URL {
+        root
+            .appendingPathComponent(projectID.uuidString, isDirectory: true)
+            .appendingPathComponent(baselineID.uuidString, isDirectory: true)
+    }
+
+    private func revisionDirectory(
+        _ revisionID: BrowserBaselineRevisionID,
+        baselineID: BrowserBaselineID
+    ) -> URL {
+        baselineDirectory(baselineID)
+            .appendingPathComponent(revisionID.uuidString, isDirectory: true)
     }
 }

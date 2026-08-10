@@ -316,9 +316,10 @@ enum ThemedChartGeometry {
         let xRange: ClosedRange<Date>?
         let x: ClosedRange<Double>
         if let requested = model.xRange {
-            xRange = nonEmpty(requested)
-            let lower = xRange!.lowerBound.timeIntervalSinceReferenceDate
-            let upper = xRange!.upperBound.timeIntervalSinceReferenceDate
+            let resolved = nonEmpty(requested)
+            xRange = resolved
+            let lower = resolved.lowerBound.timeIntervalSinceReferenceDate
+            let upper = resolved.upperBound.timeIntervalSinceReferenceDate
             x = lower...upper
         } else if hasPoint {
             let resolved = nonEmpty(minimumTime...maximumTime)
@@ -1821,7 +1822,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
             for value in series.points
                 where model.series[seriesIndex].points.indices.contains(value.sourceIndex) {
                 let distance = abs(value.x - targetX)
-                if best == nil || distance < best!.distance {
+                if best.map({ distance < $0.distance }) ?? true {
                     best = (distance, seriesIndex, value.sourceIndex)
                 }
             }

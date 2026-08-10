@@ -20,7 +20,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No such file: \(path)"))
                 return
             }
-            guard let data = try? Data(contentsOf: url) else {
+            guard let data = ProjectIconStore.candidateData(at: url) else {
                 completion(.failure("Could not read \(url.lastPathComponent)."))
                 return
             }
@@ -53,18 +53,23 @@ extension AgentToolCoordinator {
     }
 
     func apply(iconData: Data, to project: Project) -> MCPToolResult {
-        guard let fileName = ProjectIconStore.store(imageData: iconData, for: project.id) else {
+        switch dependencies.projects.setIcon(
+            imageData: iconData,
+            source: .agent,
+            for: project.id
+        ) {
+        case .success:
+            return .success("Set \"\(project.name)\"'s sidebar icon.")
+        case .failure(.unusableImage):
             return .failure("""
                 That is not an image Threading can use as an icon — it needs to decode as \
                 PNG, JPEG, GIF, HEIC or ICO at 16px or larger.
                 """)
+        case .failure(.projectNotFound):
+            return .failure("That project no longer exists.")
+        case .failure(.storageFailed), .failure(.persistenceRefused):
+            return .failure("The project icon could not be saved.")
         }
-
-        dependencies.projects.setIcon(
-            ProjectIcon(source: .agent, fileName: fileName),
-            for: project.id
-        )
-        return .success("Set \"\(project.name)\"'s sidebar icon.")
     }
 
 }

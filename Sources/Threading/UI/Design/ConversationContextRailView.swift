@@ -78,11 +78,17 @@ final class ConversationContextRailView: NSView {
     ) -> [ThemedMenuEntry] {
         values.map { attachment in
             let actions = actions(for: attachment)
+            guard !actions.isEmpty else {
+                return .item(ThemedMenuItem(
+                    title: attachment.title,
+                    subtitle: attachment.presentationDetail,
+                    isEnabled: false
+                ))
+            }
             return .item(ThemedMenuItem(
                 title: attachment.title,
                 subtitle: attachment.presentationDetail,
-                isEnabled: !actions.isEmpty,
-                submenu: actions.isEmpty ? nil : actions
+                submenu: actions
             ))
         }
     }

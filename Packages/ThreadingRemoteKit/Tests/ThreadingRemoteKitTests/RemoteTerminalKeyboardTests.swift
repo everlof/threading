@@ -169,6 +169,18 @@ final class RemoteTerminalKeyboardTests: XCTestCase {
         )
     }
 
+    /// An unknown option bit is otherwise retained by synthesized `Codable` but ignored by every
+    /// encoder branch. That makes a saved key claim a modifier it will silently never send.
+    func testUnknownModifierBitsFailAtTheArchiveBoundary() {
+        let payload = Data(#"{"keys":[{"id":"6F1E9C7A-1111-2222-3333-444455556666","action":{"kind":"named","key":"up","modifiers":{"rawValue":8}}}]}"#.utf8)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(RemoteTerminalKeyboardLayout.self, from: payload)
+        )
+        XCTAssertThrowsError(
+            try JSONEncoder().encode(RemoteTerminalKeyModifiers(rawValue: 8))
+        )
+    }
+
     func testACustomLabelWinsAndAnEmptyOneDoesNot() {
         XCTAssertEqual(
             RemoteTerminalKeyDefinition(customLabel: "mode", action: .named(.tab, .shift)).label,

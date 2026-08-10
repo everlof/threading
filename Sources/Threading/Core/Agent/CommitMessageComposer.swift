@@ -114,23 +114,20 @@ enum CommitMessageComposer {
         qos: .userInitiated
     )
 
-    /// `ProjectIconResearch.execute`'s shape: one merged pipe, a terminate-on-timeout work
-    /// item, and the uncaught-signal check that tells our timeout from the child's failure.
+    /// Runs through the shared bounded process-group primitive. Provider chatter is kept to a
+    /// finite suffix and a child crash remains distinct from the timeout signal we send.
     private static func execute(
         _ plan: AgentLaunchPlan
     ) -> (output: String?, failure: ComposeError?) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: CommitDraftDefaults.timeout,
+                maximumOutputBytes: CommitDraftDefaults.maximumOutputBytes
+            )
         } catch {
             ThreadingLogger.agent.error(
                 "Commit draft launch failed: \(error.localizedDescription, privacy: .public)"
@@ -138,29 +135,19 @@ enum CommitMessageComposer {
             return (nil, .launchFailed)
         }
 
-        let timeout = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global().asyncAfter(
-            deadline: .now() + CommitDraftDefaults.timeout,
-            execute: timeout
-        )
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeout.cancel()
-
-        let output = String(data: data, encoding: .utf8)
+        let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Commit draft child exited: status \(process.terminationStatus), \(data.count) output bytes"
+            "Commit draft child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
-        if process.terminationReason == .uncaughtSignal {
+        switch result.termination {
+        case .timedOut:
             return (output, .timedOut)
+        case .exited(let status) where status != 0:
+            return (output, .exitedAbnormally(status))
+        case .exited:
+            return (output, nil)
         }
-        guard process.terminationStatus == 0 else {
-            return (output, .exitedAbnormally(process.terminationStatus))
-        }
-
-        return (output, nil)
     }
 
     /// The last completed `agent_message` in the run's JSONL — the model's final say.
@@ -194,6 +181,7 @@ enum CommitDraftDefaults {
     static let subjectSampleCount = 10
 
     static let timeout: TimeInterval = 90
+    static let maximumOutputBytes = 8 * 1024 * 1024
 
     static let completedEventType = "item.completed"
     static let agentMessageItemType = "agent_message"

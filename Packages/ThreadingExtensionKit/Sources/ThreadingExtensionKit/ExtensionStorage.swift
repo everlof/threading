@@ -163,12 +163,10 @@ public final class ExtensionKeyValueStore: @unchecked Sendable {
                 attributes: [.posixPermissions: 0o700]
             )
             if fileManager.fileExists(atPath: stateURL.path) {
-                let data = try Data(contentsOf: stateURL)
-                guard data.count <= Self.maximumStoreBytes else {
-                    throw ExtensionStorageError.quotaExceeded(
-                        maximumBytes: Self.maximumStoreBytes
-                    )
-                }
+                let data = try ExtensionBoundedFileReader.read(
+                    stateURL,
+                    maximumBytes: Self.maximumStoreBytes
+                )
                 let decoded = try JSONDecoder().decode(State.self, from: data)
                 guard decoded.formatVersion == State.currentFormatVersion else {
                     throw ExtensionStorageError.incompatibleFormat(decoded.formatVersion)
@@ -271,7 +269,10 @@ public final class ExtensionKeyValueStore: @unchecked Sendable {
 #else
         try data.write(to: stateURL, options: .atomic)
 #endif
-        guard try Data(contentsOf: stateURL) == data else {
+        guard try ExtensionBoundedFileReader.read(
+            stateURL,
+            maximumBytes: Self.maximumStoreBytes
+        ) == data else {
             throw ExtensionStorageError.unreadable(
                 "the saved key-value state could not be verified"
             )
@@ -415,7 +416,10 @@ public final class ExtensionCacheStore: @unchecked Sendable {
             let url = directory.appendingPathComponent(name, isDirectory: false)
             guard fileManager.fileExists(atPath: url.path) else { return nil }
             do {
-                return try Data(contentsOf: url)
+                return try ExtensionBoundedFileReader.read(
+                    url,
+                    maximumBytes: Self.maximumEntryBytes
+                )
             } catch {
                 // A cache read that fails is a cache miss. The entry may have been reclaimed
                 // between the existence check and the read, which is normal here.
@@ -499,5 +503,31 @@ public final class ExtensionCacheStore: @unchecked Sendable {
         else {
             throw ExtensionStorageError.invalidName
         }
+    }
+}
+
+/// A real allocation boundary for extension-owned files.
+///
+/// Checking `fileSize` and then calling `Data(contentsOf:)` is not a boundary: the file can grow
+/// in between and `Data` allocates the new size. Reading one byte past the allowance makes exact
+/// quota files valid while refusing a changed or corrupted file before an unbounded allocation.
+private enum ExtensionBoundedFileReader {
+    static func read(_ url: URL, maximumBytes: Int) throws -> Data {
+        precondition(maximumBytes >= 0 && maximumBytes < Int.max)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var data = Data()
+        data.reserveCapacity(min(maximumBytes, 64 * 1_024))
+        while data.count <= maximumBytes {
+            let remaining = maximumBytes + 1 - data.count
+            guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
+                  !chunk.isEmpty else { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumBytes else {
+            throw ExtensionStorageError.quotaExceeded(maximumBytes: maximumBytes)
+        }
+        return data
     }
 }

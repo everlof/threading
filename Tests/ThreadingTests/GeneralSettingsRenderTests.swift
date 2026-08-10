@@ -138,6 +138,31 @@ final class GeneralSettingsRenderTests: XCTestCase {
         XCTAssertTrue(labels.contains(L10n.string("Codex sessions start in")))
     }
 
+    /// Detection is stored and consumed per `AgentKind`; the page must be built from that same
+    /// set or a new runtime can tell the user to change a switch that does not exist.
+    @MainActor
+    func testEveryAgentKindHasAnAttachmentDetectionRow() throws {
+        let controller = GeneralPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+        let labels = Self.labels(in: controller.view)
+
+        for kind in AgentKind.allCases {
+            XCTAssertTrue(
+                labels.contains("Detect attachments from \(kind.displayName)"),
+                "\(kind.displayName) has no attachment detection row"
+            )
+            let identifier = "settings.general.\(kind.rawValue)-attachment-detection"
+            let toggle = try XCTUnwrap(
+                Self.view(in: controller.view, identifiedBy: identifier) as? ThemedToggle,
+                "\(kind.displayName) has no reachable attachment detection control"
+            )
+            XCTAssertEqual(
+                toggle.state == .on,
+                AppSettings.shared.detectsAttachmentReferences(for: kind)
+            )
+        }
+    }
+
     private static func labels(in view: NSView) -> Set<String> {
         var found: Set<String> = []
         if let field = view as? NSTextField { found.insert(field.stringValue) }

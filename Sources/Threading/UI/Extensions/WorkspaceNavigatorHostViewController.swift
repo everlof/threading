@@ -232,7 +232,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             ) else {
                 return nil
             }
-            return NSImage(contentsOf: url)
+            return ExtensionImageResourceLoader.image(at: url)
         case .hostAsset:
             return nil
         }

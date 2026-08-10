@@ -38,7 +38,7 @@ final class GrokACPStreamSession:
     }
 
     private let workingDirectory: String
-    private let plan: () -> AgentLaunchPlan
+    private let plan: () throws -> AgentLaunchPlan
 
     private var process: AgentChildProcess?
     private var input: FileHandle?
@@ -71,7 +71,7 @@ final class GrokACPStreamSession:
     init(
         sessionID: SessionID,
         workingDirectory: String,
-        plan: @escaping () -> AgentLaunchPlan
+        plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
@@ -83,12 +83,10 @@ final class GrokACPStreamSession:
     func start() {
         guard !isRunning else { return }
 
-        let launchPlan = plan()
-
-        resetForLaunch(resumeState: launchPlan.resumeState)
-
         let process: AgentChildProcess
         do {
+            let launchPlan = try plan()
+            resetForLaunch(resumeState: launchPlan.resumeState)
             process = try AgentChildProcess.launch(
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,
@@ -101,7 +99,11 @@ final class GrokACPStreamSession:
             ThreadingLogger.agent.error(
                 "Grok ACP failed to start: \(error.localizedDescription)"
             )
-            onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+            // Match every other native transport: start never calls an external lifecycle
+            // callback re-entrantly before its caller has finished installing the surface.
+            Task { @MainActor [weak self] in
+                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+            }
             return
         }
 

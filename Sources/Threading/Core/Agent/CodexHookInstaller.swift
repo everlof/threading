@@ -22,6 +22,7 @@ import Foundation
 /// That last rule is what the environment variables in the command are for. A URL carrying
 /// today's port would change every launch and invalidate the trust every launch.
 enum CodexHookInstaller {
+    static let maximumHooksBytes = 4 * 1024 * 1024
 
     // MARK: - Public Methods
 
@@ -33,8 +34,25 @@ enum CodexHookInstaller {
     static func install(inCodexHome codexHome: String) -> Bool {
         let file = hooksFile(inCodexHome: codexHome)
 
-        let existing = (try? Data(contentsOf: file))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let existingData: Data?
+        let existing: [String: Any]
+        if FileManager.default.fileExists(atPath: file.path) {
+            guard let data = try? BoundedFileReader.read(
+                file,
+                maximumBytes: maximumHooksBytes
+            ), let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                ThreadingLogger.agent.error(
+                    "Refusing to replace unreadable Codex hooks in \(codexHome, privacy: .public)"
+                )
+                return false
+            }
+            existingData = data
+            existing = document
+        } else {
+            existingData = nil
+            existing = [:]
+        }
 
         let merged = merging(into: existing)
 
@@ -52,6 +70,16 @@ enum CodexHookInstaller {
                 withJSONObject: merged,
                 options: [.prettyPrinted, .sortedKeys]
             )
+            // This is a shared user-owned file. If Codex or another tool rewrote it after our
+            // merge read, retry on the next launch instead of atomically clobbering newer hooks.
+            if let existingData {
+                guard try BoundedFileReader.read(
+                    file,
+                    maximumBytes: maximumHooksBytes
+                ) == existingData else { return false }
+            } else {
+                guard !FileManager.default.fileExists(atPath: file.path) else { return false }
+            }
             try data.write(to: file, options: .atomic)
 
             // Durable, because of what a rewrite *costs*: Codex pins a trusted hook by hashing
@@ -78,7 +106,10 @@ enum CodexHookInstaller {
     static func uninstall(fromCodexHome codexHome: String) -> Bool {
         let file = hooksFile(inCodexHome: codexHome)
 
-        guard let data = try? Data(contentsOf: file),
+        guard let data = try? BoundedFileReader.read(
+            file,
+            maximumBytes: maximumHooksBytes
+        ),
               let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             return false
@@ -101,7 +132,9 @@ enum CodexHookInstaller {
             options: [.prettyPrinted, .sortedKeys]
         )
 
-        guard let encoded, (try? encoded.write(to: file, options: .atomic)) != nil else {
+        guard let encoded,
+              (try? BoundedFileReader.read(file, maximumBytes: maximumHooksBytes)) == data,
+              (try? encoded.write(to: file, options: .atomic)) != nil else {
             return false
         }
 

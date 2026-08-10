@@ -621,6 +621,112 @@ final class ThemeToolTests: XCTestCase {
         )
     }
 
+    /// Asset bytes and the theme document are one logical update. If a later field refuses the
+    /// patch, a replaced file must return to its old bytes and a newly introduced slot must not
+    /// survive under the standing document.
+    func testRefusedThemeUpdateRollsBackReplacedAndIntroducedAssets() throws {
+        func png(_ color: NSColor) throws -> Data {
+            let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+                color.setFill()
+                rect.fill()
+                return true
+            }
+            return try XCTUnwrap(
+                NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?
+                    .representation(using: .png, properties: [:])
+            )
+        }
+
+        let theme = try AppThemeLibrary.duplicate(
+            AppThemeStyles.cyberpunk,
+            name: "Asset Transaction \(UUID().uuidString)"
+        )
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+        let kind = try XCTUnwrap(theme.availableVariants.first)
+        let originalPNG = try png(.systemTeal)
+        let replacementPNG = try png(.systemPink)
+
+        let seed = coordinator().updateAppTheme(UpdateAppThemeArguments(
+            themeID: theme.id.rawValue,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(
+                sidebar: AppThemeSidebarArguments(
+                    image: AppThemeSidebarImageArguments(
+                        source: AppThemeImageArguments(
+                            path: nil,
+                            base64: originalPNG.base64EncodedString()
+                        ),
+                        mode: "tile",
+                        opacity: 0.5
+                    )
+                )
+            )],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        ))
+        XCTAssertFalse(seed.isError, seed.text)
+
+        let backgroundName = SidebarAssetSlot.background.fileName(for: kind)
+        let logoName = SidebarAssetSlot.logo.fileName(for: kind)
+        let storedOriginal = try XCTUnwrap(
+            ThemeAssetStore.pngData(named: backgroundName, for: theme.id)
+        )
+
+        let refused = coordinator().updateAppTheme(UpdateAppThemeArguments(
+            themeID: theme.id.rawValue,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [kind.rawValue: AppThemeVariantArguments(
+                sidebar: AppThemeSidebarArguments(
+                    image: AppThemeSidebarImageArguments(
+                        source: AppThemeImageArguments(
+                            path: nil,
+                            base64: replacementPNG.base64EncodedString()
+                        ),
+                        mode: "tile",
+                        opacity: 0.5
+                    ),
+                    logo: .image(AppThemeImageArguments(
+                        path: nil,
+                        base64: replacementPNG.base64EncodedString()
+                    ))
+                ),
+                chrome: AppThemeChromeArguments(
+                    titleBar: AppThemeChromeTitleBarArguments(),
+                    frame: nil,
+                    removeFrame: nil,
+                    remove: true
+                )
+            )],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        ))
+
+        XCTAssertTrue(refused.isError, "a self-contradictory chrome patch was accepted")
+        XCTAssertEqual(
+            ThemeAssetStore.pngData(named: backgroundName, for: theme.id),
+            storedOriginal,
+            "a refused document left its replacement image visible"
+        )
+        XCTAssertFalse(
+            ThemeAssetStore.assetExists(named: logoName, for: theme.id),
+            "a refused document left its newly introduced logo behind"
+        )
+    }
+
     /// The gate travels the tool path too: a wash the label cannot be read on is refused with
     /// the reason, and nothing is created — including the asset folder.
     func testAnUnreadableGradientIsRefusedThroughTheTool() throws {

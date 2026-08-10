@@ -1,5 +1,18 @@
 import Foundation
 
+/// A lossless persisted identifier is not automatically a safe child of a filesystem URL.
+/// Stores use this one rule at their boundary instead of each inventing a partial slash check.
+enum StoredPathComponent {
+    static func isValid(_ value: String) -> Bool {
+        !value.isEmpty
+            && value != "."
+            && value != ".."
+            && value.utf8.count <= 255
+            && (value as NSString).lastPathComponent == value
+            && !value.contains("\0")
+    }
+}
+
 /// A project's stable identity.
 ///
 /// The custom `Codable` implementation deliberately encodes the wrapped UUID as a single
@@ -133,6 +146,7 @@ struct TranscriptID: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 
     var description: String { rawValue }
+    var isSafePathComponent: Bool { StoredPathComponent.isValid(rawValue) }
 
     init(from decoder: Decoder) throws {
         rawValue = try decoder.singleValueContainer().decode(String.self)

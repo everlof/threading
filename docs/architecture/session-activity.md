@@ -427,6 +427,15 @@ asynchronous, so a late result from turn A must not stop a newer turn B. The adm
 through `SessionActivityTracker`, exactly like `Stop`, which is why the sidebar, alerts, control
 plane and waiting deliveries all agree again.
 
+The reader is **single-flight with a trailing wave**, not "ignore while busy". A file can append
+its last lifecycle record after an in-flight scan took the size snapshot but before that scan
+returns. The output callback for that append may be the final callback of the turn; discarding it
+leaves the cached size and activity state behind forever. Requests that overlap a scan therefore
+coalesce into exactly one follow-up scan, while every waiting caller receives the changed fact.
+The size snapshot comes from current filesystem attributes, not `URL.resourceValues`: Foundation
+caches requested resource keys on a reused URL value, which turns an append-only transcript's old
+size into a permanent answer and defeats the invalidation the reader is built around.
+
 **A refused request is the same hole, on Claude.** Measured on CLI 2.1.226 against this app's own
 session `e7a26edf`: `UserPromptSubmit` fired at 12:26:02.464, an expired login was recorded 23 ms
 later as `{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed"}` carrying

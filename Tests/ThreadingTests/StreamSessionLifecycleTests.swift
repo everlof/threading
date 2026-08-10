@@ -4,6 +4,46 @@ import XCTest
 @MainActor
 final class StreamSessionLifecycleTests: XCTestCase {
 
+    private enum PlanningFixtureError: Error {
+        case refused
+    }
+
+    func testPlanningFailureExitsEveryNativeTransportOnceAndAsynchronously() {
+        let claudeExit = expectation(description: "Claude planning failure")
+        let codexExit = expectation(description: "Codex planning failure")
+        let grokExit = expectation(description: "Grok planning failure")
+        var startReturned = false
+
+        let claude = ClaudeStreamSession(sessionID: SessionID()) {
+            throw PlanningFixtureError.refused
+        }
+        let codex = CodexStreamSession(sessionID: SessionID()) {
+            throw PlanningFixtureError.refused
+        }
+        let grok = GrokACPStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/tmp"
+        ) {
+            throw PlanningFixtureError.refused
+        }
+
+        func verify(_ status: Int32, expectation: XCTestExpectation) {
+            XCTAssertTrue(startReturned)
+            XCTAssertEqual(status, AgentChildProcessDefaults.spawnFailureStatus)
+            expectation.fulfill()
+        }
+        claude.onExit = { verify($0, expectation: claudeExit) }
+        codex.onExit = { verify($0, expectation: codexExit) }
+        grok.onExit = { verify($0, expectation: grokExit) }
+
+        claude.start()
+        codex.start()
+        grok.start()
+        startReturned = true
+
+        wait(for: [claudeExit, codexExit, grokExit], timeout: 1)
+    }
+
     func testClaudeSpawnFailureArrivesAsynchronouslyOnMain() {
         let exited = expectation(description: "spawn failure callback")
         var startReturned = false
@@ -1356,6 +1396,41 @@ final class SubagentSessionStateTests: XCTestCase {
         XCTAssertNotNil(store.load(sessionID: sessionID))
     }
 
+    func testOversizedSnapshotIsQuarantinedBeforeDecodeAllocatesItsContents() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sessionID = SessionID()
+        let stateDirectory = directory.appendingPathComponent(
+            SubagentDefaults.snapshotDirectoryName,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: stateDirectory,
+            withIntermediateDirectories: true
+        )
+        let file = stateDirectory
+            .appendingPathComponent(sessionID.uuidString)
+            .appendingPathExtension(SubagentDefaults.snapshotExtension)
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: UInt64(SubagentDefaults.maximumSnapshotBytes + 1))
+        try handle.close()
+
+        let store = SubagentStateStore(directory: directory)
+        XCTAssertNil(store.load(sessionID: sessionID))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        let quarantined = try FileManager.default.contentsOfDirectory(
+            at: stateDirectory,
+            includingPropertiesForKeys: [.fileSizeKey]
+        ).first { $0.lastPathComponent.hasPrefix(file.lastPathComponent + ".unreadable-") }
+        XCTAssertEqual(
+            try XCTUnwrap(quarantined).resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            SubagentDefaults.maximumSnapshotBytes + 1
+        )
+    }
+
     func testClaudeChildUsageIncludesCachedAndUncachedTokens() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -2332,5 +2407,48 @@ final class AppEventTests: XCTestCase {
         center.post(ProjectsDidChange())
 
         XCTAssertEqual(deliveryCount, 1)
+    }
+
+    func testObservationGenerationCanBeReplacedAndFilteredToOneObject() {
+        let center = NotificationCenter()
+        let observations = AppEventObservations(center: center)
+        let watched = NSObject()
+        let unrelated = NSObject()
+        let name = Notification.Name("AppEventTests.generation")
+        var deliveryCount = 0
+
+        observations.observe(name, object: watched) { deliveryCount += 1 }
+        center.post(name: name, object: unrelated)
+        center.post(name: name, object: watched)
+        observations.removeAll()
+        center.post(name: name, object: watched)
+
+        XCTAssertEqual(deliveryCount, 1)
+    }
+
+    func testLocalLifecycleOwnersEndTheirInstalledResourcesIdempotently() {
+        let monitor = LocalEventMonitor()
+        monitor.install(matching: .keyDown) { $0 }
+        XCTAssertTrue(monitor.isInstalled)
+        monitor.remove()
+        monitor.remove()
+        XCTAssertFalse(monitor.isInstalled)
+
+        let runLoopTimer = MainRunLoopTimer()
+        let timer = Timer(timeInterval: 60, repeats: true) { _ in }
+        RunLoop.main.add(timer, forMode: .default)
+        runLoopTimer.install(timer)
+        XCTAssertTrue(runLoopTimer.isInstalled)
+        runLoopTimer.invalidate()
+        runLoopTimer.invalidate()
+        XCTAssertFalse(runLoopTimer.isInstalled)
+        XCTAssertFalse(timer.isValid)
+
+        let lifetimeTimer = Timer(timeInterval: 60, repeats: true) { _ in }
+        RunLoop.main.add(lifetimeTimer, forMode: .default)
+        var lifetimeOwner: MainRunLoopTimer? = MainRunLoopTimer()
+        lifetimeOwner?.install(lifetimeTimer)
+        lifetimeOwner = nil
+        XCTAssertFalse(lifetimeTimer.isValid)
     }
 }

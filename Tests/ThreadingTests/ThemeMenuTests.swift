@@ -129,14 +129,21 @@ final class ThemeMenuTests: XCTestCase {
     }
 
     /// End to end through the themed menu action: picking an item reaches the assignment layer.
-    /// The session identifier is one no store knows, so the write itself is a no-op — what is
-    /// under test is that the item, its target and its selector are connected at all.
+    /// The target is a real persisted session: assignment notifications describe committed
+    /// changes, and a missing target must not make observers redraw as though a write succeeded.
     ///
     /// The action is carried by the row itself rather than routed through whichever sidebar row
     /// was last clicked, which is the themed-menu equivalent of AppKit's item target.
     func testChoosingAThemeFiresTheAssignmentEvent() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: SessionID()))
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("theme-menu-event-\(UUID().uuidString)", isDirectory: true)
+        ))
+        defer { _ = store.removeProject(id: project.id) }
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let submenu = try themeSubmenu(of: sidebar.sessionThemeEntry(for: session.id))
 
         let themeItem = try XCTUnwrap(
             items(in: submenu).first {
@@ -153,17 +160,18 @@ final class ThemeMenuTests: XCTestCase {
         action()
 
         wait(for: [fired], timeout: 1)
+        XCTAssertNotNil(ThemeAssignments.themeID(forSession: session.id))
     }
 
     /// A choice remains bound to the scope it was built for even after another menu is built.
     func testAChoiceSurvivesAnotherMenuBuildWithoutChangingTarget() throws {
         let sidebar = ProjectSidebarViewController()
         let store = ProjectStore.shared
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("theme-menu-\(UUID().uuidString)", isDirectory: true)
-        )
-        defer { store.removeProject(id: project.id) }
+        ))
+        defer { _ = store.removeProject(id: project.id) }
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
         let sessionID = session.id
         let item = items(in: try themeSubmenu(of: sidebar.sessionThemeEntry(for: sessionID)))

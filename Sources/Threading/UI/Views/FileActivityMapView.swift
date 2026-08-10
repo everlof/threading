@@ -55,7 +55,7 @@ final class FileActivityMapView: NSView {
         }
     }
 
-    nonisolated(unsafe) private var glowTimer: Timer?
+    private let glowTimer = MainRunLoopTimer()
     private var themeRedraw: ThemeRedraw?
     private let appEvents = AppEventObservations()
 
@@ -74,10 +74,6 @@ final class FileActivityMapView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        glowTimer?.invalidate()
     }
 
     override var isFlipped: Bool { true }
@@ -352,22 +348,20 @@ final class FileActivityMapView: NSView {
     /// Repaints while anything is still fading, and stops itself the moment nothing is —
     /// a strip nobody has touched costs nothing.
     private func scheduleGlowRefreshIfNeeded() {
-        guard window != nil, glowTimer == nil, hasActiveGlow(now: clock()) else { return }
+        guard window != nil, !glowTimer.isInstalled, hasActiveGlow(now: clock()) else { return }
 
-        glowTimer = Timer.scheduledTimer(
-            timeInterval: Metrics.glowRefreshInterval,
-            target: self,
-            selector: #selector(refreshGlow),
-            userInfo: nil,
+        glowTimer.install(Timer.scheduledTimer(
+            withTimeInterval: Metrics.glowRefreshInterval,
             repeats: true
-        )
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshGlow() }
+        })
     }
 
-    @objc private func refreshGlow() {
+    private func refreshGlow() {
         needsDisplay = true
         if !hasActiveGlow(now: clock()) {
-            glowTimer?.invalidate()
-            glowTimer = nil
+            glowTimer.invalidate()
         }
     }
 
@@ -386,8 +380,7 @@ final class FileActivityMapView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
-            glowTimer?.invalidate()
-            glowTimer = nil
+            glowTimer.invalidate()
         } else {
             scheduleGlowRefreshIfNeeded()
         }

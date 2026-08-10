@@ -28,12 +28,27 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    private let workspaceNavigatorPersistence:
+        RecoverableDefaultsStore<WorkspaceNavigatorSelection>
+    private var cachedWorkspaceNavigatorSelection: WorkspaceNavigatorSelection
 
     init(
         defaults: UserDefaults = .standard,
         legacyPreferences: [String: Any] = [:]
     ) {
+        let workspaceNavigatorPersistence =
+            RecoverableDefaultsStore<WorkspaceNavigatorSelection>(
+                defaults: defaults,
+                key: Keys.workspaceNavigatorSelection,
+                criticality: .preference,
+                sizePolicy: .compactMetadata
+            )
         self.defaults = defaults
+        self.workspaceNavigatorPersistence = workspaceNavigatorPersistence
+        self.cachedWorkspaceNavigatorSelection = workspaceNavigatorPersistence.load(
+            defaultValue: .native,
+            validate: Self.validateWorkspaceNavigatorSelection
+        ).value
         registerDefaults()
         migrateLegacyCodexHookPreferences(from: legacyPreferences)
         migrateClosingConfirmation()
@@ -663,24 +678,22 @@ final class AppSettings {
 
     // MARK: - Extensions
 
-    /// Which complete leading navigator the user chose. An absent or unreadable value is Native.
+    /// Which complete leading navigator the user chose. An absent or unreadable value is Native;
+    /// unreadable bytes are quarantined before the next choice can replace them.
     var workspaceNavigatorSelection: WorkspaceNavigatorSelection {
-        get {
-            guard let data = defaults.data(forKey: Keys.workspaceNavigatorSelection),
-                  let selection = try? JSONDecoder().decode(
-                      WorkspaceNavigatorSelection.self,
-                      from: data
-                  ) else {
-                return .native
-            }
-            return selection
-        }
+        get { cachedWorkspaceNavigatorSelection }
         set {
-            if newValue == .native {
-                defaults.removeObject(forKey: Keys.workspaceNavigatorSelection)
-            } else if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Keys.workspaceNavigatorSelection)
+            guard newValue != cachedWorkspaceNavigatorSelection else { return }
+            do {
+                try Self.validateWorkspaceNavigatorSelection(newValue)
+            } catch {
+                ThreadingLogger.extensions.error(
+                    "Refusing invalid workspace navigator selection"
+                )
+                return
             }
+            guard workspaceNavigatorPersistence.save(newValue) else { return }
+            cachedWorkspaceNavigatorSelection = newValue
             notifyChanged()
         }
     }
@@ -1099,6 +1112,25 @@ final class AppSettings {
         case .claude: return Keys.claudeStartupSpeed
         case .codex: return Keys.codexStartupSpeed
         case .grok, .openCode: return nil
+        }
+    }
+
+    private enum WorkspaceNavigatorValidationError: Error {
+        case invalidIdentity
+    }
+
+    private static func validateWorkspaceNavigatorSelection(
+        _ selection: WorkspaceNavigatorSelection
+    ) throws {
+        guard case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection else {
+            return
+        }
+        let maximumIdentityBytes = 1_024
+        guard !extensionIdentifier.isEmpty,
+              extensionIdentifier.utf8.count <= maximumIdentityBytes,
+              !navigatorID.isEmpty,
+              navigatorID.utf8.count <= maximumIdentityBytes else {
+            throw WorkspaceNavigatorValidationError.invalidIdentity
         }
     }
 

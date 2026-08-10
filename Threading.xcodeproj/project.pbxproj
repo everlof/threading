@@ -311,6 +311,24 @@
 		341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */; };
 		60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */; };
 		8C709959439ACFD5BB55FB9D /* ChartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9876F9C389CEB602F4DCF632 /* ChartTests.swift */; };
+		2F7C98B3323CA360F6EA9FC3 /* AIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165AF74FFAAE502D904EB9FB /* AIProviderTests.swift */; };
+		135EA1D4C5A6EB752C171B7F /* BoundedFileReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BCC9DAB9EADE69EA686C25 /* BoundedFileReaderTests.swift */; };
+		0A9269FDDE7E26D8EDBA1463 /* ProjectStoreMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5F6DAC63E7D1E11748A255 /* ProjectStoreMutationTests.swift */; };
+		FF677331AA3F21693BE39503 /* SessionMigrationTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA4586FF98826157A8408E58 /* SessionMigrationTransactionTests.swift */; };
+		70412529CED994D5D8870212 /* BuildChannelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020EE6DA36EBC8E59CA84768 /* BuildChannelTests.swift */; };
+		769A7ED1D0CB9BDE93B3A7D5 /* ChangeRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAADB9D40D9CD3824340C41 /* ChangeRequestTests.swift */; };
+		AD0D5E60BBA2232A1D018749 /* ChromeAutomationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0D7B0F05AFB746EFE6CB4F /* ChromeAutomationTests.swift */; };
+		6D6EBF0D355823720F66907F /* ComposerHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85DB69265C8D9C8AE2FD18F8 /* ComposerHandoffTests.swift */; };
+		78F2C76BA78B9DC0CF219C60 /* ExecutionAuditRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */; };
+		971E6F21E984CDB63CDF7B33 /* ExecutionAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */; };
+		961BC1BDA7898BF3AFB594EC /* GitRepositoryFileAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */; };
+		8CC2181BFF2F551374F4F8EA /* GrokACPStreamSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */; };
+		7E04A2F922EA38D37962922B /* JSONLReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */; };
+		4A3F79DFC7960043FFCACB63 /* ProjectRowCreateButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */; };
+		32875F93546A7EDD15CBACB8 /* ResolvedDefaultModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */; };
+		E608B83E8D4ECC5B86B1408B /* ThemeLeakSweepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8648626115C25C919CD87C8E /* ThemeLeakSweepTests.swift */; };
+		2CE5D19C2C23F7E9D6A794FF /* UsageBarTravelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */; };
+		51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -670,6 +688,24 @@
 		718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardRenderTests.swift; sourceTree = "<group>"; };
 		935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeTurnRefusalTests.swift; sourceTree = "<group>"; };
 		9876F9C389CEB602F4DCF632 /* ChartTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChartTests.swift; sourceTree = "<group>"; };
+		165AF74FFAAE502D904EB9FB /* AIProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AIProviderTests.swift; sourceTree = "<group>"; };
+		B9BCC9DAB9EADE69EA686C25 /* BoundedFileReaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BoundedFileReaderTests.swift; sourceTree = "<group>"; };
+		AB5F6DAC63E7D1E11748A255 /* ProjectStoreMutationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectStoreMutationTests.swift; sourceTree = "<group>"; };
+		DA4586FF98826157A8408E58 /* SessionMigrationTransactionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionMigrationTransactionTests.swift; sourceTree = "<group>"; };
+		020EE6DA36EBC8E59CA84768 /* BuildChannelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BuildChannelTests.swift; sourceTree = "<group>"; };
+		ACAADB9D40D9CD3824340C41 /* ChangeRequestTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChangeRequestTests.swift; sourceTree = "<group>"; };
+		0E0D7B0F05AFB746EFE6CB4F /* ChromeAutomationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChromeAutomationTests.swift; sourceTree = "<group>"; };
+		85DB69265C8D9C8AE2FD18F8 /* ComposerHandoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerHandoffTests.swift; sourceTree = "<group>"; };
+		0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExecutionAuditRenderTests.swift; sourceTree = "<group>"; };
+		358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExecutionAuditTests.swift; sourceTree = "<group>"; };
+		46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitRepositoryFileAccessTests.swift; sourceTree = "<group>"; };
+		9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrokACPStreamSessionTests.swift; sourceTree = "<group>"; };
+		CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JSONLReaderTests.swift; sourceTree = "<group>"; };
+		0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectRowCreateButtonTests.swift; sourceTree = "<group>"; };
+		62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ResolvedDefaultModelTests.swift; sourceTree = "<group>"; };
+		8648626115C25C919CD87C8E /* ThemeLeakSweepTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeLeakSweepTests.swift; sourceTree = "<group>"; };
+		8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageBarTravelTests.swift; sourceTree = "<group>"; };
+		26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationTestSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1098,6 +1134,24 @@
 				718DE87B31C294AAB5DA849E /* UsageDashboardRenderTests.swift */,
 				935F27DD60BF257EA8B3205F /* ClaudeTurnRefusalTests.swift */,
 				9876F9C389CEB602F4DCF632 /* ChartTests.swift */,
+				165AF74FFAAE502D904EB9FB /* AIProviderTests.swift */,
+				B9BCC9DAB9EADE69EA686C25 /* BoundedFileReaderTests.swift */,
+				AB5F6DAC63E7D1E11748A255 /* ProjectStoreMutationTests.swift */,
+				DA4586FF98826157A8408E58 /* SessionMigrationTransactionTests.swift */,
+				020EE6DA36EBC8E59CA84768 /* BuildChannelTests.swift */,
+				ACAADB9D40D9CD3824340C41 /* ChangeRequestTests.swift */,
+				0E0D7B0F05AFB746EFE6CB4F /* ChromeAutomationTests.swift */,
+				85DB69265C8D9C8AE2FD18F8 /* ComposerHandoffTests.swift */,
+				0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */,
+				358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */,
+				46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */,
+				9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */,
+				CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */,
+				0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */,
+				62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */,
+				8648626115C25C919CD87C8E /* ThemeLeakSweepTests.swift */,
+				8638ED11F26E436A60DFBB62 /* UsageBarTravelTests.swift */,
+				26E21A3C4D4B4824B6B094E6 /* ConversationTestSupport.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1537,7 +1591,9 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Sources",
+				"$(SRCROOT)/Tests/ThreadingTests",
 				"$(SRCROOT)/scripts/config/theme-boundary.json",
+				"$(SRCROOT)/scripts/check_test_registration.py",
 				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
 				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
 				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
@@ -1553,7 +1609,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/scripts/check_theme_boundaries.sh\"\nif [[ -z \"${THREADING_MOBILE_ICON_OUTPUT_DIR:-}\" ]]; then\n  \"${SRCROOT}/scripts/check_architecture_boundaries.sh\"\nfi\n";
+			shellScript = "python3 \"${SRCROOT}/scripts/check_test_registration.py\"\n\"${SRCROOT}/scripts/check_theme_boundaries.sh\"\nif [[ -z \"${THREADING_MOBILE_ICON_OUTPUT_DIR:-}\" ]]; then\n  \"${SRCROOT}/scripts/check_architecture_boundaries.sh\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1848,6 +1904,24 @@
 				341ABD876494E01EE9C4DD00 /* UsageDashboardRenderTests.swift in Sources */,
 				60E7B6FDEEAAC8B45E132978 /* ClaudeTurnRefusalTests.swift in Sources */,
 				8C709959439ACFD5BB55FB9D /* ChartTests.swift in Sources */,
+				2F7C98B3323CA360F6EA9FC3 /* AIProviderTests.swift in Sources */,
+				135EA1D4C5A6EB752C171B7F /* BoundedFileReaderTests.swift in Sources */,
+				0A9269FDDE7E26D8EDBA1463 /* ProjectStoreMutationTests.swift in Sources */,
+				FF677331AA3F21693BE39503 /* SessionMigrationTransactionTests.swift in Sources */,
+				70412529CED994D5D8870212 /* BuildChannelTests.swift in Sources */,
+				769A7ED1D0CB9BDE93B3A7D5 /* ChangeRequestTests.swift in Sources */,
+				AD0D5E60BBA2232A1D018749 /* ChromeAutomationTests.swift in Sources */,
+				6D6EBF0D355823720F66907F /* ComposerHandoffTests.swift in Sources */,
+				78F2C76BA78B9DC0CF219C60 /* ExecutionAuditRenderTests.swift in Sources */,
+				971E6F21E984CDB63CDF7B33 /* ExecutionAuditTests.swift in Sources */,
+				961BC1BDA7898BF3AFB594EC /* GitRepositoryFileAccessTests.swift in Sources */,
+				8CC2181BFF2F551374F4F8EA /* GrokACPStreamSessionTests.swift in Sources */,
+				7E04A2F922EA38D37962922B /* JSONLReaderTests.swift in Sources */,
+				4A3F79DFC7960043FFCACB63 /* ProjectRowCreateButtonTests.swift in Sources */,
+				32875F93546A7EDD15CBACB8 /* ResolvedDefaultModelTests.swift in Sources */,
+				E608B83E8D4ECC5B86B1408B /* ThemeLeakSweepTests.swift in Sources */,
+				2CE5D19C2C23F7E9D6A794FF /* UsageBarTravelTests.swift in Sources */,
+				51CD5437FD82D5FB1DCA6243 /* ConversationTestSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

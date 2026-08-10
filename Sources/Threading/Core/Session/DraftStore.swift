@@ -33,7 +33,8 @@ final class DraftStore {
         self.persistence = RecoverableFileStore(
             url: root.appendingPathComponent(DraftDefaults.fileName),
             fileManager: fileManager,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .userDocument
         )
 
         load()
@@ -50,21 +51,23 @@ final class DraftStore {
     /// the file holds only what could still be lost.
     func setDraft(_ text: String, for projectID: ProjectID) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidate = drafts
 
         if trimmed.isEmpty {
-            guard drafts.removeValue(forKey: projectID) != nil else { return }
+            guard candidate.removeValue(forKey: projectID) != nil else { return }
         } else {
-            guard drafts[projectID] != text else { return }
-            drafts[projectID] = text
+            guard candidate[projectID] != text else { return }
+            candidate[projectID] = text
         }
 
-        save()
+        commit(candidate)
     }
 
     /// Drops a project's draft: it has been started, or the project itself is gone.
     func clear(for projectID: ProjectID) {
-        guard drafts.removeValue(forKey: projectID) != nil else { return }
-        save()
+        var candidate = drafts
+        guard candidate.removeValue(forKey: projectID) != nil else { return }
+        commit(candidate)
     }
 
     // MARK: - Private Methods
@@ -87,12 +90,16 @@ final class DraftStore {
         }
     }
 
-    private func save() {
+    /// Memory follows the verified file, never the other way around. In particular, clearing a
+    /// submitted draft must fail closed: resurrecting already-sent text is preferable to saying
+    /// it was durably removed when the next launch will prove otherwise.
+    private func commit(_ candidate: [ProjectID: String]) {
         let file = DraftsFile(
-            drafts: drafts.reduce(into: [:]) { $0[$1.key.uuidString] = $1.value }
+            drafts: candidate.reduce(into: [:]) { $0[$1.key.uuidString] = $1.value }
         )
 
-        persistence.save(file)
+        guard persistence.save(file) else { return }
+        drafts = candidate
     }
 }
 

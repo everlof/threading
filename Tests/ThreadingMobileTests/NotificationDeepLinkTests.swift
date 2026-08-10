@@ -81,6 +81,60 @@ final class NotificationDeepLinkTests: XCTestCase {
         ]))
     }
 
+    @MainActor
+    func testOversizedContinuityDraftCannotReplacePublishedOrDurableState() throws {
+        let suite = "MobileContinuityCandidate.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MobileSessionContinuityStore(defaults: defaults)
+        store.setDraft("keep me", surface: .conversation, hostID: "host", sessionID: "session")
+
+        store.setDraft(
+            String(repeating: "x", count: 256 * 1_024 + 1),
+            surface: .conversation,
+            hostID: "host",
+            sessionID: "session"
+        )
+
+        XCTAssertEqual(
+            store.draft(surface: .conversation, hostID: "host", sessionID: "session"),
+            "keep me"
+        )
+        XCTAssertEqual(
+            MobileSessionContinuityStore(defaults: defaults).draft(
+                surface: .conversation,
+                hostID: "host",
+                sessionID: "session"
+            ),
+            "keep me"
+        )
+        XCTAssertNotNil(store.recoveryMessage)
+    }
+
+    @MainActor
+    func testOversizedKeyboardActionCannotReplacePublishedOrDurableLayout() throws {
+        let suite = "MobileKeyboardCandidate.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MobileTerminalKeyboardStore(defaults: defaults)
+        let valid = RemoteTerminalKeyboardLayout(keys: [
+            .init(action: .snippet(text: "echo ready", submits: true))
+        ])
+        store.setLayout(valid, forAgentKind: "codex")
+        let oversized = RemoteTerminalKeyboardLayout(keys: [
+            .init(action: .sequence(String(repeating: "x", count: 64 * 1_024 + 1)))
+        ])
+
+        store.setLayout(oversized, forAgentKind: "codex")
+
+        XCTAssertEqual(store.layout(forAgentKind: "codex"), valid)
+        XCTAssertEqual(
+            MobileTerminalKeyboardStore(defaults: defaults).layout(forAgentKind: "codex"),
+            valid
+        )
+        XCTAssertNotNil(store.recoveryMessage)
+    }
+
     private func event(
         destination: RemoteNotificationDestinationDTO
     ) -> RemoteNotificationEventDTO {

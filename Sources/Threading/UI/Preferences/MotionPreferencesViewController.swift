@@ -48,7 +48,7 @@ final class MotionPreferencesViewController: NSViewController {
     /// The row currently demonstrating a transition, and the timer stepping it. One of each,
     /// because one row is highlighted at a time.
     private var demonstrating: ChatNameMorphStyle?
-    private var demonstrationTimer: Timer?
+    private let demonstrationTimer = MainRunLoopTimer()
 
     private let previewNames = [
         "Rename this conversation",
@@ -181,8 +181,7 @@ final class MotionPreferencesViewController: NSViewController {
     }
 
     private func stopDemonstration() {
-        demonstrationTimer?.invalidate()
-        demonstrationTimer = nil
+        demonstrationTimer.invalidate()
         // Put the row back to its own name without animating. A row abandoned mid-morph would be
         // left showing the app's name where a transition's name belongs.
         if let style = demonstrating {
@@ -206,13 +205,12 @@ final class MotionPreferencesViewController: NSViewController {
     }
 
     private func scheduleNextLeg(after delay: TimeInterval) {
-        demonstrationTimer?.invalidate()
         let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.stepDemonstration()
             }
         }
-        demonstrationTimer = timer
+        demonstrationTimer.install(timer)
         // `.common`, because a press held on the control that opened the menu runs the
         // event-tracking run-loop mode — and browsing a dropdown with the button still down is
         // one of the two ways every menu is used. A default-mode timer would stop there.

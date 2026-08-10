@@ -53,6 +53,31 @@ final class ChangeRequestTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreadableProjectPolicyIsPreservedBeforeANewChoiceReplacesIt() throws {
+        let fixture = try repositoryWithLinkedWorktree()
+        defer { try? FileManager.default.removeItem(at: fixture.container) }
+        let suite = "ChangeRequestPolicyRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "changeRequest.repositoryConfigurations.v1"
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: key)
+
+        let store = ChangeRequestConfigurationStore(userDefaults: defaults)
+        XCTAssertEqual(store.configuration(forProjectPath: fixture.main.path), .default)
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: key)),
+            corrupt
+        )
+        XCTAssertTrue(store.setPublishPolicy(.createReady, forProjectPath: fixture.main.path))
+        XCTAssertEqual(
+            ChangeRequestConfigurationStore(userDefaults: defaults)
+                .configuration(forProjectPath: fixture.main.path).publishPolicy,
+            .createReady
+        )
+    }
+
+    @MainActor
     func testPublishReceiptsAreBoundedDurableAndNameTheCredentialTier() throws {
         let suite = "ChangeRequestReceipts.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -75,6 +100,32 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertEqual(restored.branch, "feature")
         XCTAssertEqual(restored.credentialTier, .ghCLI)
         XCTAssertEqual(restored.action, .createdDraft)
+    }
+
+    @MainActor
+    func testUnreadableReceiptsArePreservedAndUnsafeURLsAreNotRecorded() throws {
+        let suite = "ChangeRequestReceiptRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "changeRequest.publishReceipts.v1"
+        let corrupt = Data("not-json".utf8)
+        defaults.set(corrupt, forKey: key)
+
+        let store = ChangeRequestReceiptStore(userDefaults: defaults)
+        XCTAssertEqual(store.receipts, [])
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: key)),
+            corrupt
+        )
+        XCTAssertFalse(store.append(ChangeRequestReceipt(
+            date: Date(timeIntervalSince1970: 1),
+            action: .createdReady,
+            repository: "team/app",
+            branch: "feature",
+            url: URL(fileURLWithPath: "/private/pull-request"),
+            credentialTier: .ghCLI
+        )))
+        XCTAssertEqual(store.receipts, [])
     }
 
     // MARK: - GitHub discovery

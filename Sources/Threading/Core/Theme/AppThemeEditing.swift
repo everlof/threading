@@ -204,6 +204,12 @@ enum AppThemeEditing {
             return
         }
 
+        guard theme.id.isSafeAssetDirectoryName else {
+            throw AppThemeEditingError.invalid(
+                "A theme id must be one safe file-name component."
+            )
+        }
+
         guard !theme.variants.isEmpty else {
             throw AppThemeEditingError.invalid(
                 "An app theme must provide at least one light or dark variant."

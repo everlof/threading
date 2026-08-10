@@ -71,6 +71,7 @@ Components so far:
 | `ChipView` | A compact chooser that opens a menu. It is a flat pill by default; a material may request the classic square dropdown anatomy: sunken value well, separate raised arrow button, regular control text, and no SF-symbol decoration. The same authorable choice carries through the shared menu presenter, whose compact rows, flat selection band, etched separators, filled arrows, edge attachment, and hard panel edge complete the control instead of leaving a modern popover under a period button. |
 | `CodeContextPreviewView` | The bounded diff-shaped context above a code-comment field. It keeps two neighbouring rendered rows around an ordinary target, preserves additions/removals and line numbers, and marks every target row with the theme's selection surface plus a leading `›` so the distinction survives without colour. The presentation model draws at most ten code rows; a larger selection retains both ends around one counted omission row, while the attachment still carries the complete selected excerpt. |
 | `ConversationContextRailView` | The compact reference/comment receipts shared by the Chat composer and sent-message transcript. It groups a large batch into quiet count chips, then uses the themed menu for inspection, removal, re-reference, and comment actions. |
+| `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
 | `PaneNoticeView` | A standing condition between a pane header and its content, pushed into layout rather than drawn over it. Ordinary notices are one message line; a technical diagnosis may add a short title above a two-line explanation. The warning/information mark, exact copy, compact intrinsic-width actions and keyboard-reachable dismissal remain one accessible group. It owns its ground because the pane beneath it may be an unrelated terminal palette. |
@@ -1146,8 +1147,9 @@ type-to-select, arrow-key navigation into and out of submenus, press-drag-releas
 hover-safe submenu travel, and pointer anchoring, so the app never mixes two menu languages in
 one window. Nested menus ride on `ThemedMenuItem.submenu`; a parent row draws the chevron,
 opens beside its panel on hover or right-arrow, and keeps the menu-path highlight while the
-pointer is anywhere in the chain. Callers still depend on a named boundary rather than
-constructing their chrome.
+pointer is anywhere in the chain. A menu item's destination is one algebraic value — inert,
+action, or submenu — because a row carrying both would answer a press with the action and hover
+with the submenu. Callers still depend on a named boundary rather than constructing their chrome.
 
 Nine bugs are worth keeping, because each is a trap the next drawn control will walk into:
 

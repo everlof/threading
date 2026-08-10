@@ -175,6 +175,51 @@ final class ProviderArchiveSyncTests: XCTestCase {
         )
     }
 
+    /// A local-only archive used to report success after `ProjectStore.save()` had restored the
+    /// standing snapshot. Recovery mode makes that refusal deterministic without damaging a
+    /// database, and the synchronizer must neither hide the session nor claim that it did.
+    @MainActor
+    func testKnownPersistenceRefusalStopsBeforeArchiveSideEffectsAndIsReported() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-archive-refusal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        let seed = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(seed.addProject(folderURL: directory))
+        let session = try XCTUnwrap(seed.addSession(to: project.id, kind: .claude))
+
+        let recovery = ProjectStore(stateManager: manager, refusesWrites: true)
+        let synchronizer = ProviderArchiveSync(store: recovery)
+        var received: Result<Void, ProviderArchiveFailure>?
+        synchronizer.setArchived(true, for: session.id) { received = $0 }
+
+        guard case .failure(let failure) = try XCTUnwrap(received) else {
+            return XCTFail("a refused write was acknowledged as a successful archive")
+        }
+        XCTAssertEqual(failure, .persistenceUnavailable(processStopped: false))
+        XCTAssertFalse(try XCTUnwrap(recovery.session(withID: session.id)).isArchived)
+    }
+
+    @MainActor
+    func testAMissingArchiveTargetIsNotAcknowledgedAsSuccess() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-archive-missing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let synchronizer = ProviderArchiveSync(store: ProjectStore(
+            stateManager: StateManager(appSupportDirectory: directory),
+            refusesWrites: false
+        ))
+        var received: Result<Void, ProviderArchiveFailure>?
+        synchronizer.setArchived(true, for: SessionID()) { received = $0 }
+
+        guard case .failure(let failure) = try XCTUnwrap(received) else {
+            return XCTFail("a missing session was acknowledged as a successful archive")
+        }
+        XCTAssertEqual(failure, .sessionNotFound)
+    }
+
     private func rollout(in directory: URL, id: TranscriptID) -> URL {
         directory.appendingPathComponent("rollout-2026-08-08T00-00-00-\(id.rawValue).jsonl")
     }

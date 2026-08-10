@@ -99,7 +99,8 @@ final class ProfileStorage {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.profiles,
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
         self.storedProfiles = persistence.load(defaultValue: [.default]).value
     }

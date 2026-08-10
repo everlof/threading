@@ -120,6 +120,23 @@ final class LaunchLedgerTests: XCTestCase {
         XCTAssertEqual(ledger().read(), .valid(LaunchLedgerHistory()))
     }
 
+    func testAnOversizedLedgerIsQuarantinedBeforeParsingAllocatesTheWholeFile() throws {
+        XCTAssertTrue(FileManager.default.createFile(atPath: ledgerURL.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: ledgerURL)
+        try handle.truncate(atOffset: UInt64(LaunchLedgerDefaults.maximumFileBytes + 1))
+        try handle.close()
+
+        guard case .corrupt(let quarantinedAt) = ledger().read() else {
+            return XCTFail("an oversized ledger must be damage, not missing history")
+        }
+        let quarantined = try XCTUnwrap(quarantinedAt)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ledgerURL.path))
+        XCTAssertEqual(
+            try quarantined.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            LaunchLedgerDefaults.maximumFileBytes + 1
+        )
+    }
+
     /// **A torn final line is what dying between two writes looks like.** It is the signature this
     /// file exists to record, so it is dropped and flagged rather than treated as a reason to
     /// distrust everything above it.

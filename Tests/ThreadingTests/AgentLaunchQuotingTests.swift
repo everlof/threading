@@ -210,7 +210,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
 
         let plans = [
             AgentLauncher.plan(for: session, in: project),
-            AgentLauncher.streamPlan(for: session, in: project)
+            try AgentLauncher.streamPlan(for: session, in: project)
         ]
 
         for plan in plans {
@@ -522,6 +522,22 @@ final class AgentLaunchQuotingTests: XCTestCase {
         var quoted = ShellCommand(word: "echo")
         quoted.append(word: "; $(id) `id` && it's fine")
         XCTAssertEqual(Self.strippingQuotedSpans(quoted.source).trimmingCharacters(in: .whitespaces), "")
+    }
+
+    func testTerminalOnlyRuntimeRefusesEveryNativeConversationBoundary() throws {
+        let session = AgentSession(kind: .openCode, title: "Terminal only")
+        let project = Project(
+            name: "Terminal only",
+            folderURL: URL(fileURLWithPath: "/tmp/terminal-only")
+        )
+
+        XCTAssertNil(ConversationViewController(agentSession: session, project: project))
+        XCTAssertThrowsError(try AgentLauncher.streamPlan(for: session, in: project)) { error in
+            XCTAssertEqual(
+                error as? AgentLaunchPlanningError,
+                .unsupportedNativeConversation(.openCode)
+            )
+        }
     }
 
     // MARK: - Helpers

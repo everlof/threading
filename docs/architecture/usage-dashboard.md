@@ -90,6 +90,9 @@ source path. File size plus a freshly read modification timestamp invalidates tr
 OpenCode entries use export id plus session revision. The cached value retains every response
 identity, so global deduplication happens after cache hits and misses are joined and a warm result
 is exactly the cold result. Stale cache entries are removed only inside the private cache directory.
+Each envelope is bounded to 64 MiB on both read and write. An externally enlarged entry is a cache
+miss and is replaced only after the source is parsed; metadata preflight is not used as allocation
+authority.
 
 `UsageLedgerBuilder` deduplicates once, prices once, resolves checkout roots once per directory and
 aggregates at the bounded cell grain:
@@ -116,6 +119,10 @@ The durable format is owner-only daily JSONL in Application Support:
 - regular files only, with symbolic links rejected;
 - normalized percentages and metadata only—never credentials or transcript text;
 - legacy `usage-history.json` samples are enriched and migrated once without duplicate records.
+
+The 8 MiB daily ceiling is enforced by the opened stream, and append rotation uses subtraction
+rather than an overflowable `current + incoming` sum. A file changed after metadata inspection
+therefore cannot turn the history loader into an unbounded allocation.
 
 The journal is append-only because a damaged line can be skipped without losing its neighbours and
 because appending an observation does not rewrite six months of history. The Advanced reset path

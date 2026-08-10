@@ -64,19 +64,29 @@ final class ChangeRequestConfigurationStore {
 
     private enum Defaults {
         static let key = "changeRequest.repositoryConfigurations.v1"
+        static let maximumConfigurations = 1_024
+        static let maximumRepositoryIdentityBytes = 4 * 1_024
     }
 
-    private let userDefaults: UserDefaults
+    private enum ValidationError: Error {
+        case invalidRepositorySet
+    }
+
+    private let persistence: RecoverableDefaultsStore<State>
     private var state: State
 
     init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-        if let data = userDefaults.data(forKey: Defaults.key),
-           let decoded = try? JSONDecoder().decode(State.self, from: data) {
-            state = decoded
-        } else {
-            state = State()
-        }
+        let persistence = RecoverableDefaultsStore<State>(
+            defaults: userDefaults,
+            key: Defaults.key,
+            criticality: .preference,
+            sizePolicy: .compactMetadata
+        )
+        self.persistence = persistence
+        self.state = persistence.load(
+            defaultValue: State(),
+            validate: Self.validate
+        ).value
     }
 
     func configuration(forProjectPath path: String) -> ChangeRequestConfiguration {
@@ -84,26 +94,54 @@ final class ChangeRequestConfigurationStore {
         return state.configurations[identity] ?? .default
     }
 
-    func set(_ configuration: ChangeRequestConfiguration, forProjectPath path: String) {
-        guard let identity = GitInfo.repositoryIdentity(for: path) else { return }
-
-        if configuration == .default {
-            state.configurations.removeValue(forKey: identity)
-        } else {
-            state.configurations[identity] = configuration
+    @discardableResult
+    func set(
+        _ configuration: ChangeRequestConfiguration,
+        forProjectPath path: String
+    ) -> Bool {
+        guard let identity = GitInfo.repositoryIdentity(for: path),
+              !identity.isEmpty,
+              identity.utf8.count <= Defaults.maximumRepositoryIdentityBytes else {
+            return false
         }
-        persist()
+
+        var candidate = state
+        if configuration == .default {
+            candidate.configurations.removeValue(forKey: identity)
+        } else {
+            candidate.configurations[identity] = configuration
+        }
+        guard candidate.configurations != state.configurations else { return true }
+        do {
+            try Self.validate(candidate)
+        } catch {
+            ThreadingLogger.session.error(
+                "Refusing oversized change-request configuration state"
+            )
+            return false
+        }
+        guard persistence.save(candidate) else { return false }
+        state = candidate
         NotificationCenter.default.post(ChangeRequestConfigurationDidChange(
             repositoryIdentity: identity
         ))
+        return true
     }
 
-    func setPublishPolicy(_ policy: ChangeRequestPublishPolicy, forProjectPath path: String) {
+    @discardableResult
+    func setPublishPolicy(
+        _ policy: ChangeRequestPublishPolicy,
+        forProjectPath path: String
+    ) -> Bool {
         set(ChangeRequestConfiguration(publishPolicy: policy), forProjectPath: path)
     }
 
-    private func persist() {
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        userDefaults.set(data, forKey: Defaults.key)
+    private static func validate(_ state: State) throws {
+        guard state.configurations.count <= Defaults.maximumConfigurations,
+              state.configurations.keys.allSatisfy({
+                  !$0.isEmpty && $0.utf8.count <= Defaults.maximumRepositoryIdentityBytes
+              }) else {
+            throw ValidationError.invalidRepositorySet
+        }
     }
 }

@@ -402,4 +402,41 @@ final class UsageWindowPlanTests: XCTestCase {
             .hold(.notScheduledToday)
         )
     }
+
+    @MainActor
+    func testUnreadableUsageWindowScheduleIsPreservedBeforeAReplacement() throws {
+        let suite = "UsageWindowRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "usageWindowSchedule"
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: key)
+
+        let store = UsageWindowSettings(defaults: defaults)
+        XCTAssertFalse(store.schedule.isEnabled)
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: key)),
+            corrupt
+        )
+        let replacement = schedule()
+        store.schedule = replacement
+        XCTAssertEqual(UsageWindowSettings(defaults: defaults).schedule, replacement)
+    }
+
+    @MainActor
+    func testInvalidUsageWindowScheduleCannotReplaceTheDurableCandidate() throws {
+        let suite = "UsageWindowValidation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UsageWindowSettings(defaults: defaults)
+        let valid = schedule()
+        store.schedule = valid
+
+        var invalid = valid
+        invalid.startMinute = -1
+        store.schedule = invalid
+
+        XCTAssertEqual(store.schedule, valid)
+        XCTAssertEqual(UsageWindowSettings(defaults: defaults).schedule, valid)
+    }
 }

@@ -49,6 +49,7 @@ final class SessionAttachmentStoreTests: XCTestCase {
                 self?.payloads = self?.payloads.filter { ids.contains($0.key) } ?? [:]
             },
             copiesDirectory: takesCustody ? { [copies] in copies! } : nil,
+            referenceRoot: { [checkout] _ in checkout },
             allowsFilesOutsideProject: { [weak self] in self?.allowsFilesOutsideProject ?? false }
         )
     }
@@ -188,6 +189,24 @@ final class SessionAttachmentStoreTests: XCTestCase {
         let relaunched = makeStore()
         XCTAssertEqual(relaunched.attachment(for: session, id: first.id)?.id, first.id)
         XCTAssertEqual(relaunched.attachment(for: session, id: second.id)?.id, second.id)
+    }
+
+    func testDisplayedSnapshotStoresTheValidatedBytesNotALaterSourceRevision() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let progress = elsewhere.appendingPathComponent("progress.png")
+        let validated = Data([0x01, 0x02])
+        try Data([0x09, 0x09]).write(to: progress)
+
+        let snapshot = try XCTUnwrap(store.recordSnapshot(
+            validated,
+            of: progress,
+            sessionID: session,
+            origin: .agent
+        ))
+
+        XCTAssertEqual(try Data(contentsOf: snapshot.url), validated)
+        XCTAssertEqual(try Data(contentsOf: progress), Data([0x09, 0x09]))
     }
 
     func testGeneratedHTMLIsAnInspectableAttachmentRatherThanAPanelOnlyValue() throws {
@@ -507,6 +526,22 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(attachments.map(\.origin), [.agent])
         XCTAssertEqual(attachments.map(\.url).map { $0.resolvingSymlinksInPath() },
                        [file.resolvingSymlinksInPath()])
+    }
+
+    func testAPersistedRootCannotGrantReadAuthorityOutsideTheSession() throws {
+        let session = SessionID()
+        let outside = try write([0x89], to: elsewhere.appendingPathComponent("private.png"))
+        let relativeToFilesystemRoot = String(outside.path.dropFirst())
+        payloads[session] = """
+        [{"projectRoot":"/","relativePath":"\(relativeToFilesystemRoot)",\
+        "kind":"image","referencedAt":0}]
+        """
+
+        XCTAssertEqual(
+            makeStore().attachments(for: session),
+            [],
+            "a persisted absolute root outside the checkout became remote-readable authority"
+        )
     }
 
     /// A payload from a *newer* build may name a kind this build has no case for. `Array`

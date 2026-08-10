@@ -83,34 +83,14 @@ enum GitWorktree {
 
     @discardableResult
     fileprivate static func run(_ arguments: [String], in directory: URL) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: GitDefaults.executablePath)
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
-        process.environment = GitChildEnvironment.make()
-
-        let output = Pipe()
-        let errors = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
-
         do {
-            try process.run()
+            let output = try GitProcess.run(arguments, in: directory)
+            return String(decoding: output, as: UTF8.self)
         } catch {
-            throw Failure.gitFailed(error.localizedDescription)
+            throw Failure.gitFailed(
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            )
         }
-
-        let outData = output.fileHandleForReading.readDataToEndOfFile()
-        let errData = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Failure.gitFailed(message.flatMap { $0.isEmpty ? nil : $0 } ?? "git failed.")
-        }
-
-        return String(data: outData, encoding: .utf8) ?? ""
     }
 }
 

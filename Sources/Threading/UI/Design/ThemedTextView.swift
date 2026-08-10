@@ -142,17 +142,33 @@ class ThemedTextView: NSTextView, ThemedComponent {
     /// The themed replacement for `NSTextView.scrollableTextView()`: a transparent scroll
     /// view around a width-tracking, vertically growing text view — the wiring every
     /// scrolling text pane needs and nobody should re-derive.
-    static func scrolling() -> ThemedScrollView {
-        let scrollView = ThemedScrollView(frame: .zero)
-        let textView = ThemedTextView(frame: .zero, textContainer: nil)
+    static func scrolling() -> ThemedTextScrollView { ThemedTextScrollView() }
+}
+
+/// A scrolling text surface whose document type remains visible to the compiler.
+///
+/// Returning a plain scroll view forced every caller to rediscover the factory invariant with
+/// `documentView as? ThemedTextView`—and two important editors used `as!`. The composite owns the
+/// invariant instead: replacing its document view remains possible through AppKit, but code built
+/// by this factory never needs a runtime cast to reach the text view it created.
+final class ThemedTextScrollView: ThemedScrollView {
+    let textView: ThemedTextView
+
+    init() {
+        textView = ThemedTextView(frame: .zero, textContainer: nil)
+        super.init(frame: .zero)
 
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
 
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        return scrollView
+        documentView = textView
+        hasVerticalScroller = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }

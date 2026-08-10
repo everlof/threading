@@ -248,7 +248,9 @@ final class DisplayPaneStore {
   /// Writes an image tab's PNG to the session cache, returning the filename to persist. Named by
   /// the tab id so it lines up with the tab and is trivially removed when the tab closes.
   func cacheImage(_ image: NSImage, tabID: UUID, for sessionID: SessionID) -> String? {
-    guard let data = image.pngRepresentation else { return nil }
+    guard let data = image.pngRepresentation,
+      data.count <= DisplayPaneStoreDefaults.maximumCachedImageBytes
+    else { return nil }
     let name = tabID.uuidString + "." + DisplayPaneStoreDefaults.imageExtension
     do {
       try fileManager.createDirectory(
@@ -262,10 +264,15 @@ final class DisplayPaneStore {
   }
 
   func loadImage(_ name: String, for sessionID: SessionID) -> NSImage? {
-    NSImage(contentsOf: cacheDirectory(sessionID).appendingPathComponent(name))
+    guard StoredPathComponent.isValid(name) else { return nil }
+    return BoundedImageDecoder.image(
+      at: cacheDirectory(sessionID).appendingPathComponent(name),
+      policy: .userMedia
+    )
   }
 
   func removeCachedImage(_ name: String, for sessionID: SessionID) {
+    guard StoredPathComponent.isValid(name) else { return }
     try? fileManager.removeItem(at: cacheDirectory(sessionID).appendingPathComponent(name))
   }
 
@@ -409,6 +416,8 @@ enum DisplayPaneStoreDefaults {
   static let rootDirectory = "panels"
   static let layoutExtension = "json"
   static let imageExtension = "png"
+  static let maximumLayoutBytes = 4 * 1024 * 1024
+  static let maximumCachedImageBytes = MCPDefaults.maximumImageBytes
   static let maximumBrowserScreenshots = 8
   static let maximumBrowserTraces = 4
   static let maximumBrowserVisualArtifacts = 8

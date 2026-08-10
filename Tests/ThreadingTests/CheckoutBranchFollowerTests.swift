@@ -35,9 +35,9 @@ final class CheckoutBranchFollowerTests: XCTestCase {
         let subfolder = try makeSubfolder(of: checkout, named: "docs")
         let elsewhere = try makeCheckout(named: "elsewhere", branch: "main")
 
-        let project = store.addProject(folderURL: checkout)
-        let subProject = store.addProject(folderURL: subfolder)
-        let otherProject = store.addProject(folderURL: elsewhere)
+        let project = try XCTUnwrap(store.addProject(folderURL: checkout))
+        let subProject = try XCTUnwrap(store.addProject(folderURL: subfolder))
+        let otherProject = try XCTUnwrap(store.addProject(folderURL: elsewhere))
         store.addSession(to: project.id, kind: .claude)
         store.addSession(to: project.id, kind: .claude)
         store.addSession(to: subProject.id, kind: .codex)
@@ -56,7 +56,7 @@ final class CheckoutBranchFollowerTests: XCTestCase {
     func testADetachedReadingLeavesEveryRecordAlone() throws {
         let store = makeStore()
         let checkout = try makeCheckout(named: "app", branch: "main")
-        let project = store.addProject(folderURL: checkout)
+        let project = try XCTUnwrap(store.addProject(folderURL: checkout))
         store.addSession(to: project.id, kind: .claude)
 
         // A rebase detaches HEAD for seconds at a time; the follower's path never applies
@@ -70,7 +70,7 @@ final class CheckoutBranchFollowerTests: XCTestCase {
     func testCheckoutRefreshMovesStandaloneTerminalBranch() throws {
         let store = makeStore()
         let checkout = try makeCheckout(named: "terminal", branch: "main")
-        let project = store.addProject(folderURL: checkout)
+        let project = try XCTUnwrap(store.addProject(folderURL: checkout))
         let terminal = try XCTUnwrap(store.addTerminal(to: project.id))
 
         try setBranch("feature", in: checkout)
@@ -83,8 +83,8 @@ final class CheckoutBranchFollowerTests: XCTestCase {
         let store = makeStore()
         let checkout = try makeCheckout(named: "app", branch: "main")
         let docs = try makeSubfolder(of: checkout, named: "docs")
-        let home = store.addProject(folderURL: checkout)
-        let docsProject = store.addProject(folderURL: docs)
+        let home = try XCTUnwrap(store.addProject(folderURL: checkout))
+        let docsProject = try XCTUnwrap(store.addProject(folderURL: docs))
         let terminal = try XCTUnwrap(store.addTerminal(to: home.id))
 
         store.updateTerminalLocation(docs.path, for: terminal.id)
@@ -98,7 +98,7 @@ final class CheckoutBranchFollowerTests: XCTestCase {
     func testStartCatchesUpABranchThatMovedWhileUnwatched() throws {
         let store = makeStore()
         let checkout = try makeCheckout(named: "app", branch: "main")
-        let project = store.addProject(folderURL: checkout)
+        let project = try XCTUnwrap(store.addProject(folderURL: checkout))
         store.addSession(to: project.id, kind: .claude)
 
         // The switch happens before any watcher exists — the closed-app case.

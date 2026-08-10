@@ -46,7 +46,13 @@ final class MobileSessionContinuityStore: ObservableObject {
         static let archiveKey = "threading.mobile.session-continuity.v1"
         static let archiveVersion = 1
         static let unreadableKeyPrefix = "threading.mobile.session-continuity.unreadable."
+        static let maximumArchiveBytes = 1 * 1_024 * 1_024
+        static let maximumStateCount = 512
         static let retainedPositionCount = 250
+        static let maximumIdentifierBytes = 1_024
+        static let maximumStorageKeyBytes = 2 * maximumIdentifierBytes + 32
+        static let maximumDraftBytes = 256 * 1_024
+        static let maximumAggregateStringBytes = 768 * 1_024
     }
 
     private let defaults: UserDefaults
@@ -67,6 +73,9 @@ final class MobileSessionContinuityStore: ObservableObject {
             return
         }
         do {
+            guard data.count <= Defaults.maximumArchiveBytes else {
+                throw ValidationError.invalidArchive
+            }
             var decoded = try JSONDecoder().decode(Archive.self, from: data)
             guard (decoded.version ?? 1) <= Defaults.archiveVersion else {
                 archive = empty
@@ -75,6 +84,7 @@ final class MobileSessionContinuityStore: ObservableObject {
                 return
             }
             decoded.version = Defaults.archiveVersion
+            try Self.validate(decoded)
             archive = decoded
         } catch {
             let recoveryKey = Defaults.unreadableKeyPrefix + UUID().uuidString.lowercased()
@@ -135,21 +145,24 @@ final class MobileSessionContinuityStore: ObservableObject {
 
     func setActiveHostID(_ hostID: String?) {
         guard archive.activeHostID != hostID else { return }
-        archive.activeHostID = hostID
-        save()
+        var candidate = archive
+        candidate.activeHostID = hostID
+        save(candidate)
     }
 
     func setLastRoute(hostID: String, sessionID: String) {
         let route = Route(hostID: hostID, sessionID: sessionID)
         guard archive.lastRoute != route else { return }
-        archive.lastRoute = route
-        save()
+        var candidate = archive
+        candidate.lastRoute = route
+        save(candidate)
     }
 
     func clearLastRoute() {
         guard archive.lastRoute != nil else { return }
-        archive.lastRoute = nil
-        save()
+        var candidate = archive
+        candidate.lastRoute = nil
+        save(candidate)
     }
 
     private func update(
@@ -163,31 +176,39 @@ final class MobileSessionContinuityStore: ObservableObject {
         mutation(&state)
         guard state != previous else { return }
         state.updatedAt = Date()
+        var candidate = archive
         if state.isEmpty {
-            archive.states.removeValue(forKey: storageKey)
+            candidate.states.removeValue(forKey: storageKey)
         } else {
-            archive.states[storageKey] = state
+            candidate.states[storageKey] = state
         }
-        prunePositions()
-        save()
+        prunePositions(in: &candidate)
+        save(candidate)
     }
 
     /// Position-only records are disposable history; records containing unsent words are not.
-    private func prunePositions() {
-        let positionOnly = archive.states.filter { !$0.value.hasDraft }
+    private func prunePositions(in candidate: inout Archive) {
+        let positionOnly = candidate.states.filter { !$0.value.hasDraft }
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
         guard positionOnly.count > Defaults.retainedPositionCount else { return }
         for entry in positionOnly.dropFirst(Defaults.retainedPositionCount) {
-            archive.states.removeValue(forKey: entry.key)
+            candidate.states.removeValue(forKey: entry.key)
         }
     }
 
-    private func save() {
+    private func save(_ candidate: Archive) {
         guard writesAllowed else { return }
-        archive.version = Defaults.archiveVersion
-        guard let data = try? JSONEncoder().encode(archive) else {
-            writesAllowed = false
-            recoveryMessage = "Session state could not be encoded. New writes are paused."
+        var candidate = candidate
+        candidate.version = Defaults.archiveVersion
+        do {
+            try Self.validate(candidate)
+        } catch {
+            recoveryMessage = "Session state exceeded its safe storage limits and was not changed."
+            return
+        }
+        guard let data = try? JSONEncoder().encode(candidate),
+              data.count <= Defaults.maximumArchiveBytes else {
+            recoveryMessage = "Session state exceeded its safe storage limit and was not changed."
             return
         }
         defaults.set(data, forKey: Defaults.archiveKey)
@@ -196,6 +217,8 @@ final class MobileSessionContinuityStore: ObservableObject {
             recoveryMessage = "Session state could not be saved. New writes are paused."
             return
         }
+        archive = candidate
+        recoveryMessage = nil
     }
 
     private func key(hostID: String, sessionID: String) -> String {
@@ -203,4 +226,50 @@ final class MobileSessionContinuityStore: ObservableObject {
     }
 
     private func clamp(_ value: Double) -> Double { min(max(value, 0), 1) }
+
+    private enum ValidationError: Error {
+        case invalidArchive
+    }
+
+    private static func validate(_ archive: Archive) throws {
+        guard archive.states.count <= Defaults.maximumStateCount else {
+            throw ValidationError.invalidArchive
+        }
+
+        var aggregateBytes = 0
+        func count(_ value: String, maximum: Int) throws {
+            let bytes = value.utf8.count
+            guard !value.isEmpty, bytes <= maximum else {
+                throw ValidationError.invalidArchive
+            }
+            let (total, overflow) = aggregateBytes.addingReportingOverflow(bytes)
+            guard !overflow, total <= Defaults.maximumAggregateStringBytes else {
+                throw ValidationError.invalidArchive
+            }
+            aggregateBytes = total
+        }
+
+        if let hostID = archive.activeHostID {
+            try count(hostID, maximum: Defaults.maximumIdentifierBytes)
+        }
+        if let route = archive.lastRoute {
+            try count(route.hostID, maximum: Defaults.maximumIdentifierBytes)
+            try count(route.sessionID, maximum: Defaults.maximumIdentifierBytes)
+        }
+        for (storageKey, state) in archive.states {
+            try count(storageKey, maximum: Defaults.maximumStorageKeyBytes)
+            if !state.conversationDraft.isEmpty {
+                try count(state.conversationDraft, maximum: Defaults.maximumDraftBytes)
+            }
+            if !state.terminalDraft.isEmpty {
+                try count(state.terminalDraft, maximum: Defaults.maximumDraftBytes)
+            }
+            for progress in [state.conversationViewportProgress, state.terminalViewportProgress]
+                .compactMap({ $0 }) {
+                guard progress.isFinite, (0 ... 1).contains(progress) else {
+                    throw ValidationError.invalidArchive
+                }
+            }
+        }
+    }
 }

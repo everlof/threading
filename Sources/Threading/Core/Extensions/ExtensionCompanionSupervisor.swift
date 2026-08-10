@@ -86,7 +86,7 @@ struct LocalExtensionCompanionLaunchPolicy: ExtensionCompanionLaunchPolicy {
                     1: descriptor(for: request.standardOutput, childReads: false),
                     2: descriptor(for: request.standardError, childReads: false),
                     ExtensionRemoteSurfaceConnection.childDescriptorNumber:
-                        remoteSurfaceDescriptor
+                        .inherited(remoteSurfaceDescriptor)
                 ]
             )
         }
@@ -108,14 +108,14 @@ struct LocalExtensionCompanionLaunchPolicy: ExtensionCompanionLaunchPolicy {
     private func descriptor(
         for stream: ExtensionChildStream,
         childReads: Bool
-    ) -> Int32 {
+    ) -> ChildDescriptorSource {
         switch stream {
         case .nullDevice:
-            return FileHandle.nullDevice.fileDescriptor
+            return .nullDevice
         case .pipe(let pipe):
-            return childReads
+            return .inherited(childReads
                 ? pipe.fileHandleForReading.fileDescriptor
-                : pipe.fileHandleForWriting.fileDescriptor
+                : pipe.fileHandleForWriting.fileDescriptor)
         }
     }
 

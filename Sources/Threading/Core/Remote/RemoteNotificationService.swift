@@ -572,6 +572,8 @@ struct RemoteAPNSDeliveryResult: Equatable, Sendable {
 
 actor RemoteAPNSPushSender {
 
+    private static let maximumPrivateKeyBytes = 64 * 1_024
+
     enum Environment: String {
         case sandbox
         case production
@@ -638,7 +640,11 @@ actor RemoteAPNSPushSender {
         guard let keyID = environment["THREADING_APNS_KEY_ID"]?.nilIfEmpty,
               let teamID = environment["THREADING_APNS_TEAM_ID"]?.nilIfEmpty,
               let path = environment["THREADING_APNS_PRIVATE_KEY_PATH"]?.nilIfEmpty,
-              let pem = try? String(contentsOfFile: (path as NSString).expandingTildeInPath),
+              let bytes = try? BoundedFileReader.read(
+                  URL(fileURLWithPath: (path as NSString).expandingTildeInPath),
+                  maximumBytes: maximumPrivateKeyBytes
+              ),
+              let pem = String(data: bytes, encoding: .utf8),
               let privateKey = try? P256.Signing.PrivateKey(pemRepresentation: pem)
         else {
             return nil

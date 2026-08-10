@@ -62,10 +62,7 @@ private final class PullRequestComposerAccessory: NSView {
     var body: String { bodyView.string }
     var isDraft: Bool { draftToggle.state == .on }
 
-    private var bodyView: ThemedTextView {
-        // `ThemedTextView.scrolling()` owns exactly this document type.
-        bodyScroll.documentView as! ThemedTextView
-    }
+    private var bodyView: ThemedTextView { bodyScroll.textView }
 
     init(seed: ChangeRequestProposalSeed, root: URL, isDraft: Bool) {
         self.seed = seed

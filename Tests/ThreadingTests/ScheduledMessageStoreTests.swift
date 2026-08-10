@@ -361,6 +361,48 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(reopened.messages(for: session).first?.text, "Still here tomorrow")
     }
 
+    func testAFailedAddIsRefusedAndNeverBecomesCurrentOnlyInMemory() throws {
+        let blockedDirectory = directory.appendingPathComponent("not-a-directory")
+        try Data("occupied".utf8).write(to: blockedDirectory)
+        let store = ScheduledMessageStore(
+            directory: blockedDirectory,
+            center: NotificationCenter()
+        )
+
+        let result = store.add(message(), now: now)
+
+        XCTAssertEqual(result.failure, .writesBlocked)
+        XCTAssertTrue(
+            store.all.isEmpty,
+            "A scheduled send is accepted only after its sole durable copy is verified"
+        )
+    }
+
+    func testAFailedRemovalKeepsTheRecordAndStopsUnattendedDelivery() throws {
+        let mutableDirectory = directory.appendingPathComponent("mutable", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: mutableDirectory,
+            withIntermediateDirectories: true
+        )
+        let store = ScheduledMessageStore(
+            directory: mutableDirectory,
+            center: NotificationCenter()
+        )
+        let scheduled = try store.add(message(dueIn: 60), now: now).get()
+
+        try FileManager.default.removeItem(at: mutableDirectory)
+        try Data("occupied".utf8).write(to: mutableDirectory)
+
+        XCTAssertFalse(store.remove(scheduled.id))
+        XCTAssertEqual(store.all.map(\.id), [scheduled.id])
+        XCTAssertNil(
+            store.claim(scheduled.id),
+            "Once outcomes cannot be recorded, unattended sends must stand down"
+        )
+        XCTAssertTrue(store.due(at: now.addingTimeInterval(120)).isEmpty)
+        XCTAssertFalse(store.hasClockWorkPending)
+    }
+
     func testFinishTriggerSurvivesBeingReadBackFromDisk() {
         let watched = SessionID()
         let written = makeStore()

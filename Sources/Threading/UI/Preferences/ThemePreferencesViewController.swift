@@ -850,7 +850,14 @@ final class ThemePreferencesViewController: NSViewController {
 
     @objc private func duplicateTheme() {
         guard let theme = selectedTheme else { return }
-        selectedTheme = ThemeManager.shared.duplicateTheme(theme)
+        guard let duplicated = ThemeManager.shared.duplicateTheme(theme) else {
+            presentAlert(
+                L10n.string("Cannot Duplicate"),
+                L10n.string("The terminal theme could not be saved.")
+            )
+            return
+        }
+        selectedTheme = duplicated
         loadThemes()
     }
 
@@ -909,7 +916,13 @@ final class ThemePreferencesViewController: NSViewController {
         guard var theme = selectedTheme, !ThemeManager.shared.isBuiltIn(theme) else { return }
 
         theme[key] = color
-        ThemeManager.shared.addTheme(theme)
+        guard ThemeManager.shared.addTheme(theme) else {
+            presentAlert(
+                L10n.string("Cannot Save"),
+                L10n.string("The terminal theme could not be saved.")
+            )
+            return
+        }
         selectedTheme = theme
         themes = ThemeAssignments.selectableThemes
 

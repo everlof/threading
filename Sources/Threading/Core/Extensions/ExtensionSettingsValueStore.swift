@@ -139,7 +139,8 @@ final class ExtensionSettingsValueStore: @unchecked Sendable {
         let store = RecoverableFileStore<State>(
             url: stateURL(identifier: identifier),
             fileManager: fileManager,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
         )
         persistenceByIdentifier[identifier] = store
         return store

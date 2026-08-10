@@ -69,6 +69,26 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertTrue(detail.contains("Settings ▸ Archived"))
     }
 
+    func testArchiveFailureReportsAStopOnlyIfItHappenedBeforeTheFailure() throws {
+        let preflight = SessionCoordinator.archiveFailureToast(
+            for: session(),
+            failure: .persistenceUnavailable(processStopped: false),
+            wasRunning: true
+        )
+        XCTAssertFalse(try XCTUnwrap(preflight.detail).contains("stopped"))
+
+        let afterProviderStarted = SessionCoordinator.archiveFailureToast(
+            for: session(),
+            failure: .commandCouldNotLaunch(
+                provider: "Codex",
+                archives: true,
+                detail: "fixture"
+            ),
+            wasRunning: true
+        )
+        XCTAssertTrue(try XCTUnwrap(afterProviderStarted.detail).contains("stopped"))
+    }
+
     /// The undo is the whole reason the question is gone. A receipt that reports an archive and
     /// offers no way back is strictly worse than the alert it replaced.
     func testTheArchiveToastCarriesTheWayBack() {

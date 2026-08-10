@@ -8,6 +8,23 @@ import XCTest
 @MainActor
 final class ThemedControlTests: XCTestCase {
 
+    func testAMenuRowHasOnlyOneDestination() {
+        let inert = ThemedMenuItem(title: "Unavailable", isEnabled: false)
+        XCTAssertNil(inert.onChoose)
+        XCTAssertNil(inert.submenu)
+
+        let action = ThemedMenuItem(title: "Rename", onChoose: {})
+        XCTAssertNotNil(action.onChoose)
+        XCTAssertNil(action.submenu)
+
+        let parent = ThemedMenuItem(
+            title: "Options",
+            submenu: [.item(ThemedMenuItem(title: "Child"))]
+        )
+        XCTAssertNil(parent.onChoose)
+        XCTAssertEqual(parent.submenu?.compactMap { $0.item?.title }, ["Child"])
+    }
+
     override func tearDown() {
         Design.Accessibility.increaseContrastOverrideForTesting = nil
         Design.Accessibility.differentiateWithoutColorOverrideForTesting = nil
@@ -3652,7 +3669,7 @@ final class ThemedControlTests: XCTestCase {
         defer { fixture.tearDown() }
         let container = fixture.container
 
-        let conversation = ConversationViewController(
+        let conversation = requireConversationViewController(
             agentSession: fixture.session,
             project: fixture.project
         )
@@ -3711,7 +3728,7 @@ final class ThemedControlTests: XCTestCase {
             )
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let session = try XCTUnwrap(
             store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Drawer")
         )
@@ -6098,6 +6115,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedTextField",
                 "ThemedSearchField",
                 "ThemedSecureField",
+                "ThemedTextScrollView",
                 "ThemedTextView",
                 "ThemedToggle",
                 "ThemedVirtualTableCell",

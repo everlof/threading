@@ -33,7 +33,7 @@ final class AccountUsageItemView: BackdropOverlay {
 
     /// Re-asks the service on a short cadence; the service's own spacing decides whether a
     /// tick actually fetches, so the timer stays cheap.
-    nonisolated(unsafe) private var refreshTimer: Timer?
+    private let refreshTimer = MainRunLoopTimer()
 
     private var popover: ThemedPopover?
 
@@ -102,10 +102,6 @@ final class AccountUsageItemView: BackdropOverlay {
         render()
     }
 
-    deinit {
-        refreshTimer?.invalidate()
-    }
-
     // MARK: - Setup
 
     private func setupViews() {
@@ -147,7 +143,7 @@ final class AccountUsageItemView: BackdropOverlay {
             self?.usageDidChange(event)
         }
 
-        refreshTimer = Timer.scheduledTimer(
+        let timer = Timer.scheduledTimer(
             withTimeInterval: UsageDefaults.refreshTimerInterval,
             repeats: true
         ) { [weak self] _ in
@@ -156,7 +152,8 @@ final class AccountUsageItemView: BackdropOverlay {
                 AccountUsageService.shared.refresh(account)
             }
         }
-        refreshTimer.map { RunLoop.main.add($0, forMode: .common) }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer.install(timer)
     }
 
     // MARK: - Public Methods
@@ -195,11 +192,11 @@ final class AccountUsageItemView: BackdropOverlay {
             return
         }
 
-        let usage = AccountUsageService.shared.usage(for: account)
-        let errorMessage = AccountUsageService.shared.errorMessage(for: account)
+        let reading = AccountUsageService.shared.reading(for: account)
+        let usage = reading.usage
 
         // Nothing yet, and no failure to explain: stay hidden until the first result.
-        guard usage != nil || errorMessage != nil else {
+        guard reading.hasResult else {
             isHidden = true
             return
         }

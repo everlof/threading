@@ -111,7 +111,8 @@ final class DefaultsQuarantineTests: XCTestCase {
         let store = RecoverableDefaultsStore<[String: String]>(
             defaults: defaults,
             key: "versioned",
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
 
         let outcome = store.load(defaultValue: [:])
@@ -127,6 +128,107 @@ final class DefaultsQuarantineTests: XCTestCase {
             defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "versioned")),
             future
         )
+    }
+
+    func testOversizedDefaultsValueIsQuarantinedBeforeJSONMaterialization() {
+        let oversized = Data(
+            repeating: 0x78,
+            count: RecoverableDefaultsSizePolicy.compactMetadata.maximumBytes + 1
+        )
+        defaults.set(oversized, forKey: "oversized-defaults")
+        let store = RecoverableDefaultsStore<[String: String]>(
+            defaults: defaults,
+            key: "oversized-defaults",
+            criticality: .preference,
+            sizePolicy: .compactMetadata
+        )
+
+        let outcome = store.load(defaultValue: [:])
+        guard case .unreadable(let fallback, let recovery) = outcome else {
+            return XCTFail("Oversized defaults state must not be decoded")
+        }
+        XCTAssertEqual(fallback, [:])
+        XCTAssertEqual(
+            recovery,
+            .defaultsKey(DefaultsQuarantine.quarantineKey(for: "oversized-defaults"))
+        )
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "oversized-defaults")),
+            oversized
+        )
+    }
+
+    func testOversizedDefaultsEncodingIsRefusedWithoutReplacingKnownGoodBytes() {
+        let original = Data(#"{"legacy":"value"}"#.utf8)
+        defaults.set(original, forKey: "bounded-defaults")
+        let store = RecoverableDefaultsStore<[String: String]>(
+            defaults: defaults,
+            key: "bounded-defaults",
+            criticality: .preference,
+            sizePolicy: .compactMetadata
+        )
+
+        XCTAssertFalse(store.save([
+            "value": String(
+                repeating: "x",
+                count: RecoverableDefaultsSizePolicy.compactMetadata.maximumBytes
+            )
+        ]))
+        XCTAssertEqual(defaults.data(forKey: "bounded-defaults"), original)
+    }
+
+    func testOversizedRecoverableFileIsQuarantinedWithoutAWholeFileRead() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recoverable-file-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(
+            atOffset: UInt64(RecoverableFileSizePolicy.compactMetadata.maximumBytes + 1)
+        )
+        try handle.close()
+
+        let store = RecoverableFileStore<[String: String]>(
+            url: url,
+            fileManager: .default,
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
+        )
+        let outcome = store.load(defaultValue: [:])
+        guard case .unreadable(let fallback, .some(.file(let recoveryURL))) = outcome else {
+            return XCTFail("An oversized document must take the recovery path")
+        }
+
+        XCTAssertEqual(fallback, [:])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(
+            try recoveryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            RecoverableFileSizePolicy.compactMetadata.maximumBytes + 1
+        )
+        XCTAssertTrue(store.save(["recovered": "value"]))
+    }
+
+    func testOversizedEncodedValueIsRefusedBeforeItCreatesAFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recoverable-file-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        let store = RecoverableFileStore<[String: String]>(
+            url: url,
+            fileManager: .default,
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
+        )
+
+        XCTAssertFalse(store.save([
+            "value": String(
+                repeating: "x",
+                count: RecoverableFileSizePolicy.compactMetadata.maximumBytes
+            )
+        ]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
     func testUnreadableProfilesArePreservedBeforeAnEdit() {

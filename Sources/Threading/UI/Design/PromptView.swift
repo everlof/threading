@@ -959,7 +959,10 @@ final class PromptView: NSView, ThemedComponent {
         var literalPaths: [String] = []
 
         for path in paths {
-            guard let image = NSImage(contentsOfFile: path), image.isValid else {
+            guard let image = BoundedImageDecoder.image(
+                at: URL(fileURLWithPath: path),
+                policy: .composerPreview
+            ), image.isValid else {
                 literalPaths.append(path)
                 continue
             }

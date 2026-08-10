@@ -35,6 +35,8 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
     // MARK: - Types
 
+    private typealias Completion = @MainActor @Sendable (Value?) -> Void
+
     /// One transcript's answer and the size it was read at. The size is the invalidation: a file
     /// that has not grown cannot have recorded a different answer.
     private struct Reading: Sendable {
@@ -51,6 +53,12 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
     /// One scan per transcript at a time, so a burst of refreshes cannot queue a stack of reads
     /// behind each other.
     private var scanning: Set<String> = []
+
+    /// Requests that arrived after a scan took its size snapshot. They become one trailing scan
+    /// wave when the current one lands. Dropping them is a correctness race, not coalescing: the
+    /// request may describe bytes appended after the in-flight scan read the file, and there may
+    /// be no later output event to ask again.
+    private var pendingCompletions: [String: [Completion]] = [:]
 
     /// Reads the fact out of one file, or nil when the file does not state it within its budget.
     /// `nonisolated` by type: it runs on a utility queue and must reach nothing isolated.
@@ -74,7 +82,18 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
     /// changed.
     func revalidate(at url: URL, completion: @escaping @MainActor @Sendable (Value?) -> Void) {
         let path = url.path
-        guard !scanning.contains(path) else { return }
+        guard !scanning.contains(path) else {
+            pendingCompletions[path, default: []].append(completion)
+            return
+        }
+
+        beginRevalidation(at: url, completions: [completion])
+    }
+
+    /// Starts one single-flight read. Calls that overlap it collect in `pendingCompletions` and
+    /// are answered by one subsequent read against the newest file size.
+    private func beginRevalidation(at url: URL, completions: [Completion]) {
+        let path = url.path
 
         let previous = readings[path]
         let scan = scan
@@ -85,12 +104,23 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    self.scanning.remove(path)
-                    guard let reading else { return }
+                    if let reading {
+                        self.readings[path] = reading
+                        if reading.value != previous?.value {
+                            for completion in completions {
+                                completion(reading.value)
+                            }
+                        }
+                    }
 
-                    self.readings[path] = reading
-                    guard reading.value != previous?.value else { return }
-                    completion(reading.value)
+                    // Keep the path marked as scanning while callbacks run. A callback may ask
+                    // for another validation; admitting it immediately would race this queued
+                    // trailing wave and violate the one-scan-per-path contract.
+                    let pending = self.pendingCompletions.removeValue(forKey: path)
+                    self.scanning.remove(path)
+                    if let pending, !pending.isEmpty {
+                        self.beginRevalidation(at: url, completions: pending)
+                    }
                 }
             }
         }
@@ -115,7 +145,12 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
         unchangedFrom previousSize: Int?,
         scan: @Sendable (URL) -> Value?
     ) -> Reading? {
-        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else {
+        // `URL.resourceValues` caches requested keys on the URL value. These readers deliberately
+        // reuse one URL for a running transcript, so a second request can return the size from
+        // the first scan even after the provider appended a lifecycle record. Ask the filesystem
+        // for current attributes instead; this remains on the utility queue.
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue else {
             return nil
         }
         guard previousSize != size else { return nil }

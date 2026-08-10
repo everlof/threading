@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Storage Layout
 
@@ -267,7 +268,10 @@ struct MetricKitDiagnosticReader {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size > 0, size <= MetricKitReadBudget.maximumPayloadBytes else { return nil }
 
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: MetricKitReadBudget.maximumPayloadBytes
+        ),
               let payload = try? JSONDecoder().decode(PersistedDiagnosticPayload.self, from: data)
         else {
             return nil
@@ -471,28 +475,37 @@ private struct LooseScalar: Decodable {
 private enum MetricKitTimestamp {
 
     static func date(from text: String) -> Date? {
-        if let date = fractional.date(from: text) { return date }
-        if let date = internetDateTime.date(from: text) { return date }
-        return spaceSeparated.date(from: text)
+        parsers.withLock { parsers in
+            if let date = parsers.fractional.date(from: text) { return date }
+            if let date = parsers.internetDateTime.date(from: text) { return date }
+            return parsers.spaceSeparated.date(from: text)
+        }
     }
 
-    private static let fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
+    /// Foundation formatters are reference types with mutable configuration and no available
+    /// `Sendable` conformance. The diagnostic reader can run while MetricKit is delivering on a
+    /// different queue, so access is synchronized rather than merely silencing Swift 6.
+    private final class Parsers: @unchecked Sendable {
+        let fractional: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter
+        }()
 
-    private static let internetDateTime: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+        let internetDateTime: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter
+        }()
 
-    private static let spaceSeparated: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
+        let spaceSeparated: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return formatter
+        }()
+    }
+
+    private static let parsers = OSAllocatedUnfairLock(initialState: Parsers())
 }

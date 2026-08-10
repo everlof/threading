@@ -108,17 +108,23 @@ enum ProjectIconResearch {
                     completion(.failure(error))
 
                 case .success(let data):
-                    guard let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
+                    switch ProjectStore.shared.setIcon(
+                        imageData: data,
+                        source: .agent,
+                        for: projectID
+                    ) {
+                    case .success(let icon):
+                        ThreadingLogger.agent.info(
+                            "Icon research succeeded for \(projectID, privacy: .public): stored \(icon.fileName, privacy: .public)"
+                        )
+                        completion(.success(icon))
+                    case .failure(.unusableImage):
                         completion(.failure(.unusableResult("the image could not be decoded")))
-                        return
+                    case .failure(.projectNotFound):
+                        completion(.failure(.unusableResult("the project was removed")))
+                    case .failure(.storageFailed), .failure(.persistenceRefused):
+                        completion(.failure(.unusableResult("the icon could not be saved")))
                     }
-
-                    ThreadingLogger.agent.info(
-                        "Icon research succeeded for \(projectID, privacy: .public): stored \(fileName, privacy: .public)"
-                    )
-                    let icon = ProjectIcon(source: .agent, fileName: fileName)
-                    ProjectStore.shared.setIcon(icon, for: projectID)
-                    completion(.success(icon))
                 }
             }
         }
@@ -183,22 +189,19 @@ enum ProjectIconResearch {
         }
     }
 
-    /// Runs the plan to completion. stderr is merged into the same pipe as stdout — one
-    /// reader can never deadlock on two pipes, the JSONL parser skips non-JSON lines
-    /// anyway, and the record then holds the *whole* story, diagnostics included.
+    /// Runs the plan to completion. stderr is merged into stdout because the JSONL parser skips
+    /// diagnostics, while the shared runner bounds that combined story and owns the process
+    /// group's TERM/KILL timeout sequence.
     private static func execute(_ plan: AgentLaunchPlan) -> (output: String?, failure: ResearchError?) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: IconResearchDefaults.timeout,
+                maximumOutputBytes: IconResearchDefaults.maximumOutputBytes
+            )
         } catch {
             ThreadingLogger.agent.error(
                 "Icon research launch failed: \(error.localizedDescription, privacy: .public)"
@@ -206,31 +209,19 @@ enum ProjectIconResearch {
             return (nil, .launchFailed)
         }
 
-        let timeout = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global().asyncAfter(
-            deadline: .now() + IconResearchDefaults.timeout,
-            execute: timeout
-        )
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeout.cancel()
-
-        let output = String(data: data, encoding: .utf8)
+        let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Icon research child exited: status \(process.terminationStatus), \(data.count) output bytes"
+            "Icon research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
-        // `terminate()` surfaces as an uncaught SIGTERM, which distinguishes our timeout
-        // from the child failing on its own.
-        if process.terminationReason == .uncaughtSignal {
+        switch result.termination {
+        case .timedOut:
             return (output, .timedOut)
+        case .exited(let status) where status != 0:
+            return (output, .exitedAbnormally(status))
+        case .exited:
+            return (output, nil)
         }
-        guard process.terminationStatus == 0 else {
-            return (output, .exitedAbnormally(process.terminationStatus))
-        }
-
-        return (output, nil)
     }
 
     /// The last completed `agent_message` in the run's JSONL — the model's final say.
@@ -268,22 +259,32 @@ enum ProjectIconResearch {
         atProjectPath path: String,
         folderURL: URL
     ) -> Result<Data, ResearchError> {
-        let resolved = path.hasPrefix("/")
-            ? URL(fileURLWithPath: path)
-            : folderURL.appendingPathComponent(path)
-
-        let standardized = resolved.standardizedFileURL.path
-        let root = folderURL.standardizedFileURL.path
-        guard standardized == root || standardized.hasPrefix(root + "/") else {
+        guard let candidate = projectContainedCandidateURL(path: path, folderURL: folderURL) else {
             return .failure(.unusableResult("\(path) is outside the project"))
         }
 
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: standardized)),
-              ProjectIconStore.isUsableImage(data) else {
+        guard let data = ProjectIconStore.candidateData(at: candidate) else {
             return .failure(.unusableResult("\(path) is not a usable image"))
         }
 
         return .success(data)
+    }
+
+    /// Resolves a research answer against the authority it was granted.
+    ///
+    /// The assistant is authorized for this project, not for whatever an in-project symlink
+    /// happens to target. Both sides resolve before containment or `icons/avatar.png` can be a
+    /// host read of a private image elsewhere on disk.
+    nonisolated static func projectContainedCandidateURL(path: String, folderURL: URL) -> URL? {
+        let unresolved = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : folderURL.appendingPathComponent(path)
+        let candidate = unresolved.standardizedFileURL.resolvingSymlinksInPath()
+        let root = folderURL.standardizedFileURL.resolvingSymlinksInPath()
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
+            return nil
+        }
+        return candidate
     }
 
     private static func imageData(atRemoteAddress address: String) -> Result<Data, ResearchError> {
@@ -304,6 +305,7 @@ enum ProjectIconResearch {
 enum IconResearchDefaults {
     /// Generous: a cold `codex exec` includes login-shell startup and a model round trip.
     static let timeout: TimeInterval = 180
+    static let maximumOutputBytes = 8 * 1024 * 1024
 
     static let recordDirectoryName = "IconResearch"
     static let recordExtension = "jsonl"

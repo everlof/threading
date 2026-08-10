@@ -151,6 +151,9 @@ Rules:
   with `"runtime": "native"`.
 - `executable` is relative to the installed extension directory.
 - A WebAssembly executable ends in `.wasm` and does not need a POSIX executable bit.
+- The runtime admits at most 256 MiB of module bytes. That ceiling is checked on the opened stream,
+  not only from package metadata, so replacing or growing a module during launch cannot enlarge the
+  runner's allocation.
 - `executable` must not contain `.` or `..` path components.
 - Do not request `network.client` for WebAssembly. Direct sockets are absent; outbound HTTPS
   goes through the host broker instead: declare `network.brokered` plus explicit
@@ -1113,7 +1116,8 @@ binding names are documentation and stable source identifiers, not shader reflec
 v1 live signal is `active-account.usage-remaining`, a `0...1` fraction with the binding's
 fallback used when no active account reading exists. The host owns the `MTKView`, pipeline
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
-reduced-motion behavior. Shader source is limited to 256 KiB and frame rate to 60 fps.
+reduced-motion behavior. Shader source is limited to 256 KiB at the actual opened-file read (a
+package-size preflight is not trusted) and frame rate to 60 fps.
 
 Use `Packages/ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
 Never import Metal, MetalKit, AppKit or SwiftUI in extension Swift source.
@@ -1288,6 +1292,10 @@ Before reporting an extension complete:
 16. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.
+
+Threading refuses an installed-package directory above 1,024 visible entries or 256 package
+directories rather than performing unbounded discovery and eager Settings construction. Those are
+product safety ceilings, not suggested extension counts.
 
 Threading's Component Gallery remains the direct panel-rendering development harness. The
 Extensions page in Settings and `extension_propose_install` are the product installation paths.

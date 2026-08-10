@@ -62,12 +62,14 @@ struct HelperLaunchPolicy: ExtensionLaunchPolicy {
             throw ExtensionHelperError.helperUnavailable(Self.helperName(for: capabilities))
         }
 
-        var descriptors: [Int32: Int32] = [
+        var descriptors: [Int32: ChildDescriptorSource] = [
             0: try descriptor(for: request.standardInput, end: .child),
             1: try descriptor(for: request.standardOutput, end: .host),
             2: try descriptor(for: request.standardError, end: .host)
         ]
-        descriptors.merge(request.extraDescriptors) { _, extra in extra }
+        descriptors.merge(request.extraDescriptors.mapValues(ChildDescriptorSource.inherited)) {
+            _, extra in extra
+        }
 
         // Attempting the spawn *consumes* the request's descriptors, whether or not it
         // succeeds. Anything else leaves the caller guessing whether it still owns them, and a
@@ -98,16 +100,19 @@ struct HelperLaunchPolicy: ExtensionLaunchPolicy {
         case host
     }
 
-    private func descriptor(for stream: ExtensionChildStream, end: PipeEnd) throws -> Int32 {
+    private func descriptor(
+        for stream: ExtensionChildStream,
+        end: PipeEnd
+    ) throws -> ChildDescriptorSource {
         switch stream {
         case .nullDevice:
-            return FileHandle.nullDevice.fileDescriptor
+            return .nullDevice
         case .pipe(let pipe):
             switch end {
             case .child:
-                return pipe.fileHandleForReading.fileDescriptor
+                return .inherited(pipe.fileHandleForReading.fileDescriptor)
             case .host:
-                return pipe.fileHandleForWriting.fileDescriptor
+                return .inherited(pipe.fileHandleForWriting.fileDescriptor)
             }
         }
     }

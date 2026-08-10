@@ -13,6 +13,10 @@ import Foundation
 public struct RemoteTerminalKeyModifiers: OptionSet, Codable, Hashable, Sendable {
     public let rawValue: Int
 
+    private enum CodingKeys: String, CodingKey {
+        case rawValue
+    }
+
     public init(rawValue: Int) {
         self.rawValue = rawValue
     }
@@ -20,6 +24,32 @@ public struct RemoteTerminalKeyModifiers: OptionSet, Codable, Hashable, Sendable
     public static let shift = RemoteTerminalKeyModifiers(rawValue: 1 << 0)
     public static let alt = RemoteTerminalKeyModifiers(rawValue: 1 << 1)
     public static let control = RemoteTerminalKeyModifiers(rawValue: 1 << 2)
+
+    private static let supportedRawValue = shift.rawValue | alt.rawValue | control.rawValue
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decoded = try container.decode(Int.self, forKey: .rawValue)
+        guard decoded & ~Self.supportedRawValue == 0 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .rawValue,
+                in: container,
+                debugDescription: "Terminal key modifiers contain unsupported bits."
+            )
+        }
+        self.init(rawValue: decoded)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        guard rawValue & ~Self.supportedRawValue == 0 else {
+            throw EncodingError.invalidValue(self, .init(
+                codingPath: encoder.codingPath,
+                debugDescription: "Terminal key modifiers contain unsupported bits."
+            ))
+        }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rawValue, forKey: .rawValue)
+    }
 
     /// The `;N` parameter xterm's modified-key CSI sequences carry: 1 plus shift(1),
     /// alt(2), control(4). `nil` when no modifier is held, because an unmodified key uses

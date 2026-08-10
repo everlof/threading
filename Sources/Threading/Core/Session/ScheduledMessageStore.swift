@@ -62,6 +62,7 @@ final class ScheduledMessageStore {
             url: root.appendingPathComponent(ScheduledMessageDefaults.fileName),
             fileManager: fileManager,
             criticality: .userAuthored,
+            sizePolicy: .userDocument,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
@@ -103,7 +104,8 @@ final class ScheduledMessageStore {
     /// `isOwed`, not `isArmed`: a send that found its session busy is still owed an attempt, and
     /// filtering it out here is how it would wait forever for a retry that never came.
     func due(at now: Date) -> [ScheduledMessage] {
-        all.filter { message in
+        guard persistence.writesAllowed else { return [] }
+        return all.filter { message in
             guard message.state.isOwed, !claimed.contains(message.id) else { return false }
 
             // `waiting` means the trigger already happened and delivery alone is standing by.
@@ -117,7 +119,8 @@ final class ScheduledMessageStore {
 
     /// Armed sends whose selected conversation has just finished its current turn.
     func dueWhenSessionFinishes(_ sessionID: SessionID) -> [ScheduledMessage] {
-        all.filter {
+        guard persistence.writesAllowed else { return [] }
+        return all.filter {
             $0.state.isArmed
                 && $0.trigger.watchedSessionID == sessionID
                 && !claimed.contains($0.id)
@@ -128,7 +131,8 @@ final class ScheduledMessageStore {
     /// scheduler actually observed in flight. That memory is what distinguishes a real end edge
     /// from an unrelated idle-state notification after relaunch.
     var armedFinishSessionIDs: Set<SessionID> {
-        Set(messages.compactMap { message in
+        guard persistence.writesAllowed else { return [] }
+        return Set(messages.compactMap { message in
             guard message.state.isArmed else { return nil }
             return message.trigger.watchedSessionID
         })
@@ -136,7 +140,8 @@ final class ScheduledMessageStore {
 
     /// The soonest moment anything is waiting for, which is what a single timer is armed against.
     func nextDueDate(after now: Date) -> Date? {
-        all.compactMap { message -> Date? in
+        guard persistence.writesAllowed else { return nil }
+        return all.compactMap { message -> Date? in
             guard message.state.isArmed,
                   let dueAt = message.dueAt,
                   dueAt > now,
@@ -157,7 +162,8 @@ final class ScheduledMessageStore {
     /// the scheduler, and a five-minute timer spinning for days would add no information. A
     /// delivery already in `waiting` keeps the heartbeat so its patience can expire.
     var hasClockWorkPending: Bool {
-        messages.contains { message in
+        guard persistence.writesAllowed else { return false }
+        return messages.contains { message in
             if case .waiting = message.state { return true }
             return message.state.isArmed && message.dueAt != nil
         }
@@ -181,17 +187,19 @@ final class ScheduledMessageStore {
         }
         guard persistence.writesAllowed else { return .failure(.writesBlocked) }
 
-        messages.append(message)
-        save()
+        var updated = messages
+        updated.append(message)
+        guard commit(updated) else { return .failure(.writesBlocked) }
         return .success(message)
     }
 
     @discardableResult
     func remove(_ id: ScheduledMessageID) -> Bool {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
-        messages.remove(at: index)
+        var updated = messages
+        updated.remove(at: index)
+        guard commit(updated) else { return false }
         claimed.remove(id)
-        save()
         return true
     }
 
@@ -199,16 +207,18 @@ final class ScheduledMessageStore {
     @discardableResult
     func replace(_ id: ScheduledMessageID, with message: ScheduledMessage) -> Bool {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
-        messages[index] = message
-        save()
-        return true
+        var updated = messages
+        updated[index] = message
+        return commit(updated)
     }
 
-    func setState(_ state: ScheduledMessage.State, for id: ScheduledMessageID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        guard messages[index].state != state else { return }
-        messages[index].state = state
-        save()
+    @discardableResult
+    func setState(_ state: ScheduledMessage.State, for id: ScheduledMessageID) -> Bool {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
+        guard messages[index].state != state else { return true }
+        var updated = messages
+        updated[index].state = state
+        return commit(updated)
     }
 
     // MARK: - Claiming
@@ -222,7 +232,8 @@ final class ScheduledMessageStore {
     /// re-*sending* a message is not. So a performer takes the record before it acts, and puts it
     /// back if it could not.
     func claim(_ id: ScheduledMessageID) -> ScheduledMessage? {
-        guard let message = self[id], message.state.isOwed, !claimed.contains(id) else {
+        guard persistence.writesAllowed,
+              let message = self[id], message.state.isOwed, !claimed.contains(id) else {
             return nil
         }
         claimed.insert(id)
@@ -231,22 +242,27 @@ final class ScheduledMessageStore {
 
     /// Hands a claimed record back unspent — the surface refused, or was not ready yet.
     func relinquish(_ id: ScheduledMessageID, waitingBecause reason: String? = nil) {
+        guard let reason else {
+            claimed.remove(id)
+            return
+        }
+        guard setState(.waiting(reason), for: id) else { return }
         claimed.remove(id)
-        guard let reason else { return }
-        setState(.waiting(reason), for: id)
     }
 
     /// Marks a claimed record delivered: it leaves the store, because the conversation it
     /// landed in is now the record of it.
-    func complete(_ id: ScheduledMessageID) {
-        claimed.remove(id)
+    @discardableResult
+    func complete(_ id: ScheduledMessageID) -> Bool {
         remove(id)
     }
 
     /// Marks a claimed record undeliverable, keeping it for the user to decide about.
-    func fail(_ id: ScheduledMessageID, reason: String) {
+    @discardableResult
+    func fail(_ id: ScheduledMessageID, reason: String) -> Bool {
+        guard setState(.failed(reason), for: id) else { return false }
         claimed.remove(id)
-        setState(.failed(reason), for: id)
+        return true
     }
 
     // MARK: - Time
@@ -258,16 +274,16 @@ final class ScheduledMessageStore {
     /// The next launch asks, item by item.
     @discardableResult
     func markMissed(before now: Date) -> [ScheduledMessage] {
+        var updated = messages
         var missed: [ScheduledMessage] = []
-        for index in messages.indices where messages[index].state.isArmed {
-            guard messages[index].dueAt != nil else { continue }
-            guard messages[index].isDue(at: now) else { continue }
-            messages[index].state = .missed
-            missed.append(messages[index])
+        for index in updated.indices where updated[index].state.isArmed {
+            guard updated[index].dueAt != nil else { continue }
+            guard updated[index].isDue(at: now) else { continue }
+            updated[index].state = .missed
+            missed.append(updated[index])
         }
         guard !missed.isEmpty else { return [] }
-        save()
-        return missed
+        return commit(updated) ? missed : []
     }
 
     /// Re-derives every wall-clock moment after the system time zone changed.
@@ -278,21 +294,21 @@ final class ScheduledMessageStore {
     /// Reset-anchored sends are left alone — they were never aimed at a wall-clock time.
     @discardableResult
     func reanchorWallClockMoments(calendar: Calendar = .current) -> Bool {
+        var updated = messages
         var changed = false
-        for index in messages.indices {
-            guard case .time(var time) = messages[index].trigger,
+        for index in updated.indices {
+            guard case .time(var time) = updated[index].trigger,
                   time.anchor == .wallClock else { continue }
             var wallClockCalendar = calendar
             wallClockCalendar.timeZone = .current
             guard let moment = wallClockCalendar.date(from: time.intendedWallClock),
                   moment != time.dueAt else { continue }
             time.dueAt = moment
-            messages[index].trigger = .time(time)
+            updated[index].trigger = .time(time)
             changed = true
         }
         guard changed else { return false }
-        save()
-        return true
+        return commit(updated)
     }
 
     // MARK: - Lifecycle
@@ -309,7 +325,6 @@ final class ScheduledMessageStore {
 
         for var message in messages {
             if message.target.sessionID == sessionID {
-                claimed.remove(message.id)
                 changed = true
                 continue
             }
@@ -317,22 +332,20 @@ final class ScheduledMessageStore {
                 message.state = .failed(L10n.string(
                     "The conversation this was waiting for was deleted."
                 ))
-                claimed.remove(message.id)
                 changed = true
             }
             retained.append(message)
         }
 
         guard changed else { return }
-        messages = retained
-        save()
+        guard commit(retained) else { return }
+        claimed.formIntersection(Set(retained.map(\.id)))
     }
 
     func forget(projectID: ProjectID) {
-        let before = messages.count
-        messages.removeAll { $0.target.projectID == projectID }
-        guard messages.count != before else { return }
-        save()
+        let retained = messages.filter { $0.target.projectID != projectID }
+        guard retained.count != messages.count, commit(retained) else { return }
+        claimed.formIntersection(Set(retained.map(\.id)))
     }
 
     /// Drops everything whose target is not in the given sets. The sweep for a store that has
@@ -350,7 +363,6 @@ final class ScheduledMessageStore {
             }
 
             if targetIsMissing {
-                claimed.remove(message.id)
                 changed = true
                 continue
             }
@@ -359,15 +371,14 @@ final class ScheduledMessageStore {
                 message.state = .failed(L10n.string(
                     "The conversation this was waiting for was deleted."
                 ))
-                claimed.remove(message.id)
                 changed = true
             }
             retained.append(message)
         }
 
         guard changed else { return }
-        messages = retained
-        save()
+        guard commit(retained) else { return }
+        claimed.formIntersection(Set(retained.map(\.id)))
     }
 
     // MARK: - Private Methods
@@ -390,9 +401,17 @@ final class ScheduledMessageStore {
         messages = outcome.value.messages
     }
 
-    private func save() {
-        persistence.save(ScheduledMessagesFile(messages: messages))
+    /// Makes disk authoritative for every mutation. A scheduled send can be the only copy of
+    /// text somebody wrote, so memory must never announce or act on a state that the verified
+    /// file did not accept. `RecoverableFileStore` disables later writes after a failed save;
+    /// `claim` and the due queries observe the same gate, preventing unattended delivery whose
+    /// outcome could no longer be recorded safely.
+    @discardableResult
+    private func commit(_ updated: [ScheduledMessage]) -> Bool {
+        guard persistence.save(ScheduledMessagesFile(messages: updated)) else { return false }
+        messages = updated
         center.post(ScheduledMessagesDidChange())
+        return true
     }
 }
 

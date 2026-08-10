@@ -62,7 +62,7 @@ final class WindowChromeButton: ThemedControl {
     }
 
     private var isPressed = false { didSet { needsDisplay = true } }
-    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+    private let windowStateObservations = AppEventObservations()
 
     /// Replaces presentation in a component test while still receiving the exact semantic
     /// menu a real press would show. Nil in production.
@@ -85,10 +85,6 @@ final class WindowChromeButton: ThemedControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    deinit {
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
-    }
-
     /// The family's measured period slot, from the one anatomy table. The rationale for
     /// each measurement lives on its row in `WindowChromeCaptionAnatomy`.
     override var intrinsicContentSize: NSSize {
@@ -103,8 +99,7 @@ final class WindowChromeButton: ThemedControl {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
-        windowStateObservations = []
+        windowStateObservations.removeAll()
 
         guard let newWindow else {
             applyWindowState()
@@ -115,13 +110,9 @@ final class WindowChromeButton: ThemedControl {
             NSWindow.didEnterFullScreenNotification,
             NSWindow.didExitFullScreenNotification
         ] {
-            windowStateObservations.append(NotificationCenter.default.addObserver(
-                forName: name,
-                object: newWindow,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applyWindowState() }
-            })
+            windowStateObservations.observe(name, object: newWindow) { [weak self] in
+                self?.applyWindowState()
+            }
         }
         applyWindowState()
     }

@@ -27,6 +27,24 @@ final class PublicIssueReportingTests: XCTestCase {
         XCTAssertFalse(PublicIssueReportPolicy.accepts(submission))
     }
 
+    func testDurableSubmissionReadUsesTheRequestByteBoundary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("public-report-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("report.json")
+        let submission = makeSubmission(description: "A bounded report")
+        try JSONEncoder().encode(submission).write(to: url)
+        XCTAssertEqual(PublicIssueReportPolicy.submission(at: url), submission)
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(
+            atOffset: UInt64(PublicIssueReportPolicy.maximumRequestBytes + 1)
+        )
+        try handle.close()
+        XCTAssertNil(PublicIssueReportPolicy.submission(at: url))
+    }
+
     func testDiagnosticsKeepNewestRecordsWithinBodyBudget() throws {
         let source = makeReport(recordCount: 800)
         let bounded = PublicIssueReportDiagnosticsDTO(bounding: source)

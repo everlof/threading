@@ -49,6 +49,32 @@ final class AppThemeTests: XCTestCase {
     private static let chromeTestFamily = "Baskerville"
     private static let conversationTestFamily = "Palatino"
 
+    func testThemeAssetPathsRefuseTraversalComponents() throws {
+        for invalid in ["", ".", "..", "../outside", "nested/asset"] {
+            XCTAssertFalse(AppThemeID(invalid).isSafeAssetDirectoryName)
+            XCTAssertNil(ThemeAssetStore.image(
+                named: "light-logo.png",
+                for: AppThemeID(invalid)
+            ))
+        }
+        XCTAssertFalse(AppThemeID.isSafePathComponent("../logo.png"))
+        XCTAssertThrowsError(try ThemeAssetStore.restore(
+            pngData: Data([0]),
+            named: "../logo.png",
+            for: AppThemeID("safe-theme")
+        ))
+
+        let source = AppThemeStyles.cyberpunk
+        let invalidTheme = AppTheme(
+            id: AppThemeID("../outside"),
+            name: source.name,
+            mode: source.mode,
+            summary: source.summary,
+            variants: source.variants
+        )
+        XCTAssertThrowsError(try AppThemeEditing.validate(invalidTheme))
+    }
+
     func testTheFontFixturesAreInstalled() {
         let families = NSFontManager.shared.availableFontFamilies
         XCTAssertTrue(families.contains(Self.chromeTestFamily))

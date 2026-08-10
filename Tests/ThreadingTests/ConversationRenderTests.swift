@@ -400,7 +400,7 @@ final class ConversationRenderTests: XCTestCase {
         height: CGFloat = Render.viewportHeight,
         appearance: NSAppearance? = nil
     ) -> (controller: ConversationViewController, host: NSView) {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(kind: .codex, title: "Column", usesNativeUI: true),
             project: Project(
                 name: "Column",
@@ -434,6 +434,19 @@ final class ConversationRenderTests: XCTestCase {
         Self.apply(Self.stressEvents(shape: .mixed, turns: turns), to: controller)
         host.layoutSubtreeIfNeeded()
         return (controller, host)
+    }
+
+    func testTerminatingAConversationEndsItsWorkingStatusClock() {
+        let (controller, _) = livePane(turns: 0, width: Render.width)
+        controller.apply(.status(.working(word: "Reviewing")))
+
+        let timer = controller.workingStatusTimer
+        XCTAssertEqual(timer?.isValid, true)
+
+        controller.terminate()
+
+        XCTAssertNil(controller.workingStatusTimer)
+        XCTAssertEqual(timer?.isValid, false)
     }
 
     /// Everything in the pane stands on one column, and the column is in the middle of the pane.
@@ -543,7 +556,7 @@ final class ConversationRenderTests: XCTestCase {
     /// its panes the way the main window holds them, with the divider driven through the same
     /// Auto Layout path a drag resolves into.
     func testTheSplitViewDividerOutranksTheComposer() throws {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(kind: .codex, title: "Column", usesNativeUI: true),
             project: Project(
                 name: "Column",
@@ -899,7 +912,7 @@ final class ConversationRenderTests: XCTestCase {
 
     func testSettledTurnVirtualizesFoldedWorkAndRestoresPresentation() throws {
         let session = AgentSession(kind: .codex, title: "Fold restoration", usesNativeUI: true)
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: session,
             project: Project(
                 name: "Fold restoration",
@@ -961,7 +974,7 @@ final class ConversationRenderTests: XCTestCase {
 
     func testReplayFinishAttachesAnUnfinishedTail() {
         let session = AgentSession(kind: .codex, title: "Replay tail", usesNativeUI: true)
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: session,
             project: Project(
                 name: "Replay tail",
@@ -988,7 +1001,7 @@ final class ConversationRenderTests: XCTestCase {
     }
 
     func testLargeReplayMaterializesOnlyViewportRowsAndCanJumpExactly() throws {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(
                 kind: .codex,
                 title: "Virtual conversation",
@@ -1039,7 +1052,7 @@ final class ConversationRenderTests: XCTestCase {
     }
 
     func testLiveMinimapAppendsAndSettlesOnlyTheTrailingTurn() {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(kind: .codex, title: "Live rail", usesNativeUI: true),
             project: Project(
                 name: "Live rail",
@@ -1109,7 +1122,7 @@ final class ConversationRenderTests: XCTestCase {
                 title: "Resident conversation \(sessionIndex)",
                 usesNativeUI: true
             )
-            let controller = ConversationViewController(
+            let controller = requireConversationViewController(
                 agentSession: session,
                 project: Project(
                     name: "Resident project \(sessionIndex)",
@@ -1284,7 +1297,7 @@ final class ConversationRenderTests: XCTestCase {
         let modelMemory = Self.physicalFootprintBytes()
 
         let session = AgentSession(kind: .codex, title: "Conversation stress", usesNativeUI: true)
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: session,
             project: Project(
                 name: "Conversation stress",
@@ -1465,7 +1478,7 @@ final class ConversationRenderTests: XCTestCase {
     }
 
     private func runActiveTurnStress(baseTurns: Int, toolCount: Int) {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(
                 kind: .codex,
                 title: "Active turn stress",
@@ -2517,7 +2530,7 @@ final class SubagentSummaryViewTests: XCTestCase {
     func testNativeSurfaceKeepsTheSubagentNavigatorOutOfTheMainPane() {
         let session = AgentSession(kind: .codex, title: "Native children")
         let state = SubagentSessionState(sessionID: session.id)
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: session,
             project: Project(
                 name: "Native children",
@@ -2714,7 +2727,7 @@ final class SubagentSummaryViewTests: XCTestCase {
                     state: .completed,
                     statusDetail: nil,
                     detailLines: [detail],
-                    transcriptURL: transcriptURL
+                    transcriptAvailability: .onDisk(transcriptURL)
                 )
             ],
             workingCount: 0,
@@ -3159,8 +3172,9 @@ final class SubagentSummaryViewTests: XCTestCase {
                     state: .completed,
                     statusDetail: nil,
                     detailLines: ["Finished"],
-                    transcriptURL: URL(fileURLWithPath: "/tmp/agent-opens.jsonl"),
-                    canOpenTranscript: true
+                    transcriptAvailability: .onDisk(
+                        URL(fileURLWithPath: "/tmp/agent-opens.jsonl")
+                    )
                 ),
                 SubagentSummaryItem(
                     id: "empty",
@@ -3169,7 +3183,7 @@ final class SubagentSummaryViewTests: XCTestCase {
                     state: .completed,
                     statusDetail: nil,
                     detailLines: [],
-                    canOpenTranscript: false
+                    transcriptAvailability: .unavailable
                 )
             ],
             workingCount: 0,
@@ -3255,8 +3269,9 @@ final class SubagentSummaryViewTests: XCTestCase {
                     state: .completed,
                     statusDetail: nil,
                     detailLines: ["Finished"],
-                    transcriptURL: URL(fileURLWithPath: "/tmp/agent-opens.jsonl"),
-                    canOpenTranscript: true
+                    transcriptAvailability: .onDisk(
+                        URL(fileURLWithPath: "/tmp/agent-opens.jsonl")
+                    )
                 ),
                 SubagentSummaryItem(
                     id: "empty",
@@ -3265,7 +3280,7 @@ final class SubagentSummaryViewTests: XCTestCase {
                     state: .completed,
                     statusDetail: nil,
                     detailLines: [],
-                    canOpenTranscript: false
+                    transcriptAvailability: .unavailable
                 )
             ],
             workingCount: 0,

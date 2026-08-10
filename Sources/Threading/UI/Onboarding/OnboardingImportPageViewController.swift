@@ -85,9 +85,9 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
             let selected = group.selected
             guard !selected.isEmpty else { continue }
 
-            let project = ProjectStore.shared.addProject(
+            guard let project = ProjectStore.shared.addProject(
                 folderURL: URL(fileURLWithPath: group.data.folder)
-            )
+            ) else { continue }
             ProjectStore.shared.importSessions(selected, into: project.id)
         }
     }

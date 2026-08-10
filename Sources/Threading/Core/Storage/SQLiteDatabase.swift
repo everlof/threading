@@ -17,12 +17,15 @@ final class SQLiteDatabase {
         case open(String)
         case statement(String)
         case step(String)
+        case newerSchema(found: Int, supported: Int)
 
         var errorDescription: String? {
             switch self {
             case .open(let message): return "Could not open the database: \(message)"
             case .statement(let message): return "Could not prepare a statement: \(message)"
             case .step(let message): return "Database error: \(message)"
+            case .newerSchema(let found, let supported):
+                return "Database schema \(found) is newer than supported schema \(supported)"
             }
         }
     }
@@ -36,7 +39,7 @@ final class SQLiteDatabase {
 
     // MARK: - Initialization
 
-    init(path: String) throws {
+    init(path: String, maximumSchemaVersion: Int? = nil) throws {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
 
@@ -47,17 +50,41 @@ final class SQLiteDatabase {
         }
         self.handle = handle
 
+        // Check before journal-mode configuration: opening a future database is a read, while
+        // changing its journal mode is a write. A downgraded build must leave bytes it does not
+        // understand exactly where the newer build put them.
+        if let maximumSchemaVersion {
+            do {
+                let found = try scalar("PRAGMA user_version") ?? 0
+                guard found <= maximumSchemaVersion else {
+                    close()
+                    throw Failure.newerSchema(
+                        found: found,
+                        supported: maximumSchemaVersion
+                    )
+                }
+            } catch {
+                close()
+                throw error
+            }
+        }
+
         // Ordered deliberately: WAL first so everything after it is journalled the new way.
         // `busy_timeout` is what turns "another writer has it" from an error into a wait —
         // the whole point of coming here.
-        try execute("PRAGMA journal_mode = WAL")
-        try execute("PRAGMA busy_timeout = \(SQLiteDefaults.busyTimeoutMilliseconds)")
-        try execute("PRAGMA foreign_keys = ON")
-        try execute("PRAGMA synchronous = NORMAL")
+        do {
+            try execute("PRAGMA journal_mode = WAL")
+            try execute("PRAGMA busy_timeout = \(SQLiteDefaults.busyTimeoutMilliseconds)")
+            try execute("PRAGMA foreign_keys = ON")
+            try execute("PRAGMA synchronous = NORMAL")
+        } catch {
+            close()
+            throw error
+        }
     }
 
     deinit {
-        sqlite3_close_v2(handle)
+        close()
     }
 
     // MARK: - Public Methods
@@ -98,6 +125,9 @@ final class SQLiteDatabase {
     /// transaction. `user_version` is SQLite's own integer for exactly this.
     func migrate(to target: Int, step: (Int) throws -> Void) throws {
         var version = try scalar("PRAGMA user_version") ?? 0
+        guard version <= target else {
+            throw Failure.newerSchema(found: version, supported: target)
+        }
         guard version < target else { return }
 
         try transaction {
@@ -122,13 +152,55 @@ final class SQLiteDatabase {
         handle.map { String(cString: sqlite3_errmsg($0)) } ?? "no database"
     }
 
+    /// Releases the native connection exactly once. The app normally keeps one connection for
+    /// the process, but initialization failure and test-owned stores both need deterministic
+    /// teardown. `sqlite3_close_v2` safely completes after any still-owned statement finalizes;
+    /// `Statement` now owns that finalization rather than relying on every call path to remember.
+    func close() {
+        guard let handle else { return }
+        self.handle = nil
+        sqlite3_close_v2(handle)
+    }
+
+    /// Makes the database a single-file artifact before its owner moves it.
+    ///
+    /// Merely closing this connection is not enough in WAL mode: another reader can pin committed
+    /// frames in `-wal`, and renaming the main file underneath that reader is an SQLite API
+    /// violation. Switching back to the delete journal requires SQLite's own exclusive transition;
+    /// if another connection prevents it, the refusal is evidence that no file move is safe yet.
+    func prepareForFileMove() -> Bool {
+        do {
+            // Quarantine is a recovery path. It must refuse promptly rather than stall the main
+            // actor for the ordinary five-second writer timeout while another build is open.
+            try execute("PRAGMA busy_timeout = 0")
+            let statement = try prepare("PRAGMA journal_mode = DELETE")
+            defer { statement.finalize() }
+            guard try statement.step(), statement.text(0)?.lowercased() == "delete" else {
+                return false
+            }
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Could not make the SQLite store safe to move: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    /// Diagnostic seam for the ownership test. A native statement surviving after its Swift
+    /// owner leaves scope is a leaked SQLite resource and can keep a closed WAL connection alive.
+    var hasOpenStatements: Bool {
+        guard let handle else { return false }
+        return sqlite3_next_stmt(handle, nil) != nil
+    }
+
     // MARK: - Statement
 
     /// One prepared statement. Deliberately not `Sendable` and deliberately manual: a statement
     /// belongs to the queue that prepared it, and its lifetime is a few lines long.
     final class Statement {
 
-        private let handle: OpaquePointer
+        private var handle: OpaquePointer?
         private let transient: sqlite3_destructor_type
 
         fileprivate init(_ handle: OpaquePointer, transient: @escaping sqlite3_destructor_type) {
@@ -136,51 +208,56 @@ final class SQLiteDatabase {
             self.transient = transient
         }
 
+        deinit {
+            finalize()
+        }
+
         // MARK: Binding — 1-based, as SQLite counts them
 
         @discardableResult
         func bind(_ index: Int32, _ value: String) -> Statement {
-            sqlite3_bind_text(handle, index, value, -1, transient)
+            sqlite3_bind_text(activeHandle, index, value, -1, transient)
             return self
         }
 
         @discardableResult
         func bind(_ index: Int32, _ value: String?) -> Statement {
             if let value { return bind(index, value) }
-            sqlite3_bind_null(handle, index)
+            sqlite3_bind_null(activeHandle, index)
             return self
         }
 
         @discardableResult
         func bind(_ index: Int32, _ value: Int) -> Statement {
-            sqlite3_bind_int64(handle, index, Int64(value))
+            sqlite3_bind_int64(activeHandle, index, Int64(value))
             return self
         }
 
         @discardableResult
         func bind(_ index: Int32, _ value: Double) -> Statement {
-            sqlite3_bind_double(handle, index, value)
+            sqlite3_bind_double(activeHandle, index, value)
             return self
         }
 
         // MARK: Reading — 0-based, as SQLite counts them
 
         func text(_ column: Int32) -> String? {
-            guard let pointer = sqlite3_column_text(handle, column) else { return nil }
+            guard let pointer = sqlite3_column_text(activeHandle, column) else { return nil }
             return String(cString: pointer)
         }
 
         func int(_ column: Int32) -> Int {
-            Int(sqlite3_column_int64(handle, column))
+            Int(sqlite3_column_int64(activeHandle, column))
         }
 
         func double(_ column: Int32) -> Double {
-            sqlite3_column_double(handle, column)
+            sqlite3_column_double(activeHandle, column)
         }
 
         /// True while rows remain. A statement that returns nothing steps once and is done.
         @discardableResult
         func step() throws -> Bool {
+            let handle = activeHandle
             switch sqlite3_step(handle) {
             case SQLITE_ROW: return true
             case SQLITE_DONE: return false
@@ -195,7 +272,19 @@ final class SQLiteDatabase {
         }
 
         func finalize() {
+            guard let handle else { return }
+            self.handle = nil
             sqlite3_finalize(handle)
+        }
+
+        /// A finalized statement is a programmer error, but it must not become a use-after-free
+        /// in SQLite. The optional native handle makes teardown idempotent; this guard turns any
+        /// later misuse into a deterministic failure at the ownership boundary.
+        private var activeHandle: OpaquePointer {
+            guard let handle else {
+                preconditionFailure("Attempted to use a finalized SQLite statement")
+            }
+            return handle
         }
     }
 }

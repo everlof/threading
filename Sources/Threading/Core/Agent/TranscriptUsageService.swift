@@ -453,6 +453,7 @@ final class TranscriptUsageService {
             url: root.appendingPathComponent(UsageReportDefaults.fileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
@@ -600,7 +601,10 @@ final class TranscriptUsageService {
                 scan.sourceFiles += 1
                 if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
                 records.append(contentsOf: result.records)
-                var item = coverage[runtime.rawValue]!
+                guard var item = coverage[runtime.rawValue] else {
+                    assertionFailure("Missing usage coverage for \(runtime.rawValue)")
+                    continue
+                }
                 item.sourceCount += 1
                 item.recordCount += result.records.count
                 item.state = .complete
@@ -615,7 +619,10 @@ final class TranscriptUsageService {
             case .openCode: break
             case .claude, .codex, .grok: continue
             }
-            var item = coverage[runtime.rawValue]!
+            guard var item = coverage[runtime.rawValue] else {
+                assertionFailure("Missing usage coverage for \(runtime.rawValue)")
+                continue
+            }
             item.sourceCount += 1
             do {
                 let result = try cache.records(
@@ -642,12 +649,16 @@ final class TranscriptUsageService {
                     $0.origin.billingProviderID == UsageReportDefaults.openRouterCoverageID
                 }
                 if !routed.isEmpty {
-                    var route = coverage[UsageReportDefaults.openRouterCoverageID]!
-                    route.sourceCount += 1
-                    route.recordCount += routed.count
-                    route.state = .complete
-                    route.detail = nil
-                    coverage[UsageReportDefaults.openRouterCoverageID] = route
+                    let routeID = UsageReportDefaults.openRouterCoverageID
+                    if var route = coverage[routeID] {
+                        route.sourceCount += 1
+                        route.recordCount += routed.count
+                        route.state = .complete
+                        route.detail = nil
+                        coverage[routeID] = route
+                    } else {
+                        assertionFailure("Missing usage coverage for \(routeID)")
+                    }
                 }
             } catch {
                 item.state = item.recordCount > 0 ? .partial : .failed

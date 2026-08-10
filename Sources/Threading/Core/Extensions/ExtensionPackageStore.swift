@@ -28,6 +28,7 @@ enum ExtensionPackageStoreError: LocalizedError {
     case packageCouldNotBeDigested(String)
     case dataVersionRollback(identifier: String, installed: Int, candidate: Int)
     case enablementStateCouldNotBeSaved
+    case provenanceCouldNotBeSaved(String)
 
     var errorDescription: String? {
         switch self {
@@ -72,6 +73,8 @@ enum ExtensionPackageStoreError: LocalizedError {
             return L10n.string(
                 "Extension enablement could not be saved without risking its recovery copy."
             )
+        case .provenanceCouldNotBeSaved(let identifier):
+            return L10n.format("Extension provenance could not be saved for %@.", identifier)
         }
     }
 }
@@ -85,6 +88,8 @@ final class ExtensionPackageStore: @unchecked Sendable {
     static let packageExtension = "threadingextension"
     static let maximumEntries = 20_000
     static let maximumPackageBytes: Int64 = 256 * 1024 * 1024
+    static let maximumInstalledPackages = 256
+    static let maximumPackageDirectoryEntries = 1_024
 
     private struct State: Codable {
         static let currentFormatVersion = 1
@@ -122,7 +127,8 @@ final class ExtensionPackageStore: @unchecked Sendable {
         self.statePersistence = RecoverableFileStore(
             url: rootURL.appendingPathComponent("state.json", isDirectory: false),
             fileManager: fileManager,
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
     }
 
@@ -136,12 +142,19 @@ final class ExtensionPackageStore: @unchecked Sendable {
         defer { lock.unlock() }
 
         try ensureDirectories()
-        return try fileManager.contentsOfDirectory(
-            at: packagesURL,
+        let entries = try BoundedDirectoryReader.shallowContents(
+            of: packagesURL,
             includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            maximumEntries: Self.maximumPackageDirectoryEntries,
+            fileManager: fileManager
         )
-        .filter { $0.pathExtension == Self.packageExtension }
+        let packageURLs = entries.filter { $0.pathExtension == Self.packageExtension }
+        guard packageURLs.count <= Self.maximumInstalledPackages else {
+            throw BoundedDirectoryReadError.exceedsLimit(
+                maximumEntries: Self.maximumInstalledPackages
+            )
+        }
+        return packageURLs
         .map { url in
             do {
                 return InstalledExtensionPackage(
@@ -233,18 +246,51 @@ final class ExtensionPackageStore: @unchecked Sendable {
             throw ExtensionPackageStoreError.installedCopyInvalid(error.localizedDescription)
         }
 
-        var state = loadState()
+        let previousState = loadState()
+        var state = previousState
         state.enabledIdentifiers.remove(identifier)
         try saveState(state)
 
-        try fileManager.moveItem(at: staging, to: target)
-        let installed = try ExtensionBundleInspector.inspect(at: target)
-        recordProvenance(
-            for: installed,
-            sourceName: sourceURL.lastPathComponent,
-            preserving: nil
-        )
-        return installed
+        do {
+            try fileManager.moveItem(at: staging, to: target)
+            let installed = try ExtensionBundleInspector.inspect(at: target)
+            try recordProvenance(
+                for: installed,
+                sourceName: sourceURL.lastPathComponent,
+                preserving: nil
+            )
+            return installed
+        } catch {
+            let installError = error
+            var rollbackProblems: [String] = []
+            do {
+                try restoreProvenance(nil, identifier: identifier)
+            } catch {
+                rollbackProblems.append("provenance: \(error.localizedDescription)")
+            }
+            if fileManager.fileExists(atPath: target.path) {
+                do {
+                    try fileManager.moveItem(at: target, to: staging)
+                } catch {
+                    rollbackProblems.append("package: \(error.localizedDescription)")
+                }
+            }
+            if state.enabledIdentifiers != previousState.enabledIdentifiers {
+                do {
+                    try saveState(previousState)
+                } catch {
+                    rollbackProblems.append("enablement: \(error.localizedDescription)")
+                }
+            }
+            guard rollbackProblems.isEmpty else {
+                throw ExtensionPackageStoreError.installedCopyInvalid(
+                    "the import failed and its partial state could not be restored completely. "
+                        + "Import error: \(installError.localizedDescription). "
+                        + "Rollback errors: \(rollbackProblems.joined(separator: "; "))"
+                )
+            }
+            throw installError
+        }
     }
 
     /// What replacing the installed copy of `sourceURL`'s extension would change.
@@ -349,6 +395,8 @@ final class ExtensionPackageStore: @unchecked Sendable {
             throw ExtensionPackageStoreError.updateChangedUnderneath(identifier)
         }
 
+        let existingProvenance = loadProvenance(identifier: identifier)
+
         // Move the old copy aside before moving the new one in, and put it back if that fails.
         // A window in which no package exists is survivable; one in which a half-copied package
         // exists is not, which is why the new copy is validated in staging first.
@@ -356,10 +404,10 @@ final class ExtensionPackageStore: @unchecked Sendable {
         do {
             try fileManager.moveItem(at: staging, to: target)
             let installed = try ExtensionBundleInspector.inspect(at: target)
-            recordProvenance(
+            try recordProvenance(
                 for: installed,
                 sourceName: sourceURL.lastPathComponent,
-                preserving: loadProvenance(identifier: identifier)
+                preserving: existingProvenance
             )
             do {
                 try fileManager.removeItem(at: outgoing)
@@ -371,6 +419,7 @@ final class ExtensionPackageStore: @unchecked Sendable {
             return installed
         } catch {
             let updateError = error
+            var rollbackProblems: [String] = []
             do {
                 // If the new tree reached its destination but post-move validation failed, move
                 // it back to staging first. The deferred staging cleanup may discard that
@@ -380,11 +429,20 @@ final class ExtensionPackageStore: @unchecked Sendable {
                 }
                 try fileManager.moveItem(at: outgoing, to: target)
             } catch {
+                rollbackProblems.append(
+                    "package (recoverable at \(outgoing.path)): \(error.localizedDescription)"
+                )
+            }
+            do {
+                try restoreProvenance(existingProvenance, identifier: identifier)
+            } catch {
+                rollbackProblems.append("provenance: \(error.localizedDescription)")
+            }
+            guard rollbackProblems.isEmpty else {
                 throw ExtensionPackageStoreError.installedCopyInvalid(
-                    "the update failed and the previous package could not be restored "
-                        + "automatically; it remains recoverable at \(outgoing.path). "
-                        + "Update error: \(updateError.localizedDescription). "
-                        + "Restore error: \(error.localizedDescription)"
+                    "the update failed and the previous installation could not be restored "
+                        + "completely. Update error: \(updateError.localizedDescription). "
+                        + "Rollback errors: \(rollbackProblems.joined(separator: "; "))"
                 )
             }
             throw updateError
@@ -476,12 +534,14 @@ final class ExtensionPackageStore: @unchecked Sendable {
         for bundle: ThreadingExtensionBundle,
         sourceName: String,
         preserving existing: ExtensionInstallProvenance?
-    ) {
+    ) throws {
         guard let digest = ExtensionPackageDigest.compute(
             at: bundle.rootURL,
             fileManager: fileManager
         ) else {
-            return
+            throw ExtensionPackageStoreError.packageCouldNotBeDigested(
+                bundle.manifest.identifier
+            )
         }
         let now = Date()
         let sdkVersion = bundle.sourceURL.flatMap { source in
@@ -491,7 +551,10 @@ final class ExtensionPackageStore: @unchecked Sendable {
                     isDirectory: false
                 ),
                 source.appendingPathComponent("SDK_VERSION", isDirectory: false)
-            ].lazy.compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            ].lazy.compactMap {
+                try? BoundedFileReader.read($0, maximumBytes: 4_096)
+            }
+                .compactMap { String(data: $0, encoding: .utf8) }
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .first { !$0.isEmpty }
         }
@@ -502,7 +565,31 @@ final class ExtensionPackageStore: @unchecked Sendable {
             firstInstalledAt: existing?.firstInstalledAt ?? now,
             lastUpdatedAt: now
         )
-        _ = provenanceStore(identifier: bundle.manifest.identifier).save(record)
+        guard provenanceStore(identifier: bundle.manifest.identifier).save(record) else {
+            throw ExtensionPackageStoreError.provenanceCouldNotBeSaved(
+                bundle.manifest.identifier
+            )
+        }
+    }
+
+    /// Restores the provenance half of an import/update transaction with a fresh persistence
+    /// latch. A failed verified write deliberately disables its store instance; reusing that
+    /// instance would make rollback impossible even when the filesystem failure was transient.
+    private func restoreProvenance(
+        _ record: ExtensionInstallProvenance?,
+        identifier: String
+    ) throws {
+        provenancePersistence.removeValue(forKey: identifier)
+        let url = provenanceFileURL(identifier: identifier)
+        guard let record else {
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+            return
+        }
+        guard provenanceStore(identifier: identifier).save(record) else {
+            throw ExtensionPackageStoreError.provenanceCouldNotBeSaved(identifier)
+        }
     }
 
     private func loadProvenance(identifier: String) -> ExtensionInstallProvenance? {
@@ -524,7 +611,8 @@ final class ExtensionPackageStore: @unchecked Sendable {
         let store = RecoverableFileStore<ExtensionInstallProvenance?>(
             url: provenanceFileURL(identifier: identifier),
             fileManager: fileManager,
-            criticality: .primary
+            criticality: .primary,
+            sizePolicy: .compactMetadata
         )
         provenancePersistence[identifier] = store
         return store

@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for Anthropic's Claude API.
-final class ClaudeProvider: AIProvider, @unchecked Sendable {
+final class ClaudeProvider: AIProvider {
 
     // MARK: - Constants
 

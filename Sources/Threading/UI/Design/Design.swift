@@ -385,8 +385,10 @@ enum Design {
         /// installed, never on a theme or an override, so a hit needs no invalidating. Only
         /// successes are kept: a miss stays a live question, which is what lets a family that
         /// is installed mid-run be found the next time the sweep asks for it.
-        private static let familyCacheLock = NSLock()
-        nonisolated(unsafe) private static var familyCache: [String: NSFont] = [:]
+        /// Typography is main-actor isolated with the rest of the design system, so this cache
+        /// has one owner. A lock plus `nonisolated(unsafe)` made the compiler unable to prove the
+        /// confinement that every caller already obeyed.
+        private static var familyCache: [String: NSFont] = [:]
 
         private static func resolve(
             family: String,
@@ -395,10 +397,7 @@ enum Design {
             size: CGFloat
         ) -> NSFont? {
             let key = "\(family)|\(size)|\(weight?.doubleValue ?? .nan)|\(italic)"
-            familyCacheLock.lock()
-            let cached = familyCache[key]
-            familyCacheLock.unlock()
-            if let cached { return cached }
+            if let cached = familyCache[key] { return cached }
 
             var traits: [NSFontDescriptor.TraitKey: Any] = [:]
             if let weight { traits[.weight] = weight }
@@ -407,11 +406,7 @@ enum Design {
             if !traits.isEmpty { attributes[.traits] = traits }
             let resolved = NSFont(descriptor: NSFontDescriptor(fontAttributes: attributes), size: size)
 
-            if let resolved {
-                familyCacheLock.lock()
-                familyCache[key] = resolved
-                familyCacheLock.unlock()
-            }
+            if let resolved { familyCache[key] = resolved }
             return resolved
         }
 

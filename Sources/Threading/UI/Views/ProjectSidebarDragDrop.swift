@@ -26,9 +26,8 @@ extension ProjectSidebarViewController {
         let folders = droppedFolderURLs(from: info)
         guard !folders.isEmpty else { return false }
 
-        for folder in folders {
-            projectStore.addProject(folderURL: folder)
-        }
+        let added = folders.compactMap { projectStore.addProject(folderURL: $0) }
+        guard !added.isEmpty else { return false }
         reload()
         return true
     }

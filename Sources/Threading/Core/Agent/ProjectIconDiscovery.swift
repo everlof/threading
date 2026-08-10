@@ -107,17 +107,20 @@ final class ProjectIconDiscovery {
                     return
                 }
 
-                guard let found,
-                      let fileName = ProjectIconStore.store(imageData: found.data, for: projectID)
-                else {
+                guard let found else {
                     completion?(false)
                     return
                 }
 
-                ProjectStore.shared.setIcon(
-                    ProjectIcon(source: found.source, fileName: fileName),
+                let result = ProjectStore.shared.setIcon(
+                    imageData: found.data,
+                    source: found.source,
                     for: projectID
                 )
+                guard case .success = result else {
+                    completion?(false)
+                    return
+                }
                 completion?(true)
             }
         }
@@ -255,7 +258,10 @@ final class ProjectIconDiscovery {
     /// The favicon of the homepage the project's `package.json` declares.
     nonisolated private static func homepageIcon(in folder: URL) -> Data? {
         let manifestURL = folder.appendingPathComponent(ProjectIconDefaults.packageManifestName)
-        guard let manifestData = try? Data(contentsOf: manifestURL),
+        guard let manifestData = try? BoundedFileReader.read(
+            manifestURL,
+            maximumBytes: 1024 * 1024
+        ),
               let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
               let homepage = manifest[ProjectIconDefaults.homepageKey] as? String,
               let origin = origin(fromWebsite: homepage) else { return nil }
@@ -297,10 +303,7 @@ final class ProjectIconDiscovery {
 
     /// Reads a local candidate, admitting it only when it decodes as an icon-sized image.
     nonisolated private static func usableImageData(at url: URL) -> Data? {
-        guard fileSize(url) <= ProjectIconDefaults.maximumSourceBytes,
-              let data = try? Data(contentsOf: url),
-              ProjectIconStore.isUsableImage(data) else { return nil }
-        return data
+        ProjectIconStore.candidateData(at: url)
     }
 
     /// Fetches a remote candidate synchronously — callers are already off the main thread —

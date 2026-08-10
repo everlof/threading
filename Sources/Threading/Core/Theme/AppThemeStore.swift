@@ -23,7 +23,8 @@ final class AppThemeStore {
         let persistence = RecoverableDefaultsStore<[AppTheme]>(
             defaults: defaults,
             key: key,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
         )
         self.persistence = persistence
         self.storedThemes = persistence.load(defaultValue: []).value
@@ -33,10 +34,11 @@ final class AppThemeStore {
         storedThemes
     }
 
-    func insert(_ theme: AppTheme) {
+    @discardableResult
+    func insert(_ theme: AppTheme) -> Bool {
         var stored = storedThemes
         stored.append(theme)
-        commit(stored)
+        return commit(stored)
     }
 
     @discardableResult

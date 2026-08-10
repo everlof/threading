@@ -15,7 +15,9 @@ import re
 import sys
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parent.parent / "Threading.xcodeproj" / "project.pbxproj"
+ROOT = Path(__file__).resolve().parent.parent
+PROJECT = ROOT / "Threading.xcodeproj" / "project.pbxproj"
+TEST_DIRECTORY = ROOT / "Tests" / "ThreadingTests"
 
 # The four places a test file has to appear, discovered by diffing the file against itself
 # after adding one through Xcode.
@@ -37,9 +39,15 @@ def add(text, filename):
     # that is the tail of another one — ChartTests.swift inside ThemedTimeSeriesChartTests.swift —
     # otherwise reports "already present" and is silently left out of the target, which is the
     # exact failure this script exists to prevent.
-    if f"path = {filename};" in text:
+    has_reference = f"path = {filename};" in text
+    has_build_entry = f"/* {filename} in Sources */" in text
+    if has_reference and has_build_entry:
         print(f"  {filename}: already present")
         return text
+    if has_reference or has_build_entry:
+        sys.exit(
+            f"{filename} is only partly registered; repair project.pbxproj before adding it again"
+        )
 
     # 1. PBXBuildFile
     text = text.replace(
@@ -94,9 +102,27 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
 
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
+        print(__doc__)
+        return
+
+    # Validate the whole invocation before touching the project. Treating an option or a typo as
+    # a basename used to register a nonexistent Swift source, and the registration checker then
+    # missed it because its stale-entry regex considered only names already ending in `.swift`.
+    filenames = []
+    for argument in sys.argv[1:]:
+        filename = Path(argument).name
+        if argument.startswith("-"):
+            sys.exit(f"error: unknown option: {argument}")
+        if Path(filename).suffix != ".swift":
+            sys.exit(f"error: test source must end in .swift: {argument}")
+        if not (TEST_DIRECTORY / filename).is_file():
+            sys.exit(f"error: test source does not exist in {TEST_DIRECTORY}: {filename}")
+        filenames.append(filename)
+
     text = PROJECT.read_text()
-    for filename in sys.argv[1:]:
-        text = add(text, Path(filename).name)
+    for filename in filenames:
+        text = add(text, filename)
     PROJECT.write_text(text)
 
 

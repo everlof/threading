@@ -132,7 +132,10 @@ enum ClaudeSubagentTranscriptReplay {
         let metadataURL = transcriptURL
             .deletingPathExtension()
             .appendingPathExtension(ClaudeSubagentHistoryDefaults.metadataExtension)
-        let metadata = (try? Data(contentsOf: metadataURL))
+        let metadata = (try? BoundedFileReader.read(
+            metadataURL,
+            maximumBytes: ClaudeSubagentHistoryDefaults.maximumMetadataBytes
+        ))
             .flatMap { try? JSONDecoder().decode(Metadata.self, from: $0) }
 
         var firstRecord: [String: Any]?
@@ -304,6 +307,7 @@ enum ClaudeSubagentHistoryDefaults {
     static let agentPrefix = "agent-"
     static let metadataExtension = "meta.json"
     static let maximumConversationEvents = ReplayDefaults.maximumEvents
+    static let maximumMetadataBytes = 1 * 1_024 * 1_024
     static let incompleteActivity = "Saved transcript ended before Claude reported completion"
     static let truncatedActivity = "Earlier child transcript omitted"
 }

@@ -104,8 +104,9 @@ enum GlobalSessionScan {
     static func discover(
         completion: @escaping @MainActor @Sendable (GlobalScanResult) -> Void
     ) {
-        let claudeAccounts = AgentAccountDiscovery.accounts(for: .claude)
-        let codexAccounts = AgentAccountDiscovery.accounts(for: .codex)
+        let replaySources = TranscriptReplayFormat.allCases.map { format in
+            (format: format, accounts: AgentAccountDiscovery.accounts(for: format.kind))
+        }
         let known = Set(
             ProjectStore.shared.projects
                 .flatMap(\.sessions)
@@ -126,8 +127,10 @@ enum GlobalSessionScan {
                 return root
             }
 
-            var discovery = claudeConversations(accounts: claudeAccounts)
-            discovery.append(codexConversations(accounts: codexAccounts))
+            var discovery = Discovery()
+            for source in replaySources {
+                discovery.append(conversations(format: source.format, accounts: source.accounts))
+            }
 
             let result = grouped(
                 discovery.conversations,
@@ -143,6 +146,16 @@ enum GlobalSessionScan {
             )
 
             DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    private static func conversations(
+        format: TranscriptReplayFormat,
+        accounts: [AgentAccount]
+    ) -> Discovery {
+        switch format {
+        case .claude: return claudeConversations(accounts: accounts)
+        case .codex: return codexConversations(accounts: accounts)
         }
     }
 

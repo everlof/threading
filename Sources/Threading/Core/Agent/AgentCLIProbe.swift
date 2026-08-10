@@ -35,26 +35,22 @@ enum AgentCLIProbe {
         }
     }
 
-    private nonisolated static func locate(_ executable: String, shell: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", "command -v \(executable) 2>/dev/null | head -1"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+    /// Shared by external-editor discovery so every login-shell lookup has the same quoting,
+    /// deadline, size bound, and executable validation.
+    nonisolated static func locate(_ executable: String, shell: String) -> String? {
+        var command = ShellCommand(word: "command")
+        command.append(word: "-v")
+        command.append(word: executable)
+        guard let result = try? BoundedChildProcess.run(
+            executable: shell,
+            arguments: ["-l", "-c", command.source],
+            timeout: AgentCLIProbeDefaults.timeout,
+            maximumOutputBytes: AgentCLIProbeDefaults.maximumOutputBytes,
+            output: .standardOutput
+        ), result.termination == .exited(0), !result.outputWasTruncated else { return nil }
 
         return path(
-            fromShellOutput: String(decoding: data, as: UTF8.self),
+            fromShellOutput: String(decoding: result.output, as: UTF8.self),
             isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }
         )
     }
@@ -69,4 +65,9 @@ enum AgentCLIProbe {
         guard path.hasPrefix("/"), !path.contains("\n"), isExecutable(path) else { return nil }
         return path
     }
+}
+
+private enum AgentCLIProbeDefaults {
+    static let timeout: TimeInterval = 5
+    static let maximumOutputBytes = 64 * 1024
 }

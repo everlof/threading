@@ -70,6 +70,7 @@ final class ArtifactScanService {
             url: root.appendingPathComponent(ArtifactScanDefaults.fileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )

@@ -15,7 +15,7 @@ import Foundation
 /// could not have told them apart.
 enum IntentionalExitReason: String, Equatable, Sendable {
 
-    /// `AppRelaunch.discardingState()`, which both resets take.
+    /// `AppRelaunch.PreparedRelaunch.commit`, which both resets take.
     case reset
 
     /// The recovery surface's "Try Normal Launch Once".
@@ -425,7 +425,10 @@ final class EventLog: @unchecked Sendable {
     /// and deleting it would hand that launch a clean bill of health it has not earned yet.
     private func removeOwnedMarker() {
         guard let ownedMarker,
-              let data = try? Data(contentsOf: markerURL),
+              let data = try? BoundedFileReader.read(
+                  markerURL,
+                  maximumBytes: EventLogDefaults.maximumMarkerBytes
+              ),
               let onDisk = try? JSONSerialization.jsonObject(with: data) as? [String: String],
               onDisk[EventLogDefaults.markerLaunchKey]
                 == ownedMarker[EventLogDefaults.markerLaunchKey]
@@ -442,7 +445,10 @@ final class EventLog: @unchecked Sendable {
     /// The raw marker rather than a journal detail: only the caller knows which of the two it is
     /// looking at, and only one of them should go looking for a crash report.
     private func consumePreviousMarker() -> [String: String]? {
-        guard let data = try? Data(contentsOf: markerURL),
+        guard let data = try? BoundedFileReader.read(
+                  markerURL,
+                  maximumBytes: EventLogDefaults.maximumMarkerBytes
+              ),
               let marker = try? JSONSerialization.jsonObject(with: data) as? [String: String]
         else { return nil }
 
@@ -591,6 +597,7 @@ enum EventLogDefaults {
     static let dayFormat = "yyyy-MM-dd"
 
     static let markerFileName = "launch.json"
+    static let maximumMarkerBytes = 16 * 1_024
     static let queueLabel = "codes.threading.eventlog"
 
     /// What the marker carries. `markerLaunchKey` is the ownership token `endLaunch` checks

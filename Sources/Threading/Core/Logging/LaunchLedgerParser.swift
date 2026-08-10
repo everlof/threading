@@ -100,7 +100,7 @@ enum LaunchLedgerParser {
             indexByLaunch[record.launch] = history.launches.count
             history.launches.append(LaunchLedgerLaunch(
                 id: record.launch,
-                startedAt: LaunchLedger.timestampFormatter.date(from: record.at),
+                startedAt: LaunchLedgerTimestamp.date(from: record.at),
                 uptime: record.uptime,
                 bootID: record.boot,
                 fingerprint: record.fingerprint ?? "",

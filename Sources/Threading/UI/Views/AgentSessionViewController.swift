@@ -447,6 +447,25 @@ final class AgentSessionViewController: NSViewController {
             return  // Retried from the sizeChanged callback once layout settles.
         }
 
+        let recorded = ProjectStore.shared.update(sessionID: sessionID) { stored in
+            stored.hasLaunched = true
+            stored.lastActiveAt = Date()
+            stored.lastExitCode = nil
+            stored.resumeState = plan.resumeState
+        }
+        guard recorded.succeeded else {
+            pendingLaunchPlan = nil
+            ThreadingLogger.agent.error(
+                "Refused to launch session \(self.sessionID, privacy: .public): project state could not be saved"
+            )
+            let alert = ThemedAlert()
+            alert.messageText = L10n.string("Couldn’t start")
+            alert.informativeText = L10n.string("The project data could not be saved.")
+            alert.alertStyle = .informational
+            alert.runModal()
+            return
+        }
+
         pendingLaunchPlan = nil
         isRunning = true
         resetTranscriptFallbackObservation()
@@ -466,19 +485,11 @@ final class AgentSessionViewController: NSViewController {
             identifierLaunchDate = Date()
         }
         session.start(plan: plan)
-        recordLaunch(plan: plan)
+        finishRecordedLaunch(plan: plan)
     }
 
-    /// Persists what the launch established: that the session has run, and the identifier
-    /// needed to resume it later.
-    private func recordLaunch(plan: AgentLaunchPlan) {
-        ProjectStore.shared.update(sessionID: sessionID) { stored in
-            stored.hasLaunched = true
-            stored.lastActiveAt = Date()
-            stored.lastExitCode = nil
-            stored.resumeState = plan.resumeState
-        }
-
+    /// Starts discovery and repaint work after the process launch record has already committed.
+    private func finishRecordedLaunch(plan: AgentLaunchPlan) {
         if plan.resumeState == .awaitingIdentifier {
             discoverAssignedSessionID()
         }

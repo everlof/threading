@@ -41,6 +41,76 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertTrue(value.hasSuffix("…"))
     }
 
+    func testOversizedJournalReadsOnlyItsBoundedValidTail() throws {
+        let file = directory.appendingPathComponent("remote-diagnostics-2026-08-10.jsonl")
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(
+            atOffset: UInt64(RemoteDiagnosticJournal.maximumJournalReadBytes + 1_024)
+        )
+        try handle.seekToEnd()
+        let expected = RemoteDiagnosticRecord(
+            timestamp: "2026-08-10T00:00:00Z",
+            source: .iOSClient,
+            level: .warning,
+            event: .socketFailed,
+            fields: ["code": "url.-1009"]
+        )
+        try handle.write(contentsOf: Data([0x0A]))
+        try handle.write(contentsOf: JSONEncoder().encode(expected))
+        try handle.write(contentsOf: Data([0x0A]))
+        try handle.close()
+
+        let journal = RemoteDiagnosticJournal(directory: directory, source: .iOSClient)
+        XCTAssertEqual(journal.records(), [expected])
+    }
+
+    func testDirectoryEnumerationRefusesBeforeAllocatingPastItsEntryBudget() throws {
+        for index in 0..<4 {
+            let url = directory.appendingPathComponent("entry-\(index)")
+            XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        }
+
+        XCTAssertThrowsError(
+            try RemoteBoundedDirectoryReader.shallowContents(
+                of: directory,
+                maximumEntries: 3
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteDirectoryEnumerationError,
+                .entryLimitExceeded(maximumEntries: 3)
+            )
+        }
+    }
+
+    func testJournalRejectsSymlinksAndFailsClosedWhenDirectoryBudgetIsExceeded() throws {
+        let external = directory.deletingLastPathComponent()
+            .appendingPathComponent("external-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: external) }
+        let record = RemoteDiagnosticRecord(
+            timestamp: "2026-08-10T00:00:00Z",
+            source: .iOSClient,
+            level: .warning,
+            event: .socketFailed,
+            fields: [:]
+        )
+        try (JSONEncoder().encode(record) + Data([0x0A])).write(to: external)
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("remote-diagnostics-2026-08-10.jsonl"),
+            withDestinationURL: external
+        )
+
+        let journal = RemoteDiagnosticJournal(directory: directory, source: .iOSClient)
+        XCTAssertTrue(journal.records().isEmpty)
+
+        for index in 0...RemoteDiagnosticJournal.maximumJournalDirectoryEntries {
+            let url = directory.appendingPathComponent("unrecognized-\(index)")
+            XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        }
+        XCTAssertTrue(journal.records().isEmpty)
+    }
+
     func testSupportReportCarriesBuildAndProtocolWithoutInventingContentFields() throws {
         let journal = RemoteDiagnosticJournal(directory: directory, source: .iOSClient)
         journal.record(.notificationReceived, fields: [
@@ -67,6 +137,7 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertEqual(report.records.first?.fields["trace"], "event-1")
         XCTAssertNil(report.records.first?.fields["message"])
         XCTAssertNil(report.records.first?.fields["token"])
+        XCTAssertEqual(try RemoteDiagnosticJournal.readSupportReport(at: url), report)
     }
 
     func testAdditionalDetailsRequireTypedOptInAndRemainBounded() throws {

@@ -411,7 +411,9 @@ enum BrowserBaselineStoreError: LocalizedError, Equatable {
     case revisionNotFound
     case userOwned
     case invalidImage
+    case imageDimensionsTooLarge
     case imageTooLarge(bytes: Int, limit: Int)
+    case storedRevisionDamaged
     case tooManyBaselines(limit: Int)
     case projectStorageExceeded(limit: Int)
     case writesBlocked
@@ -436,11 +438,17 @@ enum BrowserBaselineStoreError: LocalizedError, Equatable {
             )
         case .invalidImage:
             return L10n.string("The capture is not a decodable PNG.")
+        case .imageDimensionsTooLarge:
+            return L10n.string("The baseline or current capture exceeds the comparison limit.")
         case .imageTooLarge(let bytes, let limit):
             return L10n.format(
                 "The capture is %lld bytes, over the %lld byte limit for one baseline.",
                 Int64(bytes),
                 Int64(limit)
+            )
+        case .storedRevisionDamaged:
+            return L10n.string(
+                "The stored baseline image no longer matches its approved revision."
             )
         case .tooManyBaselines(let limit):
             return L10n.format(
@@ -615,12 +623,32 @@ final class BrowserBaselineStore {
         of baselineID: BrowserBaselineID,
         in projectID: ProjectID
     ) throws -> Data {
+        guard let revision = revision(revisionID, of: baselineID, in: projectID) else {
+            throw BrowserBaselineStoreError.revisionNotFound
+        }
         let url = pngURL(forRevision: revisionID, of: baselineID, in: projectID)
+        let data: Data
         do {
-            return try Data(contentsOf: url, options: .mappedIfSafe)
+            data = try BoundedFileReader.read(
+                url,
+                maximumBytes: BrowserBaselineDefaults.maximumImageBytes
+            )
+        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+            throw BrowserBaselineStoreError.imageTooLarge(
+                bytes: BrowserBaselineDefaults.maximumImageBytes + 1,
+                limit: BrowserBaselineDefaults.maximumImageBytes
+            )
         } catch {
             throw BrowserBaselineStoreError.revisionNotFound
         }
+        guard BrowserBaselineImage.hash(data) == revision.contentHash,
+              let size = BrowserBaselineImage.pixelSize(of: data),
+              BrowserBaselineImage.isWithinComparisonLimits(size),
+              size.width == revision.conditions.pixelWidth,
+              size.height == revision.conditions.pixelHeight else {
+            throw BrowserBaselineStoreError.storedRevisionDamaged
+        }
+        return data
     }
 
     /// The bounded page state stored beside one revision's pixels, when it has any.
@@ -632,10 +660,10 @@ final class BrowserBaselineStore {
         of baselineID: BrowserBaselineID,
         in projectID: ProjectID
     ) -> Data? {
-        try? Data(
-            contentsOf: revisionDirectory(revisionID, of: baselineID, in: projectID)
+        try? BoundedFileReader.read(
+            revisionDirectory(revisionID, of: baselineID, in: projectID)
                 .appendingPathComponent(BrowserBaselineDefaults.stateFileName),
-            options: .mappedIfSafe
+            maximumBytes: BrowserBaselineDefaults.maximumAttributionBytes
         )
     }
 
@@ -645,10 +673,10 @@ final class BrowserBaselineStore {
         of baselineID: BrowserBaselineID,
         in projectID: ProjectID
     ) -> Data? {
-        try? Data(
-            contentsOf: revisionDirectory(revisionID, of: baselineID, in: projectID)
+        try? BoundedFileReader.read(
+            revisionDirectory(revisionID, of: baselineID, in: projectID)
                 .appendingPathComponent(BrowserBaselineDefaults.diagnosticsFileName),
-            options: .mappedIfSafe
+            maximumBytes: BrowserDiagnosticsDefaults.maximumBytes
         )
     }
 
@@ -739,14 +767,14 @@ final class BrowserBaselineStore {
     ) throws -> BrowserBaseline {
         try requireWritable()
         loadIfNeeded(projectID)
-        guard let index = baselinesByProject[projectID]?.firstIndex(where: { $0.id == baselineID })
-        else {
+        guard var baselines = baselinesByProject[projectID],
+              let index = baselines.firstIndex(where: { $0.id == baselineID }) else {
             throw BrowserBaselineStoreError.notFound
         }
         // No ownership guard here on purpose. Who may revise what is an MCP-surface question —
         // the agent path refuses a user-captured record, the user path refuses nothing — and a
         // flag here was both unreachable and, when read, backwards.
-        var baseline = baselinesByProject[projectID]![index]
+        var baseline = baselines[index]
         try requireProjectSpace(for: request.pngData.count, in: projectID, freeing: 0)
 
         let revision = try writeRevision(request, for: baselineID, in: projectID)
@@ -774,7 +802,8 @@ final class BrowserBaselineStore {
                 at: revisionDirectory(stale.id, of: baselineID, in: projectID)
             )
         }
-        baselinesByProject[projectID]![index] = baseline
+        baselines[index] = baseline
+        baselinesByProject[projectID] = baselines
         announce(projectID)
         return baseline
     }
@@ -788,18 +817,19 @@ final class BrowserBaselineStore {
     ) throws -> BrowserBaseline {
         try requireWritable()
         loadIfNeeded(projectID)
-        guard let index = baselinesByProject[projectID]?.firstIndex(where: { $0.id == baselineID })
-        else {
+        guard var baselines = baselinesByProject[projectID],
+              let index = baselines.firstIndex(where: { $0.id == baselineID }) else {
             throw BrowserBaselineStoreError.notFound
         }
-        var baseline = baselinesByProject[projectID]![index]
+        var baseline = baselines[index]
         guard baseline.revisions.contains(where: { $0.id == revisionID }) else {
             throw BrowserBaselineStoreError.revisionNotFound
         }
         baseline.activeRevisionID = revisionID
         baseline.updatedAt = now()
         try writeRecord(baseline)
-        baselinesByProject[projectID]![index] = baseline
+        baselines[index] = baseline
+        baselinesByProject[projectID] = baselines
         announce(projectID)
         return baseline
     }
@@ -812,15 +842,16 @@ final class BrowserBaselineStore {
     ) throws -> BrowserBaseline {
         try requireWritable()
         let validated = try validatedName(name, in: projectID, excluding: baselineID)
-        guard let index = baselinesByProject[projectID]?.firstIndex(where: { $0.id == baselineID })
-        else {
+        guard var baselines = baselinesByProject[projectID],
+              let index = baselines.firstIndex(where: { $0.id == baselineID }) else {
             throw BrowserBaselineStoreError.notFound
         }
-        var baseline = baselinesByProject[projectID]![index]
+        var baseline = baselines[index]
         baseline.name = validated
         baseline.updatedAt = now()
         try writeRecord(baseline)
-        baselinesByProject[projectID]![index] = baseline
+        baselines[index] = baseline
+        baselinesByProject[projectID] = baselines
         announce(projectID)
         return baseline
     }
@@ -833,15 +864,16 @@ final class BrowserBaselineStore {
     ) throws -> BrowserBaseline {
         try requireWritable()
         loadIfNeeded(projectID)
-        guard let index = baselinesByProject[projectID]?.firstIndex(where: { $0.id == baselineID })
-        else {
+        guard var baselines = baselinesByProject[projectID],
+              let index = baselines.firstIndex(where: { $0.id == baselineID }) else {
             throw BrowserBaselineStoreError.notFound
         }
-        var baseline = baselinesByProject[projectID]![index]
+        var baseline = baselines[index]
         baseline.isAgentReadable = isReadable
         baseline.updatedAt = now()
         try writeRecord(baseline)
-        baselinesByProject[projectID]![index] = baseline
+        baselines[index] = baseline
+        baselinesByProject[projectID] = baselines
         announce(projectID)
         return baseline
     }
@@ -857,11 +889,11 @@ final class BrowserBaselineStore {
     ) throws {
         try requireWritable()
         loadIfNeeded(projectID)
-        guard let index = baselinesByProject[projectID]?.firstIndex(where: { $0.id == baselineID })
-        else {
+        guard var baselines = baselinesByProject[projectID],
+              let index = baselines.firstIndex(where: { $0.id == baselineID }) else {
             throw BrowserBaselineStoreError.notFound
         }
-        let baseline = baselinesByProject[projectID]![index]
+        let baseline = baselines[index]
         if requiresAgentOwnership, baseline.provenance.isUserOwned {
             throw BrowserBaselineStoreError.userOwned
         }
@@ -870,7 +902,8 @@ final class BrowserBaselineStore {
         } catch {
             throw BrowserBaselineStoreError.persistenceFailed(error.localizedDescription)
         }
-        baselinesByProject[projectID]!.remove(at: index)
+        baselines.remove(at: index)
+        baselinesByProject[projectID] = baselines
         announce(projectID)
     }
 
@@ -959,6 +992,9 @@ final class BrowserBaselineStore {
         guard let dimensions = BrowserBaselineImage.pixelSize(of: request.pngData) else {
             throw BrowserBaselineStoreError.invalidImage
         }
+        guard BrowserBaselineImage.isWithinComparisonLimits(dimensions) else {
+            throw BrowserBaselineStoreError.imageDimensionsTooLarge
+        }
         guard request.pngData.count <= BrowserBaselineDefaults.maximumImageBytes else {
             throw BrowserBaselineStoreError.imageTooLarge(
                 bytes: request.pngData.count,
@@ -978,10 +1014,10 @@ final class BrowserBaselineStore {
         // whose state is not worth keeping, and the comparison degrades to pixels rather than
         // letting one capture own the project's byte budget.
         let attribution = request.attributionJSON.flatMap {
-            $0.count <= BrowserBaselineDefaults.maximumAttributionBytes ? $0 : nil
+            !$0.isEmpty && $0.count <= BrowserBaselineDefaults.maximumAttributionBytes ? $0 : nil
         }
         let diagnostics = request.diagnosticsJSON.flatMap {
-            $0.count <= BrowserDiagnosticsDefaults.maximumBytes ? $0 : nil
+            !$0.isEmpty && $0.count <= BrowserDiagnosticsDefaults.maximumBytes ? $0 : nil
         }
         let revision = BrowserBaselineRevision(
             id: BrowserBaselineRevisionID(),
@@ -1026,12 +1062,21 @@ final class BrowserBaselineStore {
                     options: .atomic
                 )
             }
-            try Self.encoder
-                .encode(StoredRevision(schemaVersion: BrowserBaselineDefaults.schemaVersion, revision: revision))
-                .write(
-                    to: staging.appendingPathComponent(BrowserBaselineDefaults.manifestFileName),
-                    options: .atomic
+            let manifest = try Self.encoder.encode(
+                StoredRevision(
+                    schemaVersion: BrowserBaselineDefaults.schemaVersion,
+                    revision: revision
                 )
+            )
+            guard manifest.count <= BrowserBaselineDefaults.maximumManifestBytes else {
+                throw BrowserBaselineStoreError.persistenceFailed(
+                    L10n.string("the captured manifest exceeded its storage limit")
+                )
+            }
+            try manifest.write(
+                to: staging.appendingPathComponent(BrowserBaselineDefaults.manifestFileName),
+                options: .atomic
+            )
             try validateStaged(staging, against: revision)
             try removeIfPresent(destination)
             try fileManager.moveItem(at: staging, to: destination)
@@ -1048,25 +1093,32 @@ final class BrowserBaselineStore {
     private func validateStaged(_ staging: URL, against revision: BrowserBaselineRevision) throws {
         let imageURL = staging.appendingPathComponent(BrowserBaselineDefaults.imageFileName)
         let stateURL = staging.appendingPathComponent(BrowserBaselineDefaults.stateFileName)
-        let stateBytes = (try? Data(contentsOf: stateURL))?.count ?? 0
         let diagnosticsURL = staging.appendingPathComponent(
             BrowserBaselineDefaults.diagnosticsFileName
         )
-        let diagnosticsBytes = (try? Data(contentsOf: diagnosticsURL))?.count ?? 0
-        guard revision.hasDiagnostics == (diagnosticsBytes > 0) else {
+        let state = try readOptionalStagedFile(
+            stateURL,
+            maximumBytes: BrowserBaselineDefaults.maximumAttributionBytes
+        )
+        let diagnostics = try readOptionalStagedFile(
+            diagnosticsURL,
+            maximumBytes: BrowserDiagnosticsDefaults.maximumBytes
+        )
+        guard revision.hasAttribution == (state != nil),
+              revision.hasDiagnostics == (diagnostics != nil) else {
             throw BrowserBaselineStoreError.persistenceFailed(
                 L10n.string("the captured page state was not stored beside its image")
             )
         }
-        guard revision.hasAttribution == (stateBytes > 0) else {
-            throw BrowserBaselineStoreError.persistenceFailed(
-                L10n.string("the captured page state was not stored beside its image")
-            )
-        }
-        guard let written = try? Data(contentsOf: imageURL),
-              written.count + stateBytes + diagnosticsBytes == revision.byteCount,
+        guard let written = try? BoundedFileReader.read(
+            imageURL,
+            maximumBytes: BrowserBaselineDefaults.maximumImageBytes
+        ),
+              written.count + (state?.count ?? 0) + (diagnostics?.count ?? 0)
+                == revision.byteCount,
               BrowserBaselineImage.hash(written) == revision.contentHash,
               let size = BrowserBaselineImage.pixelSize(of: written),
+              BrowserBaselineImage.isWithinComparisonLimits(size),
               size.width == revision.conditions.pixelWidth,
               size.height == revision.conditions.pixelHeight else {
             throw BrowserBaselineStoreError.persistenceFailed(
@@ -1074,13 +1126,22 @@ final class BrowserBaselineStore {
             )
         }
         let manifestURL = staging.appendingPathComponent(BrowserBaselineDefaults.manifestFileName)
-        guard let manifest = try? Data(contentsOf: manifestURL),
+        guard let manifest = try? BoundedFileReader.read(
+                manifestURL,
+                maximumBytes: BrowserBaselineDefaults.maximumManifestBytes
+              ),
               let stored = try? Self.decoder.decode(StoredRevision.self, from: manifest),
               stored.revision.id == revision.id else {
             throw BrowserBaselineStoreError.persistenceFailed(
                 L10n.string("the stored manifest could not be read back")
             )
         }
+    }
+
+    private func readOptionalStagedFile(_ url: URL, maximumBytes: Int) throws -> Data? {
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try BoundedFileReader.read(url, maximumBytes: maximumBytes)
+        return data.isEmpty ? nil : data
     }
 
     private func writeRecord(_ baseline: BrowserBaseline) throws {
@@ -1098,10 +1159,18 @@ final class BrowserBaselineStore {
                 createdAt: baseline.createdAt,
                 updatedAt: baseline.updatedAt
             )
-            try Self.encoder.encode(stored).write(
+            let data = try Self.encoder.encode(stored)
+            guard data.count <= BrowserBaselineDefaults.maximumRecordBytes else {
+                throw BrowserBaselineStoreError.persistenceFailed(
+                    L10n.string("the baseline record exceeded its storage limit")
+                )
+            }
+            try data.write(
                 to: directory.appendingPathComponent(BrowserBaselineDefaults.recordFileName),
                 options: .atomic
             )
+        } catch let error as BrowserBaselineStoreError {
+            throw error
         } catch {
             throw BrowserBaselineStoreError.persistenceFailed(error.localizedDescription)
         }
@@ -1155,13 +1224,24 @@ final class BrowserBaselineStore {
 
     private func readBaseline(at directory: URL, in projectID: ProjectID) -> ReadOutcome {
         let recordURL = directory.appendingPathComponent(BrowserBaselineDefaults.recordFileName)
-        guard let data = try? Data(contentsOf: recordURL) else { return .damaged }
+        guard let data = try? BoundedFileReader.read(
+            recordURL,
+            maximumBytes: BrowserBaselineDefaults.maximumRecordBytes
+        ) else { return .damaged }
         guard let version = try? Self.decoder.decode(SchemaProbe.self, from: data).schemaVersion
         else {
             return .damaged
         }
         guard version <= BrowserBaselineDefaults.schemaVersion else { return .unsupported }
         guard let stored = try? Self.decoder.decode(StoredBaseline.self, from: data) else {
+            return .damaged
+        }
+        guard stored.id.uuidString == directory.lastPathComponent,
+              !stored.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              stored.name.count <= BrowserBaselineDefaults.maximumNameLength,
+              !stored.revisionIDs.isEmpty,
+              stored.revisionIDs.count <= BrowserBaselineDefaults.maximumRevisionsPerBaseline,
+              Set(stored.revisionIDs).count == stored.revisionIDs.count else {
             return .damaged
         }
 
@@ -1174,14 +1254,27 @@ final class BrowserBaselineStore {
             let manifestURL = revisionDirectory.appendingPathComponent(
                 BrowserBaselineDefaults.manifestFileName
             )
-            guard let manifestData = try? Data(contentsOf: manifestURL),
-                  let manifest = try? Self.decoder.decode(StoredRevision.self, from: manifestData),
-                  manifest.schemaVersion <= BrowserBaselineDefaults.schemaVersion,
+            guard let manifestData = try? BoundedFileReader.read(
+                    manifestURL,
+                    maximumBytes: BrowserBaselineDefaults.maximumManifestBytes
+                  ),
+                  let manifestVersion = try? Self.decoder.decode(
+                    SchemaProbe.self,
+                    from: manifestData
+                  ).schemaVersion else {
+                return .damaged
+            }
+            guard manifestVersion <= BrowserBaselineDefaults.schemaVersion else {
+                return .unsupported
+            }
+            guard let manifest = try? Self.decoder.decode(StoredRevision.self, from: manifestData),
+                  manifest.revision.id == revisionID,
+                  isPlausibleStoredRevision(manifest.revision),
                   fileManager.fileExists(
                     atPath: revisionDirectory
                         .appendingPathComponent(BrowserBaselineDefaults.imageFileName).path
                   ) else {
-                continue
+                return .damaged
             }
             revisions.append(manifest.revision)
         }
@@ -1190,9 +1283,9 @@ final class BrowserBaselineStore {
         guard !revisions.isEmpty else { return .damaged }
         revisions.sort { $0.capturedAt < $1.capturedAt }
 
-        let active = revisions.contains { $0.id == stored.activeRevisionID }
-            ? stored.activeRevisionID
-            : revisions[revisions.count - 1].id
+        guard revisions.contains(where: { $0.id == stored.activeRevisionID }) else {
+            return .damaged
+        }
 
         return .loaded(BrowserBaseline(
             id: stored.id,
@@ -1201,10 +1294,31 @@ final class BrowserBaselineStore {
             provenance: stored.provenance,
             isAgentReadable: stored.isAgentReadable,
             revisions: revisions,
-            activeRevisionID: active,
+            activeRevisionID: stored.activeRevisionID,
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt
         ))
+    }
+
+    private func isPlausibleStoredRevision(_ revision: BrowserBaselineRevision) -> Bool {
+        let maximumRevisionBytes = BrowserBaselineDefaults.maximumImageBytes
+            + BrowserBaselineDefaults.maximumAttributionBytes
+            + BrowserDiagnosticsDefaults.maximumBytes
+        let hashIsSHA256 = revision.contentHash.utf8.count == 64
+            && revision.contentHash.utf8.allSatisfy { byte in
+                switch byte {
+                case 48...57, 97...102: return true
+                default: return false
+                }
+            }
+        return revision.byteCount > 0
+            && revision.byteCount <= maximumRevisionBytes
+            && BrowserBaselineImage.isWithinComparisonLimits((
+                revision.conditions.pixelWidth,
+                revision.conditions.pixelHeight
+            ))
+            && hashIsSHA256
+            && (revision.note?.count ?? 0) <= BrowserBaselineDefaults.maximumNoteLength
     }
 
     /// Moves damaged data out of the way, keeping it.
@@ -1438,6 +1552,15 @@ enum BrowserBaselineImage {
         }
         return (width, height)
     }
+
+    static func isWithinComparisonLimits(_ size: (width: Int, height: Int)) -> Bool {
+        guard size.width <= BrowserBaselineDefaults.maximumImageDimension,
+              size.height <= BrowserBaselineDefaults.maximumImageDimension else {
+            return false
+        }
+        let (pixels, overflow) = size.width.multipliedReportingOverflow(by: size.height)
+        return !overflow && pixels <= BrowserBaselineDefaults.maximumImagePixels
+    }
 }
 
 // MARK: - Defaults
@@ -1469,6 +1592,10 @@ enum BrowserBaselineDefaults {
     /// One capture. Matches the comparison limit, so the store never accepts a baseline the
     /// comparator would refuse to read.
     static let maximumImageBytes = 50 * 1_024 * 1_024
+    static let maximumImageDimension = 16_384
+    static let maximumImagePixels = 20_000_000
+    static let maximumRecordBytes = 256 * 1_024
+    static let maximumManifestBytes = 256 * 1_024
     static let maximumBaselinesPerProject = 200
     static let maximumRevisionsPerBaseline = 20
     static let maximumProjectBytes = 512 * 1_024 * 1_024

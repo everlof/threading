@@ -1,5 +1,93 @@
 import Foundation
 
+enum TranscriptCopyTransactionError: Error, Equatable {
+    case sourceNotRegular
+    case commitRefused
+    case rollbackFailed(recoveryPath: String, detail: String)
+}
+
+/// Installs a transcript copy without destroying an older target-account copy unless the caller's
+/// durable record update commits too. Candidate and backup live beside the destination, so their
+/// promotions are same-volume renames rather than partial cross-volume copies.
+enum TranscriptCopyTransaction {
+    static func install(
+        source: URL,
+        destination: URL,
+        fileManager: FileManager = .default,
+        commit: () -> Bool
+    ) throws {
+        let values = try source.resourceValues(forKeys: [
+            .isRegularFileKey, .isSymbolicLinkKey
+        ])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw TranscriptCopyTransactionError.sourceNotRegular
+        }
+
+        let parent = destination.deletingLastPathComponent()
+        let nonce = UUID().uuidString.lowercased()
+        let staging = parent.appendingPathComponent(".threading-move-\(nonce).candidate")
+        let backup = parent.appendingPathComponent(".threading-move-\(nonce).previous")
+        var movedStandingDestination = false
+        var installedCandidate = false
+        defer { try? fileManager.removeItem(at: staging) }
+
+        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        try fileManager.copyItem(at: source, to: staging)
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.moveItem(at: destination, to: backup)
+            movedStandingDestination = true
+        }
+        do {
+            try fileManager.moveItem(at: staging, to: destination)
+            installedCandidate = true
+        } catch let promotionError {
+            if movedStandingDestination {
+                do {
+                    try fileManager.moveItem(at: backup, to: destination)
+                    movedStandingDestination = false
+                } catch {
+                    throw TranscriptCopyTransactionError.rollbackFailed(
+                        recoveryPath: backup.path,
+                        detail: "\(promotionError.localizedDescription); \(error.localizedDescription)"
+                    )
+                }
+            }
+            throw promotionError
+        }
+
+        guard commit() else {
+            do {
+                if installedCandidate {
+                    try fileManager.removeItem(at: destination)
+                    installedCandidate = false
+                }
+                if movedStandingDestination {
+                    try fileManager.moveItem(at: backup, to: destination)
+                    movedStandingDestination = false
+                }
+            } catch {
+                // The backup is deliberately retained at the reported path. A cleanup defer that
+                // erased it would convert an already reported refusal into target-account loss.
+                throw TranscriptCopyTransactionError.rollbackFailed(
+                    recoveryPath: movedStandingDestination ? backup.path : destination.path,
+                    detail: error.localizedDescription
+                )
+            }
+            throw TranscriptCopyTransactionError.commitRefused
+        }
+
+        if movedStandingDestination {
+            do {
+                try fileManager.removeItem(at: backup)
+            } catch {
+                ThreadingLogger.agent.error(
+                    "Could not retire previous migrated transcript: \(backup.path, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+    }
+}
+
 /// Moves a conversation to another account of the same agent, so it resumes there.
 ///
 /// A conversation is a client-side transcript the CLI replays to the API each turn, not server
@@ -65,35 +153,49 @@ enum SessionMigration {
         }
 
         guard let current = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle),
-              source.path.hasPrefix(current.configPath) else {
+              account.handle != session.accountHandle,
+              let relativeComponents = relativePathComponents(
+                of: source,
+                beneath: URL(fileURLWithPath: current.configPath, isDirectory: true)
+              ) else {
             return .failure(MoveError(message: "Could not locate the conversation on disk."))
+        }
+
+        guard ProjectStore.shared.acceptsDurableMutations else {
+            return .failure(MoveError(message: "The moved conversation could not be saved."))
         }
 
         // The layout under a config directory is identical between accounts, so the destination
         // is the source with its account-directory prefix swapped. This holds for Claude's
         // `projects/<slug>/` and Codex's dated `sessions/` path alike.
-        let relative = String(source.path.dropFirst(current.configPath.count))
-        let destination = URL(fileURLWithPath: account.configPath + relative)
+        let destination = relativeComponents.reduce(
+            URL(fileURLWithPath: account.configPath, isDirectory: true)
+        ) { partial, component in
+            partial.appendingPathComponent(component, isDirectory: false)
+        }
 
         // A live process still belongs to the old account and is still writing the transcript,
         // so it is torn down before the file is copied.
         AgentRuntime.shared.discard(sessionID: sessionID)
 
         do {
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
+            try TranscriptCopyTransaction.install(source: source, destination: destination) {
+                let mutation = ProjectStore.shared.setAccountHandle(account.handle, for: sessionID)
+                return mutation == .applied || mutation == .unchanged
             }
-            try FileManager.default.copyItem(at: source, to: destination)
+        } catch TranscriptCopyTransactionError.sourceNotRegular {
+            return .failure(MoveError(message: "The conversation transcript is not a regular file."))
+        } catch TranscriptCopyTransactionError.commitRefused {
+            return .failure(MoveError(message: "The moved conversation could not be saved."))
+        } catch TranscriptCopyTransactionError.rollbackFailed(let recoveryPath, let detail) {
+            ThreadingLogger.agent.error(
+                "Migrated transcript rollback needs recovery at \(recoveryPath, privacy: .private(mask: .hash)): \(detail, privacy: .public)"
+            )
+            return .failure(MoveError(
+                message: "The moved conversation could not be saved; its previous target copy was kept for recovery."
+            ))
         } catch {
             return .failure(MoveError(message: "Could not copy the conversation: \(error.localizedDescription)"))
-        }
-
-        ProjectStore.shared.update(sessionID: sessionID) {
-            $0.accountHandle = account.handle
         }
 
         ThreadingLogger.agent.info("Migrated session \(sessionID) to account \(account.handle, privacy: .public)")
@@ -104,6 +206,20 @@ enum SessionMigration {
 
     private static func normalizedHandle(_ account: AgentAccount) -> AccountHandle {
         account.handle
+    }
+
+    /// Component containment rather than a string prefix: `/a/config-old/session` is not below
+    /// `/a/config`, and a symlinked source is compared at its resolved destination.
+    nonisolated static func relativePathComponents(of file: URL, beneath root: URL) -> [String]? {
+        let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let resolvedFile = file.standardizedFileURL.resolvingSymlinksInPath()
+        let rootComponents = resolvedRoot.pathComponents
+        let fileComponents = resolvedFile.pathComponents
+        guard fileComponents.count > rootComponents.count,
+              Array(fileComponents.prefix(rootComponents.count)) == rootComponents else {
+            return nil
+        }
+        return Array(fileComponents.dropFirst(rootComponents.count))
     }
 }
 
@@ -178,6 +294,17 @@ enum ConversationContinuation {
             )))
             return
         }
+        guard ProjectStore.shared.acceptsDurableMutations else {
+            completion(.failure(ContinuationError(
+                message: "The destination conversation could not be saved."
+            )))
+            return
+        }
+
+        // Capture owns the stable snapshot and therefore owns stopping its writer. Keeping this
+        // inside the transaction prevents callers from tearing a process down before validation
+        // or a known persistence refusal.
+        AgentRuntime.shared.discard(sessionID: sourceID)
 
         let targetID = SessionID()
         let title = source.displayTitle
@@ -356,6 +483,8 @@ struct ConversationHandoffSnapshot: Codable, Equatable {
 /// Adapts each runtime's supported history surface at the moment a handoff is made.
 enum ConversationHandoffCapture {
     private static let maximumExportBytes = 32 * 1024 * 1024
+    private static let maximumExportDiagnosticBytes = 64 * 1024
+    private static let exportTimeout: TimeInterval = 60
     private static let bootstrapMarker = "Threading cross-provider continuation bootstrap"
 
     @MainActor
@@ -515,36 +644,43 @@ enum ConversationHandoffCapture {
             )
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: loginShellPath)
-        process.arguments = ["-l", "-c", command.source]
-        process.currentDirectoryURL = URL(fileURLWithPath: projectFolder, isDirectory: true)
-        process.environment = AgentEnvironment.launchEnvironment()
-
         _ = fileManager.createFile(atPath: standardErrorURL.path, contents: nil)
         let standardError = try FileHandle(forWritingTo: standardErrorURL)
-        process.standardError = standardError
+        defer { try? standardError.close() }
+        let standardOutput: FileHandle?
         switch kind {
         case .openCode:
             _ = fileManager.createFile(atPath: output.path, contents: nil)
-            let handle = try FileHandle(forWritingTo: output)
-            process.standardOutput = handle
-            try process.run()
-            process.waitUntilExit()
-            try? handle.close()
+            standardOutput = try FileHandle(forWritingTo: output)
         case .grok:
-            process.standardOutput = FileHandle.nullDevice
-            try process.run()
-            process.waitUntilExit()
+            standardOutput = nil
         case .claude, .codex:
             throw ConversationContinuation.ContinuationError(
                 message: "This runtime does not use the export adapter."
             )
         }
-        try? standardError.close()
+        defer { try? standardOutput?.close() }
 
-        guard process.terminationStatus == 0 else {
-            let errorData = (try? Data(contentsOf: standardErrorURL)) ?? Data()
+        let child = try ChildProcessSpawn.spawn(
+            executableURL: URL(fileURLWithPath: loginShellPath),
+            arguments: ["-l", "-c", command.source],
+            environment: AgentEnvironment.launchEnvironment(),
+            workingDirectory: URL(fileURLWithPath: projectFolder, isDirectory: true),
+            descriptors: [
+                AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
+                AgentChildProcessDefaults.standardOutputDescriptor:
+                    standardOutput.map { .inherited($0.fileDescriptor) } ?? .nullDevice,
+                AgentChildProcessDefaults.standardErrorDescriptor:
+                    .inherited(standardError.fileDescriptor)
+            ]
+        )
+        let termination = child.waitUntilExit(timeout: exportTimeout)
+
+        guard termination == .exited(0) else {
+            let errorData = (try? BoundedFileReader.read(
+                standardErrorURL,
+                maximumBytes: maximumExportDiagnosticBytes
+            )) ?? Data()
             let detail = String(decoding: errorData.prefix(4_000), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             throw ConversationContinuation.ContinuationError(
@@ -554,16 +690,20 @@ enum ConversationHandoffCapture {
             )
         }
 
-        let attributes = try fileManager.attributesOfItem(atPath: output.path)
-        let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
-        guard size > 0, size <= maximumExportBytes else {
+        let data: Data
+        do {
+            data = try BoundedFileReader.read(output, maximumBytes: maximumExportBytes)
+        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
             throw ConversationContinuation.ContinuationError(
-                message: size == 0
-                    ? "The \(kind.displayName) export was empty."
-                    : "The \(kind.displayName) export was too large to hand off safely."
+                message: "The \(kind.displayName) export was too large to hand off safely."
             )
         }
-        return try Data(contentsOf: output, options: .mappedIfSafe)
+        guard !data.isEmpty else {
+            throw ConversationContinuation.ContinuationError(
+                message: "The \(kind.displayName) export was empty."
+            )
+        }
+        return data
     }
 
     /// OpenCode's documented export is `{ info, messages }`. Only visible user/assistant text
@@ -634,6 +774,7 @@ enum ConversationHandoffStore {
 
     private static let directoryName = "ConversationHandoffs"
     private static let inlineCharacterLimit = 96_000
+    static let maximumSnapshotBytes = 8 * 1024 * 1024
 
     static func url(for sessionID: SessionID, rootDirectory: URL? = nil) -> URL {
         directory(rootDirectory: rootDirectory)
@@ -672,7 +813,13 @@ enum ConversationHandoffStore {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(snapshot).write(
+        let data = try encoder.encode(snapshot)
+        guard data.count <= maximumSnapshotBytes else {
+            throw ConversationContinuation.ContinuationError(
+                message: "The conversation handoff snapshot is too large to store safely."
+            )
+        }
+        try data.write(
             to: url(for: sessionID, rootDirectory: rootDirectory),
             options: .atomic
         )
@@ -683,11 +830,21 @@ enum ConversationHandoffStore {
         legacySourceKind: AgentKind?,
         legacySourceTitle: String
     ) throws -> ConversationHandoffSnapshot {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        if let snapshot = try? JSONDecoder().decode(ConversationHandoffSnapshot.self, from: data),
-           snapshot.version == ConversationHandoffSnapshot.currentVersion,
-           !snapshot.segments.isEmpty {
-            return snapshot
+        do {
+            let data = try BoundedFileReader.read(url, maximumBytes: maximumSnapshotBytes)
+            if let snapshot = try? JSONDecoder().decode(
+                ConversationHandoffSnapshot.self,
+                from: data
+            ), snapshot.version == ConversationHandoffSnapshot.currentVersion,
+               !snapshot.segments.isEmpty {
+                return snapshot
+            }
+        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+            guard legacySourceKind != nil else {
+                throw ConversationContinuation.ContinuationError(
+                    message: "The conversation handoff snapshot is too large to read safely."
+                )
+            }
         }
 
         // Compatibility for destinations created before the provider-neutral snapshot format:

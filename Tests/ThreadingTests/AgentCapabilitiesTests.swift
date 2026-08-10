@@ -46,7 +46,8 @@ final class AgentCapabilitiesTests: XCTestCase {
             ("providerTitleMetadata", .providerTitleMetadata),
             ("providerArchive", .providerArchive),
             ("transcriptInterruptedTurnRecord", .transcriptInterruptedTurnRecord),
-            ("transcriptRefusedTurnRecord", .transcriptRefusedTurnRecord)
+            ("transcriptRefusedTurnRecord", .transcriptRefusedTurnRecord),
+            ("transcriptReplay", .transcriptReplay)
         ]
 
         var seen: [Int: String] = [:]
@@ -95,19 +96,39 @@ final class AgentCapabilitiesTests: XCTestCase {
         }
     }
 
-    /// A runtime whose transcript Threading reads for a title must have a transcript reader in
-    /// the first place. `.transcriptTitles`, `.transcriptModelRecord` and
-    /// `.transcriptPermissionModeRecord` are separate facts — a runtime could record one and not
-    /// the others — but all three are readings of the same file, so none may be claimed by a
-    /// runtime with no transcript to read.
-    func testTranscriptCapabilitiesImplyAResumableTranscript() {
-        for kind in AgentKind.allCases where kind.supports(.transcriptTitles)
-            || kind.supports(.transcriptModelRecord)
-            || kind.supports(.transcriptPermissionModeRecord) {
-            XCTAssertTrue(
-                kind.supports(.resume),
-                "\(kind) reads a transcript it has no identifier for"
-            )
+    /// The capability matrix is the policy and the format enum is its implementation. Exact
+    /// agreement catches both silent failure modes: a runtime offered replay with no adapter,
+    /// and a working adapter that discovery/import forgot to advertise.
+    func testTranscriptReplayCapabilityExactlyMatchesMeasuredFormats() {
+        let declared = Set(
+            AgentKind.allCases.filter { $0.supports(.transcriptReplay) }
+        )
+        let implemented = Set(TranscriptReplayFormat.allCases.map(\.kind))
+        XCTAssertEqual(declared, implemented)
+        XCTAssertEqual(declared, [.claude, .codex])
+    }
+
+    /// Narrow structured-record facts are readings of the replayable conversation file. They
+    /// may differ independently, but none can exist without the base format adapter. Usage
+    /// indexing is intentionally absent: OpenCode's supported export can total usage without
+    /// being a conversation transcript the UI can replay.
+    func testTranscriptRecordCapabilitiesImplyReplay() {
+        let dependentCapabilities: [(String, AgentCapabilities)] = [
+            ("titles", .transcriptTitles),
+            ("model", .transcriptModelRecord),
+            ("permission mode", .transcriptPermissionModeRecord),
+            ("usage-limit refusal", .transcriptUsageLimitRecord),
+            ("interrupted turn", .transcriptInterruptedTurnRecord),
+            ("turn refusal", .transcriptRefusedTurnRecord)
+        ]
+
+        for kind in AgentKind.allCases {
+            for (name, capability) in dependentCapabilities where kind.supports(capability) {
+                XCTAssertTrue(
+                    kind.supports(.transcriptReplay),
+                    "\(kind) reads \(name) records without a replay adapter"
+                )
+            }
         }
     }
 
@@ -308,6 +329,53 @@ final class AgentCapabilitiesTests: XCTestCase {
         ]))
     }
 
+    /// A failable initializer does not constrain synthesized `Decodable`: without a custom
+    /// decoder, persisted bytes could directly assign a negative omitted count or a same-runtime
+    /// path and create a value no ordinary caller can construct.
+    func testConversationHandoffDecodeReentersTheValidatingInitializer() throws {
+        let handoff = try XCTUnwrap(ConversationHandoff(endpoints: [
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .claude,
+                model: nil,
+                title: nil
+            ),
+            ConversationHandoffEndpoint(
+                sessionID: SessionID(),
+                kind: .codex,
+                model: nil,
+                title: nil
+            )
+        ]))
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        var negativeCount = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(handoff)) as? [String: Any]
+        )
+        negativeCount["omittedEndpointCount"] = -1
+        XCTAssertThrowsError(try decoder.decode(
+            ConversationHandoff.self,
+            from: JSONSerialization.data(withJSONObject: negativeCount)
+        ))
+
+        var sameRuntime = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(handoff)) as? [String: Any]
+        )
+        var endpoints = try XCTUnwrap(sameRuntime["endpoints"] as? [[String: Any]])
+        endpoints[1]["kind"] = AgentKind.claude.rawValue
+        sameRuntime["endpoints"] = endpoints
+        XCTAssertThrowsError(try decoder.decode(
+            ConversationHandoff.self,
+            from: JSONSerialization.data(withJSONObject: sameRuntime)
+        ))
+
+        XCTAssertEqual(
+            try decoder.decode(ConversationHandoff.self, from: encoder.encode(handoff)),
+            handoff
+        )
+    }
+
     /// Reasoning effort is carried only by providers with a launch contract for it. Accepting
     /// it elsewhere would store a choice no turn could act on.
     func testReasoningEffortIsAcceptedOnlyWhereTheConfigurationCarriesIt() {
@@ -329,7 +397,7 @@ final class AgentCapabilitiesTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-effort-admission-\(UUID().uuidString)")
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         defer { store.removeProject(id: project.id) }
 
         XCTAssertNotNil(store.addSession(

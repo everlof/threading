@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Usage Fetch Error
 
-enum UsageFetchError: Error, Equatable {
+enum UsageFetchError: Error, Equatable, Sendable {
     case noCredential(String)
     case tokenExpired
     /// The usage endpoint itself said "too fast". Carries its `Retry-After` when one was
@@ -29,6 +29,51 @@ enum UsageFetchError: Error, Equatable {
             return "Usage could not be fetched: \(detail)"
         case .decoding:
             return "The usage response was not in a recognized shape."
+        }
+    }
+}
+
+// MARK: - Cached Reading
+
+/// The result currently known for one account.
+///
+/// The last good value deliberately survives a failed refresh, but that is not the same state
+/// as either a fresh value or a first fetch that failed. Naming all four states keeps consumers
+/// from reconstructing them from two independent optionals.
+enum AccountUsageReading: Equatable {
+    case notFetched
+    case current(AccountUsage)
+    case stale(AccountUsage, error: UsageFetchError)
+    case failed(UsageFetchError)
+
+    var usage: AccountUsage? {
+        switch self {
+        case .notFetched, .failed: nil
+        case .current(let usage), .stale(let usage, _): usage
+        }
+    }
+
+    var error: UsageFetchError? {
+        switch self {
+        case .notFetched, .current: nil
+        case .stale(_, let error), .failed(let error): error
+        }
+    }
+
+    var hasResult: Bool {
+        if case .notFetched = self { return false }
+        return true
+    }
+
+    func recording(
+        _ result: Result<AccountUsage, UsageFetchError>
+    ) -> AccountUsageReading {
+        switch result {
+        case .success(let usage):
+            return .current(usage)
+        case .failure(let error):
+            guard let usage else { return .failed(error) }
+            return .stale(usage, error: error)
         }
     }
 }
@@ -63,8 +108,7 @@ final class AccountUsageService {
     /// A cached reading beside its bookkeeping. A failed fetch keeps the last good value —
     /// stale usage beside an error message beats a pill that blanks on every network blip.
     private struct Entry {
-        var usage: AccountUsage?
-        var errorMessage: String?
+        var reading: AccountUsageReading = .notFetched
         var lastAttemptAt: Date?
         /// Set when the endpoint answered 429: no request before this moment, forced or not.
         var notBefore: Date?
@@ -101,12 +145,16 @@ final class AccountUsageService {
 
     // MARK: - Public Methods
 
+    func reading(for account: AgentAccount) -> AccountUsageReading {
+        entries[account.id]?.reading ?? .notFetched
+    }
+
     func usage(for account: AgentAccount) -> AccountUsage? {
-        entries[account.id]?.usage
+        reading(for: account).usage
     }
 
     func errorMessage(for account: AgentAccount) -> String? {
-        entries[account.id]?.errorMessage
+        reading(for: account).error?.message
     }
 
     /// Fetches when the cached value has aged out, or sooner when `force` asks — though
@@ -152,7 +200,7 @@ final class AccountUsageService {
     private func spacing(for accountID: AccountID, force: Bool) -> TimeInterval {
         if force { return UsageDefaults.minimumRefreshSpacing }
 
-        return entries[accountID]?.usage?.source == .localCache
+        return entries[accountID]?.reading.usage?.source == .localCache
             ? UsageDefaults.localCacheRefreshInterval
             : UsageDefaults.refreshInterval
     }
@@ -162,10 +210,9 @@ final class AccountUsageService {
         inFlight.remove(accountID)
 
         var entry = entries[accountID] ?? Entry()
+        entry.reading = entry.reading.recording(result)
         switch result {
         case .success(let usage):
-            entry.usage = usage
-            entry.errorMessage = nil
             entry.notBefore = nil
             entry.consecutiveRateLimits = 0
 
@@ -174,9 +221,6 @@ final class AccountUsageService {
             UsageHistoryStore.shared.record(usage, for: account)
             seedHistoryIfThin(account, usage: usage)
         case .failure(let error):
-            // The last good reading survives a failed refresh.
-            entry.errorMessage = error.message
-
             if case .rateLimited(let retryAfter) = error {
                 entry.consecutiveRateLimits += 1
                 entry.notBefore = Date().addingTimeInterval(
@@ -185,6 +229,12 @@ final class AccountUsageService {
                         consecutiveRateLimits: entry.consecutiveRateLimits
                     )
                 )
+            } else {
+                // These counters describe consecutive 429 responses, not consecutive failures.
+                // Any other response breaks the sequence; an expired not-before has no reason
+                // to leak into the next refusal's backoff calculation.
+                entry.notBefore = nil
+                entry.consecutiveRateLimits = 0
             }
 
             ThreadingLogger.agent.info(

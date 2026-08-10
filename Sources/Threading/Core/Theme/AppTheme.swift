@@ -24,6 +24,16 @@ struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible 
 
     var description: String { rawValue }
 
+    /// Theme ids become Application Support directory names. Keep the wire type lossless so a
+    /// corrupt preference can still be diagnosed, but never let that value escape its store.
+    var isSafeAssetDirectoryName: Bool {
+        StoredPathComponent.isValid(rawValue)
+    }
+
+    static func isSafePathComponent(_ value: String) -> Bool {
+        StoredPathComponent.isValid(value)
+    }
+
     /// The identity theme: every role answers with the system colour it always did.
     static let system = AppThemeID("system")
 }

@@ -831,17 +831,13 @@ private final class AgentWorkWorker: @unchecked Sendable {
     ) -> AgentWorkTraceStore.AppliedChange? {
         switch mutation {
         case .file(let sessionID, let title, let agent, let kind, let path, let date):
-            if memory.file.sessions[sessionID] == nil {
-                memory.file.sessions[sessionID] = AgentSessionWorkTrace()
-            }
-            let firstSession = memory.file.sessions[sessionID]?.files[path]?.isTouched != true
-            memory.file.sessions[sessionID]!.sessionTitle = title
-            memory.file.sessions[sessionID]!.agentLabel = agent
-            memory.file.sessions[sessionID]!.files[path, default: AgentFileWork()]
-                .record(kind, at: date)
-            let previousActivity = memory.file.sessions[sessionID]!.lastActivity
-            memory.file.sessions[sessionID]!.lastActivity = max(previousActivity ?? date, date)
-            let trace = memory.file.sessions[sessionID]!
+            var trace = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
+            let firstSession = trace.files[path]?.isTouched != true
+            trace.sessionTitle = title
+            trace.agentLabel = agent
+            trace.files[path, default: AgentFileWork()].record(kind, at: date)
+            trace.lastActivity = max(trace.lastActivity ?? date, date)
+            memory.file.sessions[sessionID] = trace
 
             let firstProject = memory.aggregate.files[path]?.work.isTouched != true
             memory.aggregate.recordFile(kind, path: path, sessionID: sessionID, at: date)
@@ -865,18 +861,16 @@ private final class AgentWorkWorker: @unchecked Sendable {
             )
 
         case .action(let sessionID, let title, let agent, let category, let operation, let date):
-            if memory.file.sessions[sessionID] == nil {
-                memory.file.sessions[sessionID] = AgentSessionWorkTrace()
-            }
-            memory.file.sessions[sessionID]!.sessionTitle = title
-            memory.file.sessions[sessionID]!.agentLabel = agent
-            memory.file.sessions[sessionID]!.recordAction(
+            var trace = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
+            trace.sessionTitle = title
+            trace.agentLabel = agent
+            trace.recordAction(
                 category: category,
                 operation: operation,
                 at: date,
                 sessionID: sessionID
             )
-            let trace = memory.file.sessions[sessionID]!
+            memory.file.sessions[sessionID] = trace
             memory.aggregate.recordAction(
                 category: category,
                 operation: operation,
@@ -939,6 +933,7 @@ private final class AgentWorkWorker: @unchecked Sendable {
             url: url(projectID: projectID, directory: directory),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .millisecondsSince1970,
             dateDecodingStrategy: .millisecondsSince1970
         )

@@ -4053,9 +4053,6 @@ enum BrowserDefaults {
     static let userAgentTooltipLength = 96
     static let maximumTraceEvents = 500
     static let maximumTraceDetailLength = 500
-    static let maximumVisualComparisonDimension = 16_384
-    static let maximumVisualComparisonPixels = 20_000_000
-    static let maximumVisualBaselineBytes = 50 * 1_024 * 1_024
     static let maximumAgentUploadPaths = 10
     static let agentDownloadStartTimeout: TimeInterval = 5
     static let agentNavigationGuardNanoseconds: UInt64 = 150_000_000

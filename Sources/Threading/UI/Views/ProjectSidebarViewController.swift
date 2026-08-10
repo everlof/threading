@@ -816,8 +816,20 @@ extension ProjectSidebarViewController {
         )
         guard ConfirmationAlert.ask(request) else { return }
 
+        guard projectStore.removeSession(id: sessionID) == .applied else {
+            reload()
+            presentToast(ToastRequest(
+                message: L10n.format("Couldn’t delete “%@”", session.displayTitle),
+                detail: L10n.string(
+                    "The project data could not be saved. Its running agent was left alone."
+                ),
+                identifier: "sidebar.toast.delete.persistence.failed"
+            ))
+            return
+        }
+        // Deleting the durable owner is the commitment point. A refused database write must not
+        // kill a process whose row and resumable record still stand.
         AgentRuntime.shared.discard(sessionID: sessionID)
-        projectStore.removeSession(id: sessionID)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
     }
@@ -1400,7 +1412,10 @@ private extension ProjectSidebarViewController {
     }
 
     private func addProject(folderURL: URL) {
-        let project = projectStore.addProject(folderURL: folderURL)
+        guard let project = projectStore.addProject(folderURL: folderURL) else {
+            presentProjectNotice(L10n.string("The project could not be saved."))
+            return
+        }
         reload()
         delegate?.projectSidebar(self, didAddProject: project)
     }
@@ -1413,7 +1428,12 @@ private extension ProjectSidebarViewController {
                 title: L10n.string("Rename Project"),
                 current: projectStore.project(withID: node.projectID)?.name ?? ""
             ) { newName in
-                self.projectStore.renameProject(id: node.projectID, to: newName)
+                guard self.projectStore.renameProject(id: node.projectID, to: newName).succeeded
+                else {
+                    self.reload()
+                    self.presentProjectNotice(L10n.string("The project data could not be saved."))
+                    return
+                }
                 self.reload()
             }
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
@@ -1424,7 +1444,12 @@ private extension ProjectSidebarViewController {
                 placeholder: session?.displayTitle ?? "",
                 allowsEmpty: true
             ) { newTitle in
-                self.projectStore.renameSession(id: node.sessionID, to: newTitle)
+                guard self.projectStore.renameSession(id: node.sessionID, to: newTitle).succeeded
+                else {
+                    self.reload()
+                    self.presentProjectNotice(L10n.string("The project data could not be saved."))
+                    return
+                }
                 self.reload()
             }
         } else if let node = outlineView.item(atRow: row) as? TerminalNode {
@@ -1436,7 +1461,12 @@ private extension ProjectSidebarViewController {
                     ?? L10n.string("Terminal"),
                 allowsEmpty: true
             ) { newTitle in
-                self.projectStore.renameTerminal(id: node.terminalID, to: newTitle)
+                guard self.projectStore.renameTerminal(id: node.terminalID, to: newTitle).succeeded
+                else {
+                    self.reload()
+                    self.presentProjectNotice(L10n.string("The project data could not be saved."))
+                    return
+                }
             }
         }
     }
@@ -1480,19 +1510,40 @@ private extension ProjectSidebarViewController {
 
         guard ConfirmationAlert.ask(request) else { return }
 
+        guard projectStore.removeProject(id: projectID) == .applied else {
+            reload()
+            presentToast(ToastRequest(
+                message: L10n.format("Couldn’t remove “%@”", project.name),
+                detail: L10n.string(
+                    "The project data could not be saved. Its running processes were left alone."
+                ),
+                identifier: "sidebar.toast.remove-project.persistence.failed"
+            ))
+            return
+        }
+        // As with a surface switch, process teardown follows the durable graph mutation. A store
+        // refusal leaves every running chat and terminal untouched and still reachable.
         for session in project.sessions {
             AgentRuntime.shared.discard(sessionID: session.id)
         }
         ProjectTerminalRuntime.shared.discard(terminalsIn: project)
-
-        projectStore.removeProject(id: projectID)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
     }
 
     private func closeTerminal(_ terminalID: TerminalID) {
+        guard projectStore.removeTerminal(id: terminalID) == .applied else {
+            reload()
+            presentToast(ToastRequest(
+                message: L10n.string("Couldn’t close the terminal"),
+                detail: L10n.string(
+                    "The project data could not be saved. The terminal was left running."
+                ),
+                identifier: "sidebar.toast.close-terminal.persistence.failed"
+            ))
+            return
+        }
         ProjectTerminalRuntime.shared.discard(terminalID: terminalID)
-        projectStore.removeTerminal(id: terminalID)
         delegate?.projectSidebar(self, didCloseTerminal: terminalID)
     }
 
@@ -2278,10 +2329,14 @@ extension ProjectSidebarViewController {
         guard let projectID = contextProjectID(),
               let project = projectStore.project(withID: projectID) else { return }
 
-        projectStore.setNotificationsMuted(
+        guard projectStore.setNotificationsMuted(
             !(project.notificationsMuted ?? false),
             forProjectID: projectID
-        )
+        ).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
         // The store has no idea notifications exist, so what it has just silenced is still on
         // screen until this asks. Muting is not a settings change, which is why the alert
         // center's own observation does not cover it.
@@ -2303,18 +2358,26 @@ extension ProjectSidebarViewController {
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
 
-            guard let data = try? Data(contentsOf: url),
-                  let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
+            guard let data = ProjectIconStore.candidateData(at: url) else {
                 self?.presentIconNotice(
                     L10n.string("The file could not be read as an image.")
                 )
                 return
             }
 
-            self?.projectStore.setIcon(
-                ProjectIcon(source: .custom, fileName: fileName),
+            guard let self else { return }
+            switch self.projectStore.setIcon(
+                imageData: data,
+                source: .custom,
                 for: projectID
-            )
+            ) {
+            case .success:
+                break
+            case .failure(.unusableImage):
+                self.presentIconNotice(L10n.string("The file could not be read as an image."))
+            case .failure:
+                self.presentIconNotice(L10n.string("The project icon could not be saved."))
+            }
         }
     }
 
@@ -2365,8 +2428,7 @@ extension ProjectSidebarViewController {
                 let data = ProjectIconDiscovery.websiteIcon(atOrigin: origin)
 
                 DispatchQueue.main.async {
-                    guard let data,
-                          let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
+                    guard let data else {
                         self?.presentIconNotice(
                             L10n.format(
                                 "No favicon was found at %@.",
@@ -2378,10 +2440,21 @@ extension ProjectSidebarViewController {
 
                     // The user named the site, so this is their choice — never replaced
                     // automatically, exactly like a file they picked.
-                    self?.projectStore.setIcon(
-                        ProjectIcon(source: .custom, fileName: fileName),
+                    guard let self else { return }
+                    switch self.projectStore.setIcon(
+                        imageData: data,
+                        source: .custom,
                         for: projectID
-                    )
+                    ) {
+                    case .success:
+                        break
+                    case .failure(.unusableImage):
+                        self.presentIconNotice(
+                            L10n.format("No favicon was found at %@.", origin.absoluteString)
+                        )
+                    case .failure:
+                        self.presentIconNotice(L10n.string("The project icon could not be saved."))
+                    }
                 }
             }
         }
@@ -2418,6 +2491,14 @@ extension ProjectSidebarViewController {
     private func presentIconNotice(_ message: String) {
         let alert = ThemedAlert()
         alert.messageText = L10n.string("Project Icon")
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.runModal()
+    }
+
+    func presentProjectNotice(_ message: String) {
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string("Project")
         alert.informativeText = message
         alert.alertStyle = .informational
         alert.runModal()

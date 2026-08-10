@@ -111,37 +111,33 @@ enum ChangeRequestTextComposer {
     private static func execute(
         _ plan: AgentLaunchPlan
     ) -> (output: String?, failure: ComposeError?) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-        do { try process.run() }
-        catch { return (nil, .launchFailed) }
-
-        let timeout = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global().asyncAfter(
-            deadline: .now() + ChangeRequestTextDefaults.timeout,
-            execute: timeout
-        )
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeout.cancel()
-
-        let output = String(data: data, encoding: .utf8)
-        if process.terminationReason == .uncaughtSignal { return (output, .timedOut) }
-        guard process.terminationStatus == 0 else {
-            return (output, .exitedAbnormally(process.terminationStatus))
+        let result: BoundedChildResult
+        do {
+            result = try BoundedChildProcess.run(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: ChangeRequestTextDefaults.timeout,
+                maximumOutputBytes: ChangeRequestTextDefaults.maximumOutputBytes
+            )
+        } catch {
+            return (nil, .launchFailed)
         }
-        return (output, nil)
+
+        let output = String(decoding: result.output, as: UTF8.self)
+        switch result.termination {
+        case .timedOut:
+            return (output, .timedOut)
+        case .exited(let status) where status != 0:
+            return (output, .exitedAbnormally(status))
+        case .exited:
+            return (output, nil)
+        }
     }
 }
 
 enum ChangeRequestTextDefaults {
     static let diffCharacterLimit = 40_000
     static let timeout: TimeInterval = 90
+    static let maximumOutputBytes = 8 * 1024 * 1024
 }

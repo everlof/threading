@@ -42,7 +42,10 @@ actor UsageLimitHistoryJournal {
                 .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey
             ]), values.isRegularFile == true, values.isSymbolicLink != true,
                   (values.fileSize ?? Int.max) <= UsageLimitHistoryDefaults.maximumDailyFileBytes,
-                  let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+                  let data = try? BoundedFileReader.read(
+                    url,
+                    maximumBytes: UsageLimitHistoryDefaults.maximumDailyFileBytes
+                  ) else { continue }
 
             for line in data.split(separator: 0x0A)
                 where count < UsageLimitHistoryDefaults.maximumLoadedRecords {
@@ -137,7 +140,9 @@ actor UsageLimitHistoryJournal {
         }
         let attributes = try fileManager.attributesOfItem(atPath: url.path)
         let current = (attributes[.size] as? NSNumber)?.intValue ?? 0
-        guard current + data.count <= UsageLimitHistoryDefaults.maximumDailyFileBytes else {
+        guard data.count <= UsageLimitHistoryDefaults.maximumDailyFileBytes,
+              current >= 0,
+              current <= UsageLimitHistoryDefaults.maximumDailyFileBytes - data.count else {
             throw CocoaError(.fileWriteOutOfSpace)
         }
 

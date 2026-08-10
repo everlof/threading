@@ -77,9 +77,9 @@ struct LaunchFlags: Codable, Equatable, Sendable {
 /// Where a recovery launch writes what the next launch should do differently.
 ///
 /// **A file beside the ledger, not `PreferenceStore`.** The onboarding flag's rule is a preference
-/// the user set on a settings page with the app running normally; this one is written in the two
-/// statements before `AppRelaunch.discardingState()`, which deliberately leaves without the quit
-/// path every store hangs its final save on. `UserDefaults` is asynchronous to disk, `cfprefsd`
+/// the user set on a settings page with the app running normally; this one is written immediately
+/// before `AppRelaunch.PreparedRelaunch.commit`, which deliberately leaves without the quit path
+/// every store hangs its final save on. `UserDefaults` is asynchronous to disk, `cfprefsd`
 /// holds the domain, and `synchronize()` is deprecated — so a sentinel written immediately before
 /// an `exit()` is exactly the case it is worst at. It also has to survive Reset Settings, which
 /// takes the preferences domain, while being taken by Reset Everything, which moves the support
@@ -112,7 +112,7 @@ final class LaunchFlagsStore: @unchecked Sendable {
 
     /// What is on disk, changing nothing. The surface reads this to title its own buttons.
     func read() -> LaunchFlags {
-        queue.sync { readFlags() }
+        queue.sync { readFlags().value }
     }
 
     /// Reads the flags and clears them in one breath, returning what this launch may act on.
@@ -126,7 +126,7 @@ final class LaunchFlagsStore: @unchecked Sendable {
     /// failing the other way costs them the feature silently.
     func consume(launchID: String?) -> LaunchFlags {
         queue.sync {
-            let flags = readFlags()
+            guard case .loaded(let flags) = readFlags() else { return .none }
             guard flags.isArmed else { return .none }
 
             var cleared = flags
@@ -151,7 +151,14 @@ final class LaunchFlagsStore: @unchecked Sendable {
     @discardableResult
     func set(_ flag: LaunchFlag, armed: Bool, launchID: String?) -> Bool {
         queue.sync {
-            var flags = readFlags()
+            let read = readFlags()
+            guard !read.isRefused else {
+                ThreadingLogger.session.error(
+                    "Refusing to replace unreadable launch flags at \(self.url.path, privacy: .public)"
+                )
+                return false
+            }
+            var flags = read.value
             switch flag {
             case .forceNormalNextLaunch: flags.forceNormalNextLaunch = armed
             case .disableExtensionsNextLaunch: flags.disableExtensionsNextLaunch = armed
@@ -159,7 +166,7 @@ final class LaunchFlagsStore: @unchecked Sendable {
             flags.version = LaunchFlagsDefaults.formatVersion
             flags.consumedByLaunch = nil
             if armed {
-                flags.armedAt = LaunchLedger.timestampFormatter.string(from: Date())
+                flags.armedAt = LaunchLedgerTimestamp.string(from: Date())
                 flags.armedByLaunch = launchID
             }
             return write(flags)
@@ -173,14 +180,16 @@ final class LaunchFlagsStore: @unchecked Sendable {
     /// The ledger's posture, for its reason: the cost of being wrong about a newer build is that
     /// build's own state, and the cost of standing down is one launch that does not honour a
     /// one-shot it could not understand.
-    private func readFlags() -> LaunchFlags {
-        guard fileManager.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let flags = try? JSONDecoder().decode(LaunchFlags.self, from: data) else {
-            return .none
+    private func readFlags() -> LaunchFlagsRead {
+        guard fileManager.fileExists(atPath: url.path) else { return .missing }
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: LaunchFlagsDefaults.maximumFileBytes
+        ), let flags = try? JSONDecoder().decode(LaunchFlags.self, from: data) else {
+            return .refused
         }
-        guard flags.version <= LaunchFlagsDefaults.formatVersion else { return .none }
-        return flags
+        guard flags.version <= LaunchFlagsDefaults.formatVersion else { return .refused }
+        return .loaded(flags)
     }
 
     private func write(_ flags: LaunchFlags) -> Bool {
@@ -204,12 +213,29 @@ final class LaunchFlagsStore: @unchecked Sendable {
     }
 }
 
+private enum LaunchFlagsRead {
+    case missing
+    case loaded(LaunchFlags)
+    case refused
+
+    var value: LaunchFlags {
+        if case .loaded(let flags) = self { return flags }
+        return .none
+    }
+
+    var isRefused: Bool {
+        if case .refused = self { return true }
+        return false
+    }
+}
+
 // MARK: - Launch Flags Defaults
 
 enum LaunchFlagsDefaults {
 
     static let fileName = "launch-flags.json"
     static let queueLabel = "codes.threading.launch-flags"
+    static let maximumFileBytes = 16 * 1_024
 
     /// Raised only when the record's shape changes. A reader stands down above its own.
     static let formatVersion = 1

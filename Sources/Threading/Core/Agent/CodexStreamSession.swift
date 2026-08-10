@@ -66,7 +66,7 @@ final class CodexStreamSession:
         return process.processIdentifier
     }
 
-    private let plan: () -> AgentLaunchPlan
+    private let plan: () throws -> AgentLaunchPlan
     private let configurationProvider: () -> CodexTurnConfiguration
     private let workingDirectory: String
 
@@ -138,7 +138,7 @@ final class CodexStreamSession:
         sessionID: SessionID,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
-        plan: @escaping () -> AgentLaunchPlan
+        plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
@@ -150,7 +150,7 @@ final class CodexStreamSession:
     convenience init(
         sessionID: SessionID,
         effortProvider: @escaping () -> String?,
-        plan: @escaping () -> AgentLaunchPlan
+        plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.init(
             sessionID: sessionID,
@@ -167,12 +167,10 @@ final class CodexStreamSession:
     func start() {
         guard !isRunning else { return }
 
-        let launchPlan = plan()
-
-        resetForLaunch(resumeState: launchPlan.resumeState)
-
         let process: AgentChildProcess
         do {
+            let launchPlan = try plan()
+            resetForLaunch(resumeState: launchPlan.resumeState)
             process = try AgentChildProcess.launch(
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,

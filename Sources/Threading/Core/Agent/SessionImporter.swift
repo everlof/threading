@@ -38,8 +38,9 @@ enum SessionImporter {
     ) {
         let folder = normalized(project.folderPath)
         let known = Set(project.sessions.compactMap { $0.resumeState.transcriptID })
-        let claudeAccounts = AgentAccountDiscovery.accounts(for: .claude)
-        let codexAccounts = AgentAccountDiscovery.accounts(for: .codex)
+        let replaySources = TranscriptReplayFormat.allCases.map { format in
+            (format: format, accounts: AgentAccountDiscovery.accounts(for: format.kind))
+        }
 
         DispatchQueue.global(qos: .userInitiated).async {
             // Resolve the project's worktree once, so a chat is attributed by which checkout
@@ -47,16 +48,14 @@ enum SessionImporter {
             // worktree nested inside the folder out of it — a different checkout, its own id.
             let worktree = GitInfo.worktreeIdentity(for: folder)
 
-            var found = claudeSessions(
-                inFolder: folder,
-                worktree: worktree,
-                accounts: claudeAccounts
-            )
-            found.append(contentsOf: codexSessions(
-                inFolder: folder,
-                worktree: worktree,
-                accounts: codexAccounts
-            ))
+            let found = replaySources.flatMap { source in
+                sessions(
+                    inFolder: folder,
+                    worktree: worktree,
+                    format: source.format,
+                    accounts: source.accounts
+                )
+            }
 
             let result = deduplicated(
                 found
@@ -82,6 +81,23 @@ enum SessionImporter {
     static func deduplicated(_ sessions: [ImportableSession]) -> [ImportableSession] {
         var seen = Set<String>()
         return sessions.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Dispatches only after the closed replay-format set has admitted the runtime. A new
+    /// runtime cannot be added to transcript replay without the compiler asking which import
+    /// format walks its files; callers no longer maintain a parallel provider allow-list.
+    private static func sessions(
+        inFolder folder: String,
+        worktree: String?,
+        format: TranscriptReplayFormat,
+        accounts: [AgentAccount]
+    ) -> [ImportableSession] {
+        switch format {
+        case .claude:
+            return claudeSessions(inFolder: folder, worktree: worktree, accounts: accounts)
+        case .codex:
+            return codexSessions(inFolder: folder, worktree: worktree, accounts: accounts)
+        }
     }
 
     /// Whether a chat launched in `cwd` belongs to a project's checkout.

@@ -97,13 +97,15 @@ struct WasmLaunchPolicy: ExtensionLaunchPolicy {
         }
         defer { Darwin.close(moduleDescriptor) }
 
-        var descriptors: [Int32: Int32] = [
+        var descriptors: [Int32: ChildDescriptorSource] = [
             0: descriptor(for: request.standardInput, childReads: true),
             1: descriptor(for: request.standardOutput, childReads: false),
             2: descriptor(for: request.standardError, childReads: false),
-            Self.moduleDescriptorNumber: moduleDescriptor
+            Self.moduleDescriptorNumber: .inherited(moduleDescriptor)
         ]
-        descriptors.merge(request.extraDescriptors) { _, extra in extra }
+        descriptors.merge(request.extraDescriptors.mapValues(ChildDescriptorSource.inherited)) {
+            _, extra in extra
+        }
 
         return try ExtensionChildSpawner.spawn(
             executableURL: runner,
@@ -119,14 +121,14 @@ struct WasmLaunchPolicy: ExtensionLaunchPolicy {
     private func descriptor(
         for stream: ExtensionChildStream,
         childReads: Bool
-    ) -> Int32 {
+    ) -> ChildDescriptorSource {
         switch stream {
         case .nullDevice:
-            return FileHandle.nullDevice.fileDescriptor
+            return .nullDevice
         case .pipe(let pipe):
-            return childReads
+            return .inherited(childReads
                 ? pipe.fileHandleForReading.fileDescriptor
-                : pipe.fileHandleForWriting.fileDescriptor
+                : pipe.fileHandleForWriting.fileDescriptor)
         }
     }
 

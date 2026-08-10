@@ -79,36 +79,63 @@ enum GitProcess {
             ])
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: GitDefaults.executablePath)
-        process.arguments = arguments
-        process.currentDirectoryURL = root
+        let stdout = try ChildPipe()
+        let stderr = try ChildPipe(closingOnFailure: [stdout])
+        let stdin: ChildPipe?
+        if input == nil {
+            stdin = nil
+        } else {
+            stdin = try ChildPipe(closingOnFailure: [stdout, stderr])
+        }
 
-        process.environment = GitChildEnvironment.make(overrides: environmentOverrides)
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        let stdin = input.map { _ in Pipe() }
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = stdin ?? FileHandle.nullDevice
-
+        let child: SpawnedChildProcess
         let started = Date()
         do {
-            try process.run()
+            child = try ChildProcessSpawn.spawn(
+                executableURL: URL(fileURLWithPath: GitDefaults.executablePath),
+                arguments: arguments,
+                environment: GitChildEnvironment.make(overrides: environmentOverrides),
+                workingDirectory: root,
+                descriptors: [
+                    AgentChildProcessDefaults.standardInputDescriptor:
+                        stdin.map { .inherited($0.readEnd) } ?? .nullDevice,
+                    AgentChildProcessDefaults.standardOutputDescriptor:
+                        .inherited(stdout.writeEnd),
+                    AgentChildProcessDefaults.standardErrorDescriptor:
+                        .inherited(stderr.writeEnd)
+                ]
+            )
         } catch {
+            stdout.closeBothEnds()
+            stderr.closeBothEnds()
+            stdin?.closeBothEnds()
             throw GitFailure.launchFailed(error.localizedDescription)
         }
 
+        stdout.closeWriteEnd()
+        stderr.closeWriteEnd()
+        stdin?.closeReadEnd()
+        let outputReader = stdout.takeReadHandle()
+        let errorReader = stderr.takeReadHandle()
+        let inputWriter = stdin?.takeWriteHandle()
+        let deadline = ChildProcessDeadline(
+            child: child,
+            timeout: GitReviewDefaults.timeout,
+            terminationGrace: BoundedChildDefaults.terminationGrace
+        )
+
         // Written on another queue: a patch larger than the pipe buffer would otherwise block
         // here while git is still waiting for us to read its output.
-        if let stdin, let input {
+        let inputWritten = DispatchGroup()
+        if let inputWriter, let input {
+            inputWritten.enter()
             DispatchQueue.global(qos: .userInitiated).async {
+                defer { inputWritten.leave() }
                 // The throwing form: a git that rejected the patch and exited early leaves a
                 // pipe with no reader, and the non-throwing `write` raises on that rather than
                 // returning an error. The exit status is what reports the failure.
-                try? stdin.fileHandleForWriting.write(contentsOf: input)
-                try? stdin.fileHandleForWriting.close()
+                try? inputWriter.write(contentsOf: input)
+                try? inputWriter.close()
             }
         }
 
@@ -118,35 +145,40 @@ enum GitProcess {
         let stderrDrained = DispatchGroup()
         stderrDrained.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            errorCapture.replace(with: stderr.fileHandleForReading.readDataToEndOfFile())
+            errorCapture.replace(with: BoundedChildProcess.captureSuffix(
+                from: errorReader,
+                maximumBytes: GitProcessDefaults.maximumErrorBytes
+            ).data)
+            try? errorReader.close()
             stderrDrained.leave()
         }
 
-        let interrupted = InterruptFlag()
-        let timeoutItem = DispatchWorkItem {
-            interrupted.markTimedOut()
-            process.terminate()
-        }
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(
-            deadline: .now() + GitReviewDefaults.timeout, execute: timeoutItem
-        )
-
         var outputData = Data()
-        let reader = stdout.fileHandleForReading
-        while true {
-            let chunk = reader.availableData
-            if chunk.isEmpty { break }
-            outputData.append(chunk)
-            if outputData.count > maximumOutput {
-                interrupted.markOversized()
-                process.terminate()
-                _ = reader.readDataToEndOfFile()
-                break
+        var outputWasOversized = false
+        var outputReadError: Error?
+        var outputEscalation: ChildProcessEscalation?
+        let outputLimit = max(0, maximumOutput)
+        do {
+            while let chunk = try outputReader.read(
+                upToCount: BoundedChildDefaults.readChunkBytes
+            ), !chunk.isEmpty {
+                guard !outputWasOversized else { continue }
+                if outputData.count + chunk.count > outputLimit {
+                    outputWasOversized = true
+                    outputEscalation = ChildProcessEscalation(child: child)
+                } else {
+                    outputData.append(chunk)
+                }
             }
+        } catch {
+            outputReadError = error
         }
+        try? outputReader.close()
 
-        process.waitUntilExit()
-        timeoutItem.cancel()
+        child.waitUntilExit()
+        let timedOut = deadline.complete()
+        outputEscalation?.complete()
+        inputWritten.wait()
         stderrDrained.wait()
 
         let elapsed = Int(-started.timeIntervalSinceNow * 1000)
@@ -155,10 +187,11 @@ enum GitProcess {
             "git \(arguments.first ?? "", privacy: .public) finished in \(elapsed)ms, \(outputData.count) bytes"
         )
 
-        if interrupted.timedOut { throw GitFailure.timedOut }
-        if interrupted.oversized { throw GitFailure.outputTooLarge }
+        if timedOut { throw GitFailure.timedOut }
+        if outputWasOversized { throw GitFailure.outputTooLarge }
+        if let outputReadError { throw GitFailure.gitFailed(outputReadError.localizedDescription) }
 
-        guard acceptedExitCodes.contains(process.terminationStatus) else {
+        guard acceptedExitCodes.contains(child.terminationStatus) else {
             let message = String(data: errorCapture.value, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             ThreadingLogger.git.error(
@@ -181,17 +214,11 @@ enum GitProcess {
         return .gitFailed(message)
     }
 
-    /// Why a run was cut short, written by the timeout's queue and read after `waitUntilExit`.
-    private final class InterruptFlag {
-        private let lock = NSLock()
-        private var timedOutValue = false
-        private var oversizedValue = false
+}
 
-        func markTimedOut() { lock.lock(); timedOutValue = true; lock.unlock() }
-        func markOversized() { lock.lock(); oversizedValue = true; lock.unlock() }
-        var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOutValue }
-        var oversized: Bool { lock.lock(); defer { lock.unlock() }; return oversizedValue }
-    }
+private enum GitProcessDefaults {
+    /// Git diagnostics are useful at the end (the failed ref or hook), not as an unbounded log.
+    static let maximumErrorBytes = 64 * 1024
 }
 
 // MARK: - Environment
@@ -277,28 +304,29 @@ enum GitChildEnvironment {
     }
 
     private static func resolveLoginPath(shell: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", "exec /usr/bin/printenv PATH"]
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: shell,
+                arguments: ["-l", "-c", "exec /usr/bin/printenv PATH"],
+                timeout: GitChildEnvironmentDefaults.loginPathTimeout,
+                maximumOutputBytes: GitChildEnvironmentDefaults.maximumLoginPathBytes,
+                output: .standardOutput
+            )
         } catch {
             ThreadingLogger.git.error(
                 "Could not resolve login-shell PATH: \(error.localizedDescription, privacy: .public)"
             )
             return nil
         }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return path(fromShellOutput: String(decoding: data, as: UTF8.self))
+        guard result.termination == .exited(0), !result.outputWasTruncated else { return nil }
+        return path(fromShellOutput: String(decoding: result.output, as: UTF8.self))
     }
+}
+
+private enum GitChildEnvironmentDefaults {
+    static let loginPathTimeout: TimeInterval = 5
+    static let maximumLoginPathBytes = 64 * 1024
 }
 
 /// One cross-queue stderr handoff. The dispatch group establishes ordering for the caller;

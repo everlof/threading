@@ -99,17 +99,17 @@ final class MainWindowNavigationTests: XCTestCase {
     /// It used to remember only a session, so leaving Settings from a composer landed on "No
     /// Session Selected" — taking the half-written prompt in it off the screen, which is how the
     /// bug was reported.
-    func testLeavingSettingsPutsAProjectsComposerBack() {
+    func testLeavingSettingsPutsAProjectsComposerBack() throws {
         let controller = makeController()
         let store = ProjectStore.shared
 
         // A folder of its own, for the reason `AgentPermissionModeTests` states: `addProject`
         // returns the existing project for a folder it already knows, and the teardown here
         // deletes whatever it was handed.
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-settings-detour-\(UUID().uuidString)")
-        )
+        ))
         defer { store.removeProject(id: project.id) }
 
         // The sidebar's own delegate call, which is what selecting a project row makes. A

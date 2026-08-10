@@ -48,7 +48,8 @@ enum GitInfo {
 
         let headURL = URL(fileURLWithPath: location.worktreeIdentity)
             .appendingPathComponent(GitDefaults.headFile)
-        guard let contents = try? String(contentsOf: headURL, encoding: .utf8) else { return nil }
+        guard let contents = boundedString(at: headURL, maximumBytes: GitDefaults.maximumControlFileBytes)
+        else { return nil }
 
         let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(GitDefaults.refPrefix) else {
@@ -68,7 +69,7 @@ enum GitInfo {
 
         let headURL = URL(fileURLWithPath: location.worktreeIdentity)
             .appendingPathComponent(GitDefaults.headFile)
-        guard let contents = try? String(contentsOf: headURL, encoding: .utf8) else {
+        guard let contents = boundedString(at: headURL, maximumBytes: GitDefaults.maximumControlFileBytes) else {
             return nil
         }
 
@@ -83,8 +84,10 @@ enum GitInfo {
             URL(fileURLWithPath: location.repositoryIdentity).appendingPathComponent(reference)
         ]
         for candidate in candidates {
-            if let value = try? String(contentsOf: candidate, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
+            if let value = boundedString(
+                at: candidate,
+                maximumBytes: GitDefaults.maximumControlFileBytes
+            )?.trimmingCharacters(in: .whitespacesAndNewlines),
                isCommitHash(value) {
                 return value
             }
@@ -92,17 +95,7 @@ enum GitInfo {
 
         let packedRefs = URL(fileURLWithPath: location.repositoryIdentity)
             .appendingPathComponent(GitDefaults.packedRefsFile)
-        guard let packed = try? String(contentsOf: packedRefs, encoding: .utf8) else {
-            return nil
-        }
-        for line in packed.split(separator: "\n") {
-            guard !line.hasPrefix("#"), !line.hasPrefix("^") else { continue }
-            let fields = line.split(separator: " ", maxSplits: 1)
-            guard fields.count == 2, fields[1] == reference else { continue }
-            let value = String(fields[0])
-            return isCommitHash(value) ? value : nil
-        }
-        return nil
+        return packedReference(reference, at: packedRefs)
     }
 
     /// Suggests a project name for a folder.
@@ -229,7 +222,10 @@ enum GitInfo {
 
         let configURL = URL(fileURLWithPath: identity)
             .appendingPathComponent(GitDefaults.configFile)
-        guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+        guard let contents = boundedString(
+            at: configURL,
+            maximumBytes: GitDefaults.maximumConfigBytes
+        ) else { return nil }
 
         var inOriginSection = false
         for rawLine in contents.split(separator: "\n") {
@@ -292,7 +288,10 @@ enum GitInfo {
             return dotGit
         }
 
-        guard let contents = try? String(contentsOf: dotGit, encoding: .utf8) else { return nil }
+        guard let contents = boundedString(
+            at: dotGit,
+            maximumBytes: GitDefaults.maximumControlFileBytes
+        ) else { return nil }
         let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(GitDefaults.gitDirPrefix) else { return nil }
 
@@ -306,11 +305,65 @@ enum GitInfo {
 
         return resolved.standardizedFileURL
     }
+
+    private static func boundedString(at url: URL, maximumBytes: Int) -> String? {
+        guard let data = try? BoundedFileReader.read(url, maximumBytes: maximumBytes) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// `packed-refs` scales with repository history and can legitimately be very large. Scan it
+    /// in bounded chunks instead of making every project snapshot allocate the whole file.
+    private static func packedReference(_ reference: String, at url: URL) -> String? {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var pending = Data()
+        while true {
+            let chunk: Data
+            do {
+                guard let read = try handle.read(upToCount: 64 * 1024), !read.isEmpty else {
+                    break
+                }
+                chunk = read
+            } catch {
+                return nil
+            }
+            pending.append(chunk)
+            while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                let line = String(decoding: pending[..<newline], as: UTF8.self)
+                pending.removeSubrange(...newline)
+                if let revision = packedRevision(in: line, matching: reference) {
+                    return revision
+                }
+            }
+            guard pending.count <= GitDefaults.maximumPackedRefLineBytes else { return nil }
+        }
+        guard !pending.isEmpty else { return nil }
+        return packedRevision(
+            in: String(decoding: pending, as: UTF8.self),
+            matching: reference
+        )
+    }
+
+    private static func packedRevision(in line: String, matching reference: String) -> String? {
+        guard !line.hasPrefix("#"), !line.hasPrefix("^") else { return nil }
+        let fields = line.split(separator: " ", maxSplits: 1)
+        guard fields.count == 2, fields[1] == reference else { return nil }
+        let value = String(fields[0])
+        return isCommitHash(value) ? value : nil
+    }
 }
 
 // MARK: - Git Defaults
 
 enum GitDefaults {
+    static let maximumControlFileBytes = 64 * 1024
+    static let maximumConfigBytes = 4 * 1024 * 1024
+    static let maximumPackedRefLineBytes = 4 * 1024
     /// Prefix of a symbolic `HEAD` entry, followed by the branch ref path.
     static let refPrefix = "ref: refs/heads/"
 

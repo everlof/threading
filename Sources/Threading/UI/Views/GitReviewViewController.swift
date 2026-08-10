@@ -178,8 +178,7 @@ final class GitReviewViewController: NSViewController {
         button.isHidden = true
         return button
     }()
-    nonisolated(unsafe) private var scrollObserver: NSObjectProtocol?
-    nonisolated(unsafe) private var liveScrollObservers: [NSObjectProtocol] = []
+    private let scrollEvents = AppEventObservations()
     private let appEvents = AppEventObservations()
 
     /// What the body is currently showing. Commit mode is two phases deep: the history list,
@@ -367,10 +366,6 @@ final class GitReviewViewController: NSViewController {
         }
         watcher?.stop()
         changeRequestTask?.cancel()
-        if let scrollObserver {
-            NotificationCenter.default.removeObserver(scrollObserver)
-        }
-        liveScrollObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     // MARK: - Setup
@@ -395,35 +390,19 @@ final class GitReviewViewController: NSViewController {
     private func setupBody() {
         clipView.drawsBackground = false
         clipView.postsBoundsChangedNotifications = true
-        scrollObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: clipView,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateScrollControls()
-            }
+        scrollEvents.observe(NSView.boundsDidChangeNotification, object: clipView) { [weak self] in
+            self?.updateScrollControls()
         }
-        liveScrollObservers = [
-            NotificationCenter.default.addObserver(
-                forName: NSScrollView.willStartLiveScrollNotification,
-                object: scrollView,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.isFileLiveScrolling = true
-                }
-            },
-            NotificationCenter.default.addObserver(
-                forName: NSScrollView.didEndLiveScrollNotification,
-                object: scrollView,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.finishFileLiveScrolling()
-                }
-            },
-        ]
+        scrollEvents.observe(
+            NSScrollView.willStartLiveScrollNotification,
+            object: scrollView
+        ) { [weak self] in
+            self?.isFileLiveScrolling = true
+        }
+        scrollEvents.observe(NSScrollView.didEndLiveScrollNotification, object: scrollView) {
+            [weak self] in
+            self?.finishFileLiveScrolling()
+        }
 
         view.addSubview(scrollView)
         view.addSubview(changeRequestBar)

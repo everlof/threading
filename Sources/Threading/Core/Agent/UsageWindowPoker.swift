@@ -67,6 +67,7 @@ final class UsageWindowPoker {
             url: root.appendingPathComponent(UsageWindowPokeDefaults.ledgerFileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
@@ -292,46 +293,33 @@ final class UsageWindowPoker {
 
     /// Runs the poke and returns nil, or one line saying what went wrong.
     ///
-    /// `SettingsSearchResearch.execute`'s shape, minus the output: a poke's reply is discarded by
-    /// design, so only the exit status is read.
+    /// The bounded process-group runner keeps only enough output for the failure excerpt and
+    /// distinguishes its timeout from a CLI that crashed on a signal of its own.
     private nonisolated static func execute(_ plan: AgentLaunchPlan) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: plan.executable)
-        process.arguments = plan.arguments
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: UsageWindowDefaults.pokeTimeout,
+                maximumOutputBytes: UsageWindowPokeDefaults.maximumOutputBytes
+            )
         } catch {
             return error.localizedDescription
         }
 
-        let timeout = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global().asyncAfter(
-            deadline: .now() + UsageWindowDefaults.pokeTimeout,
-            execute: timeout
-        )
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeout.cancel()
-
-        if process.terminationReason == .uncaughtSignal {
+        switch result.termination {
+        case .timedOut:
             return UsageWindowPokeDefaults.timedOutDetail
-        }
-        guard process.terminationStatus == 0 else {
-            let output = String(data: data.suffix(UsageWindowPokeDefaults.failureExcerptBytes),
+        case .exited(0):
+            return nil
+        case .exited(let status):
+            let output = String(data: result.output.suffix(UsageWindowPokeDefaults.failureExcerptBytes),
                                 encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return UsageWindowPokeDefaults.exitDetail(process.terminationStatus, output: output)
+            return UsageWindowPokeDefaults.exitDetail(status, output: output)
         }
-
-        return nil
     }
 }
 
@@ -343,6 +331,7 @@ enum UsageWindowPokeDefaults {
     /// How much of a failing run's output is worth keeping beside the status. A CLI's last line
     /// is usually the whole story; more than this is a stack trace in a settings row.
     static let failureExcerptBytes = 400
+    static let maximumOutputBytes = 16 * 1024
 
     static func durationDetail(_ elapsed: TimeInterval) -> String {
         L10n.format("took %@", UsageFormat.duration(elapsed))

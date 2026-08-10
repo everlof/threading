@@ -252,6 +252,11 @@ or matching browser binary is absent the tool returns the exact install command 
 download anything implicitly. Optional final screenshots are size-bounded, cached with the
 existing rolling browser artifacts, and can be returned as an MCP image.
 
+The subprocess boundary returns a typed two-case outcome: success owns the formatted result and
+optional screenshot, while failure owns only an actionable diagnostic. A boolean beside nullable
+payloads is deliberately avoided here, so callers cannot treat failure text as page output or
+forward a screenshot from a failed run.
+
 ## Attached Chrome
 
 `browser_attach_chrome` is the third backend, for the one job neither of the others can do: work
@@ -605,10 +610,17 @@ browser-artifact cache: that ring evicts by count, which is right for evidence a
   onto a revision that has not proven itself.
 - **Damage is set aside.** A record that will not decode is moved under `Quarantine/`. If that move
   fails, **writes are blocked** rather than continuing over data nobody has looked at.
+- **The record is one claim.** Record id/directory identity, unique revision ids, manifest ids,
+  active revision, hashes, sizes and pixel dimensions are validated together. One damaged revision
+  quarantines the bundle; it is never silently dropped so another revision can impersonate the
+  complete history. Empty optional state and diagnostics are canonicalized as absent.
 - **A newer schema is not corruption.** A record from a later build is left exactly as found and
   counted, not quarantined: downgrading and losing a colleague's baselines is not a recovery.
-- **Quotas refuse visibly.** Per-image bytes, baselines per project, revisions per baseline, project
-  bytes and attribution bytes are all bounded, and exceeding one is a typed error with a route to the
+- **Quotas refuse visibly.** The record and each manifest are bounded before decoding, optional
+  artifacts use their own bounds, and PNGs are read through a 50 MiB stream ceiling. Hash, stored
+  byte count and pixel dimensions are revalidated when pixels are used; ImageIO properties enforce
+  dimension and total-pixel ceilings before full decode. Baselines per project, revisions per
+  baseline and project bytes are bounded too. Exceeding one is a typed error with a route to the
   baseline browser. An approved baseline is never silently evicted.
 
 Deleting a session leaves the library alone. Removing a **project** takes its baselines, which is why

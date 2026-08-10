@@ -108,6 +108,41 @@ final class ClaudeTranscriptModelTests: XCTestCase {
         XCTAssertEqual(ClaudeTranscriptModel.known(at: url), "claude-opus-5")
     }
 
+    /// The final output callback can arrive while the previous background scan is still reading.
+    /// Coalescing that callback away strands the reader on the earlier size: no later output is
+    /// promised to trigger a retry, which is how a terminal turn can remain visibly in flight.
+    @MainActor
+    func testARevalidationDuringAScanReadsTheTrailingAppend() throws {
+        let url = try write(["first"])
+        let gate = TranscriptScanGate()
+        let reader = TranscriptFactReader<String> { gate.read($0) }
+        var observed: [String?] = []
+
+        let both = expectation(description: "initial and trailing transcript reads")
+        both.expectedFulfillmentCount = 2
+        reader.revalidate(at: url) { value in
+            observed.append(value)
+            both.fulfill()
+        }
+
+        wait(for: [gate.firstScanStarted], timeout: 5)
+        defer { gate.releaseFirstScan.signal() }
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("second-and-longer\n".utf8))
+        try handle.close()
+
+        reader.revalidate(at: url) { value in
+            observed.append(value)
+            both.fulfill()
+        }
+        gate.releaseFirstScan.signal()
+        wait(for: [both], timeout: 5)
+
+        XCTAssertEqual(observed, ["first\n", "first\nsecond-and-longer\n"])
+        XCTAssertEqual(reader.known(at: url), "first\nsecond-and-longer\n")
+    }
+
     // MARK: - Naming
 
     /// The display name behind the row. `claude-opus-5` matched no family and read as its own
@@ -138,5 +173,29 @@ final class ClaudeTranscriptModelTests: XCTestCase {
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
+    }
+}
+
+/// Holds the first scan after it has read the file but before it returns. That makes the
+/// scan-versus-append ordering above deterministic without sleeping.
+private final class TranscriptScanGate: @unchecked Sendable {
+    let firstScanStarted = XCTestExpectation(description: "first transcript scan started")
+    let releaseFirstScan = DispatchSemaphore(value: 0)
+
+    private let lock = NSLock()
+    private var scanCount = 0
+
+    func read(_ url: URL) -> String? {
+        let value = try? String(contentsOf: url, encoding: .utf8)
+        lock.lock()
+        scanCount += 1
+        let isFirst = scanCount == 1
+        lock.unlock()
+
+        if isFirst {
+            firstScanStarted.fulfill()
+            releaseFirstScan.wait()
+        }
+        return value
     }
 }

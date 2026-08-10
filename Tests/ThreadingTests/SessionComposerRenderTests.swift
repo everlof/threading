@@ -68,10 +68,10 @@ final class SessionComposerRenderTests: XCTestCase {
         )
 
         let store = ProjectStore.shared
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-composer-start-\(UUID().uuidString)")
-        )
+        ))
         defer { store.removeProject(id: project.id) }
 
         composer.show(projectID: project.id)
@@ -357,8 +357,8 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
-        let plain = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
+        let plain = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer {
             store.removeProject(id: project.id)
             store.removeProject(id: plain.id)
@@ -405,7 +405,7 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -481,7 +481,7 @@ final class SessionComposerRenderTests: XCTestCase {
         )
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -543,7 +543,7 @@ final class SessionComposerRenderTests: XCTestCase {
 
     func testManagedWorkspaceOptInIsDisabledOutsideGit() throws {
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -579,7 +579,7 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -607,7 +607,7 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -650,7 +650,7 @@ final class SessionComposerRenderTests: XCTestCase {
     /// hover standing in front of the answer.
     func testWithNoProjectTheLocationMenuIsTheProjectsThemselves() throws {
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -710,7 +710,7 @@ final class SessionComposerRenderTests: XCTestCase {
 
     func testEffortFollowsTheSelectedModelsCatalogAndCrossesTheStartBoundary() throws {
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -764,7 +764,7 @@ final class SessionComposerRenderTests: XCTestCase {
         AppSettings.shared.setStartupSpeed(.standard, for: .claude)
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
 
         let composer = SessionComposerViewController()
@@ -823,10 +823,10 @@ final class SessionComposerRenderTests: XCTestCase {
         prompt.stringValue = "Fix the login flow"
 
         let store = ProjectStore.shared
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-composer-carry-\(UUID().uuidString)")
-        )
+        ))
         defer {
             store.removeProject(id: project.id)
             DraftStore.shared.setDraft("", for: project.id)
@@ -850,8 +850,8 @@ final class SessionComposerRenderTests: XCTestCase {
         _ = composer.view
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
-        let elsewhere = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        let elsewhere = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer {
             store.removeProject(id: project.id)
             store.removeProject(id: elsewhere.id)
@@ -887,7 +887,7 @@ final class SessionComposerRenderTests: XCTestCase {
         _ = composer.view
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: fixtureFolder())
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
 
         let delegate = StartRecorder()
@@ -1057,7 +1057,7 @@ final class SessionComposerRenderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: repository.deletingLastPathComponent()) }
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: repository)
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
         defer { store.removeProject(id: project.id) }
 
         // The broad pair catches ordinary adaptive styling; every hard-retro material is kept

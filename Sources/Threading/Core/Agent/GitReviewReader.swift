@@ -440,6 +440,21 @@ enum GitReviewReader {
     /// prefix, require a regular file — without the ls-files membership check, because the
     /// paths here come from git's own diff output rather than from a remote request.
     private static func worktreeBytes(path: String, in root: URL) -> Data? {
+        boundedWorktreeBytes(
+            path: path,
+            in: root,
+            maximumBytes: GitReviewDefaults.maximumDiffBytes
+        )
+    }
+
+    /// Git paths are still input. In particular, an untracked symlink can name bytes outside
+    /// the checkout and a generated file can grow after `status` reports it. Resolve containment
+    /// and enforce the allocation cap in the same helper for diff and summary reads.
+    private static func boundedWorktreeBytes(
+        path: String,
+        in root: URL,
+        maximumBytes: Int
+    ) -> Data? {
         let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
         let candidate = resolvedRoot
             .appendingPathComponent(path)
@@ -448,13 +463,8 @@ enum GitReviewReader {
         let rootPrefix = resolvedRoot.path.hasSuffix("/")
             ? resolvedRoot.path
             : resolvedRoot.path + "/"
-        guard candidate.path.hasPrefix(rootPrefix),
-              let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-              values.isRegularFile == true,
-              (values.fileSize ?? 0) <= GitReviewDefaults.maximumDiffBytes else {
-            return nil
-        }
-        return try? Data(contentsOf: candidate, options: .mappedIfSafe)
+        guard candidate.path.hasPrefix(rootPrefix) else { return nil }
+        return try? BoundedFileReader.read(candidate, maximumBytes: maximumBytes)
     }
 
     /// The ref the Branch mode measures from: origin's HEAD when known, else the first
@@ -551,10 +561,11 @@ enum GitReviewReader {
 
         var added = 0
         for path in status.untracked {
-            let url = root.appendingPathComponent(path)
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
-            guard size <= GitReviewDefaults.untrackedByteCap,
-                  let data = try? Data(contentsOf: url),
+            guard let data = boundedWorktreeBytes(
+                path: path,
+                in: root,
+                maximumBytes: GitReviewDefaults.untrackedByteCap
+            ),
                   !data.prefix(GitReviewDefaults.binarySniffBytes).contains(0) else { continue }
             added += lineCount(of: data)
         }
@@ -573,11 +584,11 @@ enum GitReviewReader {
     }
 
     private static func synthesizedDiff(path: String, root: URL) -> GitFileDiff {
-        let url = root.appendingPathComponent(path)
-
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
-        guard size <= GitReviewDefaults.untrackedByteCap,
-              let data = try? Data(contentsOf: url) else {
+        guard let data = boundedWorktreeBytes(
+            path: path,
+            in: root,
+            maximumBytes: GitReviewDefaults.untrackedByteCap
+        ) else {
             return GitFileDiff(path: path, change: .untracked, hunks: [], added: 0, removed: 0)
         }
 

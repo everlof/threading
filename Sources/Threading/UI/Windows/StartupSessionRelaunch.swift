@@ -55,7 +55,7 @@ final class StartupSessionRelauncher {
     private var pending: [SessionID]
     private let interval: TimeInterval
     private let launch: (SessionID) -> Void
-    private var timer: Timer?
+    private let timer = MainRunLoopTimer()
 
     // MARK: - Initialization
 
@@ -76,7 +76,7 @@ final class StartupSessionRelauncher {
 
     /// Begins the stagger. Idempotent while running; the timer retires itself with the plan.
     func start() {
-        guard timer == nil, !pending.isEmpty else { return }
+        guard !timer.isInstalled, !pending.isEmpty else { return }
 
         let timer = Timer.scheduledTimer(
             withTimeInterval: interval,
@@ -87,23 +87,21 @@ final class StartupSessionRelauncher {
             }
         }
         timer.tolerance = StartupRelaunchDefaults.staggerTolerance
-        self.timer = timer
+        self.timer.install(timer)
     }
 
     // MARK: - Private Methods
 
     private func launchNext() {
         guard !pending.isEmpty else {
-            timer?.invalidate()
-            timer = nil
+            timer.invalidate()
             return
         }
 
         launch(pending.removeFirst())
 
         if pending.isEmpty {
-            timer?.invalidate()
-            timer = nil
+            timer.invalidate()
         }
     }
 }

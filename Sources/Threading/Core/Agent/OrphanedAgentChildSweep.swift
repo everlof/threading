@@ -164,11 +164,14 @@ enum OrphanedAgentChildSweep {
     }
 
     private static func detail(for record: AgentChildRecord) -> [String: String] {
-        [
+        var fields = [
             OrphanedAgentChildSweepDefaults.pidField: String(record.pid),
-            OrphanedAgentChildSweepDefaults.sessionField: record.sessionID,
             OrphanedAgentChildSweepDefaults.agentField: record.executable
         ]
+        if let sessionID = record.sessionID {
+            fields[OrphanedAgentChildSweepDefaults.sessionField] = sessionID
+        }
+        return fields
     }
 }
 

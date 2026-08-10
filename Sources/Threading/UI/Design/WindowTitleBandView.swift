@@ -70,7 +70,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private(set) lazy var depthButton = WindowChromeButton(role: .depth)
 
     private let appEvents = AppEventObservations()
-    nonisolated(unsafe) private var windowStateObservations: [NSObjectProtocol] = []
+    private let windowStateObservations = AppEventObservations()
     private var centeredTitleConstraint: NSLayoutConstraint?
     private var leadingTitleConstraint: NSLayoutConstraint?
     private var titleContentWidthConstraint: NSLayoutConstraint?
@@ -94,10 +94,6 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    deinit {
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
-    }
 
     // MARK: - Contents
 
@@ -490,8 +486,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        windowStateObservations.forEach(NotificationCenter.default.removeObserver)
-        windowStateObservations = []
+        windowStateObservations.removeAll()
 
         guard let newWindow else { return }
 
@@ -499,13 +494,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             NSWindow.didBecomeKeyNotification,
             NSWindow.didResignKeyNotification
         ] {
-            windowStateObservations.append(NotificationCenter.default.addObserver(
-                forName: name,
-                object: newWindow,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.apply() }
-            })
+            windowStateObservations.observe(name, object: newWindow) { [weak self] in
+                self?.apply()
+            }
         }
     }
 

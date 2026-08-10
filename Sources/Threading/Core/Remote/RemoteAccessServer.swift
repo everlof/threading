@@ -934,7 +934,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unknown Theme")))
                 return
             }
-            ThemeAssignments.setTheme(id: themeID, forSession: sessionID)
+            let result = ThemeAssignments.setTheme(id: themeID, forSession: sessionID)
+            switch result {
+            case .applied, .unchanged:
+                break
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                return
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                return
+            }
             EventLog.shared.record(.remote, "Session theme changed remotely", [
                 "session": sessionID.uuidString,
                 "theme": themeID?.rawValue ?? "inherit",
@@ -970,7 +983,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            ProjectStore.shared.renameSession(id: sessionID, to: choice.title)
+            let result = ProjectStore.shared.renameSession(id: sessionID, to: choice.title)
+            switch result {
+            case .applied, .unchanged:
+                break
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                return
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                return
+            }
             EventLog.shared.record(.remote, "Session renamed remotely", [
                 "session": sessionID.uuidString,
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
@@ -1005,7 +1031,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            ProjectStore.shared.setPinned(choice.isPinned, for: sessionID)
+            let result = ProjectStore.shared.setPinned(choice.isPinned, for: sessionID)
+            switch result {
+            case .applied, .unchanged:
+                break
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                return
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                return
+            }
             AppDelegate.shared?.refreshAfterRemoteSessionMutation(
                 sessionID: sessionID,
                 archived: false
@@ -1059,6 +1098,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     let status: Int
                     if case .alreadyChanging = failure {
                         status = 409
+                    } else if case .sessionNotFound = failure {
+                        status = 404
+                    } else if case .persistenceUnavailable = failure {
+                        status = 503
                     } else {
                         status = 500
                     }
@@ -1098,9 +1141,25 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            AgentRuntime.shared.discard(sessionID: sessionID)
-            ProjectStore.shared.setUsesNativeUI(usesNativeUI, for: sessionID)
-            AppDelegate.shared?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            let result = ProjectStore.shared.setUsesNativeUI(usesNativeUI, for: sessionID)
+            switch result {
+            case .applied:
+                // A live process belongs to the standing surface until its replacement is
+                // durable. A database refusal must leave that process and surface untouched.
+                AgentRuntime.shared.discard(sessionID: sessionID)
+                AppDelegate.shared?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            case .unchanged:
+                break
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
+                return
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                return
+            }
             EventLog.shared.record(.remote, "Session UI changed remotely", [
                 "session": sessionID.uuidString,
                 "surface": choice.surface,
@@ -1386,8 +1445,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             let url = attachment.url
             let contentType = Self.attachmentContentType(for: url)
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                      data.count <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                guard let data = try? BoundedFileReader.read(
+                    url,
+                    maximumBytes: RemoteAccessDefaults.maximumAttachmentBytes
+                ) else {
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
                     return
                 }
@@ -1540,8 +1601,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             let contentType = Self.attachmentContentType(for: url)
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                      data.count <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                guard let data = ExtensionImageResourcePolicy.validatedData(at: url) else {
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
                     return
                 }

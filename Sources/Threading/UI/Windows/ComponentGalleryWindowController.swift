@@ -158,6 +158,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedTextField",
         "ThemedSearchField",
         "ThemedSecureField",
+        "ThemedTextScrollView",
         "ThemedTextView",
         "ThemedToggle",
         "ThemedVirtualTableCell",
@@ -1149,15 +1150,14 @@ final class ComponentGalleryViewController: NSViewController {
             radius: .control,
             border: Design.Surface.border
         )
-        if let text = scrollingText.documentView as? ThemedTextView {
-            text.string = L10n.string(
-                "ThemedTextView preserves AppKit editing while the text, insertion point, and "
-                    + "scroll surface follow the selected theme.\n\n"
-                    + "Try selecting, editing, and scrolling this text."
-            )
-            text.applyFont(.body)
-            text.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.medium)
-        }
+        let text = scrollingText.textView
+        text.string = L10n.string(
+            "ThemedTextView preserves AppKit editing while the text, insertion point, and "
+                + "scroll surface follow the selected theme.\n\n"
+                + "Try selecting, editing, and scrolling this text."
+        )
+        text.applyFont(.body)
+        text.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.medium)
 
         let prompt = PromptView()
         prompt.showsImageAttachments = true

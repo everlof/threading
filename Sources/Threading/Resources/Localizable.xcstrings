@@ -1,7 +1,24 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "The stored baseline image no longer matches its approved revision.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sparade baslinjebilden stämmer inte längre med den godkända revisionen." } } } },
+    "the baseline record exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "baslinjeposten överskred sin lagringsgräns" } } } },
+    "the captured manifest exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det fångade manifestet överskred sin lagringsgräns" } } } },
+    "Couldn’t close the terminal": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte stänga terminalen" } } } },
+    "Couldn’t delete “%@”": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte radera ”%@”" } } } },
+    "Couldn’t remove “%@”": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte ta bort ”%@”" } } } },
+    "The archive state could not be saved.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Arkiveringsläget kunde inte sparas." } } } },
+    "The project data could not be saved.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektdata kunde inte sparas." } } } },
+    "The project data could not be saved. Its running agent was left alone.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektdata kunde inte sparas. Dess körande agent lämnades orörd." } } } },
+    "The project data could not be saved. Its running processes were left alone.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektdata kunde inte sparas. Dess körande processer lämnades orörda." } } } },
+    "The project data could not be saved. The terminal was left running.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektdata kunde inte sparas. Terminalen lämnades igång." } } } },
+    "This conversation no longer exists.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här konversationen finns inte längre." } } } },
     "After": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Efter" } } } },
+    "A secure extension authorization token could not be created.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En säker auktoriseringstoken för tillägget kunde inte skapas." } } } },
+    "A secure remote access token could not be created.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En säker fjärråtkomsttoken kunde inte skapas." } } } },
+    "The Terminal theme is too large to import (maximum 2 MB).": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminaltemat är för stort för att importeras (högst 2 MB)." } } } },
+    "The terminal theme could not be saved.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminaltemat kunde inte sparas." } } } },
+    "the command took too long to answer": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "kommandot tog för lång tid att svara" } } } },
     "Before": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Före" } } } },
     "Cache": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cache" } } } },
     "ChartCardView": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ChartCardView" } } } },
@@ -6336,6 +6353,16 @@
         }
       }
     },
+    "Cannot Duplicate": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan inte duplicera"
+          }
+        }
+      }
+    },
     "Cannot Duplicate App Theme": {
       "extractionState": "stale",
       "localizations": {
@@ -6354,6 +6381,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kan inte byta namn"
+          }
+        }
+      }
+    },
+    "Cannot Save": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan inte spara"
           }
         }
       }
@@ -9721,6 +9758,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tilläggspanelens rendering misslyckades."
+          }
+        }
+      }
+    },
+    "Extension provenance could not be saved for %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tilläggets ursprungsinformation kunde inte sparas för %@."
           }
         }
       }
@@ -19091,6 +19138,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Det privata lyssnaren misslyckades (%@)."
+          }
+        }
+      }
+    },
+    "The project icon could not be saved.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projektikonen kunde inte sparas."
+          }
+        }
+      }
+    },
+    "The project could not be saved.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projektet kunde inte sparas."
           }
         }
       }

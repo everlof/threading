@@ -3,7 +3,8 @@ import Foundation
 
 // MARK: - Agent Child Record
 
-/// One native agent CLI this launch started, named well enough to be recognised after a crash.
+/// One process-group leader this launch started, named well enough to be recognised after a
+/// crash.
 ///
 /// Lifecycle facts only. A prompt, a model, an account token or a working directory would all
 /// make this file a place a support report must not include, and none of them helps decide
@@ -11,10 +12,13 @@ import Foundation
 struct AgentChildRecord: Codable, Equatable, Sendable {
     let pid: Int32
     let startTime: ProcessStartTime
-    /// The Threading session the child belongs to, so a journal line points at a row.
-    let sessionID: String
-    /// The launched file's last path component — `claude`, `codex`, `grok`. Enough to say what
-    /// was killed without recording where it was installed.
+    /// The Threading session the child belongs to, when it is a conversation. Long-lived
+    /// infrastructure children such as the remote relay have no session rather than inventing
+    /// an id that looks like a row. Optional also makes older records forward-compatible with
+    /// new child categories while preserving the original on-disk field.
+    let sessionID: String?
+    /// The launched file's last path component — `claude`, `codex`, `grok`, `cloudflared`.
+    /// Enough to say what was killed without recording where it was installed.
     let executable: String
     let recordedAt: Date
 }
@@ -74,6 +78,7 @@ final class AgentChildLedger: @unchecked Sendable {
             url: url,
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .compactMetadata,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
@@ -101,25 +106,57 @@ final class AgentChildLedger: @unchecked Sendable {
     @discardableResult
     func record(_ record: AgentChildRecord) -> Bool {
         queue.sync {
-            records.removeAll { $0.pid == record.pid }
-            records.append(record)
+            var updated = records.filter { $0.pid != record.pid }
+            updated.append(record)
 
             // A named budget rather than an unbounded file. Reaching it means children are
             // being spawned and never reaped, which is a bug this file must report rather than
             // grow through; the oldest entry goes first because it is the likeliest to be stale.
-            while records.count > AgentChildLedgerDefaults.maximumRecords {
-                let evicted = records.removeFirst()
+            var evicted: [AgentChildRecord] = []
+            while updated.count > AgentChildLedgerDefaults.maximumRecords {
+                evicted.append(updated.removeFirst())
+            }
+
+            // Memory changes only after disk does. If the write fails, reporting success in
+            // memory would let `AgentChildProcess` run an untracked child and a later save could
+            // accidentally make that stale record durable after the process had already gone.
+            guard store.save(updated) else { return false }
+            records = updated
+
+            for record in evicted {
                 ThreadingLogger.agent.error(
                     """
                     Live-children ledger is full at \
                     \(AgentChildLedgerDefaults.maximumRecords, privacy: .public) records; \
-                    pid \(evicted.pid, privacy: .public) will not be swept.
+                    pid \(record.pid, privacy: .public) will not be swept.
                     """
                 )
             }
-
-            return store.save(records)
+            return true
         }
+    }
+
+    /// Builds and durably records the identity of a child immediately after spawn.
+    ///
+    /// This is shared by native conversations and non-PTY infrastructure children. Keeping the
+    /// start-time read here prevents a new launch path from recording a pid without the second
+    /// half of the identity the next-launch sweep requires.
+    func recordSpawnedChild(
+        _ child: SpawnedChildProcess,
+        sessionID: String?,
+        executable: String
+    ) -> LiveChildEnrollmentResult {
+        guard let startTime = ProcessUtility.startTime(forPid: child.processIdentifier) else {
+            return .identityUnavailable
+        }
+        let record = AgentChildRecord(
+            pid: child.processIdentifier,
+            startTime: startTime,
+            sessionID: sessionID,
+            executable: URL(fileURLWithPath: executable).lastPathComponent,
+            recordedAt: Date()
+        )
+        return self.record(record) ? .recorded : .persistenceRefused
     }
 
     /// Forgets a child that has been reaped. Its pid is the kernel's to hand out again from
@@ -128,8 +165,8 @@ final class AgentChildLedger: @unchecked Sendable {
         queue.sync {
             let remaining = records.filter { $0.pid != pid }
             guard remaining.count != records.count else { return }
+            guard store.save(remaining) else { return }
             records = remaining
-            store.save(records)
         }
     }
 
@@ -140,15 +177,21 @@ final class AgentChildLedger: @unchecked Sendable {
     }
 }
 
+enum LiveChildEnrollmentResult: Equatable, Sendable {
+    case recorded
+    case identityUnavailable
+    case persistenceRefused
+}
+
 // MARK: - Agent Child Ledger Defaults
 
 enum AgentChildLedgerDefaults {
     static let fileName = "agent-children.json"
     static let queueLabel = "codes.threading.agent-child-ledger"
 
-    /// One record per live native conversation. Far above any plausible number of agents a
-    /// person runs side by side, and low enough that a leak shows up as a full file rather than
-    /// as a directory nobody looks at.
+    /// One record per live native conversation or infrastructure child. Far above any plausible
+    /// live set, and low enough that a leak shows up as a full file rather than as a directory
+    /// nobody looks at.
     static let maximumRecords = 64
 
     /// The scratch name a hosted test bundle writes under, so a test run never leaves entries

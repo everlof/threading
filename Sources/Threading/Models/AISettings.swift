@@ -93,7 +93,8 @@ final class AISettingsStorage {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.settings,
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
         self.storedSettings = persistence.load(defaultValue: .default).value
     }

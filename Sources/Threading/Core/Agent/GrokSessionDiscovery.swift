@@ -60,23 +60,13 @@ enum GrokSessionDiscovery {
         command.append(flag: "--limit", value: String(GrokDiscoveryDefaults.sessionListLimit))
         let source = ShellCommand.executing(command, in: projectPath)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", source.source]
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        guard let result = try? BoundedChildProcess.run(
+            executable: shell,
+            arguments: ["-l", "-c", source.source],
+            timeout: GrokDiscoveryDefaults.commandTimeout,
+            maximumOutputBytes: GrokDiscoveryDefaults.maximumSessionListBytes,
+            output: .standardOutput
+        ), result.termination == .exited(0), !result.outputWasTruncated else { return nil }
+        return String(decoding: result.output, as: UTF8.self)
     }
 }

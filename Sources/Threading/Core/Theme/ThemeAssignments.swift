@@ -179,20 +179,35 @@ enum ThemeAssignments {
     }
 
     /// Assigns a theme to one session, or clears it with nil so it inherits again.
-    static func setTheme(id: TerminalThemeID?, forSession sessionID: SessionID) {
-        ProjectStore.shared.setThemeID(id, forSessionID: sessionID)
-        notifyChanged()
+    @discardableResult
+    static func setTheme(
+        id: TerminalThemeID?,
+        forSession sessionID: SessionID
+    ) -> ProjectMutationResult {
+        let result = ProjectStore.shared.setThemeID(id, forSessionID: sessionID)
+        if result == .applied { notifyChanged() }
+        return result
     }
 
     /// Assigns a theme to every session in a project that has not chosen its own.
-    static func setTheme(id: TerminalThemeID?, forProject projectID: ProjectID) {
-        ProjectStore.shared.setThemeID(id, forProjectID: projectID)
-        notifyChanged()
+    @discardableResult
+    static func setTheme(
+        id: TerminalThemeID?,
+        forProject projectID: ProjectID
+    ) -> ProjectMutationResult {
+        let result = ProjectStore.shared.setThemeID(id, forProjectID: projectID)
+        if result == .applied { notifyChanged() }
+        return result
     }
 
-    static func setTheme(id: TerminalThemeID?, forTerminal terminalID: TerminalID) {
-        ProjectStore.shared.setThemeID(id, forTerminalID: terminalID)
-        notifyChanged()
+    @discardableResult
+    static func setTheme(
+        id: TerminalThemeID?,
+        forTerminal terminalID: TerminalID
+    ) -> ProjectMutationResult {
+        let result = ProjectStore.shared.setThemeID(id, forTerminalID: terminalID)
+        if result == .applied { notifyChanged() }
+        return result
     }
 
     /// Sets the app-wide default, which every unassigned session follows.
@@ -234,8 +249,7 @@ enum ThemeAssignments {
               theme.id != .followsAppTheme,
               ThemeManager.shared.theme(withID: theme.id) == nil,
               ThemeManager.shared.theme(named: theme.name) == nil else { return false }
-        ThemeManager.shared.addTheme(theme)
-        return true
+        return ThemeManager.shared.addTheme(theme)
     }
 
     static func displayName(for id: TerminalThemeID) -> String {

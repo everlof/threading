@@ -9,13 +9,22 @@ import Foundation
 public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     public let baseURL: URL
     public let token: String
+    public let shareURL: URL
+
+    private enum CodingKeys: String, CodingKey {
+        case baseURL
+        case token
+    }
 
     public init?(baseURL: URL, token: String) {
+        let normalizedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let scheme = baseURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
+              let host = baseURL.host?.lowercased(),
+              !host.isEmpty,
               baseURL.user == nil,
               baseURL.password == nil,
-              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              !normalizedToken.isEmpty else {
             return nil
         }
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
@@ -23,16 +32,21 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         components?.query = nil
         components?.path = "/"
         components?.scheme = scheme
-        let host = components?.host?.lowercased()
         components?.host = host
-        guard let normalized = components?.url else { return nil }
+        guard let normalized = components?.url,
+              let shareURL = Self.makeShareURL(baseURL: normalized, token: normalizedToken) else {
+            return nil
+        }
         self.baseURL = normalized
-        self.token = token
+        self.token = normalizedToken
+        self.shareURL = shareURL
     }
 
     public init?(url: URL) {
         guard let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
               url.user == nil,
               url.password == nil,
               url.query == nil,
@@ -50,12 +64,13 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         // would otherwise reach the relay in a `Host:` header and an SNI name for the rest of
         // the session.
         components?.scheme = scheme
-        let normalizedHost = components?.host?.lowercased()
-        components?.host = normalizedHost
+        components?.host = host
         guard let baseURL = components?.url else { return nil }
 
+        guard let shareURL = Self.makeShareURL(baseURL: baseURL, token: token) else { return nil }
         self.baseURL = baseURL
         self.token = token
+        self.shareURL = shareURL
     }
 
     public init?(string: String) {
@@ -65,10 +80,32 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         self.init(url: url)
     }
 
-    public var shareURL: URL {
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+    private static func makeShareURL(baseURL: URL, token: String) -> URL? {
+        guard var components = URLComponents(
+            url: baseURL,
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
         components.fragment = token
-        return components.url!
+        return components.url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedBaseURL = try container.decode(URL.self, forKey: .baseURL)
+        let decodedToken = try container.decode(String.self, forKey: .token)
+        guard let validated = Self(baseURL: decodedBaseURL, token: decodedToken) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Remote connection link has an invalid origin or bearer token."
+            ))
+        }
+        self = validated
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encode(token, forKey: .token)
     }
 
     /// The same credential, written for a QR code.

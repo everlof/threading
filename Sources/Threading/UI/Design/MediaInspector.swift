@@ -1,8 +1,126 @@
 import AppKit
+import ImageIO
 import PDFKit
 import QuickLookUI
 
 // MARK: - Media Inspector Model
+
+/// A named memory and file boundary for an image decode.
+///
+/// Compressed bytes and either pixel dimension alone are insufficient: a narrow image can pass
+/// an area limit while a square decompression bomb passes a byte limit. Keeping all four values
+/// together makes a caller choose one complete policy rather than remember a sequence of guards.
+struct BoundedImageDecodePolicy: Equatable, Sendable {
+    let maximumBytes: Int
+    let maximumSourcePixelDimension: Int
+    let maximumSourcePixelCount: Int
+    let maximumRenderedPixelDimension: Int
+
+    static let userMedia = Self(
+        maximumBytes: MCPDefaults.maximumImageBytes,
+        maximumSourcePixelDimension: MCPDefaults.maximumImagePixelDimension,
+        maximumSourcePixelCount: MCPDefaults.maximumImagePixelCount,
+        maximumRenderedPixelDimension: MCPDefaults.maximumImagePixelDimension
+    )
+
+    static let composerPreview = Self(
+        maximumBytes: 32 * 1_024 * 1_024,
+        maximumSourcePixelDimension: MCPDefaults.maximumImagePixelDimension,
+        maximumSourcePixelCount: MCPDefaults.maximumImagePixelCount,
+        maximumRenderedPixelDimension: 4_096
+    )
+
+    static func thumbnail(maximumPixelDimension: Int) -> Self {
+        Self(
+            maximumBytes: MCPDefaults.maximumImageBytes,
+            maximumSourcePixelDimension: MCPDefaults.maximumImagePixelDimension,
+            maximumSourcePixelCount: MCPDefaults.maximumImagePixelCount,
+            maximumRenderedPixelDimension: maximumPixelDimension
+        )
+    }
+}
+
+/// Opens an image under a `BoundedImageDecodePolicy` and returns an eagerly decoded frame.
+enum BoundedImageDecoder {
+    static func image(at url: URL, policy: BoundedImageDecodePolicy) -> NSImage? {
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: policy.maximumBytes
+        ), let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = decodedImage(from: source, policy: policy) else {
+            return nil
+        }
+        return image
+    }
+
+    /// A list-safe thumbnail path. The decoded allocation is authoritatively bounded by ImageIO's
+    /// thumbnail size and the source dimensions are inspected before decode. Its file-size check
+    /// is deliberately only a cheap refusal: reading every 64 MiB attachment into `Data` while
+    /// building a 32-row rail would turn a memory-safety rule into a predictable UI stall. The
+    /// selected/full-size path above performs the one-byte-past authoritative read.
+    static func thumbnail(at url: URL, policy: BoundedImageDecodePolicy) -> NSImage? {
+        guard let values = try? url.resourceValues(
+            forKeys: [.isRegularFileKey, .fileSizeKey]
+        ), values.isRegularFile == true,
+              (values.fileSize ?? Int.max) <= policy.maximumBytes,
+              let source = CGImageSourceCreateWithURL(
+                  url as CFURL,
+                  [kCGImageSourceShouldCache: false] as CFDictionary
+              ) else {
+            return nil
+        }
+        return decodedImage(from: source, policy: policy)
+    }
+
+    private static func decodedImage(
+        from source: CGImageSource,
+        policy: BoundedImageDecodePolicy
+    ) -> NSImage? {
+        guard CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              accepts(width: width.intValue, height: height.intValue, policy: policy),
+              let decoded = CGImageSourceCreateThumbnailAtIndex(
+                  source,
+                  0,
+                  [
+                      kCGImageSourceCreateThumbnailFromImageAlways: true,
+                      kCGImageSourceCreateThumbnailWithTransform: true,
+                      kCGImageSourceThumbnailMaxPixelSize:
+                          policy.maximumRenderedPixelDimension
+                  ] as CFDictionary
+              ) else {
+            return nil
+        }
+        return NSImage(
+            cgImage: decoded,
+            size: NSSize(width: decoded.width, height: decoded.height)
+        )
+    }
+
+    private static func accepts(
+        width: Int,
+        height: Int,
+        policy: BoundedImageDecodePolicy
+    ) -> Bool {
+        guard width > 0,
+              height > 0,
+              width <= policy.maximumSourcePixelDimension,
+              height <= policy.maximumSourcePixelDimension else {
+            return false
+        }
+        let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+        return !overflow && pixels <= policy.maximumSourcePixelCount
+    }
+}
+
+enum MediaInspectorItemContent: Sendable {
+    case automatic
+    case image
+    case document
+}
 
 /// One file the app-owned inspector can show.
 ///
@@ -13,11 +131,18 @@ struct MediaInspectorItem {
     let url: URL
     let title: String
     let image: NSImage?
+    let content: MediaInspectorItemContent
 
-    init(url: URL, title: String? = nil, image: NSImage? = nil) {
+    init(
+        url: URL,
+        title: String? = nil,
+        image: NSImage? = nil,
+        content: MediaInspectorItemContent = .automatic
+    ) {
         self.url = url
         self.title = title ?? url.lastPathComponent
         self.image = image
+        self.content = content
     }
 
     var isAvailable: Bool {
@@ -465,7 +590,9 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
     private func showSelectedItem() {
         let item = selectedItem
-        let image = item.image ?? NSImage(contentsOf: item.url)
+        let image = item.image ?? (item.content == .document
+            ? nil
+            : BoundedImageDecoder.image(at: item.url, policy: .userMedia))
 
         titleLabel.stringValue = item.title
         titleLabel.toolTip = item.url.path
@@ -478,11 +605,18 @@ final class MediaInspectorView: NSView, ThemedComponent {
             canvas.configure(image: image, title: item.title)
             zoomModeControl.isHidden = false
             zoomLabel.isHidden = false
-        } else {
+        } else if item.content != .image {
             canvas.clear()
             canvas.isHidden = true
             documentView.isHidden = false
             _ = documentView.display(item.url)
+            zoomModeControl.isHidden = true
+            zoomLabel.isHidden = true
+        } else {
+            canvas.clear()
+            canvas.isHidden = true
+            documentView.close()
+            documentView.isHidden = true
             zoomModeControl.isHidden = true
             zoomLabel.isHidden = true
         }
@@ -1039,7 +1173,7 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         } else {
             let installStarted = DispatchTime.now().uptimeNanoseconds
-            let quickLookView = installedQuickLookView()
+            guard let quickLookView = installedQuickLookView() else { return false }
             timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
             let presentStarted = DispatchTime.now().uptimeNanoseconds
             quickLookView.previewItem = url as NSURL
@@ -1090,9 +1224,9 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
         return view
     }
 
-    private func installedQuickLookView() -> QLPreviewView {
+    private func installedQuickLookView() -> QLPreviewView? {
         if let quickLookView { return quickLookView }
-        let view = QLPreviewView(frame: bounds, style: .normal)!
+        guard let view = QLPreviewView(frame: bounds, style: .normal) else { return nil }
         view.autostarts = true
         view.isHidden = true
         addSubview(view)
@@ -1132,7 +1266,15 @@ private final class MediaInspectorThumbnail: ThemedControl {
 
     init(item: MediaInspectorItem) {
         self.item = item
-        preview = item.image ?? NSImage(contentsOf: item.url)
+        let thumbnailPixels = Int(
+            (Design.Size.mediaInspectorThumbnail * 2).rounded(.up)
+        )
+        preview = item.image ?? (item.content == .document
+            ? nil
+            : BoundedImageDecoder.thumbnail(
+                at: item.url,
+                policy: .thumbnail(maximumPixelDimension: thumbnailPixels)
+            ))
             ?? NSWorkspace.shared.icon(forFile: item.url.path)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false

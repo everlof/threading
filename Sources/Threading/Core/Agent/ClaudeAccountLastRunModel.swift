@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Claude Account Last Run Model
 
@@ -37,8 +38,27 @@ enum ClaudeAccountLastRunModel {
     /// Keyed by config path. Caches misses too: an account with no transcripts is the common
     /// case on a fresh install, and re-walking its directories per menu open would be the cost
     /// this whole type exists to avoid.
-    private static var cache: [String: String?] = [:]
-    private static let lock = NSLock()
+    private enum CachedModel: Sendable {
+        case found(String)
+        case missing
+
+        var value: String? {
+            switch self {
+            case .found(let model): return model
+            case .missing: return nil
+            }
+        }
+    }
+
+    private struct Cache: Sendable {
+        var generation = 0
+        var models: [String: CachedModel] = [:]
+    }
+
+    /// The compiler can see that the mutable dictionary is lock-owned. A bare global dictionary
+    /// beside an `NSLock` was safe by convention but remained a Swift 6 data-race error, and a
+    /// concurrent `forgetAll()` could be undone by a scan that had started just before it.
+    private static let cache = OSAllocatedUnfairLock(initialState: Cache())
 
     // MARK: - Public Methods
 
@@ -46,28 +66,33 @@ enum ClaudeAccountLastRunModel {
     static func lastRunModel(account: AgentAccount) -> String? {
         guard account.provider.supports(.transcriptModelRecord) else { return nil }
 
-        lock.lock()
-        if let cached = cache[account.configPath] {
-            lock.unlock()
-            return cached
+        let lookup = cache.withLock { state in
+            (model: state.models[account.configPath], generation: state.generation)
         }
-        lock.unlock()
+        if let cached = lookup.model {
+            return cached.value
+        }
+        let generation = lookup.generation
 
         let resolved = newestTranscript(inProjectsOf: account.configPath)
             .flatMap { ClaudeTranscriptModel.newestModel(at: $0) }
 
-        lock.lock()
-        cache[account.configPath] = resolved
-        lock.unlock()
+        cache.withLock { state in
+            // `forgetAll()` is an invalidation boundary. A slow scan that crossed it may return
+            // its own answer, but must not repopulate the cache with the value just invalidated.
+            guard state.generation == generation else { return }
+            state.models[account.configPath] = resolved.map(CachedModel.found) ?? .missing
+        }
 
         return resolved
     }
 
     /// Drops the memo, so a test can watch the same account answer differently.
     static func forgetAll() {
-        lock.lock()
-        cache.removeAll()
-        lock.unlock()
+        cache.withLock { state in
+            state.generation &+= 1
+            state.models.removeAll()
+        }
     }
 
     // MARK: - Private Methods

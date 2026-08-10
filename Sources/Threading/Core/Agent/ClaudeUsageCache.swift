@@ -49,8 +49,10 @@ enum ClaudeUsageCache {
     /// Claudex absent, bridge not installed for this account, schema moved on — means the
     /// same thing to the caller.
     static func read(account: AgentAccount) -> AccountUsage? {
-        guard let data = try? Data(contentsOf: cacheFileURL(forConfigPath: account.configPath)),
-              data.count <= ClaudeUsageCacheDefaults.maxSnapshotBytes
+        guard let data = try? BoundedFileReader.read(
+            cacheFileURL(forConfigPath: account.configPath),
+            maximumBytes: ClaudeUsageCacheDefaults.maxSnapshotBytes
+        )
         else { return nil }
 
         let decoder = JSONDecoder()

@@ -138,6 +138,19 @@ final class TerminalDropImageTests: XCTestCase {
         )
     }
 
+    func testAnOversizedConvertibleFileFallsBackWithoutAnUnboundedRead() throws {
+        let oversized = directory.appendingPathComponent("oversized.tiff")
+        try Data(
+            repeating: 0,
+            count: TerminalDropImageDefaults.maximumSourceBytes + 1
+        ).write(to: oversized)
+
+        XCTAssertEqual(
+            TerminalDropImage.readable([oversized.path], for: .agent(.claude)),
+            [oversized.path]
+        )
+    }
+
     /// Several files at once keep their order and are decided one at a time, so a mixed drop
     /// does not become all-or-nothing.
     func testAMixedDropIsDecidedPerFile() throws {

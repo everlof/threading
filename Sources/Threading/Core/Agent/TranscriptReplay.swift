@@ -1,5 +1,32 @@
 import Foundation
 
+/// The measured local conversation formats Threading can normalize.
+///
+/// This is a format dispatch, not a second provider policy. `AgentCapabilities.transcriptReplay`
+/// is the public answer to whether replay exists; this closed adapter set is the compiler-checked
+/// implementation behind that answer. `AgentCapabilitiesTests` holds the two in exact agreement,
+/// so granting the capability without an adapter or leaving an unadvertised adapter behind fails.
+enum TranscriptReplayFormat: CaseIterable, Sendable {
+    case claude
+    case codex
+
+    init?(kind: AgentKind) {
+        guard kind.supports(.transcriptReplay) else { return nil }
+        switch kind {
+        case .claude: self = .claude
+        case .codex: self = .codex
+        case .grok, .openCode: return nil
+        }
+    }
+
+    var kind: AgentKind {
+        switch self {
+        case .claude: return .claude
+        case .codex: return .codex
+        }
+    }
+}
+
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
 /// A resumed session picks up with its full context, but the CLI replays none of it down the
@@ -23,7 +50,8 @@ enum TranscriptReplay {
             _ events: [StreamEvent], _ isTruncated: Bool
         ) -> Void
     ) {
-        guard let agentSessionID = session.resumeState.transcriptID else {
+        guard TranscriptReplayFormat(kind: session.kind) != nil,
+              let agentSessionID = session.resumeState.transcriptID else {
             completion([], false)
             return
         }
@@ -59,6 +87,7 @@ enum TranscriptReplay {
     /// layout of an installed CLI, none of which a test should have to fake to check that a
     /// record maps to the right event.
     static func read(at url: URL, kind: AgentKind) -> ([StreamEvent], Bool) {
+        guard let format = TranscriptReplayFormat(kind: kind) else { return ([], false) }
         var events: [StreamEvent] = []
         var dropped = 0
 
@@ -96,13 +125,13 @@ enum TranscriptReplay {
         JSONLReader.forEachRecord(at: url, limit: ReplayDefaults.scanLimit) { record in
             // Context facts ride records the event mapping skips — Codex's `token_count`
             // produces no row at all — so they are read before the mapping can bail.
-            if let context = contextReading(of: record, kind: kind) {
+            if let context = contextReading(of: record, format: format) {
                 lastContextTokens = context.tokens
                 if let window = context.window { lastContextWindow = window }
             }
-            if let effort = effortReading(of: record, kind: kind) { lastEffort = effort }
+            if let effort = effortReading(of: record, format: format) { lastEffort = effort }
 
-            guard let event = self.event(from: record, kind: kind) else { return true }
+            guard let event = self.event(from: record, format: format) else { return true }
 
             if case .userMessage = event {
                 endOpenTurn()
@@ -143,11 +172,11 @@ enum TranscriptReplay {
         kind: AgentKind,
         scanLimit: Int
     ) -> [String] {
-        guard scanLimit > 0 else { return [] }
+        guard scanLimit > 0, let format = TranscriptReplayFormat(kind: kind) else { return [] }
 
         var newestFirst: [String] = []
         JSONLReader.forEachRecordFromEnd(at: url, limit: scanLimit) { record in
-            guard let event = event(from: record, kind: kind) else { return true }
+            guard let event = event(from: record, format: format) else { return true }
 
             switch event {
             case .userMessage:
@@ -183,13 +212,16 @@ enum TranscriptReplay {
     /// Codex writes it as `payload.effort` on a `turn_context` record, and restates it in
     /// `thread_settings` when a setting is applied — the turn's own value is preferred, since the
     /// applied settings describe the thread rather than the turn that followed.
-    private static func effortReading(of record: [String: Any], kind: AgentKind) -> String? {
+    private static func effortReading(
+        of record: [String: Any],
+        format: TranscriptReplayFormat
+    ) -> String? {
         func nonEmpty(_ value: Any?) -> String? {
             guard let text = value as? String, !text.isEmpty else { return nil }
             return text
         }
 
-        switch kind {
+        switch format {
         case .claude:
             guard record["type"] as? String == "assistant",
                   record["isSidechain"] as? Bool != true
@@ -201,8 +233,6 @@ enum TranscriptReplay {
             if let effort = nonEmpty(payload["effort"]) { return effort }
             guard let settings = payload["thread_settings"] as? [String: Any] else { return nil }
             return nonEmpty(settings["reasoning_effort"])
-        case .grok, .openCode:
-            return nil
         }
     }
 
@@ -215,9 +245,9 @@ enum TranscriptReplay {
     /// with `model_context_window` beside it.
     private static func contextReading(
         of record: [String: Any],
-        kind: AgentKind
+        format: TranscriptReplayFormat
     ) -> (tokens: Int, window: Int?)? {
-        switch kind {
+        switch format {
         case .claude:
             guard record["type"] as? String == "assistant",
                   record["isSidechain"] as? Bool != true,
@@ -238,8 +268,6 @@ enum TranscriptReplay {
                   let last = info["last_token_usage"] as? [String: Any],
                   let tokens = (last["total_tokens"] as? NSNumber)?.intValue else { return nil }
             return (tokens, (info["model_context_window"] as? NSNumber)?.intValue)
-        case .grok, .openCode:
-            return nil
         }
     }
 
@@ -250,14 +278,15 @@ enum TranscriptReplay {
     }
 
     /// Maps one transcript record to something worth drawing, or nil to skip it.
-    private static func event(from record: [String: Any], kind: AgentKind) -> StreamEvent? {
-        switch kind {
+    private static func event(
+        from record: [String: Any],
+        format: TranscriptReplayFormat
+    ) -> StreamEvent? {
+        switch format {
         case .claude:
             return claudeEvent(from: record)
         case .codex:
             return codexEvent(from: record)
-        case .grok, .openCode:
-            return nil
         }
     }
 

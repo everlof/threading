@@ -85,28 +85,19 @@ enum OpenCodeSessionDiscovery {
         command.append(flag: "--max-count", value: String(OpenCodeDiscoveryDefaults.sessionListLimit))
         command.append(flag: "--format", value: "json")
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = [
-            "-l",
-            "-c",
-            ShellCommand.executing(command, in: projectPath).source
-        ]
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return process.terminationStatus == 0 ? data : nil
+        guard let result = try? BoundedChildProcess.run(
+            executable: shell,
+            arguments: [
+                "-l",
+                "-c",
+                ShellCommand.executing(command, in: projectPath).source
+            ],
+            environment: AgentEnvironment.launchEnvironment(),
+            timeout: OpenCodeDiscoveryDefaults.commandTimeout,
+            maximumOutputBytes: OpenCodeDiscoveryDefaults.maximumSessionListBytes,
+            output: .standardOutput
+        ), result.termination == .exited(0), !result.outputWasTruncated else { return nil }
+        return result.output
     }
 
     private static func normalized(_ path: String) -> String {

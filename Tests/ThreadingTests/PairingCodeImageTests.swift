@@ -192,11 +192,11 @@ final class PairingCodeImageTests: XCTestCase {
     /// QR's alphanumeric mode buys 5.5 bits a character against byte mode's 8, and its charset
     /// has no lower case. The pairing token is base32 for exactly that reason, so the property
     /// is asserted rather than left to the comment that explains it.
-    func testPairingTokenFitsQRsAlphanumericCharset() {
+    func testPairingTokenFitsQRsAlphanumericCharset() throws {
         let alphanumeric = Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")
 
         for _ in 0..<32 {
-            let token = RemoteAccessCoordinator.pairingToken()
+            let token = try XCTUnwrap(RemoteAccessCoordinator.pairingToken())
             // 16 bytes at 5 bits a character, rounded up.
             XCTAssertEqual(token.count, 26, "the pairing token is no longer 128 bits of base32")
             XCTAssertTrue(
@@ -204,6 +204,17 @@ final class PairingCodeImageTests: XCTestCase {
                 "\(token) contains a character QR must encode in byte mode"
             )
         }
+    }
+
+    func testTokenGenerationFailsClosedWhenEntropyIsMissingOrMalformed() {
+        XCTAssertNil(RemoteAccessCoordinator.randomToken(using: { _ in nil }))
+        XCTAssertNil(RemoteAccessCoordinator.pairingToken(using: { _ in nil }))
+        XCTAssertNil(RemoteAccessCoordinator.randomToken(using: { count in
+            [UInt8](repeating: 0, count: count - 1)
+        }))
+        XCTAssertNil(RemoteAccessCoordinator.pairingToken(using: { count in
+            [UInt8](repeating: 0, count: count + 1)
+        }))
     }
 
     /// The measurement the payload's shape exists for.
@@ -215,16 +226,18 @@ final class PairingCodeImageTests: XCTestCase {
         // A median `trycloudflare.com` host: four dictionary words and the TLD.
         let host = "meat-implies-tracking-newfoundland.trycloudflare.com"
         let origin = try XCTUnwrap(URL(string: "https://\(host)/"))
+        let pairingToken = try XCTUnwrap(RemoteAccessCoordinator.pairingToken())
         let link = try XCTUnwrap(
-            RemoteConnectionLink(baseURL: origin, token: RemoteAccessCoordinator.pairingToken())
+            RemoteConnectionLink(baseURL: origin, token: pairingToken)
         )
 
         let scanned = try XCTUnwrap(
             PairingCodeMatrix.make(link.scannablePayload, correctionLevel: "M")
         )
         // The shape this replaced: lower-case origin, 32-byte base64url token.
+        let previousToken = try XCTUnwrap(RemoteAccessCoordinator.randomToken())
         let previous = try XCTUnwrap(PairingCodeMatrix.make(
-            "https://\(host)/#\(RemoteAccessCoordinator.randomToken())",
+            "https://\(host)/#\(previousToken)",
             correctionLevel: "M"
         ))
 

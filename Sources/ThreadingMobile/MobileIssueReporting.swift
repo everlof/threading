@@ -380,10 +380,7 @@ struct MobileIssueReportView: View {
         ])
 
         let reportURL = try MobileDiagnostics.supportReport(additionalDetails: extra)
-        let report = try JSONDecoder().decode(
-            RemoteDiagnosticReport.self,
-            from: Data(contentsOf: reportURL)
-        )
+        let report = try RemoteDiagnosticJournal.readSupportReport(at: reportURL)
         let screenshotData: Data?
         if includeScreenshot, let screenshot = request.screenshot {
             screenshotData = screenshot.publicReportPreview(
@@ -570,6 +567,7 @@ actor MobileIssueReportOutbox {
     static let shared = MobileIssueReportOutbox()
 
     private static let maximumPendingReports = 20
+    private static let maximumDirectoryEntries = maximumPendingReports * 4
     private let directory: URL
     private let endpoint: URL
     private let intakeToken: String?
@@ -638,12 +636,7 @@ actor MobileIssueReportOutbox {
         }
         guard let urls = try? pendingURLs() else { return }
         for url in urls {
-            guard let data = try? Data(contentsOf: url),
-                  let submission = try? JSONDecoder().decode(
-                    PublicIssueReportSubmissionDTO.self,
-                    from: data
-                  ),
-                  PublicIssueReportPolicy.accepts(submission) else {
+            guard let submission = PublicIssueReportPolicy.submission(at: url) else {
                 continue
             }
             do {
@@ -700,13 +693,40 @@ actor MobileIssueReportOutbox {
     }
 
     private func pendingURLs() throws -> [URL] {
-        try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.creationDateKey],
-            options: [.skipsHiddenFiles]
-        )
-        .filter { $0.pathExtension == "json" }
+        let urls: [URL]
+        do {
+            urls = try RemoteBoundedDirectoryReader.shallowContents(
+                of: directory,
+                includingPropertiesForKeys: [
+                    .creationDateKey,
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey,
+                ],
+                maximumEntries: Self.maximumDirectoryEntries
+            )
+        } catch RemoteDirectoryEnumerationError.entryLimitExceeded {
+            // The outbox cannot prove it is below its capacity once its directory itself exceeds
+            // the support-data budget. Refuse another write instead of silently hiding pending
+            // reports beyond an arbitrary enumeration prefix.
+            throw MobileIssueReportError.outboxFull
+        }
+        return urls
+        .filter {
+            guard $0.pathExtension == "json",
+                  $0.deletingPathExtension().lastPathComponent
+                    == $0.deletingPathExtension().lastPathComponent.lowercased(),
+                  UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil else {
+                return false
+            }
+            let values = try? $0.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ])
+            return values?.isRegularFile == true && values?.isSymbolicLink != true
+        }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        .prefix(Self.maximumPendingReports)
+        .map { $0 }
     }
 
     private func fileURL(for reportID: String) -> URL {
@@ -924,7 +944,7 @@ struct ShakeGestureDetector: UIViewControllerRepresentable {
             }
         }
 
-        deinit {
+        isolated deinit {
             NotificationCenter.default.removeObserver(self)
             motionManager.stopDeviceMotionUpdates()
         }

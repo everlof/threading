@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 /// Who is reading a paste, which is what decides whether a dropped image is already in a form
 /// they can use.
@@ -85,14 +86,28 @@ enum TerminalDropImage {
     ]
 
     /// Decoded and re-encoded on the calling thread, which is the main thread inside the drop.
-    ///
-    /// A 4K photo costs a fraction of a second here, and paying it inline keeps the paste in
-    /// the order the user made it: two files dropped in quick succession land in that order,
-    /// and a drop cannot arrive after something typed behind it.
+    /// Input bytes and decoded dimensions are both bounded: compressed size alone does not stop
+    /// a tiny image bomb expanding into an arbitrary bitmap. ImageIO makes a 4096px thumbnail
+    /// directly, keeping ordinary camera images useful without allocating their full sensor size.
+    /// Paying the bounded work inline preserves the order in which files were dropped.
     private static func writePNG(from path: String) -> String? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let bitmap = NSBitmapImageRep(data: data),
-              let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        guard let data = try? BoundedFileReader.read(
+            URL(fileURLWithPath: path),
+            maximumBytes: TerminalDropImageDefaults.maximumSourceBytes
+        ), let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize:
+                        TerminalDropImageDefaults.maximumPixelDimension
+                ] as CFDictionary
+              ) else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
 
         // Its own directory, so the file keeps the name it was dropped with. The agent quotes
         // that name back, and `photo.png` says which photo where a UUID says nothing.
@@ -113,4 +128,9 @@ enum TerminalDropImage {
             return nil
         }
     }
+}
+
+enum TerminalDropImageDefaults {
+    static let maximumSourceBytes = 32 * 1_024 * 1_024
+    static let maximumPixelDimension = 4_096
 }

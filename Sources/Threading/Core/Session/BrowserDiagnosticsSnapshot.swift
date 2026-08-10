@@ -283,12 +283,13 @@ enum BrowserDiagnosticsComparator {
         }
 
         var change: BrowserDiagnosticsComparison.TimingChange {
-            let delta = (before != nil && after != nil) ? abs(after! - before!) : 0
+            let delta = before.flatMap { before in after.map { abs($0 - before) } } ?? 0
+            let hasPair = before != nil && after != nil
             return BrowserDiagnosticsComparison.TimingChange(
                 name: name,
                 before: before,
                 after: after,
-                exceedsNoiseFloor: before != nil && after != nil && delta > floor
+                exceedsNoiseFloor: hasPair && delta > floor
             )
         }
     }

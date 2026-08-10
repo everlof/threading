@@ -379,14 +379,19 @@ encoder (xterm `;N` modifier parameters, DECCKM-aware arrows/Home/End — the fi
 replaced always sent normal-mode arrows); `MobileTerminalKeyboardStore` persists custom layouts
 per agent kind with the continuity store's versioned/quarantined archive pattern. Layouts are
 device-local on purpose — a phone and an iPad earn different bars — and the stock layout per
-agent kind returns on reset. Keys ride the existing `input` frame, so the server's
+agent kind returns on reset. The archive has one 1 MiB encoded ceiling plus layout/key/string
+cardinality checks; duplicate key identities and oversized actions are refused without replacing
+the active or durable layout. Keys ride the existing `input` frame, so the server's
 capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and
 the last open route and reading position are restored without copying one person's draft to
 another device. The records are versioned. If one is corrupt, the client preserves a quarantine
-copy for diagnosis and fails closed instead of overwriting it with a new blank record.
+copy for diagnosis and fails closed instead of overwriting it with a new blank record. Continuity
+mutations build, prune and validate a bounded candidate, persist and verify it, and only then make
+it visible to the running UI; a refused oversized draft therefore cannot create state that appears
+saved until the next launch disproves it.
 
 An open iOS app receives these events over its authenticated live socket. Background and
 lock-screen delivery uses APNs. Development/self-hosted builds can enable the Mac's provider
@@ -403,6 +408,10 @@ The topic is optional and defaults to the iOS bundle identifier above. Without p
 credentials the settings page says **Live only**: events still work while the authenticated
 connection is alive, but a suspended app cannot receive a remote push. A distributed build
 should move the provider key to a stable relay rather than ship it in either app.
+
+The environment-selected `.p8` file must be a regular UTF-8 file no larger than 64 KiB. It is
+read through the opened-file streaming limit before CryptoKit parses it; a metadata preflight is
+not trusted because the configured path can be replaced or grown between inspection and read.
 
 ### Hosted Firebase service
 
@@ -458,6 +467,11 @@ feature lock.
   short same-device retry window for a lost response), and rotates immediately. Invitation and
   durable device bearers remain 256-bit base64url: they travel by copied link or protocol
   exchange, never by camera, so they buy nothing from the QR trade.
+- Pairing-link decoding re-enters the same failable initializer as scanned and programmatic links.
+  Synthesized `Codable` would otherwise bypass the HTTP(S), host, user-info and non-empty-bearer
+  checks and manufacture a value its non-optional endpoint accessors could not safely represent.
+  The validated share URL is derived once at construction, while only the normalized origin and
+  bearer are persisted.
 - **The 128-bit choice is forced by the host, not by the token, and should be revisited when the
   relay moves to a short custom domain.** A 52-character `trycloudflare.com` hostname is most of
   the payload, which is what leaves the token paying for the last version. Measured at level M

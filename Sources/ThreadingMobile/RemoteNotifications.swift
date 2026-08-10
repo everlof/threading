@@ -178,23 +178,25 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         )
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         if let event = RemoteNotificationPayloadDecoder.event(
             from: notification.request.content.userInfo
         ) {
-            MobileDiagnostics.record(.notificationReceived, fields: [
-                .trace: event.id,
-                .kind: event.kind.rawValue,
-                .transport: "apns",
-            ])
+            await MainActor.run {
+                MobileDiagnostics.record(.notificationReceived, fields: [
+                    .trace: event.id,
+                    .kind: event.kind.rawValue,
+                    .transport: "apns",
+                ])
+            }
         }
         return [.banner, .list, .sound]
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
@@ -203,12 +205,14 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         ) else {
             return
         }
-        MobileDiagnostics.record(.notificationOpened, fields: [
-            .trace: event.id,
-            .kind: event.kind.rawValue,
-            .transport: "apns",
-        ])
-        model.openSessionFromNotification(event)
+        await MainActor.run {
+            MobileDiagnostics.record(.notificationOpened, fields: [
+                .trace: event.id,
+                .kind: event.kind.rawValue,
+                .transport: "apns",
+            ])
+            model.openSessionFromNotification(event)
+        }
     }
 
     func openNotification(from response: UNNotificationResponse) {
@@ -358,10 +362,10 @@ final class RemoteNotificationManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] note in
+            let token = (note.object as? String)?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
             Task { @MainActor in
-                let token = (note.object as? String)?.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                )
                 self?.deviceToken = token?.isEmpty == false ? token : nil
                 self?.registeredSignatures.removeAll()
             }
@@ -379,7 +383,7 @@ final class RemoteNotificationManager: ObservableObject {
         })
     }
 
-    deinit {
+    isolated deinit {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 

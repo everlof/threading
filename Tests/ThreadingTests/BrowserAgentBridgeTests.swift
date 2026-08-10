@@ -2988,17 +2988,23 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                 {"action":"snapshot","css":"#here"}
                 """
         )
-        if !permitted.succeeded,
-           permitted.text.contains("playwright install")
-            || permitted.text.contains("Executable doesn't exist") {
-            throw XCTSkip("The matching local Playwright browser binary is not installed.")
+        let permittedText: String
+        switch permitted {
+        case .failure(message: let message):
+            if message.contains("playwright install")
+                || message.contains("Executable doesn't exist") {
+                throw XCTSkip("The matching local Playwright browser binary is not installed.")
+            }
+            XCTFail(message)
+            return
+        case .success(text: let text, screenshotPNG: _):
+            permittedText = text
         }
-        XCTAssertTrue(permitted.succeeded, permitted.text)
         XCTAssertTrue(
-            permitted.text.contains("\"backend\" : \"playwright_attached_chrome\""),
-            permitted.text
+            permittedText.contains("\"backend\" : \"playwright_attached_chrome\""),
+            permittedText
         )
-        XCTAssertTrue(permitted.text.contains("allowed-origin-body"), permitted.text)
+        XCTAssertTrue(permittedText.contains("allowed-origin-body"), permittedText)
 
         let refused = await attachedRun(
             runner,
@@ -3009,14 +3015,17 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                 {"action":"snapshot","css":"#here"}
                 """
         )
-        XCTAssertFalse(refused.succeeded, refused.text)
-        XCTAssertTrue(refused.text.contains("step 2"), refused.text)
+        guard case .failure(message: let refusedMessage) = refused else {
+            XCTFail("A run that crosses the origin fence must fail.")
+            return
+        }
+        XCTAssertTrue(refusedMessage.contains("step 2"), refusedMessage)
         XCTAssertTrue(
-            refused.text.contains(try XCTUnwrap(BrowserOrigin(url: blockedURL)).key),
-            refused.text
+            refusedMessage.contains(try XCTUnwrap(BrowserOrigin(url: blockedURL)).key),
+            refusedMessage
         )
         XCTAssertFalse(
-            refused.text.contains("blocked-origin-body"),
+            refusedMessage.contains("blocked-origin-body"),
             "a page outside the allowlist is never read, so nothing of it can be returned"
         )
     }
@@ -3045,11 +3054,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                 )
             )
         } catch {
-            return PlaywrightAutomationOutput(
-                text: "Could not build attached arguments: \(error)",
-                screenshotPNG: nil,
-                succeeded: false
-            )
+            return .failure(message: "Could not build attached arguments: \(error)")
         }
         return await withCheckedContinuation { continuation in
             runner.run(arguments, profile: profile) { output in

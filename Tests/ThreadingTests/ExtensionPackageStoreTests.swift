@@ -37,6 +37,34 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(provenance.presentation.contains("unsigned"))
     }
 
+    func testImportRollsBackWhenItsProvenanceCannotBeSaved() throws {
+        let source = try makePackage()
+        let root = temporaryDirectory("provenance-write-failure")
+        let store = ExtensionPackageStore(rootURL: root)
+        try FileManager.default.createDirectory(
+            at: store.provenanceURL.appendingPathComponent(
+                "com.example.installed-test.json",
+                isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertThrowsError(try store.install(from: source)) { error in
+            guard case .provenanceCouldNotBeSaved(let identifier) =
+                error as? ExtensionPackageStoreError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(identifier, "com.example.installed-test")
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: store.packageURL(for: "com.example.installed-test").path
+            ),
+            "an import without its audit provenance was reported as failed but left installed"
+        )
+        XCTAssertEqual(try store.inventory().count, 0)
+    }
+
     func testEnablementPersistsSeparatelyFromThePackage() throws {
         let source = try makePackage()
         let root = temporaryDirectory("state")
@@ -62,6 +90,52 @@ final class ExtensionPackageStoreTests: XCTestCase {
             sentinel,
             "inventory must not replace unreadable storage to manufacture an empty result"
         )
+    }
+
+    func testInventoryRefusesAnUnboundedPackageDirectoryBeforeFilteringNames() throws {
+        let root = temporaryDirectory("inventory-directory-budget")
+        let store = ExtensionPackageStore(rootURL: root)
+        try FileManager.default.createDirectory(
+            at: store.packagesURL,
+            withIntermediateDirectories: true
+        )
+        for index in 0...ExtensionPackageStore.maximumPackageDirectoryEntries {
+            try Data().write(to: store.packagesURL.appendingPathComponent("unrelated-\(index)"))
+        }
+
+        XCTAssertThrowsError(try store.inventory()) { error in
+            XCTAssertEqual(
+                error as? BoundedDirectoryReadError,
+                .exceedsLimit(
+                    maximumEntries: ExtensionPackageStore.maximumPackageDirectoryEntries
+                )
+            )
+        }
+    }
+
+    func testInventoryRefusesMorePackagesThanTheProductCanRender() throws {
+        let root = temporaryDirectory("inventory-package-budget")
+        let store = ExtensionPackageStore(rootURL: root)
+        try FileManager.default.createDirectory(
+            at: store.packagesURL,
+            withIntermediateDirectories: true
+        )
+        for index in 0...ExtensionPackageStore.maximumInstalledPackages {
+            try FileManager.default.createDirectory(
+                at: store.packagesURL.appendingPathComponent(
+                    "com.example.package-\(index).threadingextension",
+                    isDirectory: true
+                ),
+                withIntermediateDirectories: false
+            )
+        }
+
+        XCTAssertThrowsError(try store.inventory()) { error in
+            XCTAssertEqual(
+                error as? BoundedDirectoryReadError,
+                .exceedsLimit(maximumEntries: ExtensionPackageStore.maximumInstalledPackages)
+            )
+        }
     }
 
     func testUnreadableEnablementIsRecoveredBeforeAReplacementIsWritten() throws {
@@ -341,6 +415,14 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertThrowsError(
             try storage.commitDataVersion(0, identifier: "com.example.invalid-version")
         )
+        XCTAssertThrowsError(try storage.keyValues(extensionIdentifier: "../../outside"))
+        XCTAssertThrowsError(
+            try storage.cacheData(extensionIdentifier: "../../outside", name: "value.json")
+        )
+        XCTAssertThrowsError(try storage.recover(
+            identifier: "../../outside",
+            alongside: temporaryDirectory("outside.threadingextension")
+        ))
     }
 
     func testOversizedCacheIsRecreatedBeforeTheExtensionStarts() throws {
@@ -519,6 +601,44 @@ final class ExtensionPackageStoreTests: XCTestCase {
             relativePath: "/tmp/outside.png",
             extensionIdentifier: "com.example.installed-test"
         ))
+    }
+
+    func testExtensionImageDecodeRechecksBytesAndDecodedDimensions() throws {
+        let source = try makePackage()
+        let resources = source.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: resources,
+            withIntermediateDirectories: true
+        )
+        try pngData(width: 16, height: 16).write(
+            to: resources.appendingPathComponent("accepted.png")
+        )
+        try pngData(
+            width: ExtensionImageResourceLoader.maximumPixelDimension + 1,
+            height: 1
+        ).write(to: resources.appendingPathComponent("too-wide.png"))
+
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("image-decode-policy"))
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        let acceptedURL = try XCTUnwrap(manager.imageResourceURL(
+            relativePath: "Resources/accepted.png",
+            extensionIdentifier: "com.example.installed-test"
+        ))
+        let oversizedDimensionsURL = try XCTUnwrap(manager.imageResourceURL(
+            relativePath: "Resources/too-wide.png",
+            extensionIdentifier: "com.example.installed-test"
+        ))
+
+        XCTAssertNotNil(ExtensionImageResourceLoader.image(at: acceptedURL))
+        XCTAssertNil(ExtensionImageResourceLoader.image(at: oversizedDimensionsURL))
+
+        // The URL lookup is only a cheap refusal. The authoritative read must still notice if
+        // the package changes between resolution and decode.
+        let handle = try FileHandle(forWritingTo: acceptedURL)
+        try handle.truncate(atOffset: UInt64(ExtensionImageResourceLoader.maximumBytes + 1))
+        try handle.close()
+        XCTAssertNil(ExtensionImageResourceLoader.image(at: acceptedURL))
     }
 
     func testExtensionsSettingsLetsTheUserResolveIdentityResolverConflicts() throws {
@@ -2703,6 +2823,22 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
         cleanupURLs.append(url)
         return url
+    }
+
+    private func pngData(width: Int, height: Int) throws -> Data {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 
     private func shellQuoted(_ value: String) -> String {

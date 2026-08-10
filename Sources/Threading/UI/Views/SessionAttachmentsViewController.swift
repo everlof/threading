@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import WebKit
 
 /// The synchronous main-thread work that presents one attachment preview.
@@ -185,10 +184,8 @@ final class SessionAttachmentsViewController: NSViewController {
     /// A diagram's *source*, in the theme's own code face. Text is what these files are —
     /// rendering Graphviz or Mermaid would take an engine the app does not carry — and their
     /// source is short, legible, and exactly what gets dragged into a chat box next.
-    private var sourcePreview: ThemedScrollView?
-    private var sourceTextView: ThemedTextView? {
-        sourcePreview?.documentView as? ThemedTextView
-    }
+    private var sourcePreview: ThemedTextScrollView?
+    private var sourceTextView: ThemedTextView? { sourcePreview?.textView }
     private lazy var fileLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.subheading)
@@ -847,7 +844,10 @@ final class SessionAttachmentsViewController: NSViewController {
         switch attachment.kind {
         case .image:
             let prepareStarted = DispatchTime.now().uptimeNanoseconds
-            guard let image = NSImage(contentsOf: attachment.url), image.isValid else {
+            guard let image = BoundedImageDecoder.image(
+                at: attachment.url,
+                policy: .userMedia
+            ), image.isValid else {
                 timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
                 showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
@@ -914,7 +914,10 @@ final class SessionAttachmentsViewController: NSViewController {
             // handed tens of megabytes is a stall, not a preview.
             let prepareStarted = DispatchTime.now().uptimeNanoseconds
             guard size <= SessionAttachmentsDefaults.maximumSourcePreviewBytes,
-                  let data = try? Data(contentsOf: attachment.url) else {
+                  let data = try? BoundedFileReader.read(
+                    attachment.url,
+                    maximumBytes: SessionAttachmentsDefaults.maximumSourcePreviewBytes
+                  ) else {
                 timing.prepareNanoseconds = DispatchTime.now().uptimeNanoseconds - prepareStarted
                 showPreviewMessage(L10n.string("This file could not be previewed."))
                 return
@@ -928,7 +931,7 @@ final class SessionAttachmentsViewController: NSViewController {
             let sourcePreview = installedSourcePreview()
             timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
             let presentStarted = DispatchTime.now().uptimeNanoseconds
-            (sourcePreview.documentView as? ThemedTextView)?.string = source
+            sourcePreview.textView.string = source
             sourcePreview.isHidden = false
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
@@ -986,7 +989,11 @@ final class SessionAttachmentsViewController: NSViewController {
                 return nil
             }
             let items = inspectable.map {
-                MediaInspectorItem(url: $0.url, title: $0.name)
+                MediaInspectorItem(
+                    url: $0.url,
+                    title: $0.name,
+                    content: $0.kind == .image ? .image : .document
+                )
             }
             return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
         }
@@ -1018,18 +1025,16 @@ final class SessionAttachmentsViewController: NSViewController {
         return webView
     }
 
-    private func installedSourcePreview() -> ThemedScrollView {
+    private func installedSourcePreview() -> ThemedTextScrollView {
         if let sourcePreview { return sourcePreview }
         let scroll = ThemedTextView.scrolling()
         scroll.isHidden = true
-        if let text = scroll.documentView as? ThemedTextView {
-            text.isEditable = false
-            text.applyFont(.previewCode)
-            text.textContainerInset = NSSize(
-                width: Design.Spacing.medium,
-                height: Design.Spacing.medium
-            )
-        }
+        scroll.textView.isEditable = false
+        scroll.textView.applyFont(.previewCode)
+        scroll.textView.textContainerInset = NSSize(
+            width: Design.Spacing.medium,
+            height: Design.Spacing.medium
+        )
         installPreviewSurface(scroll)
         sourcePreview = scroll
         return scroll
@@ -1431,7 +1436,10 @@ final class SessionAttachmentsViewController: NSViewController {
         if attachments.count == 1,
            let attachment = attachments.first,
            attachment.kind == .image,
-           let image = NSImage(contentsOf: attachment.url), image.isValid {
+           let image = BoundedImageDecoder.image(
+               at: attachment.url,
+               policy: .userMedia
+           ), image.isValid {
             NSPasteboard.general.writeObjects([image])
             return
         }
@@ -1881,29 +1889,10 @@ enum SessionAttachmentThumbnails {
         let key = "\(url.path)|\(modified)|\(pixels)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
 
-        guard let source = CGImageSourceCreateWithURL(
-            url as CFURL,
-            [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let image = BoundedImageDecoder.thumbnail(
+            at: url,
+            policy: .thumbnail(maximumPixelDimension: pixels)
         ) else { return nil }
-
-        let options: [CFString: Any] = [
-            // Always: a file's own embedded thumbnail may be absent, stale or a different crop.
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: pixels
-        ]
-        guard let decoded = CGImageSourceCreateThumbnailAtIndex(
-            source,
-            0,
-            options as CFDictionary
-        ) else { return nil }
-
-        // Sized in pixels and scaled down into the row's well, so the picture stays crisp on a
-        // Retina display without the row having to know what scale it is drawn at.
-        let image = NSImage(
-            cgImage: decoded,
-            size: NSSize(width: decoded.width, height: decoded.height)
-        )
         cache.setObject(image, forKey: key)
         return image
     }

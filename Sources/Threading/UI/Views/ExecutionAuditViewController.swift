@@ -53,10 +53,7 @@ final class ExecutionAuditViewController: NSViewController {
     private let detailScroll = ThemedTextView.scrolling()
     private let rightHost = NSView()
 
-    private var detailTextView: ThemedTextView {
-        // `ThemedTextView.scrolling()` owns exactly this document type.
-        detailScroll.documentView as! ThemedTextView
-    }
+    private var detailTextView: ThemedTextView { detailScroll.textView }
 
     init(
         sessionID: SessionID,

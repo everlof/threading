@@ -27,6 +27,14 @@ never blocks the writer, and `busy_timeout` turns "another process has it" into 
 makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a
 chosen concurrency model rather than a workaround.
 
+**SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
+`deinit` as well as after `run`: fluent binding can throw while the statement expression is still
+being built, before `run` has installed its own `defer`, and that must not leave a native statement
+holding the connection open. Both finalization and `SQLiteDatabase.close()` are idempotent, and a
+failed database initializer closes the partly configured connection. Owners still close the
+connection explicitly at storage boundaries—RAII is the backstop for an abandoned object, not the
+ordering primitive for moving a database and its sidecars.
+
 **The import runs once and keeps its rollback.** A `projects.json` is read through the decoder
 and migration chain it always used, written into the database in a single transaction, and then
 *renamed* to `projects.json.migrated` — never deleted. opencode's own migration is the reason:
@@ -66,16 +74,23 @@ Quarantine still works exactly as it did for the document, because `ProjectStore
 the difference: an unopenable database is moved aside and reported, which is what lets the store
 refuse to write over state it could not read.
 
-**The write-ahead log moves with it, and for months it did not — which made quarantine the data
-loss it exists to prevent.** In WAL mode the committed rows sit in `-wal` until a checkpoint, and
-a checkpoint runs when the *last* connection closes; on a machine where a second build or a hosted
-test target has the same store open, that never happens. So the file kept "for recovery" was an
-empty shell while the only real copy was unlinked. Measured on the store that hit it (6 Aug 2026):
-zero project rows in `threading.db`, four projects and 138 sessions in a 498KB `threading.db-wal`,
-and a quarantined copy containing nothing. SQLite finds a log by name, so it is renamed alongside —
-`X.corrupt-<stamp>` gets `X.corrupt-<stamp>-wal`. `-shm` is only an index over that log and is
-rebuilt on demand, so it is deleted rather than kept: left beside a database that has been moved
-away, *that* is the sidecar a fresh database would be recovered from.
+**Quarantine first makes the database movable; it never renames a live WAL bundle.** In WAL mode
+committed rows can live only in `-wal`, and moving those files from under another SQLite connection
+is an API violation: the live connection keeps vnodes for names that no longer describe its
+database. Measured under the hosted-test reproduction, that emitted SQLite's “vnode renamed while
+in use” warning and made the purported recovery copy timing-dependent. `StateManager` closes its
+own handle, then `SQLiteDatabase.prepareForFileMove()` asks SQLite to transition WAL to DELETE
+journalling. If another reader pins the WAL, the transition fails and quarantine leaves the
+database and both sidecars exactly in place, with writes refused. After the other owner closes,
+SQLite folds the WAL into the database; the next launch can move one self-contained file. Recovery
+is allowed to wait, never to manufacture a copy by moving files out from under the library that
+owns them.
+
+**A future database schema is unsupported, not corrupt.** `SQLiteDatabase` reads
+`PRAGMA user_version` immediately after opening and before changing journal mode or running any
+migration. A value above `ProjectDatabase.schemaVersion` closes the handle, leaves every byte and
+sidecar untouched, creates no `.corrupt` artifact and disables writes for the launch. `migrate(to:)`
+repeats the monotonicity check so no alternate constructor can silently accept a future database.
 
 **One unreadable auxiliary row costs that row, not the store.** `panel_layout` and
 `session_attachments` used to be validated inside `load`'s all-or-nothing contract, on the sound
@@ -110,6 +125,25 @@ write is a save; for a settings store the next write is **any ordinary edit** �
 bindings failed to decode lost every one of them, permanently, the first time they rebound a
 key. Both now keep the unreadable bytes under `<key>.unreadable` (`DefaultsQuarantine`) and
 permit writes only if that keeping succeeded, which is `stateWritesAllowed` in miniature.
+
+`RecoverableDefaultsStore` also requires a compact-metadata size policy. `UserDefaults` delivers
+the blob as one `Data`, so the app cannot make cfprefsd stream it, but the 1 MiB ceiling is checked
+before JSON decoding/materialization and again before replacement. Change-request repository
+policy, publish receipts, the usage-window schedule and the selected extension navigator use this
+same envelope now; none can turn corrupt bytes into an empty value that the next ordinary edit
+overwrites. Each builds and validates a candidate, persists it, and only then publishes the
+in-memory state and any change notification. Navigator identity is bounded and nonempty, so an
+invalid extension selection cannot displace the last durable route.
+The usage schedule additionally bounds its minute fields, weekdays and account set because that
+preference can authorize background work that spends an account's limit: a malformed or refused
+write must leave both the last durable and the currently active schedule unchanged.
+
+File-backed `RecoverableFileStore` adds a separate required size policy: 1 MiB compact metadata,
+32 MiB user documents, or 64 MiB derived caches. Reads and post-write verification go through the
+same streaming one-byte-past-limit boundary; encoded values over the declared policy are refused
+before replacement. Criticality still decides whether an unreadable predecessor is quarantined or
+a cache is discarded. Size and recovery value are separate facts, so adding a store cannot make it
+unbounded merely by choosing the right preservation behaviour.
 
 A related ordering trap lives one layer up. `AppSettings`'s **`nonisolated static` readers go
 straight to `UserDefaults.standard`**, while the seeded defaults were registered only in its
@@ -264,7 +298,7 @@ Everything was accidentally fine: the directory moves and the marker goes with i
 `AppRelaunch.recordIntentionalExit` **stamps** the marker with a disposition instead of removing
 it — removing it would say "quit cleanly", which is what the quit path means and this is not —
 and `PreviousLaunchOutcome` grows an `.intentional(reason:)` case that restores in full and says
-nothing. The stamp is written inside `discardingState()` rather than at the two reset call sites,
+nothing. The stamp is written inside `PreparedRelaunch.commit` rather than at the reset call sites,
 so a third caller cannot forget it, and immediately before `exit`, because everything between the
 stamp and the exit is a window in which a real crash reports as a deliberate restart.
 
@@ -372,8 +406,13 @@ Both length-prefix the paired host identity before the session id so ids cannot 
 the last host/session route, and keep Native and terminal drafts distinct. A Tailscale/relay URL
 is deliberately absent from that key: both are routes to one paired host. Records containing an
 unsent draft are never pruned automatically; position-only records are bounded to the 250 most
-recent. No continuity archive is synchronized across clients, because merging partial human input
-or moving another person's viewport would turn safety state into collaboration state.
+recent. The iOS archive is also capped at 1 MiB and validates state count, identity, viewport and
+aggregate draft bytes before decode is accepted and before encode is attempted. Every mutation is
+made against a candidate archive, and that candidate becomes visible only after the `UserDefaults`
+replacement reads back identically; a persistence refusal cannot leave the running composer ahead
+of its durable draft. The device-local terminal-keyboard archive follows the same candidate-first,
+bounded rule. No continuity archive is synchronized across clients, because merging partial human
+input or moving another person's viewport would turn safety state into collaboration state.
 
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
@@ -463,6 +502,19 @@ directory. Three decisions carry it:
   does — discarding is the whole point, and a polite quit would undo it. It also spawns a detached
   `sh` that waits before opening the bundle, because `SingleInstanceLock` is an `flock` held for
   the process's lifetime and a copy started too early sees the lock and refuses to launch.
+
+Before `Reset Everything` moves Application Support, `StateManager` explicitly closes and releases
+its cached `ProjectDatabase`. That orders the SQLite checkpoint and releases the `-wal`/`-shm`
+vnodes before the directory changes names; relying on process exit after the move leaves an open
+connection targeting stale paths and is an SQLite API violation. A later access can reopen the
+database, which keeps a failed reset recoverable while the normal successful path exits without
+saving.
+
+The relaunch itself is prepared before the reset's first mutation. `/bin/sh` starts with a private
+pipe as standard input and waits for one commit line; a thrown Keychain, database, preferences or
+filesystem operation closes that pipe without a line and terminates the helper. Only a successful
+reset signals it, stamps the launch as intentional and exits. This makes “can the helper start?” a
+precondition rather than a best-effort epilogue after state has already moved.
 
 The reset is `ConfirmationPrompt.resetAppData`, on the `.alwaysAsks(.irreversible)` branch. Not
 strictly true — the state is kept — but nothing *in the app* brings it back, and Return belongs on

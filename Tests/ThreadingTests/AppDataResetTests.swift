@@ -235,12 +235,43 @@ final class AppDataResetTests: XCTestCase {
 
         XCTAssertEqual(command.first, "-c")
         let script = command[1]
+        XCTAssertTrue(script.contains("read"), "the relauncher can run before reset commits")
         XCTAssertTrue(script.contains("sleep"), "the relauncher does not wait at all")
         XCTAssertTrue(script.contains("/usr/bin/open"))
         XCTAssertEqual(
             command.last,
             "/Applications/T.app",
             "the bundle path is not passed as an argument, so a path with a space would split"
+        )
+    }
+
+    /// The helper is a precondition for mutation, not a best-effort epilogue. Otherwise a
+    /// missing or unlaunchable shell lets Reset Everything move the data, quit the app, and
+    /// simply never open it again.
+    func testResetDoesNothingWhenTheRelauncherCannotBePrepared() {
+        enum PreparationFailure: Error { case unavailable }
+        var resetWasCalled = false
+
+        XCTAssertThrowsError(
+            try AppDataResetFlow.perform(
+                .settings,
+                at: noon,
+                prepareRelaunch: { throw PreparationFailure.unavailable },
+                reset: { _, _ in
+                    resetWasCalled = true
+                    throw PreparationFailure.unavailable
+                }
+            )
+        )
+        XCTAssertFalse(resetWasCalled, "the reset began before relaunch was proved possible")
+    }
+
+    func testAnUnlaunchableHelperIsReported() {
+        XCTAssertThrowsError(
+            try AppRelaunch.prepare(
+                for: URL(fileURLWithPath: "/Applications/T.app"),
+                executableURL: root.appendingPathComponent("missing-shell")
+            )
         )
     }
 

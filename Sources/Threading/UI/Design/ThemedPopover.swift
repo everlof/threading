@@ -35,16 +35,18 @@ final class ThemedPopover {
     /// dropped on close: nothing here extends a popover's life.
     private static let shown = NSHashTable<ThemedPopover>.weakObjects()
 
-    // `nonisolated(unsafe)` so deinit can hand a never-closed panel to `detach`; every other
-    // access stays on the main actor.
-    nonisolated(unsafe) private var panel: ThemedPopoverPanel?
+    private let panelOwner = ThemedPopoverPanelOwner()
+    private var panel: ThemedPopoverPanel? {
+        get { panelOwner.panel }
+        set { panelOwner.panel = newValue }
+    }
     private weak var anchorView: NSView?
     private var anchorRect: NSRect = .zero
     private var preferredEdge: NSRectEdge = .maxY
     private weak var presentingWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
-    nonisolated(unsafe) private var eventMonitor: Any?
-    nonisolated(unsafe) private var observations: [NSObjectProtocol] = []
+    private let eventMonitor = LocalEventMonitor()
+    private let windowEvents = AppEventObservations()
     private var preferredSizeObservation: NSKeyValueObservation?
     private let appEvents = AppEventObservations()
 
@@ -178,45 +180,32 @@ final class ThemedPopover {
 
     private func installObservation() {
         guard let window = presentingWindow else { return }
-        let center = NotificationCenter.default
+        windowEvents.removeAll()
         let repositionNames: [Notification.Name] = [
             NSWindow.didMoveNotification,
             NSWindow.didResizeNotification,
             NSWindow.didChangeScreenNotification
         ]
-        observations = repositionNames.map { name in
-            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reposition() }
-            }
+        for name in repositionNames {
+            windowEvents.observe(name, object: window) { [weak self] in self?.reposition() }
         }
-        observations.append(center.addObserver(
-            forName: NSWindow.willCloseNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
-        })
-        observations.append(center.addObserver(
-            forName: NSApplication.didResignActiveNotification,
-            object: NSApp,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.behavior != .applicationDefined else { return }
-                self?.close()
-            }
-        })
+        windowEvents.observe(NSWindow.willCloseNotification, object: window) { [weak self] in
+            self?.close()
+        }
+        windowEvents.observe(NSApplication.didResignActiveNotification, object: NSApp) {
+            [weak self] in
+            guard self?.behavior != .applicationDefined else { return }
+            self?.close()
+        }
     }
 
     private func removeObservation() {
-        let center = NotificationCenter.default
-        observations.forEach(center.removeObserver)
-        observations.removeAll()
+        windowEvents.removeAll()
     }
 
     private func installEventMonitor() {
         removeEventMonitor()
-        eventMonitor = NSEvent.addLocalMonitorForEvents(
+        eventMonitor.install(
             matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             guard let self, self.isShown else { return event }
@@ -247,35 +236,41 @@ final class ThemedPopover {
     }
 
     private func removeEventMonitor() {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = nil
+        eventMonitor.remove()
     }
+
+}
+
+/// Owns the panel past the main-actor presenter's lifetime. A parent window retains its child
+/// windows, so an owner dropped without `close()` must still detach the panel or it remains visible
+/// after the monitor that could dismiss it is gone. Uniquely owned storage makes that exceptional
+/// deinit handoff explicit without exposing the presenter's mutable property as unsafe.
+private final class ThemedPopoverPanelOwner: @unchecked Sendable {
+    var panel: ThemedPopoverPanel?
 
     deinit {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        observations.forEach(NotificationCenter.default.removeObserver)
-        // An owner that drops its last reference without close() must not strand the panel:
-        // the parent window retains its child windows, so an unclosed panel stays on screen
-        // with the monitors that could dismiss it already gone.
-        if let panel {
-            self.panel = nil
-            Self.detach(ThemedPopoverPanelHandoff(panel))
-        }
-    }
-
-    private nonisolated static func detach(_ handoff: ThemedPopoverPanelHandoff) {
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                let panel = handoff.panel
-                panel.parent?.removeChildWindow(panel)
-                panel.orderOut(nil)
-                panel.contentViewController = nil
+        guard let panel else { return }
+        self.panel = nil
+        let handoff = ThemedPopoverPanelHandoff(panel)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { Self.detach(handoff) }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { Self.detach(handoff) }
             }
         }
     }
+
+    @MainActor
+    private static func detach(_ handoff: ThemedPopoverPanelHandoff) {
+        let panel = handoff.panel
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        panel.contentViewController = nil
+    }
 }
 
-/// Carries the panel across the deinit-to-main hop; see `ThemedPopover.detach`.
+/// Carries the panel across `ThemedPopoverPanelOwner`'s deinit-to-main hop.
 private final class ThemedPopoverPanelHandoff: @unchecked Sendable {
     let panel: ThemedPopoverPanel
     init(_ panel: ThemedPopoverPanel) { self.panel = panel }

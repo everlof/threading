@@ -160,7 +160,7 @@ enum AppDataReset {
 
     /// Renames the directory into the backup. Files inside it that are still open — the SQLite
     /// store, the instance lock — follow the move, which is why the caller must not let the app
-    /// shut down normally afterwards. See `AppRelaunch.discardingState`.
+    /// shut down normally afterwards. See `AppRelaunch.PreparedRelaunch.commit`.
     private static func moveAsideSupportDirectory(
         _ directory: URL,
         into backup: URL,

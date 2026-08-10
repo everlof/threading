@@ -538,7 +538,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         prefetchMarkdown()
     }
 
-    deinit {
+    isolated deinit {
         if let contentSizeObserver {
             NotificationCenter.default.removeObserver(contentSizeObserver)
         }

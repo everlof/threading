@@ -68,7 +68,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
             .appendingPathComponent("threading-drawer-seam-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let session = try XCTUnwrap(
             store.addSession(to: project.id, kind: .claude, usesNativeUI: true, title: "Seam")
         )
@@ -99,7 +99,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 ])
                 container.setCurrentSessionForTesting(session.id)
                 container.attachConversation(
-                    ConversationViewController(agentSession: session, project: project)
+                    requireConversationViewController(agentSession: session, project: project)
                 )
                 container.openShellDrawer()
                 container.view.layoutSubtreeIfNeeded()

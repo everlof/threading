@@ -33,7 +33,11 @@ enum OnePasswordCLI {
 
         static let scheme = "op://"
 
-        /// How long a terminated `op` is given to close the pipe before its reader is abandoned.
+        /// A credential field is text, not an attachment. Refuse a surprising response instead
+        /// of retaining an unbounded secret in memory.
+        static let maximumOutputBytes = 1024 * 1024
+
+        /// How long a terminated process group gets before the shared runner escalates to KILL.
         static let terminationGrace: TimeInterval = 2
     }
 
@@ -68,8 +72,8 @@ enum OnePasswordCLI {
     /// raise 1Password's own authorization prompt, and probing must never make a window appear
     /// for a settings page the user is merely looking at. An unauthorized `op` fails at fill time
     /// with its own message, which is the moment the user expects to be asked.
-    nonisolated(unsafe) static let isInstalled: Bool = {
-        guard let output = run(["--version"], timeout: 5) else { return false }
+    static let isInstalled: Bool = {
+        guard case .value(let output) = run(["--version"], timeout: 5) else { return false }
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }()
 
@@ -101,21 +105,32 @@ enum OnePasswordCLI {
         guard isInstalled else { throw CLIError.notInstalled }
         let item = reference.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let password = read(field: Defaults.passwordField, of: item) else {
+        let password: String
+        switch read(field: Defaults.passwordField, of: item) {
+        case .value(let value):
+            password = value
+        case .timedOut:
+            throw CLIError.timedOut
+        case .failed:
             throw CLIError.readFailed(L10n.string("no password could be read for that item"))
         }
         guard !password.isEmpty else { throw CLIError.emptyPassword }
 
-        let username = read(field: Defaults.usernameField, of: item)
+        let username: String?
+        if case .value(let value) = read(field: Defaults.usernameField, of: item) {
+            username = value
+        } else {
+            username = nil
+        }
         return BrowserCredentialSecret(
             username: username?.isEmpty == false ? username : nil,
             password: password
         )
     }
 
-    private static func read(field: String, of item: String) -> String? {
-        run(["read", "\(item)/\(field)"], timeout: Defaults.timeout)?
-            .trimmingCharacters(in: .newlines)
+    private static func read(field: String, of item: String) -> CommandResult {
+        run(["read", "\(item)/\(field)"], timeout: Defaults.timeout)
+            .map { $0.trimmingCharacters(in: .newlines) }
     }
 
     // MARK: - Process
@@ -142,75 +157,41 @@ enum OnePasswordCLI {
     /// Standard error goes to `nullDevice` and nothing here is logged. `op` writes the value to
     /// stdout, and a diagnostic that echoed a failing command would be the one place a password
     /// could reach a log file.
-    private static func run(_ arguments: [String], timeout: TimeInterval) -> String? {
-        let quoted = arguments
-            .map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-            .joined(separator: " ")
+    private static func run(_ arguments: [String], timeout: TimeInterval) -> CommandResult {
+        var command = ShellCommand(word: "exec")
+        command.append(word: "op")
+        arguments.forEach { command.append(word: $0) }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: loginShell)
-        // `exec`, so the process this holds *is* `op` rather than a shell that spawned it.
-        // Without it `terminate()` kills the shell and leaves `op` running with the write end of
-        // the pipe still open — which is both an orphaned process sitting on a Touch ID prompt
-        // and a reader that never sees end-of-file.
-        process.arguments = ["-l", "-c", "exec op \(quoted)"]
+        guard let result = try? BoundedChildProcess.run(
+            executable: loginShell,
+            arguments: ["-l", "-c", command.source],
+            timeout: timeout,
+            terminationGrace: Defaults.terminationGrace,
+            maximumOutputBytes: Defaults.maximumOutputBytes,
+            output: .standardOutput
+        ) else { return .failed }
 
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
+        switch result.termination {
+        case .timedOut:
+            return .timedOut
+        case .exited(0) where !result.outputWasTruncated:
+            return .value(String(decoding: result.output, as: UTF8.self))
+        case .exited:
+            return .failed
         }
-
-        // Draining has to happen *concurrently with* the timeout, not before it.
-        //
-        // A pipe nothing drains fills and deadlocks the child, so the read cannot simply wait for
-        // exit. But `readDataToEndOfFile` blocks until `op` closes stdout — which is to say until
-        // it exits — so reading first made the deadline below unreachable: an `op` sitting on an
-        // unanswered authorization prompt hung the agent's call forever, which is the one outcome
-        // a timeout existed to prevent.
-        let collected = Collected()
-        let finished = DispatchSemaphore(value: 0)
-        let handle = output.fileHandleForReading
-        DispatchQueue.global(qos: .userInitiated).async {
-            collected.set(handle.readDataToEndOfFile())
-            finished.signal()
-        }
-
-        guard finished.wait(timeout: .now() + timeout) == .success else {
-            process.terminate()
-            // Briefly, so the pipe closes and the reader returns rather than being abandoned
-            // mid-read. Its result is discarded either way: a timed-out read is not an answer.
-            _ = finished.wait(timeout: .now() + Defaults.terminationGrace)
-            return nil
-        }
-
-        process.waitUntilExit()
-        guard process.terminationStatus == 0, let data = collected.take() else { return nil }
-        return String(decoding: data, as: UTF8.self)
     }
 
-    /// Carries the drained bytes back from the reader thread.
-    ///
-    /// A lock rather than a queue hop because exactly two threads touch it once each, and the
-    /// timeout path has to be able to walk away from a reader that is still blocked.
-    private final class Collected: @unchecked Sendable {
-        private let lock = NSLock()
-        private var data: Data?
+    private enum CommandResult {
+        case value(String)
+        case timedOut
+        case failed
 
-        func set(_ value: Data) {
-            lock.lock()
-            data = value
-            lock.unlock()
-        }
-
-        func take() -> Data? {
-            lock.lock()
-            defer { lock.unlock() }
-            return data
+        func map(_ transform: (String) -> String) -> CommandResult {
+            switch self {
+            case .value(let value): return .value(transform(value))
+            case .timedOut: return .timedOut
+            case .failed: return .failed
+            }
         }
     }
 }

@@ -303,8 +303,14 @@ final class CompareViewController: NSViewController {
             )
         case (.image, .image):
             return .images(
-                old: try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
-                new: try? Data(contentsOf: URL(fileURLWithPath: newPath))
+                old: try? BoundedFileReader.read(
+                    URL(fileURLWithPath: oldPath),
+                    maximumBytes: CompareDefaults.maximumBytes
+                ),
+                new: try? BoundedFileReader.read(
+                    URL(fileURLWithPath: newPath),
+                    maximumBytes: CompareDefaults.maximumBytes
+                )
             )
         case (.text, .text):
             return textComparison(oldPath: oldPath, newPath: newPath)
@@ -595,7 +601,10 @@ final class CompareViewController: NSViewController {
     /// The source file itself, for the archive. A side that has since been deleted is simply
     /// absent — the diff beside it is still the comparison that was made.
     nonisolated private static func textSide(title: String, path: String) -> CompareExport.TextSide? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        guard let data = try? BoundedFileReader.read(
+            URL(fileURLWithPath: path),
+            maximumBytes: CompareDefaults.maximumBytes
+        ) else { return nil }
         return CompareExport.TextSide(
             title: title,
             fileName: (path as NSString).lastPathComponent,

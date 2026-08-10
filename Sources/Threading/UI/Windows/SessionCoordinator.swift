@@ -87,7 +87,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     private func adoptProject(at url: URL) {
-        let project = ProjectStore.shared.addProject(folderURL: url)
+        guard let project = ProjectStore.shared.addProject(folderURL: url) else { return }
         sidebar.reload()
         sidebar.select(projectID: project.id)
     }
@@ -321,7 +321,6 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let wasRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
         let wasShowing = sessionID == container.currentSessionID
 
-        container.closeTerminal(for: sessionID)
         ProviderArchiveSync.shared.setArchived(true, for: sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -544,8 +543,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         }
 
+        let result = ProjectStore.shared.setUsesNativeUI(usesNative, for: sessionID)
+        guard result == .applied else { return }
+
+        // The old process remains authoritative until the surface choice is durable. Stopping it
+        // first turns a refused SQLite write into a dead session whose stored surface never moved.
         AgentRuntime.shared.discard(sessionID: sessionID)
-        ProjectStore.shared.setUsesNativeUI(usesNative, for: sessionID)
         container.reopenIfShowing(sessionID: sessionID)
         sidebar.reload()
         onPresentationChanged()
@@ -586,7 +589,6 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         }
 
-        AgentRuntime.shared.discard(sessionID: sessionID)
         ConversationContinuation.create(from: sessionID, to: account) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -890,7 +892,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         didCreateWorktreeAt url: URL,
         branch: String
     ) {
-        let project = ProjectStore.shared.addProject(folderURL: url)
+        guard let project = ProjectStore.shared.addProject(folderURL: url) else { return }
         sidebar.reload()
         container.showComposer(projectID: project.id)
     }
@@ -962,7 +964,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         failure: ProviderArchiveFailure,
         wasRunning: Bool
     ) -> ToastRequest {
-        let stopped = wasRunning ? L10n.string("The agent stopped.") : nil
+        let stopped = wasRunning && failure.stoppedAgentBeforeFailure
+            ? L10n.string("The agent stopped.")
+            : nil
         return ToastRequest(
             message: L10n.format("Couldn’t archive “%@”", session.displayTitle),
             detail: [failure.localizedDescription, stopped].compactMap { $0 }.joined(separator: " "),

@@ -505,11 +505,21 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
         // A rename asks for no accelerated affirmative, so `.immediate` cannot arrive — and if
         // one were ever added, the name it carries is still the name.
+        let result: ProjectMutationResult
         switch TextPromptAlert.ask(request) {
         case .text(let name), .immediate(let name):
-            ProjectStore.shared.renameSession(id: sessionID, to: name)
-        case .cleared: ProjectStore.shared.renameSession(id: sessionID, to: "")
+            result = ProjectStore.shared.renameSession(id: sessionID, to: name)
+        case .cleared:
+            result = ProjectStore.shared.renameSession(id: sessionID, to: "")
         case nil: return
+        }
+        guard result.succeeded else {
+            let alert = ThemedAlert()
+            alert.messageText = L10n.string("Rename Session")
+            alert.informativeText = L10n.string("The project data could not be saved.")
+            alert.alertStyle = .informational
+            alert.runModal()
+            return
         }
     }
 

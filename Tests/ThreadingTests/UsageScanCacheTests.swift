@@ -59,6 +59,42 @@ final class UsageScanCacheTests: XCTestCase {
         XCTAssertEqual(changed.records.map(\.identity), ["after"])
     }
 
+    func testOversizedCacheEntryIsAMissAndIsReplacedWithinTheBound() throws {
+        let cacheDirectory = directory.appendingPathComponent("cache")
+        let cache = UsageScanCache(directory: cacheDirectory)
+        cache.beginScan()
+        _ = cache.records(for: source, parserID: "fixture-v1") {
+            [makeRecord(identity: "before")]
+        }
+        cache.finishScan()
+
+        let entry = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(
+                at: cacheDirectory,
+                includingPropertiesForKeys: nil
+            ).first
+        )
+        let handle = try FileHandle(forWritingTo: entry)
+        try handle.truncate(atOffset: UInt64(UsageScanCacheDefaults.maximumEntryBytes + 1))
+        try handle.close()
+
+        var parses = 0
+        cache.beginScan()
+        let result = cache.records(for: source, parserID: "fixture-v1") {
+            parses += 1
+            return [makeRecord(identity: "reparsed")]
+        }
+        cache.finishScan()
+
+        XCTAssertFalse(result.wasCacheHit)
+        XCTAssertEqual(parses, 1)
+        XCTAssertEqual(result.records.map(\.identity), ["reparsed"])
+        XCTAssertLessThanOrEqual(
+            try entry.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? .max,
+            UsageScanCacheDefaults.maximumEntryBytes
+        )
+    }
+
     func testExportRevisionAvoidsRelaunchingDormantSession() throws {
         let cache = UsageScanCache(directory: directory.appendingPathComponent("cache"))
         let revision = Date(timeIntervalSince1970: 1_000)

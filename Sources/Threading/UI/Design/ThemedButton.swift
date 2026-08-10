@@ -295,7 +295,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     /// The release, watched at the application rather than waited for at this view — AppKit
     /// delivers no mouse-up at all to a view detached between the two. See `ThemedIconButton`.
-    nonisolated(unsafe) private var releaseWatch: Any?
+    private let releaseWatch = LocalEventMonitor()
 
     // MARK: - Initialization
 
@@ -413,18 +413,15 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         guard let window else { return }
         pressTarget = window.convertToScreen(convert(bounds, to: nil))
 
-        releaseWatch = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]
-        ) { [weak self] event in
+        releaseWatch.install(matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]) {
+            [weak self] event in
             self?.track(event)
             return event
         }
     }
 
     private func endWatchingForRelease() {
-        guard let releaseWatch else { return }
-        NSEvent.removeMonitor(releaseWatch)
-        self.releaseWatch = nil
+        releaseWatch.remove()
     }
 
     /// Where an event happened, in screen space — the one frame of reference that outlives the
@@ -457,10 +454,6 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         endWatchingForRelease()
         guard shouldFire, isEnabled else { return }
         sendAction(sentAction, to: sentTarget)
-    }
-
-    deinit {
-        if let releaseWatch { NSEvent.removeMonitor(releaseWatch) }
     }
 
     /// A drag out of the button releases the press without firing, which is what AppKit does and

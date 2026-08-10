@@ -39,7 +39,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
 
     private var authorization: UNAuthorizationStatus?
-    private var poll: Timer?
+    private let poll = MainRunLoopTimer()
     private let appEvents = AppEventObservations()
 
     /// Injectable so hosted tests can drive every state without the real notification center,
@@ -72,22 +72,25 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
     func pageWillAppear() {
         refreshAuthorization()
 
-        poll = Timer.scheduledTimer(
+        poll.install(Timer.scheduledTimer(
             withTimeInterval: Defaults.pollInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshAuthorization()
             }
-        }
+        })
+        // The flow normally balances appear/disappear, but re-entering this edge must not
+        // multiply the same observer if a future container retries presentation.
+        appEvents.removeAll()
         appEvents.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
             self?.refreshAuthorization()
         }
     }
 
     func pageWillDisappear() {
-        poll?.invalidate()
-        poll = nil
+        poll.invalidate()
+        appEvents.removeAll()
     }
 
     private func setupViews() {

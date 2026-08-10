@@ -391,6 +391,32 @@ final class TranscriptReplayTests: XCTestCase {
         XCTAssertEqual(conversation.rows.last, .assistant(markdown: "The adapter is correct."))
     }
 
+    func testClaudeSubagentIndexRefusesOversizedMetadataAndKeepsLegacyFallback() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let metadata = directory.appendingPathComponent("agent-bounded.meta.json")
+        XCTAssertTrue(FileManager.default.createFile(atPath: metadata.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: metadata)
+        try handle.truncate(
+            atOffset: UInt64(ClaudeSubagentHistoryDefaults.maximumMetadataBytes + 1)
+        )
+        try handle.close()
+        try write(
+            #"{"type":"assistant","agentId":"bounded","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"stop_reason":"end_turn"}}"#,
+            to: directory.appendingPathComponent("agent-bounded.jsonl")
+        )
+
+        let events = ClaudeSubagentTranscriptReplay.index(
+            rootThreadID: "root",
+            directory: directory
+        )
+        guard case .discovered(let descriptor)? = events.first else {
+            return XCTFail("The transcript should remain discoverable without its metadata")
+        }
+        XCTAssertEqual(descriptor.threadID, "bounded")
+        XCTAssertNil(descriptor.nickname)
+    }
+
     func testClaudeSubagentIndexMarksUnfinishedTranscriptStopped() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

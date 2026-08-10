@@ -448,10 +448,12 @@ These were measured rather than assumed, each having first been wrong:
   an `NSTextField` does — their compression resistance was charging the *window* 259pt of minimum
   width for text both line-break modes were already willing to truncate, hidden until then behind
   the strip's 750 hugging winning that tie. Both now sit below `.fittingSizeCompression`.
-- **`NSSplitView.setPosition` does nothing** under `NSSplitViewController`, which lays its
-  items out with Auto Layout. `setPosition(915, ofDividerAt: 1)` left the pane at its 260pt
-  minimum. Width is set with a temporary constraint, released once honoured so the divider
-  stays draggable.
+- **`NSSplitView.setPosition` does work under `NSSplitViewController`, but divider indices are
+  indices among items, not among the split view's private divider subviews.** The earlier
+  `subviews.count`-derived index addressed the wrong divider and looked like a rejected move.
+  `applyDisplayPaneWidth` derives the trailing divider from `splitViewItems` and moves it inside
+  the uncollapse geometry group, so the restored width becomes the split view's own held answer
+  without a second animation.
 - **`NSImageView`'s intrinsic content size is the image's own size**, so left alone it drives
   the split view and a 900px image opens a 900pt panel. Flooring both content priorities stopped
   that from *winning* but left the size in the layout, and still answering for `fittingSize` —
@@ -984,6 +986,11 @@ Settings' per-agent **attachment detection** toggle gates *scanning* only. A dec
 not detection, so turning it off does not hide the images you attach or the ones the agent shows
 in the panel — which the empty state now says, because an empty pane that blames a setting for
 something the setting does not control is worse than an empty pane.
+
+The General page builds those toggles from `AgentKind.allCases`, the same closed set used by the
+stored disabled set and scanner consumers. This is load-bearing because the empty pane directs a
+user to that page by runtime name: a runtime with a setting but no row would give a precise route
+to a control that did not exist.
 
 ### Acting on a row
 

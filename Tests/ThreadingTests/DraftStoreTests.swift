@@ -81,6 +81,27 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(makeStore().draft(for: projectID), "  indented, and unfinished ")
     }
 
+    func testDraftMemoryDoesNotClaimAWriteTheFileSystemRefused() {
+        let projectID = ProjectID()
+        let store = makeStore(fileManager: RefusingDraftFileManager())
+
+        store.setDraft("not durable", for: projectID)
+
+        XCTAssertEqual(store.draft(for: projectID), "")
+        XCTAssertEqual(makeStore().draft(for: projectID), "")
+    }
+
+    func testDraftClearFailsClosedWhenTheFileCannotBeRewritten() {
+        let projectID = ProjectID()
+        makeStore().setDraft("still on disk", for: projectID)
+        let store = makeStore(fileManager: RefusingDraftFileManager())
+
+        store.clear(for: projectID)
+
+        XCTAssertEqual(store.draft(for: projectID), "still on disk")
+        XCTAssertEqual(makeStore().draft(for: projectID), "still on disk")
+    }
+
     func testUnreadableDraftFileIsPreservedBeforeNewTypingIsSaved() throws {
         let original = Data("{ damaged".utf8)
         let liveURL = testDirectory.appendingPathComponent(DraftDefaults.fileName)
@@ -159,13 +180,39 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(store.state(for: sessionID).conversationViewportProgress, 0)
     }
 
-    // MARK: - Helpers
+    func testSessionContinuityMemoryDoesNotAdvancePastARefusedWrite() {
+        let sessionID = SessionID()
+        let store = makeContinuityStore(fileManager: RefusingDraftFileManager())
 
-    private func makeStore() -> DraftStore {
-        DraftStore(directory: testDirectory)
+        store.setConversationDraft("not durable", for: sessionID)
+
+        let standing = store.state(for: sessionID)
+        let reloaded = makeContinuityStore().state(for: sessionID)
+        XCTAssertEqual(standing.conversationDraft, "")
+        XCTAssertNil(standing.conversationViewportProgress)
+        XCTAssertEqual(reloaded.conversationDraft, "")
+        XCTAssertNil(reloaded.conversationViewportProgress)
     }
 
-    private func makeContinuityStore() -> SessionContinuityStore {
-        SessionContinuityStore(directory: testDirectory)
+    // MARK: - Helpers
+
+    private func makeStore(fileManager: FileManager = .default) -> DraftStore {
+        DraftStore(directory: testDirectory, fileManager: fileManager)
+    }
+
+    private func makeContinuityStore(fileManager: FileManager = .default) -> SessionContinuityStore {
+        SessionContinuityStore(directory: testDirectory, fileManager: fileManager)
+    }
+}
+
+/// `RecoverableFileStore` creates the parent before every atomic save. Refusing that operation
+/// exercises the store's durable commit edge without relying on host-specific permissions.
+private final class RefusingDraftFileManager: FileManager, @unchecked Sendable {
+    override func createDirectory(
+        at url: URL,
+        withIntermediateDirectories createIntermediates: Bool,
+        attributes: [FileAttributeKey: Any]? = nil
+    ) throws {
+        throw CocoaError(.fileWriteNoPermission)
     }
 }

@@ -126,6 +126,18 @@ public enum PublicIssueReportPolicy {
         return ((try? JSONEncoder().encode(submission).count) ?? .max) <= maximumRequestBytes
     }
 
+    /// Decodes one durable outbox item through the same byte budget the endpoint accepts.
+    public static func submission(at url: URL) -> PublicIssueReportSubmissionDTO? {
+        guard let data = try? RemoteBoundedFileReader.read(
+            url,
+            maximumBytes: maximumRequestBytes
+        ), let submission = try? JSONDecoder().decode(
+            PublicIssueReportSubmissionDTO.self,
+            from: data
+        ), accepts(submission) else { return nil }
+        return submission
+    }
+
     private static func diagnosticsAreBounded(
         _ diagnostics: PublicIssueReportDiagnosticsDTO
     ) -> Bool {

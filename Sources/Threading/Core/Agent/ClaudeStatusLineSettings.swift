@@ -66,8 +66,10 @@ enum ClaudeStatusLineSettings {
     // MARK: - Private Methods
 
     private static func statusLine(inSettingsAt url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url),
-              data.count <= ClaudeSettingsDefaults.maxSettingsBytes,
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: ClaudeSettingsDefaults.maxSettingsBytes
+        ),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let statusLine = json[ClaudeSettingsDefaults.statusLineKey] as? [String: Any],
               statusLine[ClaudeSettingsDefaults.typeKey] as? String == ClaudeSettingsDefaults.commandType,

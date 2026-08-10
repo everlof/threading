@@ -53,7 +53,7 @@ final class ShellDrawerViewController: NSViewController {
     /// browser tab's `onPageChange` is the same seam for the same reason.
     var onTitleChange: (() -> Void)?
 
-    private var titleTimer: Timer?
+    private let titleTimer = MainRunLoopTimer()
 
     // MARK: - Initialization
 
@@ -149,8 +149,7 @@ final class ShellDrawerViewController: NSViewController {
 
     func terminate() {
         guard hasStarted else { return }
-        titleTimer?.invalidate()
-        titleTimer = nil
+        titleTimer.invalidate()
         session.terminate()
         hasStarted = false
     }
@@ -175,16 +174,15 @@ final class ShellDrawerViewController: NSViewController {
     /// otherwise told about, so the name has to be asked for rather than waited on. The
     /// standalone terminal polls on the same interval for the same reason.
     private func startTitleTracking() {
-        titleTimer?.invalidate()
         refreshTitle()
-        titleTimer = Timer.scheduledTimer(
+        titleTimer.install(Timer.scheduledTimer(
             withTimeInterval: ProjectTerminalDefaults.directoryRefreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshTitle()
             }
-        }
+        })
     }
 
     private func refreshTitle() {
@@ -236,8 +234,7 @@ extension ShellDrawerViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
-        titleTimer?.invalidate()
-        titleTimer = nil
+        titleTimer.invalidate()
     }
 }
 

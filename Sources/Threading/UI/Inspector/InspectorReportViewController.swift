@@ -202,16 +202,15 @@ final class InspectorReportViewController: NSViewController {
         let scrollView = ThemedTextView.scrolling()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        if let textView = scrollView.documentView as? ThemedTextView {
-            textView.string = details
-            textView.isEditable = false
-            textView.isSelectable = true
-            textView.applyFont(.code())
-            textView.textContainerInset = NSSize(
-                width: Design.Spacing.small,
-                height: Design.Spacing.small
-            )
-        }
+        let textView = scrollView.textView
+        textView.string = details
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.applyFont(.code())
+        textView.textContainerInset = NSSize(
+            width: Design.Spacing.small,
+            height: Design.Spacing.small
+        )
 
         let box = NSView()
         box.translatesAutoresizingMaskIntoConstraints = false

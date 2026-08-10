@@ -213,7 +213,10 @@ enum CodexUsageFetcher {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentAccountDefaults.codexAuthMarker)
 
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: CodexUsageDefaults.authMaxBytes
+        ) else {
             throw UsageFetchError.noCredential("The account's auth.json could not be read.")
         }
 
@@ -233,6 +236,8 @@ enum CodexUsageFetcher {
 enum CodexUsageDefaults {
     static let usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
     static let resetCreditsEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+    /// A credential envelope contains two JWTs and account metadata, not an arbitrary document.
+    static let authMaxBytes = 64 * 1024
 
     /// The backend gates on known clients; this is the value the Codex app itself sends.
     static let originator = "Codex Desktop"

@@ -451,6 +451,11 @@ enum MCPDefaults {
 
     /// Refused rather than read into memory, since the panel shows one image at a time.
     static let maximumImageBytes = 64 * 1024 * 1024
+    /// Compressed bytes do not bound decoded memory. These still admit unusually long browser
+    /// screenshots while refusing dimensions that would allocate hundreds of megabytes or
+    /// overflow a decoder's row arithmetic.
+    static let maximumImagePixelDimension = 32_768
+    static let maximumImagePixelCount = 80_000_000
 
     /// Well under `maximumRequestBytes`, so an oversized document is refused with an
     /// explanation the agent can act on rather than a transport-level error it cannot.
@@ -578,6 +583,8 @@ enum OpenCodeDiscoveryDefaults {
     static let sessionListLimit = 20
     static let pollInterval: TimeInterval = 0.5
     static let maxAttempts = 20
+    static let commandTimeout: TimeInterval = 5
+    static let maximumSessionListBytes = 512 * 1024
 
     /// OpenCode records creation timestamps at millisecond precision. Swift's launch timestamp
     /// has finer precision and may therefore compare fractionally later even when both reads
@@ -591,6 +598,8 @@ enum GrokDiscoveryDefaults {
     static let sessionListLimit = 50
     static let pollInterval: TimeInterval = 0.5
     static let maxAttempts = 20
+    static let commandTimeout: TimeInterval = 5
+    static let maximumSessionListBytes = 512 * 1024
 }
 
 // MARK: - Terminal Padding
@@ -842,12 +851,19 @@ final class AppEventObservations {
     /// the view that cared about it rather than through a hand-held token.
     func observe(
         _ name: Notification.Name,
+        object: Any? = nil,
         using handler: @escaping @MainActor @Sendable () -> Void
     ) {
-        let token = storage.center.addObserver(forName: name, object: nil, queue: .main) { _ in
+        let token = storage.center.addObserver(forName: name, object: object, queue: .main) { _ in
             MainActor.assumeIsolated { handler() }
         }
         storage.tokens.append(token)
+    }
+
+    /// Ends one presentation generation while leaving the owner reusable for the next. Popovers
+    /// and completion panels observe a particular window only while they are open.
+    func removeAll() {
+        storage.removeAll()
     }
 }
 
@@ -862,9 +878,120 @@ private final class AppEventObservationStorage: @unchecked Sendable {
         self.center = center
     }
 
+    func removeAll() {
+        let removed = tokens
+        tokens.removeAll()
+        removed.forEach(center.removeObserver)
+    }
+
     deinit {
         tokens.forEach(center.removeObserver)
     }
+}
+
+/// Owns one application-local event monitor and removes it exactly once.
+///
+/// AppKit exposes monitor tokens as `Any`, which is not Sendable. Storing that value directly on
+/// a main-actor view made every deinitializer reach for `nonisolated(unsafe)`. The owner below is
+/// main-actor confined during use; its private Sendable storage is uniquely owned at teardown and
+/// hands an opaque token back to the main queue if destruction ever arrives elsewhere.
+@MainActor
+final class LocalEventMonitor {
+    private let storage = LocalEventMonitorStorage()
+
+    var isInstalled: Bool { storage.token != nil }
+
+    func install(
+        matching mask: NSEvent.EventTypeMask,
+        handler: @escaping (NSEvent) -> NSEvent?
+    ) {
+        remove()
+        guard let token = NSEvent.addLocalMonitorForEvents(matching: mask, handler: handler) else {
+            return
+        }
+        storage.token = LocalEventMonitorToken(token)
+    }
+
+    func remove() {
+        guard let token = storage.token else { return }
+        storage.token = nil
+        NSEvent.removeMonitor(token.value)
+    }
+}
+
+private final class LocalEventMonitorStorage: @unchecked Sendable {
+    var token: LocalEventMonitorToken?
+
+    deinit {
+        guard let token else { return }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                NSEvent.removeMonitor(token.value)
+            }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    NSEvent.removeMonitor(token.value)
+                }
+            }
+        }
+    }
+}
+
+/// The opaque AppKit token crosses only the exceptional deinit-to-main handoff above.
+private final class LocalEventMonitorToken: @unchecked Sendable {
+    let value: Any
+    init(_ value: Any) { self.value = value }
+}
+
+/// Owns one main-run-loop timer without making every AppKit owner expose actor-isolated state
+/// to `deinit` through `nonisolated(unsafe)`.
+///
+/// Callers still choose the timer's cadence and run-loop mode. This type owns only the lifecycle:
+/// installing a replacement invalidates the old generation, explicit shutdown is idempotent, and
+/// an owner dropped without shutdown hands its last timer back to the main queue for invalidation.
+@MainActor
+final class MainRunLoopTimer {
+    private let storage = MainRunLoopTimerStorage()
+
+    var isInstalled: Bool { storage.timer != nil }
+
+    func install(_ timer: Timer) {
+        invalidate()
+        storage.timer = MainRunLoopTimerToken(timer)
+    }
+
+    func invalidate() {
+        guard let timer = storage.timer else { return }
+        storage.timer = nil
+        timer.value.invalidate()
+    }
+}
+
+private final class MainRunLoopTimerStorage: @unchecked Sendable {
+    var timer: MainRunLoopTimerToken?
+
+    deinit {
+        guard let timer else { return }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                timer.value.invalidate()
+            }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    timer.value.invalidate()
+                }
+            }
+        }
+    }
+}
+
+/// `Timer` is run-loop-bound rather than Sendable; this token crosses only the exceptional
+/// deinit-to-main handoff above.
+private final class MainRunLoopTimerToken: @unchecked Sendable {
+    let value: Timer
+    init(_ value: Timer) { self.value = value }
 }
 
 struct TerminalSessionDidEnd: AppEvent {

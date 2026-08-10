@@ -111,6 +111,10 @@ struct AgentModelOption: Equatable {
 /// better source than either a hard-coded list or the one model currently named in config:
 /// it carries visibility, display names, and which models actually offer Fast mode.
 enum AgentModels {
+    /// Provider-owned cache/config files are local input, not trusted allocation sizes. The
+    /// catalog is the only genuinely large document; scalar settings should stay tiny.
+    private static let maximumProviderSettingsBytes = 1024 * 1024
+    private static let maximumProviderCatalogBytes = 16 * 1024 * 1024
 
     // MARK: - Public Methods
 
@@ -571,7 +575,10 @@ enum AgentModels {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeStateFile)
 
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: maximumProviderSettingsBytes
+        ),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
@@ -587,7 +594,10 @@ enum AgentModels {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeSettingsFile)
 
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: maximumProviderSettingsBytes
+        ),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let value = json[key] as? String,
               !value.isEmpty
@@ -613,7 +623,10 @@ enum AgentModels {
         let configURL = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.codexConfigFile)
 
-        guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+        guard let data = try? BoundedFileReader.read(
+            configURL,
+            maximumBytes: maximumProviderSettingsBytes
+        ), let contents = String(data: data, encoding: .utf8) else { return nil }
 
         for line in contents.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -645,7 +658,10 @@ enum AgentModels {
 
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.codexModelsCacheFile)
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: maximumProviderCatalogBytes
+        ),
               let cache = try? JSONDecoder().decode(CodexModelsCache.self, from: data)
         else { return [] }
 

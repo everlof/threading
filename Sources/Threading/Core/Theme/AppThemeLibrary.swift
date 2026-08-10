@@ -1,18 +1,23 @@
 import AppKit
+import os
 
 // MARK: - Current Palette
 
 /// The palette every themed colour reads at draw time.
 ///
 /// Held outside `AppThemeLibrary`'s main-actor isolation because the readers are colour
-/// providers, which AppKit calls while drawing. Drawing is on main, so this is written and read
-/// on one thread in practice; it is a plain static rather than a lock because a torn read of an
-/// object reference is not a thing that happens here and a lock in a draw path is.
+/// providers, which AppKit may call from its own drawing callbacks. The palette is a value snapshot
+/// behind a lock: a provider sees the old or new complete theme, never a concurrent mutation hidden
+/// from the compiler by `nonisolated(unsafe)`.
 enum AppThemePalette {
 
-    private(set) nonisolated(unsafe) static var current: AppTheme = .system
+    private static let storage = OSAllocatedUnfairLock(initialState: AppTheme.system)
 
-    static func set(_ theme: AppTheme) { current = theme }
+    static var current: AppTheme { storage.withLock { $0 } }
+
+    static func set(_ theme: AppTheme) {
+        storage.withLock { $0 = theme }
+    }
 
     /// A colour that resolves through the *current* theme every time it is drawn.
     ///
@@ -139,17 +144,16 @@ enum AppThemeLibrary {
             id: makeCustomID(),
             name: name
         )
-        if isContributed(source) {
-            copy = materializeContributedSidebarAssets(of: copy, from: source)
-        }
         do {
+            if isContributed(source) {
+                copy = try materializeContributedSidebarAssets(of: copy, from: source)
+            } else {
+                try ThemeAssetStore.copyAssets(from: source.id, to: copy.id)
+            }
             try create(copy)
         } catch {
             ThemeAssetStore.removeAll(for: copy.id)
             throw error
-        }
-        if !isContributed(source) {
-            ThemeAssetStore.copyAssets(from: source.id, to: copy.id)
         }
         return copy
     }
@@ -157,28 +161,34 @@ enum AppThemeLibrary {
     private static func materializeContributedSidebarAssets(
         of copy: AppTheme,
         from source: AppTheme
-    ) -> AppTheme {
+    ) throws -> AppTheme {
         var variants = copy.variants
         for (kind, variant) in variants {
             guard var sidebar = variant.sidebar else { continue }
 
-            if let layer = sidebar.background?.image,
-               let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
-                   named: layer.asset, forThemeID: source.id
-               ),
-               let stored = ThemeAssetStore.store(
-                   imageData: data, for: copy.id, slot: .background, variant: kind
-               ) {
+            if let layer = sidebar.background?.image {
+                guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                    named: layer.asset, forThemeID: source.id
+                ), let stored = ThemeAssetStore.store(
+                    imageData: data, for: copy.id, slot: .background, variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "The contributed theme’s sidebar background could not be copied."
+                    )
+                }
                 sidebar.background?.image?.asset = stored
             }
 
-            if case .asset(let name) = sidebar.brand?.logo,
-               let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
-                   named: name, forThemeID: source.id
-               ),
-               let stored = ThemeAssetStore.store(
-                   imageData: data, for: copy.id, slot: .logo, variant: kind
-               ) {
+            if case .asset(let name) = sidebar.brand?.logo {
+                guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                    named: name, forThemeID: source.id
+                ), let stored = ThemeAssetStore.store(
+                    imageData: data, for: copy.id, slot: .logo, variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "The contributed theme’s sidebar logo could not be copied."
+                    )
+                }
                 sidebar.brand?.logo = .asset(stored)
             }
 
@@ -207,7 +217,11 @@ enum AppThemeLibrary {
             )
         }
         try AppThemeEditing.validate(theme)
-        AppThemeStore.shared.insert(theme)
+        guard AppThemeStore.shared.insert(theme) else {
+            throw AppThemeEditingError.invalid(
+                "The custom app theme could not be saved."
+            )
+        }
         NotificationCenter.default.post(AppThemeLibraryDidChange())
     }
 

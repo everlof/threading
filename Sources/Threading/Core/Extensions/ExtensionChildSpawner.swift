@@ -28,15 +28,16 @@ enum ExtensionSpawnError: LocalizedError {
 /// `ExtensionLaunchPolicy`. Anything reachable through that protocol contains the child;
 /// spawning without containment is a step in building one, never a way to run an extension.
 enum ExtensionChildSpawner {
-    /// - Parameter descriptors: child descriptor number → the parent descriptor to install
-    ///   there. The parent keeps its own copies; the caller closes them once the child holds
-    ///   them, which for a socket pair is what lets the child's exit reach end-of-file.
+    /// - Parameter descriptors: child descriptor number → the inherited descriptor or explicit
+    ///   null device to install there. The parent keeps its own inherited copies; the caller
+    ///   closes them once the child holds them, which for a socket pair is what lets the child's
+    ///   exit reach end-of-file.
     static func spawn(
         executableURL: URL,
         arguments: [String],
         environment: [String: String],
         workingDirectory: URL?,
-        descriptors: [Int32: Int32]
+        descriptors: [Int32: ChildDescriptorSource]
     ) throws -> ExtensionChildProcess {
         do {
             return try ChildProcessSpawn.spawn(

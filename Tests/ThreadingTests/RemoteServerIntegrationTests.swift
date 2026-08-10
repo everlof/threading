@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 import ThreadingRemoteKit
 @testable import Threading
@@ -2187,7 +2188,7 @@ final class RemoteServerIntegrationTests: XCTestCase {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-remote-browser-e2e", isDirectory: true)
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-        let project = ProjectStore.shared.addProject(folderURL: temporary)
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
         let session = try XCTUnwrap(ProjectStore.shared.addSession(
             to: project.id,
             kind: .codex,
@@ -2890,5 +2891,43 @@ private final class FailingOwnerDeviceStore: RemoteOwnerDevicePersisting {
     func deleteAll() throws {
         deleteCount += 1
         devices = []
+    }
+}
+
+final class RemoteAPNSConfigurationTests: XCTestCase {
+    func testEnvironmentLoadsABoundedRegularPrivateKey() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "RemoteAPNSConfiguration.\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let keyURL = directory.appendingPathComponent("AuthKey.p8")
+        let pem = P256.Signing.PrivateKey().pemRepresentation
+        try pem.write(to: keyURL, atomically: true, encoding: .utf8)
+
+        XCTAssertNotNil(RemoteAPNSPushSender.fromEnvironment(environment(keyURL)))
+    }
+
+    func testEnvironmentRefusesAnOversizedPrivateKeyBeforeParsing() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "RemoteAPNSConfigurationOversized.\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let keyURL = directory.appendingPathComponent("AuthKey.p8")
+        try Data(repeating: 0x41, count: 64 * 1_024 + 1).write(to: keyURL)
+
+        XCTAssertNil(RemoteAPNSPushSender.fromEnvironment(environment(keyURL)))
+    }
+
+    private func environment(_ keyURL: URL) -> [String: String] {
+        [
+            "THREADING_APNS_KEY_ID": "key-id",
+            "THREADING_APNS_TEAM_ID": "team-id",
+            "THREADING_APNS_PRIVATE_KEY_PATH": keyURL.path,
+            "THREADING_APNS_TOPIC": "codes.threading.mobile",
+        ]
     }
 }

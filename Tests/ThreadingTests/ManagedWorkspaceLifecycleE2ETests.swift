@@ -20,7 +20,7 @@ final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
         let store = ProjectStore.shared
         let sessionID = SessionID()
         let workspace = try fixture.provision(sessionID: sessionID)
-        let project = store.addProject(folderURL: fixture.project)
+        let project = try XCTUnwrap(store.addProject(folderURL: fixture.project))
         let session = try XCTUnwrap(store.addSession(
             to: project.id,
             kind: .claude,

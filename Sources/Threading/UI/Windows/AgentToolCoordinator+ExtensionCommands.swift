@@ -45,7 +45,12 @@ extension AgentToolCoordinator {
                 at: URL(fileURLWithPath: directory, isDirectory: true),
                 sdkSnapshotURL: sdk
             )
-            _ = dependencies.projects.addProject(folderURL: project.directoryURL)
+            guard dependencies.projects.addProject(folderURL: project.directoryURL) != nil else {
+                return .failure(
+                    "Created \(project.manifest.name) at \(project.directoryURL.path), but the "
+                        + "new Threading project could not be saved."
+                )
+            }
             return .success(
                 "Created \(project.manifest.name) at \(project.directoryURL.path), vendored "
                     + "ThreadingExtensionKit SDK \(project.sdkVersion) with its offline authoring "

@@ -30,13 +30,23 @@ enum PreferenceStore {
     /// Resolved once: `NSClassFromString` is a runtime lookup, and the answer cannot change
     /// within a process.
     /// `UserDefaults` documents concurrent access as safe, but its Objective-C declaration does
-    /// not yet carry `Sendable`; this is the one shared reference that crosses isolation domains.
-    nonisolated(unsafe) static let shared: UserDefaults = {
+    /// not yet carry `Sendable`. Keep that compatibility assertion inside one immutable wrapper
+    /// rather than marking the globally visible property `nonisolated(unsafe)`.
+    private static let storage = SendableUserDefaults({
         guard NSClassFromString("XCTestCase") != nil else { return .standard }
         return UserDefaults(suiteName: hostedTestSuiteName) ?? .standard
-    }()
+    })
+
+    static var shared: UserDefaults { storage.value }
 
     /// Whether this process redirects, so a test can assert the redirect rather than the
     /// developer's luck.
     static var isRedirected: Bool { shared !== UserDefaults.standard }
+}
+
+/// Foundation documents `UserDefaults` as safe for concurrent use; the imported Objective-C
+/// type has not acquired that conformance. This wrapper is immutable after initialization.
+private final class SendableUserDefaults: @unchecked Sendable {
+    let value: UserDefaults
+    init(_ makeValue: () -> UserDefaults) { value = makeValue() }
 }

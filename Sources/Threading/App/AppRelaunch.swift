@@ -18,15 +18,47 @@ import AppKit
 ///   Discarding is the whole point here, so this leaves without asking anyone to save.
 enum AppRelaunch {
 
-    /// Relaunches and leaves immediately, writing nothing. **Does not return.**
+    /// A helper process that has proved it can start, but cannot relaunch the app until
+    /// `commit` sends one line over its private pipe.
     ///
-    /// The reason travels with the exit rather than being inferred at the next launch, because
-    /// the next launch treats the two differently: a reset restores its workspace, and a recovery
-    /// relaunch holds it back.
-    static func discardingState(reason: IntentionalExitReason = .reset) -> Never {
-        spawnRelauncher(for: Bundle.main.bundleURL)
-        recordIntentionalExit(reason: reason)
-        exit(EXIT_SUCCESS)
+    /// Preparation belongs before a reset's first mutation. If anything after it throws, this
+    /// object closes the pipe without a line and terminates the helper; the shell's guarded
+    /// `read` therefore cannot turn a failed reset into an unrelated relaunch a minute later.
+    @MainActor
+    final class PreparedRelaunch {
+        private let process: Process
+        private let signal: FileHandle
+        private var isCommitted = false
+
+        fileprivate init(process: Process, signal: FileHandle) {
+            self.process = process
+            self.signal = signal
+        }
+
+        deinit {
+            guard !isCommitted else { return }
+            try? signal.close()
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+
+        /// Releases the already-running helper, records why this launch ended, and exits.
+        ///
+        /// The signal is sent first. If the helper died in the preparation-to-commit window,
+        /// this throws while the current process is still alive and does not stamp a restart
+        /// that will never happen.
+        func commit(reason: IntentionalExitReason) throws -> Never {
+            guard process.isRunning else {
+                throw AppRelaunchError.helperExitedBeforeCommit
+            }
+            try signal.write(contentsOf: AppRelaunchDefaults.commitSignal)
+            isCommitted = true
+            try? signal.close()
+
+            recordIntentionalExit(reason: reason)
+            exit(EXIT_SUCCESS)
+        }
     }
 
     /// Says, on the way out, that this was on purpose.
@@ -42,8 +74,9 @@ enum AppRelaunch {
     /// everything between the stamp and the exit is a window in which a genuine crash would be
     /// reported as a deliberate restart. Two statements is as small as that window gets.
     ///
-    /// Split out from the exit so a test can exercise it — the reason `relaunchCommand(for:)` is
-    /// also split out — since nothing can call a function that never returns and then assert.
+    /// Split out from `PreparedRelaunch.commit` so a test can exercise it — the reason
+    /// `relaunchCommand(for:)` is also split out — since nothing can call a function that never
+    /// returns and then assert.
     static func recordIntentionalExit(reason: IntentionalExitReason = .reset) {
         EventLog.shared.recordIntentionalExit(reason)
         LaunchLedger.shared.endLaunch(.intentional(reason))
@@ -54,16 +87,39 @@ enum AppRelaunch {
     static func relaunchCommand(for bundle: URL) -> [String] {
         [
             "-c",
-            "sleep \(AppRelaunchDefaults.settleSeconds); /usr/bin/open \"$0\"",
+            "if IFS= read -r signal; then "
+                + "sleep \(AppRelaunchDefaults.settleSeconds); /usr/bin/open \"$0\"; fi",
             bundle.path
         ]
     }
 
-    private static func spawnRelauncher(for bundle: URL) {
+    /// Starts the relaunch helper and holds it behind a private commit pipe.
+    ///
+    /// `executableURL` is injectable only so the failure boundary can be tested without
+    /// replacing `/bin/sh` on the machine running the suite.
+    @MainActor
+    static func prepare(
+        for bundle: URL = Bundle.main.bundleURL,
+        executableURL: URL = URL(fileURLWithPath: AppRelaunchDefaults.shellPath)
+    ) throws -> PreparedRelaunch {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: AppRelaunchDefaults.shellPath)
+        let pipe = Pipe()
+        process.executableURL = executableURL
         process.arguments = relaunchCommand(for: bundle)
-        try? process.run()
+        process.standardInput = pipe
+        try process.run()
+        return PreparedRelaunch(process: process, signal: pipe.fileHandleForWriting)
+    }
+}
+
+enum AppRelaunchError: LocalizedError {
+    case helperExitedBeforeCommit
+
+    var errorDescription: String? {
+        switch self {
+        case .helperExitedBeforeCommit:
+            return "The relaunch helper exited before Threading was ready to restart."
+        }
     }
 }
 
@@ -71,6 +127,7 @@ enum AppRelaunch {
 
 enum AppRelaunchDefaults {
     static let shellPath = "/bin/sh"
+    static let commitSignal = Data([0x0A])
 
     /// Long enough for the kernel to drop the instance lock with the exiting process, short
     /// enough that the app appears to restart rather than to have quit.

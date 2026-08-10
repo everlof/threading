@@ -214,6 +214,17 @@ struct AgentCapabilities: OptionSet {
   /// own; this is every other way a request can fail, and all it needs is the turn ended. See
   /// `ClaudeTranscriptTurnRefusal`.
   static let transcriptRefusedTurnRecord = Self(rawValue: 1 << 26)
+
+  /// Threading can normalize this runtime's durable conversation transcript into
+  /// `[StreamEvent]` and rebuild the native conversation surface from it. Claude and Codex:
+  /// both have measured local JSONL formats and concrete `TranscriptReplayFormat` adapters.
+  ///
+  /// This is deliberately not `transcriptUsageIndex`. OpenCode has a supported export from
+  /// which Threading can total usage, but no local conversation format the UI can replay;
+  /// Grok rebuilds native history through ACP `session/load`, not through a local transcript.
+  /// Narrow facts such as transcript titles, model records and refused-turn records imply
+  /// this base capability rather than each quietly inventing its own runtime allow-list.
+  static let transcriptReplay = Self(rawValue: 1 << 27)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -270,14 +281,15 @@ enum AgentKind: String, Codable, CaseIterable {
         .threadingBridge, .remoteControl, .statusLine, .transcriptTitles,
         .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
-        .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord
+        .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
+        .transcriptReplay
       ]
     case .codex:
       return [
         .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
-        .transcriptInterruptedTurnRecord
+        .transcriptInterruptedTurnRecord, .transcriptReplay
       ]
     case .grok:
       return [
@@ -555,6 +567,12 @@ struct ConversationHandoffEndpoint: Codable, Equatable {
 struct ConversationHandoff: Codable, Equatable {
   static let maximumEndpoints = 16
 
+  private enum CodingKeys: String, CodingKey {
+    case endpoints
+    case omittedEndpointCount
+    case createdAt
+  }
+
   private(set) var endpoints: [ConversationHandoffEndpoint]
   private(set) var omittedEndpointCount: Int
   let createdAt: Date
@@ -582,6 +600,30 @@ struct ConversationHandoff: Codable, Equatable {
     self.omittedEndpointCount = omittedEndpointCount
     self.createdAt = createdAt
     compactIfNeeded()
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let decodedEndpoints = try container.decode(
+      [ConversationHandoffEndpoint].self,
+      forKey: .endpoints
+    )
+    let decodedOmittedCount = try container.decodeIfPresent(
+      Int.self,
+      forKey: .omittedEndpointCount
+    ) ?? 0
+    let decodedCreatedAt = try container.decode(Date.self, forKey: .createdAt)
+    guard let validated = Self(
+      endpoints: decodedEndpoints,
+      omittedEndpointCount: decodedOmittedCount,
+      createdAt: decodedCreatedAt
+    ) else {
+      throw DecodingError.dataCorrupted(.init(
+        codingPath: decoder.codingPath,
+        debugDescription: "Conversation handoff does not form a valid cross-runtime path."
+      ))
+    }
+    self = validated
   }
 
   /// Carries an existing path into a new destination, refreshing the source's own endpoint with

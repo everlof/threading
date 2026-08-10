@@ -46,7 +46,9 @@ agents or MCP server.
 in `project.pbxproj` by hand (PBXFileReference, PBXBuildFile, the Tests group, and the test
 target's Sources phase; follow the `A1000000…1`/`…2` id convention already there). The failure
 mode is silent: an unregistered test file builds nothing and `xcodebuild test` reports
-"Executed 0 tests" for it. `scripts/add_test_file.py` does the four edits.
+"Executed 0 tests" for it. `scripts/add_test_file.py` does the four edits. Every app build,
+`scripts/test.sh`, and `scripts/ci.sh` runs `scripts/check_test_registration.py`, which compares
+the directory with the test target's Sources phase and refuses both missing and stale entries.
 
 ## Dependencies
 

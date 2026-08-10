@@ -232,7 +232,10 @@ private extension ExtensionManifest {
         do {
             let manifest = try JSONDecoder().decode(
                 ExtensionManifest.self,
-                from: Data(contentsOf: url)
+                from: BoundedFileReader.read(
+                    url,
+                    maximumBytes: ExtensionBundleInspector.maximumManifestBytes
+                )
             )
             try manifest.validate()
             return manifest

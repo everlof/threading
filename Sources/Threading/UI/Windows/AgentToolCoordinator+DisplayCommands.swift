@@ -2,6 +2,16 @@ import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+enum DisplayImageSafety {
+  nonisolated static func accepts(width: Int, height: Int) -> Bool {
+    width > 0
+      && height > 0
+      && width <= MCPDefaults.maximumImagePixelDimension
+      && height <= MCPDefaults.maximumImagePixelDimension
+      && width <= MCPDefaults.maximumImagePixelCount / height
+  }
+}
+
 @MainActor
 extension AgentToolCoordinator {
   func displayImage(
@@ -16,8 +26,8 @@ extension AgentToolCoordinator {
       return .failure("No such file: \(path)")
     }
 
-    // Size is read before the bytes: an image far too large for a side panel should be
-    // refused with an explanation, not loaded and then discarded.
+    // Metadata makes the ordinary refusal cheap, while the bounded read below remains the
+    // authority: the agent can rewrite its file between these two operations.
     let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     guard size <= MCPDefaults.maximumImageBytes else {
       return .failure(
@@ -27,7 +37,31 @@ extension AgentToolCoordinator {
         """)
     }
 
-    guard let image = NSImage(contentsOf: url), image.isValid else {
+    let data: Data
+    do {
+      data = try BoundedFileReader.read(url, maximumBytes: MCPDefaults.maximumImageBytes)
+    } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+      return .failure(
+        "\(url.lastPathComponent) grew beyond the "
+          + "\(byteDescription(MCPDefaults.maximumImageBytes)) display-panel limit."
+      )
+    } catch {
+      return .failure("\(url.lastPathComponent) could not be read as a regular image file.")
+    }
+
+    let inspectedPixelSize = BrowserBaselineImage.pixelSize(of: data)
+    if let inspectedPixelSize,
+       !DisplayImageSafety.accepts(
+         width: inspectedPixelSize.width,
+         height: inspectedPixelSize.height
+       ) {
+      return .failure(
+        "\(url.lastPathComponent) is \(inspectedPixelSize.width)×\(inspectedPixelSize.height) "
+          + "pixels, too large to decode safely in the display panel."
+      )
+    }
+
+    guard let image = NSImage(data: data), image.isValid else {
       return .failure("\(url.lastPathComponent) is not an image Threading can display.")
     }
 
@@ -37,13 +71,15 @@ extension AgentToolCoordinator {
     var recorded: SessionAttachment?
     if dependencies.projects.executionProject(forSessionID: sessionID) != nil {
       recorded = dependencies.attachments.recordSnapshot(
+        data,
         of: url,
         sessionID: sessionID,
         origin: .agent
       )
     }
 
-    let dimensions = pixelDescription(of: image)
+    let dimensions = inspectedPixelSize.map { "\($0.width)×\($0.height)" }
+      ?? pixelDescription(of: image)
     let description = "\(url.lastPathComponent) (\(dimensions))"
 
     if let recorded,

@@ -2081,10 +2081,10 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             environment: ["THREADING_PROBE": "present"],
             workingDirectory: bundle.rootURL,
             descriptors: [
-                0: FileHandle.nullDevice.fileDescriptor,
-                1: stdout.fileHandleForWriting.fileDescriptor,
-                2: FileHandle.nullDevice.fileDescriptor,
-                3: broker.fileHandleForReading.fileDescriptor
+                0: .nullDevice,
+                1: .inherited(stdout.fileHandleForWriting.fileDescriptor),
+                2: .nullDevice,
+                3: .inherited(broker.fileHandleForReading.fileDescriptor)
             ]
         )
         try stdout.fileHandleForWriting.close()
@@ -2118,9 +2118,9 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             environment: [:],
             workingDirectory: nil,
             descriptors: [
-                0: FileHandle.nullDevice.fileDescriptor,
-                1: FileHandle.nullDevice.fileDescriptor,
-                2: FileHandle.nullDevice.fileDescriptor
+                0: .nullDevice,
+                1: .nullDevice,
+                2: .nullDevice
             ]
         )
         child.waitUntilExit()
@@ -2361,9 +2361,9 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             environment: ExtensionLaunchEnvironment.base,
             workingDirectory: bundle.rootURL,
             descriptors: [
-                0: FileHandle.nullDevice.fileDescriptor,
-                1: stdout.fileHandleForWriting.fileDescriptor,
-                2: stderr.fileHandleForWriting.fileDescriptor
+                0: .nullDevice,
+                1: .inherited(stdout.fileHandleForWriting.fileDescriptor),
+                2: .inherited(stderr.fileHandleForWriting.fileDescriptor)
             ]
         )
         try stdout.fileHandleForWriting.close()

@@ -95,9 +95,16 @@ enum ClassicSkinImporter {
             throw Failure.archiveTooLarge
         }
 
-        let archive = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard archive.count <= ClassicSkinLimits.maximumArchiveBytes else {
+        let archive: Data
+        do {
+            archive = try BoundedFileReader.read(
+                url,
+                maximumBytes: ClassicSkinLimits.maximumArchiveBytes
+            )
+        } catch BoundedFileReadError.exceedsLimit {
             throw Failure.archiveTooLarge
+        } catch {
+            throw Failure.invalidArchive
         }
         let reader = try ClassicSkinZip(data: archive)
         guard let titleBar = try reader.data(forLastEntryNamed: ["titlebar.bmp", "titlebar.png"])

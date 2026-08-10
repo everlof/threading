@@ -44,14 +44,63 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restored.selectedSessionID, selectedSessionID)
     }
 
+    func testClosingTheCachedDatabaseIsIdempotentAndLaterAccessReopensIt() throws {
+        let manager = makeManager()
+        let project = Project(name: "Fixture", folderURL: URL(fileURLWithPath: "/tmp/fixture"))
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [project])))
+
+        manager.closeDatabase()
+        manager.closeDatabase()
+
+        guard case .loaded(let restored) = manager.loadProjectsState() else {
+            return XCTFail("a manager should reopen after a recoverable close")
+        }
+        XCTAssertEqual(restored.projects.map(\.id), [project.id])
+        manager.closeDatabase()
+    }
+
+    func testNewerDatabaseSchemaIsPreservedAndClosesPersistence() throws {
+        let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        let writer = makeManager()
+        XCTAssertTrue(writer.saveProjectsState(ProjectsState(projects: [
+            Project(name: "From the future", folderURL: URL(fileURLWithPath: "/tmp/future"))
+        ])))
+        writer.closeDatabase()
+
+        let futureVersion = ProjectDatabaseSchema.version + 1
+        let raw = try SQLiteDatabase(path: databaseURL.path)
+        try raw.execute("PRAGMA user_version = \(futureVersion)")
+        raw.close()
+        let bytesBeforeDowngrade = try Data(contentsOf: databaseURL)
+
+        let downgraded = makeManager()
+        guard case .failed(let quarantinedAt) = downgraded.loadProjectsState() else {
+            return XCTFail("A future schema must be refused before any current-schema query")
+        }
+        XCTAssertNil(quarantinedAt, "unsupported is not corruption and must not be quarantined")
+        XCTAssertEqual(try Data(contentsOf: databaseURL), bytesBeforeDowngrade)
+        XCTAssertEqual(
+            try SQLiteDatabase(path: databaseURL.path).scalar("PRAGMA user_version"),
+            futureVersion
+        )
+        XCTAssertFalse(
+            downgraded.saveProjectsState(ProjectsState()),
+            "the refusal must close every writer for the rest of this launch"
+        )
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)
+                .contains { $0.contains(".corrupt-") }
+        )
+    }
+
     func testProjectStoreLookupIndexesFollowStructuralEdits() throws {
         let store = ProjectStore(stateManager: makeManager())
-        let firstProject = store.addProject(
+        let firstProject = try XCTUnwrap(store.addProject(
             folderURL: testDirectory.appendingPathComponent("first", isDirectory: true)
-        )
-        let secondProject = store.addProject(
+        ))
+        let secondProject = try XCTUnwrap(store.addProject(
             folderURL: testDirectory.appendingPathComponent("second", isDirectory: true)
-        )
+        ))
         let removedSession = try XCTUnwrap(
             store.addSession(to: firstProject.id, kind: .claude, title: "removed")
         )
@@ -85,6 +134,26 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(
             store.project(forSessionID: shiftedProjectSession.id)?.id,
             secondProject.id
+        )
+    }
+
+    func testRemovingTheSelectedSessionCommitsGraphAndSelectionTogether() throws {
+        let store = ProjectStore(stateManager: makeManager())
+        let project = try XCTUnwrap(store.addProject(
+            folderURL: testDirectory.appendingPathComponent("selected-delete")
+        ))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        store.selectedSessionID = session.id
+
+        store.removeSession(id: session.id)
+
+        XCTAssertNil(store.selectedSessionID)
+        XCTAssertNil(store.session(withID: session.id))
+        let reopened = ProjectStore(stateManager: makeManager())
+        XCTAssertNil(reopened.selectedSessionID)
+        XCTAssertNil(
+            reopened.session(withID: session.id),
+            "the scalar selection write committed but the deleted session row returned"
         )
     }
 
@@ -465,8 +534,9 @@ final class StateManagerTests: XCTestCase {
         store.addProject(folderURL: projectDirectory)
 
         // A successful quarantine preserves the unreadable bytes, but does not make the empty
-        // in-memory store authoritative. This launch remains read-only until recovery/restart.
-        XCTAssertEqual(store.projects.count, 1, "the attempted edit may remain visible in memory")
+        // in-memory store authoritative. A refused edit must not masquerade as a durable one in
+        // memory either: the visible graph returns to the last authoritative snapshot.
+        XCTAssertTrue(store.projects.isEmpty)
         XCTAssertEqual(try Data(contentsOf: quarantineURL), corruptData)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: liveURL.path),
@@ -484,6 +554,26 @@ final class StateManagerTests: XCTestCase {
             url: testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
         )
         XCTAssertTrue(try database.isEmpty(), "the attempted edit must not become replacement state")
+    }
+
+    func testOversizedLegacyStateIsQuarantinedBeforeItIsAllocatedAsOneDocument() throws {
+        let liveURL = testDirectory.appendingPathComponent("projects.json")
+        XCTAssertTrue(FileManager.default.createFile(atPath: liveURL.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: liveURL)
+        try handle.truncate(
+            atOffset: UInt64(StateManagerDefaults.maximumLegacyProjectsBytes + 1)
+        )
+        try handle.close()
+
+        guard case .failed(let quarantineURL) = makeManager().loadProjectsState() else {
+            return XCTFail("Expected an oversized legacy document to be refused")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path))
+        let quarantined = try XCTUnwrap(quarantineURL)
+        XCTAssertEqual(
+            try quarantined.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            StateManagerDefaults.maximumLegacyProjectsBytes + 1
+        )
     }
 
     func testCorruptDatabaseRowIsQuarantinedAndCannotBeOverwrittenInTheSameLaunch() throws {
@@ -594,14 +684,13 @@ final class StateManagerTests: XCTestCase {
         )
     }
 
-    /// Quarantine has to leave something behind, and for months it did not.
+    /// Quarantine has to leave something behind, and it must not split a live SQLite bundle.
     ///
-    /// In WAL mode the committed rows sit in `-wal` until a checkpoint, and a checkpoint happens
-    /// when the *last* connection closes — which never happens while a second build or a hosted
-    /// test target holds the same store open. Quarantine deleted that file, so the copy it kept
-    /// for recovery was an empty shell and the only real copy was unlinked. Measured on the store
-    /// that hit it: zero project rows in the database, every project in a 498KB log.
-    func testQuarantineKeepsTheWriteAheadLogThatHoldsTheRows() throws {
+    /// In WAL mode another reader can pin committed rows in `-wal`. Renaming the main file and log
+    /// underneath that connection is an SQLite API violation, even if both names move together.
+    /// The first attempt must therefore preserve the live bundle in place; after the reader closes,
+    /// a fresh launch may checkpoint it into one file and move that file safely.
+    func testQuarantineWaitsUntilTheWriteAheadLogHasNoOtherOwner() throws {
         let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
         let project = Project(name: "In the log", folderURL: URL(fileURLWithPath: "/tmp/in-the-log"))
 
@@ -634,55 +723,40 @@ final class StateManagerTests: XCTestCase {
             "the fixture has to reproduce an unchecked-pointed store or it proves nothing"
         )
         let manager = makeManager()
-        guard case .failed(let quarantinedAt) = manager.loadProjectsState() else {
+        guard case .failed(let firstQuarantine) = manager.loadProjectsState() else {
             return XCTFail("A damaged project row is still all-or-nothing")
         }
-        let quarantineURL = try XCTUnwrap(quarantinedAt)
-
+        XCTAssertNil(
+            firstQuarantine,
+            "a live SQLite bundle must stay at its original names until every owner releases it"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
         XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: quarantineURL.path + SQLiteDefaults.walSuffix
-            ),
-            "the log moves with the database it belongs to, under the name SQLite will look for"
-        )
-        // Read through copies rather than in place: the abandoned connection above still holds
-        // the original inode, and two connections reaching one inode by different names is a
-        // conflict SQLite reports as an I/O error. Recovery copies the files anyway.
-        let withoutTheLog = testDirectory.appendingPathComponent("quarantined-alone.db")
-        try FileManager.default.copyItem(at: quarantineURL, to: withoutTheLog)
-        XCTAssertEqual(
-            (try? SQLiteDatabase(path: withoutTheLog.path)
-                .scalar("SELECT COUNT(*) FROM project")) ?? 0,
-            0,
-            "the database file on its own is empty — which is all the old behaviour kept"
+            FileManager.default.fileExists(atPath: log.path),
+            "refusal preserves the WAL bytes under the name the live reader already owns"
         )
 
-        let recovered = testDirectory.appendingPathComponent("recovered.db")
-        try FileManager.default.copyItem(at: quarantineURL, to: recovered)
-        try FileManager.default.copyItem(
-            at: URL(fileURLWithPath: quarantineURL.path + SQLiteDefaults.walSuffix),
-            to: URL(fileURLWithPath: recovered.path + SQLiteDefaults.walSuffix)
-        )
+        try concurrentReader.execute("ROLLBACK")
+        concurrentReader.close()
+
+        let nextLaunch = makeManager()
+        guard case .failed(let retriedQuarantine) = nextLaunch.loadProjectsState() else {
+            return XCTFail("The damaged row should still require recovery on the next launch")
+        }
+        let quarantineURL = try XCTUnwrap(retriedQuarantine)
         XCTAssertEqual(
-            try SQLiteDatabase(path: recovered.path).scalar("SELECT COUNT(*) FROM project"),
+            try SQLiteDatabase(path: quarantineURL.path).scalar("SELECT COUNT(*) FROM project"),
             1,
-            "with its log the quarantined copy is the state, which is the point of keeping it"
+            "the successful checkpoint must fold the committed WAL row into the kept file"
         )
 
-        // Nothing may be left beside the live path: SQLite would read it as the log of whatever
-        // database is created there next.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: log.path))
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: databaseURL.path + SQLiteDefaults.sharedMemorySuffix
             )
         )
-        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
-
-        // Held to here and then abandoned rather than committed: a connection whose database has
-        // been moved out from under it is finished, which is true of the running app too and is
-        // not what this test is about.
-        withExtendedLifetime(concurrentReader) {}
     }
 
     /// Version 2 removed `AgentKind.shell`. A version-1 document naming that kind must still
@@ -803,7 +877,8 @@ final class StateManagerTests: XCTestCase {
             SessionAttachmentStore(
                 loadPayload: { manager.loadAttachmentsPayload(for: $0) },
                 savePayload: { manager.saveAttachmentsPayload($0, for: $1) },
-                retainPersisted: { manager.retainAttachments(sessionIDs: $0) }
+                retainPersisted: { manager.retainAttachments(sessionIDs: $0) },
+                referenceRoot: { _ in root }
             )
         }
 

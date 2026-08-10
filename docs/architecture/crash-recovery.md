@@ -148,12 +148,17 @@ card says which theme is saved.
 `forceNormalNextLaunch` and `disableExtensionsNextLaunch`.
 
 **A file, not `PreferenceStore`.** The onboarding flag's rule is about a preference set on a
-settings page with the app running normally; these are written in the two statements before
-`AppRelaunch.discardingState()`, which deliberately leaves without the quit path every store hangs
-its final save on. `UserDefaults` is asynchronous to disk, `cfprefsd` holds the domain, and
+settings page with the app running normally; these are written immediately before the prepared
+relauncher commits and deliberately leaves without the quit path every store hangs its final save
+on. `UserDefaults` is asynchronous to disk, `cfprefsd` holds the domain, and
 `synchronize()` is deprecated. The file also has to survive Reset Settings while being taken by
 Reset Everything, which a file under `Launch/` does by construction — and it inherits that
 directory's hosted-test redirection, so a test cannot arm the developer's own next launch.
+
+The helper is started *before* the one-shot is armed and waits behind a private commit pipe. A
+launch failure leaves this process alive and reports the error; a helper that dies before commit
+causes the flag to be disarmed again. Thus a failed button press cannot make some later ordinary
+launch unexpectedly consume “Try Normal Launch Once.”
 
 **Consumption rewrites rather than deletes**, leaving both booleans explicitly false plus
 `consumedByLaunch`. There is no "cleared versus never set" question to answer here; what the

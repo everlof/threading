@@ -48,6 +48,15 @@ OpenCode remains terminal-only: its TUI/resume CLI is enough for an honest termi
 but native rendering still requires a measured transport and transcript replay. Neither is
 inferred from terminal output or private storage.
 
+That capability is enforced at every boundary where the invalid state could otherwise turn into
+a process-lifecycle crash. `ProjectStore.setUsesNativeUI` refuses an unsupported durable mutation;
+`ConversationViewController` and `AgentRuntime.makeConversation` are failable even if a damaged or
+future store gets past that rule; and `AgentLauncher.streamPlan` throws a typed
+`unsupportedNativeConversation` error rather than trapping. Planning and spawn failures for all
+three native transports are reported through the same asynchronous, exactly-once exit callback.
+The callback is deliberately deferred: invoking it inline while `start()` still owns its launch
+state lets a controller tear down the session reentrantly before construction has returned.
+
 Structured execution also crosses a separate boundary before presentation normalization. Claude's
 native tool blocks, Codex App Server item notifications and Grok ACP tool updates are handed to the
 [Execution Audit](execution-audit.md) adapters before `StreamEvent` turns them into shared timeline
@@ -281,11 +290,13 @@ Selection and tool/user disclosure state live in the controller and survive row 
 A navigator row only carries a chevron when opening it reaches a transcript — rows already
 replayed, a provider file on disk, or a child still running, which is the one case where "has
 not arrived yet" is the truth rather than a permanent state. `SubagentSummaryItem` carries the
-answer as `canOpenTranscript` because the component cannot work it out: a live child streams
-rows it has no file for, and a finished one may name a path the provider never wrote. A row that
-leads nowhere keeps its place in the list and says so, indented to the chevron rows' ink via
-`ThemedButton.plainTitleLeadingInset` so a mixed list is not ragged. The same distinction picks
-the detail pane's notice, so a finished child stops claiming a file is on its way. See
+answer as one `TranscriptAvailability`: unavailable, openable from retained/live rows, or on
+disk with its URL. The component cannot derive that state: a live child streams rows it has no
+file for, and a finished one may name a path the provider never wrote. Because a Finder action
+is available only in the on-disk case, navigation and reveal cannot contradict one another. A
+row that leads nowhere keeps its place in the list and says so, indented to the chevron rows'
+ink via `ThemedButton.plainTitleLeadingInset` so a mixed list is not ragged. The same distinction
+picks the detail pane's notice, so a finished child stops claiming a file is on its way. See
 [`session-activity.md`](session-activity.md) for the hook reports that made empty rows possible.
 
 Codex app-server reports child `thread/started`, `thread/status/changed`,

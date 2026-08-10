@@ -114,7 +114,7 @@ final class SessionNameToolTests: XCTestCase {
     func testANameAboutTheConversationIsStoredAndReported() throws {
         let (store, session) = try makeSessionInProject(named: "app")
 
-        XCTAssertTrue(store.updateAgentTitle("worktree diff crash", for: session.id))
+        XCTAssertEqual(store.updateAgentTitle("worktree diff crash", for: session.id), .accepted)
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "worktree diff crash")
     }
 
@@ -125,8 +125,9 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
 
         for noise in ["Claude Code", "Claude Code 2", "app"] {
-            XCTAssertFalse(
+            XCTAssertEqual(
                 store.updateAgentTitle(noise, for: session.id),
+                .refusedAsNoise,
                 "“\(noise)” names the agent or the project, not the conversation"
             )
             XCTAssertNil(store.session(withID: session.id)?.agentTitle, noise)
@@ -138,8 +139,8 @@ final class SessionNameToolTests: XCTestCase {
     func testNamingASessionWhatItIsAlreadyCalledSucceeds() throws {
         let (store, session) = try makeSessionInProject(named: "app")
 
-        XCTAssertTrue(store.updateAgentTitle("worktree diff crash", for: session.id))
-        XCTAssertTrue(store.updateAgentTitle("worktree diff crash", for: session.id))
+        XCTAssertEqual(store.updateAgentTitle("worktree diff crash", for: session.id), .accepted)
+        XCTAssertEqual(store.updateAgentTitle("worktree diff crash", for: session.id), .accepted)
     }
 
     /// The load-bearing one. The tool writes `agentTitle`; a user's own rename lives in
@@ -150,7 +151,7 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
         store.renameSession(id: session.id, to: "what I called it")
 
-        XCTAssertTrue(store.updateAgentTitle("what the agent called it", for: session.id))
+        XCTAssertEqual(store.updateAgentTitle("what the agent called it", for: session.id), .accepted)
 
         let stored = try XCTUnwrap(store.session(withID: session.id))
         XCTAssertEqual(stored.customTitle, "what I called it")
@@ -160,7 +161,10 @@ final class SessionNameToolTests: XCTestCase {
 
     func testAMissingSessionIsReportedRatherThanIgnored() throws {
         let store = makeStore()
-        XCTAssertFalse(store.updateAgentTitle("worktree diff crash", for: SessionID()))
+        XCTAssertEqual(
+            store.updateAgentTitle("worktree diff crash", for: SessionID()),
+            .sessionNotFound
+        )
     }
 
     // MARK: - Chosen Over Reported
@@ -173,13 +177,22 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
         store.updateAgentTitle("Explore integration options", for: session.id)
 
-        XCTAssertTrue(store.updateAgentTitle(
-            "Chrome sessions and passwords", for: session.id, source: .chosen
-        ))
+        XCTAssertEqual(
+            store.updateAgentTitle(
+                "Chrome sessions and passwords", for: session.id, source: .chosen
+            ),
+            .accepted
+        )
 
         // The terminal title, then the transcript read: both re-report the old name.
-        XCTAssertFalse(store.updateAgentTitle("✻ Explore integration options", for: session.id))
-        XCTAssertFalse(store.updateAgentTitle("Explore integration options", for: session.id))
+        XCTAssertEqual(
+            store.updateAgentTitle("✻ Explore integration options", for: session.id),
+            .protectedByStrongerSource
+        )
+        XCTAssertEqual(
+            store.updateAgentTitle("Explore integration options", for: session.id),
+            .protectedByStrongerSource
+        )
         XCTAssertEqual(
             store.session(withID: session.id)?.agentTitle,
             "Chrome sessions and passwords"
@@ -191,8 +204,14 @@ final class SessionNameToolTests: XCTestCase {
     func testANewChosenNameReplacesTheOldChosenOne() throws {
         let (store, session) = try makeSessionInProject(named: "app")
 
-        XCTAssertTrue(store.updateAgentTitle("first chosen name", for: session.id, source: .chosen))
-        XCTAssertTrue(store.updateAgentTitle("second chosen name", for: session.id, source: .chosen))
+        XCTAssertEqual(
+            store.updateAgentTitle("first chosen name", for: session.id, source: .chosen),
+            .accepted
+        )
+        XCTAssertEqual(
+            store.updateAgentTitle("second chosen name", for: session.id, source: .chosen),
+            .accepted
+        )
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "second chosen name")
     }
 
@@ -201,8 +220,8 @@ final class SessionNameToolTests: XCTestCase {
     func testAReportedTitleStillFollowsWhileNothingWasChosen() throws {
         let (store, session) = try makeSessionInProject(named: "app")
 
-        XCTAssertTrue(store.updateAgentTitle("what it opened with", for: session.id))
-        XCTAssertTrue(store.updateAgentTitle("what it became", for: session.id))
+        XCTAssertEqual(store.updateAgentTitle("what it opened with", for: session.id), .accepted)
+        XCTAssertEqual(store.updateAgentTitle("what it became", for: session.id), .accepted)
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "what it became")
     }
 
@@ -213,13 +232,19 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
         store.updateAgentTitle("Action Required | app", for: session.id)
 
-        XCTAssertTrue(store.updateAgentTitle(
-            "WINAMP",
-            for: session.id,
-            source: .provider
-        ))
+        XCTAssertEqual(
+            store.updateAgentTitle(
+                "WINAMP",
+                for: session.id,
+                source: .provider
+            ),
+            .accepted
+        )
 
-        XCTAssertFalse(store.updateAgentTitle("Action Required | app", for: session.id))
+        XCTAssertEqual(
+            store.updateAgentTitle("Action Required | app", for: session.id),
+            .protectedByStrongerSource
+        )
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "WINAMP")
         XCTAssertEqual(store.session(withID: session.id)?.agentTitleSource, .provider)
     }
@@ -230,11 +255,14 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
         store.updateAgentTitle("Threading's name", for: session.id, source: .chosen)
 
-        XCTAssertFalse(store.updateAgentTitle(
-            "Provider's name",
-            for: session.id,
-            source: .provider
-        ))
+        XCTAssertEqual(
+            store.updateAgentTitle(
+                "Provider's name",
+                for: session.id,
+                source: .provider
+            ),
+            .protectedByStrongerSource
+        )
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "Threading's name")
         XCTAssertEqual(store.session(withID: session.id)?.agentTitleSource, .chosen)
     }
@@ -245,12 +273,56 @@ final class SessionNameToolTests: XCTestCase {
         let (store, session) = try makeSessionInProject(named: "app")
         store.updateAgentTitle("worktree diff crash", for: session.id)
 
-        XCTAssertTrue(store.updateAgentTitle(
-            "worktree diff crash", for: session.id, source: .chosen
-        ))
+        XCTAssertEqual(
+            store.updateAgentTitle(
+                "worktree diff crash", for: session.id, source: .chosen
+            ),
+            .accepted
+        )
 
-        XCTAssertFalse(store.updateAgentTitle("something reported later", for: session.id))
+        XCTAssertEqual(
+            store.updateAgentTitle("something reported later", for: session.id),
+            .protectedByStrongerSource
+        )
         XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "worktree diff crash")
+    }
+
+    /// A tool result is an acknowledgement, not an optimistic UI update. Recovery mode is a
+    /// deterministic refused-write fixture for the same path a disk or database failure takes:
+    /// the chosen title must report that refusal and the standing persisted title must remain.
+    func testAChosenNameIsAcknowledgedOnlyAfterItsWriteCommits() throws {
+        let (seed, session) = try makeSessionInProject(named: "app")
+        XCTAssertEqual(
+            seed.updateAgentTitle("standing persisted name", for: session.id),
+            .accepted
+        )
+        seed.flushPendingSave()
+
+        let refusingStore = ProjectStore(
+            stateManager: StateManager(
+                appSupportDirectory: testDirectory.appendingPathComponent(
+                    "state",
+                    isDirectory: true
+                )
+            ),
+            refusesWrites: true
+        )
+        XCTAssertEqual(
+            refusingStore.updateAgentTitle(
+                "optimistic ghost name",
+                for: session.id,
+                source: .chosen
+            ),
+            .persistenceRefused
+        )
+        XCTAssertEqual(
+            refusingStore.session(withID: session.id)?.agentTitle,
+            "standing persisted name"
+        )
+
+        let reopened = makeStore()
+        XCTAssertEqual(reopened.session(withID: session.id)?.agentTitle, "standing persisted name")
+        XCTAssertEqual(reopened.session(withID: session.id)?.agentTitleSource, .reported)
     }
 
     /// The pin is part of the record: a chosen name that survived to the next launch must
@@ -321,7 +393,7 @@ final class SessionNameToolTests: XCTestCase {
         let folder = testDirectory.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
         return (store, session)
     }

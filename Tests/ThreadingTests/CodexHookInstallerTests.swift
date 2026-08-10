@@ -115,6 +115,25 @@ final class CodexHookInstallerTests: XCTestCase {
 
     // MARK: - Installing
 
+    func testInstallPreservesAnUnreadableStandingHooksFile() throws {
+        let standing = Data("not json\n".utf8)
+        try standing.write(to: hooksFile)
+
+        XCTAssertFalse(CodexHookInstaller.install(inCodexHome: codexHome.path))
+        XCTAssertEqual(try Data(contentsOf: hooksFile), standing)
+    }
+
+    func testInstallPreservesAnOversizedStandingHooksFile() throws {
+        let standing = Data(count: CodexHookInstaller.maximumHooksBytes + 1)
+        try standing.write(to: hooksFile)
+
+        XCTAssertFalse(CodexHookInstaller.install(inCodexHome: codexHome.path))
+        XCTAssertEqual(
+            try hooksFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            standing.count
+        )
+    }
+
     func testInstallCreatesEntriesForEveryMappedEvent() throws {
         XCTAssertTrue(CodexHookInstaller.install(inCodexHome: codexHome.path))
 

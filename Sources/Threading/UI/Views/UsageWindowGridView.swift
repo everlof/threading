@@ -376,6 +376,7 @@ private enum UsageWindowGridStrings {
 
 // MARK: - Usage Window Grid Defaults
 
+@MainActor
 enum UsageWindowGridDefaults {
     /// A window block is as tall as the classic progress bar it becomes under a segmented
     /// material, so switching themes changes the treatment and not the layout.

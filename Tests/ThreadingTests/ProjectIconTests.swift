@@ -15,17 +15,25 @@ final class ProjectIconTests: XCTestCase {
         size: Int,
         color: CGColor = CGColor(red: 0.8, green: 0.4, blue: 0.2, alpha: 1)
     ) throws -> Data {
+        try pngData(width: size, height: size, color: color)
+    }
+
+    private func pngData(
+        width: Int,
+        height: Int,
+        color: CGColor = CGColor(red: 0.8, green: 0.4, blue: 0.2, alpha: 1)
+    ) throws -> Data {
         let context = try XCTUnwrap(CGContext(
             data: nil,
-            width: size,
-            height: size,
+            width: width,
+            height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ))
         context.setFillColor(color)
-        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
         let image = try XCTUnwrap(context.makeImage())
         let output = NSMutableData()
@@ -50,14 +58,28 @@ final class ProjectIconTests: XCTestCase {
 
     // MARK: - Store
 
+    func testPersistedIconNamesCannotEscapeTheStore() {
+        XCTAssertTrue(ProjectIconStore.isSafeFileName("legacy-icon.png"))
+        for invalid in ["", ".", "..", "../icon.png", "nested/icon.png", "/tmp/icon.png"] {
+            XCTAssertFalse(ProjectIconStore.isSafeFileName(invalid), invalid)
+            XCTAssertFalse(TranscriptID(invalid).isSafePathComponent, invalid)
+            let icon = ProjectIcon(source: .custom, fileName: invalid)
+            XCTAssertNil(ProjectIconStore.image(for: icon))
+            XCTAssertNil(ProjectIconStore.pngData(for: icon))
+            ProjectIconStore.remove(fileName: invalid)
+        }
+    }
+
     func testStoreNormalizesRoundTripsAndRemoves() throws {
         let projectID = ProjectID()
-        let fileName = try XCTUnwrap(
-            ProjectIconStore.store(imageData: pngData(size: 256), for: projectID)
+        let fileName = try ProjectIconStore.store(
+            imageData: pngData(size: 256),
+            for: projectID
         )
         defer { ProjectIconStore.remove(fileName: fileName) }
 
-        XCTAssertEqual(fileName, projectID.uuidString + ".png")
+        XCTAssertTrue(fileName.hasPrefix(projectID.uuidString + "-"))
+        XCTAssertTrue(fileName.hasSuffix(".png"))
 
         let icon = ProjectIcon(source: .repoFile, fileName: fileName)
         let image = try XCTUnwrap(ProjectIconStore.image(for: icon))
@@ -78,8 +100,9 @@ final class ProjectIconTests: XCTestCase {
 
     func testStoreDoesNotUpscaleSmallIcons() throws {
         let projectID = ProjectID()
-        let fileName = try XCTUnwrap(
-            ProjectIconStore.store(imageData: pngData(size: 32), for: projectID)
+        let fileName = try ProjectIconStore.store(
+            imageData: pngData(size: 32),
+            for: projectID
         )
         defer { ProjectIconStore.remove(fileName: fileName) }
 
@@ -99,7 +122,141 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertFalse(ProjectIconStore.isUsableImage(html))
 
         // Anything below the minimum cannot survive being drawn at 16pt.
-        XCTAssertFalse(ProjectIconStore.isUsableImage(try pngData(size: 8)))
+        let undersized = try pngData(size: 8)
+        XCTAssertFalse(ProjectIconStore.isUsableImage(undersized))
+        XCTAssertThrowsError(try ProjectIconStore.store(imageData: undersized, for: ProjectID())) {
+            guard case ProjectIconStoreError.unusableImage = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+
+        // Both axes must survive a 16pt slot. Checking width alone admitted tracking-pixel-like
+        // panoramas which decode successfully but render as a nearly invisible hairline.
+        let hairline = try pngData(width: 64, height: 1)
+        XCTAssertFalse(ProjectIconStore.isUsableImage(hairline))
+        XCTAssertThrowsError(try ProjectIconStore.store(imageData: hairline, for: ProjectID())) {
+            guard case ProjectIconStoreError.unusableImage = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+    }
+
+    func testLocalCandidateReadIsBoundedBeforeDecode() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "project-icon-read-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let usable = directory.appendingPathComponent("usable.png")
+        let usableBytes = try pngData(size: 64)
+        try usableBytes.write(to: usable)
+        XCTAssertEqual(ProjectIconStore.candidateData(at: usable), usableBytes)
+
+        let oversized = directory.appendingPathComponent("oversized.png")
+        try Data(
+            repeating: 0,
+            count: ProjectIconDefaults.maximumSourceBytes + 1
+        ).write(to: oversized)
+        XCTAssertNil(ProjectIconStore.candidateData(at: oversized))
+    }
+
+    func testExternallyOversizedStoredIconIsRefusedOnEveryReadPath() throws {
+        let fileName = try ProjectIconStore.store(
+            imageData: pngData(size: 64),
+            for: ProjectID()
+        )
+        defer { ProjectIconStore.remove(fileName: fileName) }
+        let stored = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
+            .appendingPathComponent(ProjectIconDefaults.iconDirectoryName)
+            .appendingPathComponent(fileName)
+        let handle = try FileHandle(forWritingTo: stored)
+        try handle.truncate(atOffset: UInt64(ProjectIconDefaults.maximumSourceBytes + 1))
+        try handle.close()
+        let icon = ProjectIcon(source: .custom, fileName: fileName)
+
+        XCTAssertNil(ProjectIconStore.image(for: icon))
+        XCTAssertNil(ProjectIconStore.pngData(for: icon))
+    }
+
+    func testProjectIconResearchDoesNotFollowAProjectSymlinkOutsideItsAuthority() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "project-icon-authority-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let inside = project.appendingPathComponent("inside.png")
+        try pngData(size: 64).write(to: inside)
+        XCTAssertEqual(
+            ProjectIconResearch.projectContainedCandidateURL(
+                path: "inside.png",
+                folderURL: project
+            ),
+            inside.standardizedFileURL.resolvingSymlinksInPath()
+        )
+
+        let outside = root.appendingPathComponent("private.png")
+        try pngData(size: 64).write(to: outside)
+        let link = project.appendingPathComponent("innocent-name.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        XCTAssertNil(
+            ProjectIconResearch.projectContainedCandidateURL(
+                path: link.path,
+                folderURL: project
+            )
+        )
+    }
+
+    func testRefusedProjectWriteLeavesTheStandingIconBytesAndRecordTogether() throws {
+        let stateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "project-icon-transaction-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: stateDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: stateDirectory) }
+
+        let manager = StateManager(appSupportDirectory: stateDirectory)
+        let seed = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(seed.addProject(folderURL: stateDirectory))
+        let first: ProjectIcon
+        switch seed.setIcon(
+            imageData: try pngData(size: 64, color: .init(red: 1, green: 0, blue: 0, alpha: 1)),
+            source: .custom,
+            for: project.id
+        ) {
+        case .success(let icon):
+            first = icon
+        case .failure(let error):
+            return XCTFail("failed to seed icon: \(error)")
+        }
+        defer { ProjectIconStore.remove(fileName: first.fileName) }
+        let standingBytes = try XCTUnwrap(ProjectIconStore.pngData(for: first))
+
+        let recovery = ProjectStore(stateManager: manager, refusesWrites: true)
+        let replacement = recovery.setIcon(
+            imageData: try pngData(size: 64, color: .init(red: 0, green: 0, blue: 1, alpha: 1)),
+            source: .agent,
+            for: project.id
+        )
+
+        guard case .failure(.persistenceRefused) = replacement else {
+            return XCTFail("unexpected replacement result: \(replacement)")
+        }
+        XCTAssertEqual(recovery.project(withID: project.id)?.icon, first)
+        XCTAssertEqual(
+            ProjectIconStore.pngData(for: first),
+            standingBytes,
+            "a refused metadata write had already overwritten the icon bytes it rolled back to"
+        )
     }
 
     // MARK: - Backplate
@@ -150,8 +307,9 @@ final class ProjectIconTests: XCTestCase {
     func testLuminanceReflectsIconTone() throws {
         let projectID = ProjectID()
         let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
-        let fileName = try XCTUnwrap(
-            ProjectIconStore.store(imageData: pngData(size: 64, color: white), for: projectID)
+        let fileName = try ProjectIconStore.store(
+            imageData: pngData(size: 64, color: white),
+            for: projectID
         )
         defer { ProjectIconStore.remove(fileName: fileName) }
 
@@ -333,6 +491,25 @@ final class ProjectIconTests: XCTestCase {
         )
     }
 
+    func testAvatarFileNameFallsBackToADigestForHostilePersistedAccountNames() {
+        let ordinary = AgentAccount(
+            provider: .claude,
+            handle: .named("work"),
+            configPath: "/tmp/work"
+        )
+        XCTAssertEqual(AccountAvatarStore.fileName(for: ordinary), "claude-work.png")
+
+        let hostile = AgentAccount(
+            provider: .claude,
+            handle: .named("../../outside"),
+            configPath: "/tmp/outside"
+        )
+        let fileName = AccountAvatarStore.fileName(for: hostile)
+        XCTAssertTrue(ProjectIconStore.isSafeFileName(fileName))
+        XCTAssertFalse(fileName.contains("outside"))
+        XCTAssertEqual(fileName.count, 68)
+    }
+
     private static func sha256(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -457,7 +634,10 @@ final class ProjectIconTests: XCTestCase {
 
         try FileManager.default.removeItem(at: mainRef)
         let packedRevision = String(repeating: "b", count: 40)
-        try "# pack-refs with: peeled\n\(packedRevision) refs/heads/main\n".write(
+        let packedFiller = (0..<2_000).map {
+            "\(String(repeating: "d", count: 40)) refs/tags/fixture-\($0)\n"
+        }.joined()
+        try "# pack-refs with: peeled\n\(packedFiller)\(packedRevision) refs/heads/main\n".write(
             to: gitDirectory.appendingPathComponent("packed-refs"),
             atomically: true,
             encoding: .utf8

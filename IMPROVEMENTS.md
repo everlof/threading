@@ -4,6 +4,266 @@
 > history. The follow-up review on 31 July 2026 found and closed the smaller regressions that
 > accumulated during the next refactoring wave.
 
+## Risk-directed hardening review — 9–10 August 2026
+
+This pass inspected the last 150 commits and followed fix/follow-up-fix clusters into their full
+data and lifecycle paths. The ledger is grouped by failure shape rather than diff: each invariant
+is intended to prevent the next spelling of the bug, not only the measured reproduction.
+
+- [x] **Child-process ownership and completion.** Evidence: launch failures could leave a child
+      running before the ledger knew its identity; pipe callbacks and termination handlers could
+      race or complete twice; several helpers retained descriptors past teardown. Root cause:
+      `Process`, pipes, process groups, timeout and completion were independent conventions.
+      `ChildProcessSpawn`, `AgentChildProcess` and provider/extension/remote adapters now make
+      enrollment part of launch, close every unused descriptor, own one termination state, bound
+      output and complete once. Files: `ChildProcessSpawn.swift`, `AgentChildProcess.swift`,
+      `GitProcess.swift`, `ExtensionChildSpawner.swift`, `RemoteTunnel.swift`,
+      `TailscaleRemoteTransport.swift`. Verified by `AgentChildProcessTests`,
+      `StreamSessionLifecycleTests`, extension lifecycle tests and focused remote suites.
+      Remaining risk: real OS/process-group behavior still merits the existing opt-in E2E runs.
+
+- [x] **Typed outcomes and capabilities instead of boolean/optional agreement.** Evidence:
+      Playwright failures could carry a screenshot, account usage could expose halves from
+      different refreshes, transcript support and terminal bridge policy were duplicated by
+      runtime name. Root cause: invalid combinations were representable and consumers rebuilt
+      policy. Algebraic outcomes, `AccountUsageReading`, `TranscriptReplayFormat` and distinct
+      native/terminal capabilities now make those decisions exhaustive. Files:
+      `PlaywrightAutomation.swift`, `AccountUsageService.swift`, `AgentModels.swift`,
+      `TranscriptReplay.swift`, `SessionMigration.swift`, `AgentLauncher.swift` and
+      `ConversationViewController.swift`. Native construction is now failable at the capability
+      boundary, unsupported launch planning is a typed error instead of a precondition crash, and
+      every provider defers planning/spawn failure through one exactly-once exit path rather than
+      allowing a reentrant callback during `start()`. Verified by provider matrix, Playwright,
+      account usage and continuation tests plus 97 focused native-lifecycle tests. Remaining risk:
+      new provider behavior must still be added to the closed capability matrix deliberately.
+
+- [x] **Project mutations commit as one durable candidate.** Evidence: icon replacement,
+      archive/import, session removal and auxiliary cleanup could mutate memory or a second store
+      before SQLite accepted the graph, leaving two truths after a refused write. Root cause:
+      `save()` was an epilogue rather than the state transition. `ProjectStore` now builds a
+      candidate, commits it, then publishes memory and performs rollback-safe side effects;
+      typed mutation results surface refusal. Files: `ProjectStore.swift`, `Project.swift`,
+      sidebar/session coordinators and `ProjectStoreMutationTests.swift`. Verified by mutation,
+      import-batch, archive, attachment and icon transaction suites. Remaining risk: cross-store
+      cleanup remains compensating rather than a single database transaction where the bytes are
+      intentionally file-backed.
+
+- [x] **Recoverable preferences are bounded and commit before publication.** Evidence:
+      change-request policy and publish receipts treated corrupt bytes as an empty collection, so
+      the next ordinary edit erased the only evidence; the shared recoverable defaults abstraction
+      had no allocation ceiling. Root cause: quarantine, decode work and mutation ordering were
+      separate conventions. Every `RecoverableDefaultsStore` now declares a 1 MiB compact-metadata
+      policy checked before JSON materialization and before replacement. Change-request stores and
+      the usage-window schedule and workspace-navigator choice use the versioned/quarantined
+      envelope, validate repository cardinality, receipt URL authority, schedule bounds, weekday
+      membership and stored identity, persist a candidate, then publish memory and notifications.
+      Files: `DefaultsQuarantine.swift`, `ChangeRequestConfiguration.swift`,
+      `ChangeRequestReceiptStore.swift`, `UsageWindowSettings.swift`, `AppSettings.swift` and all
+      recoverable-defaults construction sites. Verified by 54 recovery/change-request/usage-window/
+      navigator tests including corrupt, oversized, invalid-schedule/identity and unsafe-URL
+      fixtures. Remaining risk: `UserDefaults` itself returns the source blob as one `Data`; the
+      ceiling bounds app decode/materialization, not cfprefsd's read.
+
+- [x] **SQLite recovery never moves a live WAL and never downgrades a future schema.** Evidence:
+      the pinned-reader reproduction emitted SQLite's “vnode renamed while in use”; a schema
+      above the supported version was previously accepted by `migrate(to:)`. Root cause: file
+      movement was decided outside SQLite and schema monotonicity was checked too late.
+      `prepareForFileMove()` transitions WAL to DELETE or refuses without moving anything;
+      `user_version` is checked immediately after open, before configuration or migration.
+      Files: `SQLiteDatabase.swift`, `ProjectDatabase.swift`, `StateManager.swift`. Verified by
+      all 58 `StateManagerTests`/`ProjectDatabaseTests`, including byte-for-byte future-schema
+      preservation and a pinned WAL owner, with no vnode warning. Remaining risk: recovery waits
+      for an external owner to close by design.
+
+- [x] **Relaunch/reset is a prepare–commit protocol.** Evidence: arming a next-launch flag or
+      moving Application Support before `/bin/sh` successfully started could turn a failed button
+      press into a later surprise relaunch; open SQLite handles survived directory moves. Root
+      cause: irreversible state mutation preceded proof that the successor existed. The helper
+      now waits on a private commit pipe, intent is armed only for a live helper and disarmed if it
+      dies, and state owners close before reset movement. Files: `AppRelaunch.swift`,
+      `AppDataResetFlow.swift`, `AppDelegate.swift`, `StateManager.swift`. Verified by relaunch,
+      reset and recovery-mode startup suites. Remaining risk: launch-service behavior is covered
+      by process fixtures, not a destructive test against the real Application Support directory.
+
+- [x] **One authoritative bounded file reader.** Evidence: dozens of provider-named, selected or
+      externally replaceable files used metadata preflight followed by `Data(contentsOf:)`, so a
+      growth race bypassed the advertised cap. Root cause: reported size was mistaken for an
+      allocation boundary. `BoundedFileReader` accepts only regular files and reads one byte past
+      the allowance; transcript, credential/config, icon, theme, diagnostic, import and cache
+      callers use it. `RecoverableFileStore` now requires a typed 1/32/64 MiB policy at every
+      construction and verifies writes through the same boundary. Files:
+      `BoundedFileReader.swift`, `DefaultsQuarantine.swift` and the owning stores. Extension Metal
+      source and environment-selected APNs signing keys now cross the same opened-file boundary,
+      rather than trusting a size preflight or allocating an arbitrary credential file. Verified by
+      sparse-file regressions plus 128 representative store/configuration tests. Remaining risk:
+      trusted bundle and generated resources retain a few whole-file reads; they are not externally
+      replaceable persistence boundaries.
+
+- [x] **Untrusted images have one byte-and-pixel decode policy.** Evidence: extension panels and
+      navigator nodes promised a 4 MiB/1,024-pixel contract but only identity rows checked decoded
+      dimensions; composer, attachment, inspector, account-avatar and pane-cache paths still used
+      lazy `NSImage(contentsOf:)` after a metadata check. Root cause: path resolution, compressed
+      bytes, source pixels and rendered allocation were separate conventions. Typed decode policies
+      now pair byte, dimension, area and rendered-size ceilings; full previews re-read one byte past
+      the cap, extension resources reject animation and validate again for remote delivery, and
+      thumbnail rails decode only bounded thumbnails instead of every full image. Browser-baseline
+      UI also reopens through the store's hash/dimension claim. Files: `MediaInspector.swift`,
+      `ExtensionManager.swift`, extension renderers, attachment/composer/pane/avatar/baseline paths.
+      Verified by 92 media/composer/attachment tests plus sparse-growth and extension-dimension
+      regressions. Remaining risk: Quick Look/PDFKit are OS-owned document decoders and remain
+      behind the existing 64 MiB preview refusal rather than this raster policy.
+
+- [x] **Browser baselines are validated as one immutable claim.** Evidence: reload silently
+      dropped a damaged revision and selected another; empty optional artifacts persisted as
+      present; image byte checks happened after decode or only at capture. Root cause: record,
+      manifest and pixels were validated independently and charitably. The store validates ids,
+      uniqueness, active revision, hashes, sizes and dimensions together, canonicalizes empty
+      optionals, quarantines the whole damaged bundle, preserves future formats, and enforces
+      metadata/image/pixel ceilings before decode and again on use. Files:
+      `BrowserBaselineStore.swift`, browser diagnostics/comparison controllers and commands.
+      Verified by 29 baseline tests including tampered pixels and sparse oversized artifacts.
+      Remaining risk: the library's eager rich-row rendering remains a measured performance item.
+
+- [x] **Conversation exports and handoffs cannot become unbounded bootstrap state.** Evidence:
+      provider export stdout and durable snapshots were loaded whole; the one-million-character
+      rule did not bound encoded bytes, and synthesized decoding could directly assign an invalid
+      retained lineage around its failable initializer. Root cause: presentation limits were
+      reused as allocation limits and construction-time validation was assumed to govern decode.
+      Exports now cap result bytes and retained stderr; handoff envelopes cap encoded and reopened
+      bytes; `ConversationHandoff.init(from:)` re-enters the compacting, cross-runtime path
+      validator; and oversized legacy data may use the streaming replay compatibility path. Files:
+      `Project.swift`, `SessionMigration.swift`, `SideChatTests.swift`. Verified by 36 capability
+      tests plus export/handoff failure-path suites. Remaining risk: provider CLIs can still spend
+      their separately bounded process timeout before producing a refusal.
+
+- [x] **Journals and caches enforce their caps on both sides.** Evidence: execution-audit,
+      usage-cache/history and remote-diagnostic readers loaded whole files even though their
+      eventual records or suffixes were bounded; addition-based rotation could overflow.
+      Root cause: retention/output bounds were mistaken for read-work bounds. Opened-stream caps,
+      subtraction-based rotation, per-record ceilings, explicit broken/miss outcomes and shallow
+      entry-budgeted enumeration now make oversized input visible without allocating it. Both the
+      remote journal and mobile issue outbox count every visible support-directory entry before
+      filtering; overflow refuses rather than hiding valid files behind malformed names. Files:
+      `ExecutionAudit.swift`, `UsageScanCache.swift`, `UsageLimitHistoryJournal.swift`, RemoteKit
+      diagnostics and mobile issue reporting. Execution-audit removal now addresses the closed
+      per-session filename set directly and rotation policy has an absolute ceiling, so deleting
+      one session does not enumerate every other ledger. Verified by audit/usage suites, all 79
+      RemoteKit tests and a generic iOS Simulator build. Remaining risk: none known at these
+      persistence boundaries.
+
+- [x] **Extensions keep host authority and resource ceilings at the actual boundary.** Evidence:
+      storage quota checks trusted a prior file size; a `.wasm` module could grow between package
+      validation and `Data(contentsOf:)`; package/provenance writes could diverge on failure.
+      Root cause: installation validation, open-file authority and durable state were separate.
+      Extension KV/cache reads stream through quota, WebAssembly reads through the 256 MiB opened
+      module ceiling, package images enforce their documented single-frame byte/pixel contract at
+      actual decode/delivery, Metal source is streamed through its 256 KiB limit before compilation,
+      installed-package discovery stops at 1,024 visible directory entries/256 packages before
+      filtering or eagerly inspecting manifests, and install/provenance/settings stores use bounded
+      recoverable persistence. Files:
+      `ExtensionStorage.swift`, `ThreadingWasmRuntime.swift`, extension
+      manager/renderers and package/settings stores. Verified by ExtensionKit contracts, 4 Wasm
+      runtime tests and 62 package-store tests. Remaining risk: native companions remain
+      OS-sandbox/E2E territory by design.
+
+- [x] **Git, paths and hooks fail closed at ownership boundaries.** Evidence: symlinks and packed
+      refs bypassed path/name assumptions; provider hook updates reconstructed JSON and could erase
+      unknown future keys; several Git subprocesses treated truncation as complete output. Root
+      cause: convenience parsing replaced preservation and repository authority. Git reads now
+      resolve within the checkout, understand loose/packed refs, bound process/file output and
+      preserve unknown hook configuration while changing only owned entries. Files:
+      `GitReviewReader.swift`, `GitInfo.swift`, `GitWorktree.swift`, `CodexHookInstaller.swift`,
+      `StoredPathComponent` call sites. Verified by recovered `GitRepositoryFileAccessTests`, hook,
+      staging and project-icon Git fixtures. Remaining risk: filesystem replacement after a
+      resolved-path check remains an OS-level race where no descriptor-relative API is used.
+
+- [x] **Security-sensitive entropy and destructive actions fail closed.** Evidence: random-byte
+      failures could fall back to predictable identifiers, synthesized decoding could bypass a
+      pairing link's failable initializer, and destructive cleanup could proceed after an ambiguous
+      lookup. Root cause: “best effort” and construction-time checks were used where absence and
+      decode-time revalidation are safer. Token/pairing generation returns typed failure;
+      `RemoteConnectionLink` decodes through its authoritative initializer and derives a
+      non-optional share URL only there; cleanup works only from validated scan results; and
+      removal/archive flows commit their durable graph before deleting auxiliaries. Files:
+      identifiers/remote auth, `RemoteConnectionLink.swift`, `AppDataReset`, cleanup and sidebar
+      action paths. Verified by 81 RemoteKit tests plus pairing, reset and lifecycle confirmation
+      suites. Remaining risk: users can still delete data after the intentionally irreversible
+      confirmation.
+
+- [x] **UI ownership workarounds were replaced by structural contracts.** Evidence: repeated
+      delayed resets, independently inferred menu destinations, and theme rollback that restored
+      only the document allowed stale controls or assets. Root cause: views and backing resources
+      committed at different times. Menu destinations are algebraic, display geometry addresses
+      split items rather than private subviews, theme edits transact document plus assets, and
+      design controls own teardown/observer lifetimes. Files: `ThemedMenu.swift`, display-pane,
+      theme library/editing and design components. Verified by themed-control, menu, display,
+      theme transaction and rendered suites. Final CI also exposed a window-backed geometry
+      fixture retaining AppKit's legacy release-on-close ownership under ARC; the fixture now
+      makes ownership explicit and the whole class passes without process restarts. Remaining
+      risk: none known at this boundary.
+
+- [x] **A test file cannot exist without executing.** Evidence: a focused
+      `ExecutionAuditTests` run reported success with **0 tests**; comparing the directory to the
+      PBX Sources phase found 13 unregistered suites added across several recent commits. Root
+      cause: registration was documented but unenforced, and `add_test_file.py` treated partial
+      registration as success. All 13 files are registered (110 recovered tests pass), partial
+      registration is refused, and `check_test_registration.py` runs from every app build,
+      `scripts/test.sh` and `scripts/ci.sh`. The writer now validates the entire argument set before
+      mutation and accepts only existing `.swift` files; the checker audits every Sources entry,
+      including a typo without a `.swift` suffix. Files: Xcode project and test scripts. Remaining
+      risk: Xcode selectors can still spell a nonexistent method; registration guarantees the
+      suite is compiled, while final full-plan runs guarantee broad execution.
+
+- [x] **Mobile callbacks cross the main-actor boundary explicitly.** Evidence: the simulator build
+      exposed future Swift-6 data-race warnings in terminal KVO/delegate callbacks, notification
+      observers, device identity and notification-center delegates. Root cause: UIKit ownership was
+      implicit in callback provenance rather than expressed in signatures and hops. Coordinators,
+      identity and preference values are main-actor isolated; nonisolated delegates extract
+      sendable values before hopping to the actor; observer/token teardown is isolated. Files:
+      `TerminalViewRepresentable.swift`, `RemoteNotifications.swift`, `RemoteClient.swift`, mobile
+      issue reporting and timeline controllers. Verified by a generic iOS Simulator build.
+      Remaining risk: notification delivery and terminal KVO still merit native-device E2E coverage.
+
+- [x] **Device-local drafts and keyboards commit bounded candidates.** Evidence: mobile session
+      continuity mutated its published archive before encoding or verifying the write, so a refused
+      save left the running UI on state a restart could not recover; draft-bearing records and
+      custom keyboard actions also had no aggregate storage ceiling. Root cause: quarantine was
+      treated as a complete persistence contract while mutation ordering and allocation remained
+      independent. Both archives now enforce a 1 MiB encoded boundary plus structural cardinality,
+      identity, draft/action and aggregate-string limits. Continuity updates prune and validate a
+      copy, persist it, then publish it; keyboard layout identity is unique before it can become
+      durable. Files: `MobileSessionContinuityStore.swift` and
+      `MobileTerminalKeyboardStore.swift`. Verified by the generic iOS Simulator build and all 8
+      ThreadingMobile tests, including published-and-durable rollback regressions. Remaining risk:
+      the source `UserDefaults` blob is still delivered eagerly by cfprefsd before the app can apply
+      its 1 MiB decode refusal.
+
+### Final verification — 10 August 2026
+
+- `scripts/ci.sh`: architecture, theme, localization and test-registration boundaries passed;
+  strict SwiftLint reported no violations; all three local Swift package suites passed; the
+  strict-concurrency `Threading-Fast` plan executed 4,510 tests with 28 intentional skips and zero
+  failures.
+- `scripts/test.sh all`: the complete on-screen/WebKit `Threading-All` plan executed 4,531 tests
+  with 30 intentional skips and zero failures.
+- The generic iOS Simulator build and all 8 `ThreadingMobile` tests passed after the mobile
+  persistence/concurrency changes. Focused regressions were run at each checkpoint before these
+  repository-wide gates.
+- The first final CI attempt usefully caught two invalid test assumptions introduced by this pass:
+  an ARC-owned fixture window still used AppKit's release-on-close convention, causing an
+  autorelease-pool segfault, and a menu test expected a change notification from a typed
+  `.targetMissing` mutation. Both tests now model the production ownership/commit contracts; the
+  corrected tree is what the green gates above exercised.
+
+### Evidence-backed follow-ups
+
+1. Virtualize the browser baseline library's image-backed rows; the measured 200-record mount and
+   theme refresh remain the highest known UI scaling cost.
+2. Apply the same lazy construction boundary to extension panels/preferences, whose transport caps
+   still exceed a sensible eager AppKit budget.
+3. Add descriptor-relative reads for the few security-relevant repository paths where a symlink can
+   still be replaced after canonicalization.
+
 ## Provider-matrix review — 4 August 2026
 
 Prompted by a fourth and fifth runtime (Grok, OpenCode) landing beside Claude and Codex. The
@@ -48,51 +308,43 @@ could not be extended without re-reading the whole app.
 Found and verified against the tree, not yet done. Ordered by value against the number of call
 sites each would touch.
 
-- [ ] **`ThemedMenuItem.onChoose` and `.submenu` are mutually exclusive and the type does not
-      say so.** The doc comment at `ThemedMenu.swift:16` spells the rule out — "an item is a
-      parent *or* an action … which reads as a defect, so don't" — and it is enforced nowhere,
-      then re-derived identically at `:911`, `:966` and `:979`. A private `enum Activation`
-      with `onChoose`/`submenu` kept as computed accessors costs **4 call sites**: the three
-      guards, plus `ConversationContextRailView.swift:85`. Of 221 constructions none passes
-      both parameters, and no test file changes.
-- [ ] **"Which runtime has a transcript Threading can parse" is answered by name in nine
-      places** — `TranscriptReplay` ×3, `SubagentTimeline` ×2, `SessionNaming` ×2, and
-      `SessionImporter.swift:41` / `GlobalSessionScan.swift:107`, the last two as bare `.claude`
-      / `.codex` literals with no switch at all. `SessionTranscript` consolidated two of them;
-      the rest have no capability behind them. `.transcriptTitles`, `.transcriptModelRecord`
-      and `.transcriptUsageIndex` all presuppose the base fact without naming it.
-- [ ] **Attachment-reference detection runs for four runtimes and can be switched off for
-      two.** The model and both consumers are per-`AgentKind`
-      (`AppSettings.swift:508-552`); only the Settings ▸ General card is written per-name, with
-      hardcoded Claude and Codex rows. `SessionAttachmentsViewController.swift:576` can render
-      "Detection … is turned off in Settings › General" naming a runtime whose toggle does not
-      exist.
-- [ ] **`.threadingBridge` and `appendMCPFlags` disagree about Grok.** `routed(_:for:)` and
-      `appendHookEnvironment` both gate on the capability, so a Grok *terminal* launch exports
-      `THREADING_MCP_PORT` and a session token — then `appendMCPFlags`
-      (`AgentLauncher.swift:443`) drops the runtime by name, so it is never told where the
-      server is. Grok's *native* transport registers it correctly. One of the two answers is
-      wrong; a fifth runtime added to the capability list would inherit the same half-connection
-      with no compiler complaint.
-- [ ] **`ConversationContinuation.destinations` is gated on account discovery, not on what the
-      store will accept.** The menu comes from `AgentKind.allCases.flatMap { accounts(for:) }`
-      (`SessionMigration.swift:129`) while the refusal lives in
-      `AgentSessionConfiguration.init?`. They agree today only because Grok and OpenCode have no
-      accounts — the exact shape of the composer/Grok bug fixed above.
-- [ ] **`PlaywrightAutomationOutput`** (`text` means result *or* error message, beside
-      `succeeded: Bool`) → two cases; **5 call sites**, 1 test file.
-- [ ] **`HookLifecycleReport.agentSessionID: String?`** is `TranscriptID`'s domain verbatim, and
-      `AgentRuntime.swift:252` re-wraps it *and* re-checks emptiness at read time; **4 call
-      sites**, 1 test file.
-- [ ] **`SubagentSummaryItem.transcriptURL` + `canOpenTranscript`** encode three meaningful
-      states as four representable ones, and the two reads never consult each other; **~8 call
-      sites**, 2 test files.
-- [ ] **`AccountUsageService.Entry`** — nil carries two meanings on both `usage` and
-      `errorMessage`, and `AccountUsageItemView.swift:198` reconstructs "nothing yet" from the
-      pair. The stale-value-survives-a-failed-refresh behaviour is right; the state machine is
-      just unnamed. **11 call sites**, no test files. Lowest value/cost of the set.
-- [ ] `GitDiffParser.status(fromPorcelainV2:)` constructs a `GitStatus` that nothing in the app
-      or tests consumes. Confirm it is dead and delete it rather than typing it better.
+- [x] **`ThemedMenuItem` now has one algebraic destination:** inert, action, or submenu. Separate
+      initializers preserve the call-site vocabulary while making the action-plus-submenu state
+      unconstructable; consumers no longer rely on every caller honouring a comment.
+- [x] **Local conversation replay has one capability and one closed adapter set.**
+      `.transcriptReplay` distinguishes Claude/Codex's measured local JSONL formats from
+      OpenCode's usage-only export and Grok's ACP history. `TranscriptReplayFormat` centralizes
+      the format dispatch consumed by replay, subagent loading/usage, title backfill and both
+      import scans; those consumers no longer keep nine runtime allow-lists. A matrix test holds
+      the capability and adapters in exact agreement and requires every narrower structured
+      transcript-record capability to imply the base fact.
+- [x] **Attachment-reference detection settings are generated from `AgentKind.allCases`.** The
+      four runtime rows, controls, persisted per-kind setting, scanner consumers, and empty-state
+      guidance now share one closed set; a future runtime cannot gain detection without also
+      gaining the switch the guidance sends the user to.
+- [x] **Native and terminal Threading bridges are separate capabilities.**
+      `.terminalThreadingBridge` is granted only to Claude and Codex and is now the terminal
+      delivery/managed-workspace gate; Grok keeps `.threadingBridge` for its native ACP surface
+      without receiving a half-configured terminal endpoint.
+- [x] **`ConversationContinuation.destinations` now describes every acceptable runtime
+      configuration.** Account-routable runtimes contribute their discovered accounts; runtimes
+      without account routing contribute one explicit standard configuration instead of
+      disappearing from the menu by coincidence.
+- [x] **`PlaywrightAutomationOutput`** is now a two-case result. Success carries result text and
+      an optional screenshot; failure carries only its diagnostic, so callers must distinguish
+      the outcomes and a failed run cannot accidentally transport a screenshot.
+- [x] **`HookLifecycleReport.agentSessionID` is a `TranscriptID?` at the decoding boundary.**
+      Empty external strings are dropped once and consumers no longer re-wrap or revalidate the
+      provider identifier.
+- [x] **`SubagentSummaryItem.TranscriptAvailability`** is one three-case state: unavailable,
+      openable in memory/while running, or on disk with its URL. A revealable transcript is now
+      structurally openable, and the navigator and Finder action consume the same answer.
+- [x] **`AccountUsageReading` names the cache state machine.** Not-fetched, current, stale with
+      the last good value, and first-fetch failure are distinct cases; UI and remote catalog
+      consumers take one snapshot instead of reconstructing a state from two optional reads.
+- [x] **`GitDiffParser.status(fromPorcelainV2:)` is live, not dead.** `GitReviewReader` consumes
+      it for both repository and staged status, and `GitStatusParserTests` covers its porcelain-v2
+      parsing; the audit item had gone stale after those consumers landed.
 
 ## Follow-up review — 31 July 2026
 

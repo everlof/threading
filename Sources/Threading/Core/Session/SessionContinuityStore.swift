@@ -20,7 +20,8 @@ final class SessionContinuityStore {
         persistence = RecoverableFileStore(
             url: root.appendingPathComponent(SessionContinuityDefaults.fileName),
             fileManager: fileManager,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .userDocument
         )
         load()
     }
@@ -48,8 +49,9 @@ final class SessionContinuityStore {
     }
 
     func clear(for sessionID: SessionID) {
-        guard states.removeValue(forKey: sessionID) != nil else { return }
-        save()
+        var candidate = states
+        guard candidate.removeValue(forKey: sessionID) != nil else { return }
+        commit(candidate)
     }
 
     private func update(
@@ -61,12 +63,13 @@ final class SessionContinuityStore {
         mutation(&state)
         guard state != previous else { return }
         state.updatedAt = Date()
+        var candidate = states
         if state.isEmpty {
-            states.removeValue(forKey: sessionID)
+            candidate.removeValue(forKey: sessionID)
         } else {
-            states[sessionID] = state
+            candidate[sessionID] = state
         }
-        save()
+        commit(candidate)
     }
 
     private func load() {
@@ -85,10 +88,15 @@ final class SessionContinuityStore {
         }
     }
 
-    private func save() {
-        persistence.save(SessionContinuityFile(states: states.reduce(into: [:]) {
+    /// This store carries unsent user text, so the verified file is the commit point. Keeping
+    /// the prior in-memory value after failure also lets the standing composer continue to show
+    /// what the next launch can actually recover.
+    private func commit(_ candidate: [SessionID: SessionContinuityState]) {
+        let file = SessionContinuityFile(states: candidate.reduce(into: [:]) {
             $0[$1.key.uuidString] = $1.value
-        }))
+        })
+        guard persistence.save(file) else { return }
+        states = candidate
     }
 }
 

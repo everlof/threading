@@ -330,6 +330,35 @@ final class ExecutionAuditTests: XCTestCase {
         XCTAssertEqual(fixture.store.read(sessionID: sessionID).integrity, .broken)
     }
 
+    func testOversizedSegmentIsReportedBrokenWithoutAWholeFileRead() throws {
+        let fixture = try makeStore(maximumSegmentBytes: 1_024)
+        let sessionID = SessionID()
+        fixture.store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .requested,
+            operation: "exec_command",
+            input: .object(["cmd": .string("pwd")]),
+            fidelity: .exact
+        )
+        let file = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(
+                at: fixture.directory,
+                includingPropertiesForKeys: nil
+            ).first
+        )
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: 1_025)
+        try handle.close()
+
+        let result = fixture.store.read(sessionID: sessionID)
+        XCTAssertEqual(result.integrity, .broken)
+        XCTAssertEqual(result.malformedLineCount, 1)
+        XCTAssertTrue(result.records.isEmpty)
+    }
+
     func testRemovingSessionDeletesCurrentAndRotatedLedger() throws {
         let fixture = try makeStore(maximumSegmentBytes: 1_024, retainedRotatedSegments: 2)
         let sessionID = SessionID()
@@ -357,6 +386,44 @@ final class ExecutionAuditTests: XCTestCase {
             at: fixture.directory,
             includingPropertiesForKeys: nil
         ).isEmpty)
+    }
+
+    func testRemovingSessionTouchesOnlyItsClosedLedgerNamespace() throws {
+        let fixture = try makeStore(retainedRotatedSegments: Int.max)
+        let sessionID = SessionID()
+        let otherSessionID = SessionID()
+        fixture.store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .completed,
+            operation: "fixture",
+            fidelity: .exact
+        )
+
+        let targetBase = "\(sessionID.uuidString).audit.jsonl"
+        let oldestOwned = fixture.directory.appendingPathComponent(
+            "\(targetBase).\(ExecutionAuditStore.maximumRetainedRotatedSegments)"
+        )
+        let similarlyNamedButUnowned = fixture.directory.appendingPathComponent(
+            "\(targetBase).recovery-copy"
+        )
+        let otherLedger = fixture.directory.appendingPathComponent(
+            "\(otherSessionID.uuidString).audit.jsonl"
+        )
+        try Data("owned".utf8).write(to: oldestOwned)
+        try Data("preserve".utf8).write(to: similarlyNamedButUnowned)
+        try Data("other".utf8).write(to: otherLedger)
+
+        fixture.store.remove(sessionID: sessionID)
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: fixture.directory.appendingPathComponent(targetBase).path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldestOwned.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: similarlyNamedButUnowned.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherLedger.path))
     }
 
     func testJSONRPCRequestRetainsExactToolArgumentsBesideTypedCommand() throws {

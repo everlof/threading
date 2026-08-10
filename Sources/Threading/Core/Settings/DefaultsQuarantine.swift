@@ -71,6 +71,40 @@ enum PersistenceCriticality: String {
     case rebuildableCache
 }
 
+/// Allocation policy for the whole-document stores below.
+///
+/// This is deliberately required at each construction site. Criticality answers whether bytes
+/// must be preserved; size policy answers how much work one damaged or externally replaced file
+/// may make the process perform. Conflating them would make every rebuildable cache either tiny
+/// or unbounded.
+enum RecoverableFileSizePolicy {
+    case compactMetadata
+    case userDocument
+    case derivedCache
+
+    var maximumBytes: Int {
+        switch self {
+        case .compactMetadata:
+            return 1 * 1_024 * 1_024
+        case .userDocument:
+            return 32 * 1_024 * 1_024
+        case .derivedCache:
+            return 64 * 1_024 * 1_024
+        }
+    }
+}
+
+/// Allocation policy for encoded values kept in `UserDefaults`.
+///
+/// `UserDefaults` hands the blob to us as one `Data`, so this cannot make the daemon's read
+/// streaming. It still prevents a damaged preference from driving an unbounded JSON object graph,
+/// and prevents a normal write from manufacturing a value the next launch should refuse.
+enum RecoverableDefaultsSizePolicy {
+    case compactMetadata
+
+    var maximumBytes: Int { 1 * 1_024 * 1_024 }
+}
+
 enum PersistenceRecoveryLocation: Equatable {
     case defaultsKey(String)
     case file(URL)
@@ -120,11 +154,14 @@ private struct RecoverableStoreEnvelope<Value: Codable>: Codable {
 
 private enum RecoverableStoreError: LocalizedError {
     case unsupportedVersion(found: Int, current: Int)
+    case tooLarge(actual: Int, maximum: Int)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let found, let current):
             return "stored format version \(found) is newer than supported version \(current)"
+        case .tooLarge(let actual, let maximum):
+            return "stored value is \(actual) bytes; the maximum is \(maximum)"
         }
     }
 }
@@ -135,16 +172,19 @@ final class RecoverableDefaultsStore<Value: Codable> {
     private let defaults: UserDefaults
     private let key: String
     private let criticality: PersistenceCriticality
+    private let sizePolicy: RecoverableDefaultsSizePolicy
     private(set) var writesAllowed = true
 
     init(
         defaults: UserDefaults,
         key: String,
-        criticality: PersistenceCriticality
+        criticality: PersistenceCriticality,
+        sizePolicy: RecoverableDefaultsSizePolicy
     ) {
         self.defaults = defaults
         self.key = key
         self.criticality = criticality
+        self.sizePolicy = sizePolicy
     }
 
     func load(
@@ -156,6 +196,12 @@ final class RecoverableDefaultsStore<Value: Codable> {
         }
 
         do {
+            guard data.count <= sizePolicy.maximumBytes else {
+                throw RecoverableStoreError.tooLarge(
+                    actual: data.count,
+                    maximum: sizePolicy.maximumBytes
+                )
+            }
             let value = try decode(data)
             try validate(value)
             return .loaded(value)
@@ -194,6 +240,12 @@ final class RecoverableDefaultsStore<Value: Codable> {
 
         do {
             let data = try JSONEncoder().encode(RecoverableStoreEnvelope(value: value))
+            guard data.count <= sizePolicy.maximumBytes else {
+                throw RecoverableStoreError.tooLarge(
+                    actual: data.count,
+                    maximum: sizePolicy.maximumBytes
+                )
+            }
             defaults.set(data, forKey: key)
             guard defaults.data(forKey: key) == data else {
                 writesAllowed = false
@@ -239,6 +291,7 @@ final class RecoverableFileStore<Value: Codable> {
     private let url: URL
     private let fileManager: FileManager
     private let criticality: PersistenceCriticality
+    private let sizePolicy: RecoverableFileSizePolicy
     private let dateEncodingStrategy: JSONEncoder.DateEncodingStrategy
     private let dateDecodingStrategy: JSONDecoder.DateDecodingStrategy
     private(set) var writesAllowed = true
@@ -247,12 +300,14 @@ final class RecoverableFileStore<Value: Codable> {
         url: URL,
         fileManager: FileManager,
         criticality: PersistenceCriticality,
+        sizePolicy: RecoverableFileSizePolicy,
         dateEncodingStrategy: JSONEncoder.DateEncodingStrategy = .deferredToDate,
         dateDecodingStrategy: JSONDecoder.DateDecodingStrategy = .deferredToDate
     ) {
         self.url = url
         self.fileManager = fileManager
         self.criticality = criticality
+        self.sizePolicy = sizePolicy
         self.dateEncodingStrategy = dateEncodingStrategy
         self.dateDecodingStrategy = dateDecodingStrategy
     }
@@ -266,7 +321,11 @@ final class RecoverableFileStore<Value: Codable> {
         }
 
         do {
-            let value = try decode(Data(contentsOf: url))
+            let data = try BoundedFileReader.read(
+                url,
+                maximumBytes: sizePolicy.maximumBytes
+            )
+            let value = try decode(data)
             try validate(value)
             return .loaded(value)
         } catch {
@@ -310,8 +369,17 @@ final class RecoverableFileStore<Value: Codable> {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = dateEncodingStrategy
             let data = try encoder.encode(RecoverableStoreEnvelope(value: value))
+            guard data.count <= sizePolicy.maximumBytes else {
+                ThreadingLogger.session.error(
+                    "Refusing to save oversized \(self.url.lastPathComponent, privacy: .public)"
+                )
+                return false
+            }
             try data.write(to: url, options: .atomic)
-            guard try Data(contentsOf: url) == data else {
+            guard try BoundedFileReader.read(
+                url,
+                maximumBytes: sizePolicy.maximumBytes
+            ) == data else {
                 writesAllowed = false
                 ThreadingLogger.session.error(
                     "Could not verify saved \(self.url.lastPathComponent, privacy: .public); later writes are disabled"

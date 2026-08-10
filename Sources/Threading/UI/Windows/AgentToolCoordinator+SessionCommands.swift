@@ -76,7 +76,14 @@ extension AgentToolCoordinator {
             return .failure("This session is no longer in the sidebar.")
         }
 
-        guard dependencies.projects.updateAgentTitle(name, for: sessionID, source: .chosen) else {
+        switch dependencies.projects.updateAgentTitle(name, for: sessionID, source: .chosen) {
+        case .accepted:
+            break
+        case .persistenceRefused:
+            return .failure("“\(name)” could not be saved. The previous session name is unchanged.")
+        case .sessionNotFound:
+            return .failure("This session is no longer in the sidebar.")
+        case .refusedAsNoise, .protectedByStrongerSource, .cleared:
             return .failure("""
                 “\(name)” was not used: it repeats something the row already shows — the \
                 agent's name, the account's, or the project's. Name the conversation \

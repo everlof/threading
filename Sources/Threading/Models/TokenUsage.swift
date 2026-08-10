@@ -51,7 +51,8 @@ actor TokenUsageManager {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.tokenUsage,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
         )
         self.usageByModel = persistence.load(defaultValue: [:]).value
     }

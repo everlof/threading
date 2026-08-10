@@ -464,8 +464,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if launchPlan.recordsRunningSessionsOnQuit {
             ProjectStore.shared.flushPendingSave()
             // What is live right now, recorded for the next launch to bring back — necessarily
-            // ahead of `terminateAll`, after which nothing is. `AppRelaunch.discardingState()`
-            // exits without running this on purpose: a reset comes back to nothing running.
+            // ahead of `terminateAll`, after which nothing is. `AppRelaunch` exits without
+            // running this on purpose: a reset comes back to nothing running.
             runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
             StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
         }
@@ -835,12 +835,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// this process changes, because a mode is decided at launch and stays decided.
     @MainActor
     private func tryNormalLaunchOnce() {
+        let relaunch: AppRelaunch.PreparedRelaunch
+        do {
+            relaunch = try AppRelaunch.prepare()
+        } catch {
+            presentRelaunchFailure(error)
+            return
+        }
+
         LaunchFlagsStore.shared.set(
             .forceNormalNextLaunch,
             armed: true,
             launchID: EventLog.shared.currentLaunchID
         )
-        AppRelaunch.discardingState(reason: .recoveryRelaunch)
+        do {
+            try relaunch.commit(reason: .recoveryRelaunch)
+        } catch {
+            // The one-shot belongs to the relaunch this button requested. If that relaunch did
+            // not get out of this process, leaving it armed would make some later ordinary
+            // launch unexpectedly bypass recovery mode.
+            LaunchFlagsStore.shared.set(
+                .forceNormalNextLaunch,
+                armed: false,
+                launchID: EventLog.shared.currentLaunchID
+            )
+            presentRelaunchFailure(error)
+        }
+    }
+
+    @MainActor
+    private func presentRelaunchFailure(_ error: Error) {
+        ThreadingLogger.agent.error(
+            "Relaunch failed: \(error.localizedDescription, privacy: .public)"
+        )
+        let alert = ThemedAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.string("Try Normal Launch Once")
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: L10n.string("OK"))
+        alert.runModal()
     }
 
     /// Arms or disarms the second one-shot, and rebuilds the surface so its button says which.

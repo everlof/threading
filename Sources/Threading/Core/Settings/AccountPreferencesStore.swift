@@ -60,7 +60,8 @@ final class AccountPreferencesStore {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.accountPreferences,
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
         self.preferences = persistence.load(defaultValue: [:]).value
     }

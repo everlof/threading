@@ -34,11 +34,14 @@ struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvert
     /// State written before IDs existed is tagged with its old name. The tag cannot collide
     /// with a real ID and lets the assignment layer resolve it once against the theme library.
     static func legacyName(_ name: String) -> TerminalThemeID {
-        let encoded = Data(name.utf8).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-        return TerminalThemeID("legacy-name-\(encoded)")
+        TerminalThemeID("legacy-name-\(encodedComponent(name))")
+    }
+
+    /// A deterministic replacement for a persisted custom theme that claims an ID already in
+    /// use. Migration used a fresh UUID here; if its best-effort rewrite failed, the in-memory ID
+    /// changed again on every launch and any project assignment saved meanwhile became dangling.
+    static func recoveredFromCollision(name: String, ordinal: Int) -> TerminalThemeID {
+        TerminalThemeID("recovered-custom-\(encodedComponent(name))-\(ordinal)")
     }
 
     var legacyName: String? {
@@ -61,6 +64,13 @@ struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvert
         case TerminalThemeNames.followsAppTheme: return .followsAppTheme
         default: return .legacyName(name)
         }
+    }
+
+    private static func encodedComponent(_ value: String) -> String {
+        Data(value.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

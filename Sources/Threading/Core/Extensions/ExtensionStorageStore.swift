@@ -78,6 +78,7 @@ protocol ExtensionCacheStoring: AnyObject, Sendable {
 /// host copy that can drift from the one extensions were tested against.
 final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStoring, @unchecked Sendable {
     static let maximumCacheBytes: Int64 = 100 * 1024 * 1024
+    static let maximumDataVersionBytes = 4 * 1024
 
     let dataURL: URL
     let cachesURL: URL
@@ -121,6 +122,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
 
         lock.lock()
         defer { lock.unlock() }
+        try validate(identifier: manifest.identifier)
 
         var environment: [String: String] = [:]
         if manifest.capabilities.contains(.keyValueStorage) {
@@ -165,7 +167,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         guard fileManager.fileExists(atPath: url.path) else { return 0 }
         return try decodeDataVersion(
             DataVersionState.self,
-            from: Data(contentsOf: url),
+            from: BoundedFileReader.read(url, maximumBytes: Self.maximumDataVersionBytes),
             identifier: identifier
         )
     }
@@ -191,7 +193,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         if fileManager.fileExists(atPath: url.path) {
             current = try decodeDataVersion(
                 DataVersionState.self,
-                from: Data(contentsOf: url),
+                from: BoundedFileReader.read(url, maximumBytes: Self.maximumDataVersionBytes),
                 identifier: identifier
             )
         } else {
@@ -210,7 +212,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         try ensurePrivateDirectory(directory)
         let data = try JSONEncoder().encode(DataVersionState(dataVersion: version))
         try data.write(to: url, options: .atomic)
-        guard try Data(contentsOf: url) == data else {
+        guard try BoundedFileReader.read(url, maximumBytes: Self.maximumDataVersionBytes) == data else {
             throw ExtensionStorageStoreError.dataVersionCouldNotBeSaved(identifier)
         }
     }
@@ -246,6 +248,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
     private func keyValueStore(for identifier: String) throws -> ExtensionKeyValueStore {
         lock.lock()
         defer { lock.unlock() }
+        try validate(identifier: identifier)
         if let existing = keyValueStores[identifier] {
             return existing
         }
@@ -267,8 +270,8 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
     }
 
     func setCacheData(_ value: Data, extensionIdentifier: String, name: String) throws {
-        let directory = cacheDirectory(for: extensionIdentifier)
         let store = try cacheStore(for: extensionIdentifier)
+        let directory = cacheDirectory(for: extensionIdentifier)
 
         // The 100 MiB ceiling is checked per write, not only at launch. A brokered extension
         // never restarts to have its cache reclaimed, so a launch-time sweep alone would let it
@@ -290,6 +293,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
     private func cacheStore(for identifier: String) throws -> ExtensionCacheStore {
         lock.lock()
         defer { lock.unlock() }
+        try validate(identifier: identifier)
         if let existing = cacheStores[identifier] {
             return existing
         }
@@ -349,6 +353,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
 
     /// Moves private state beside a recoverable removed package instead of destroying it.
     func recover(identifier: String, alongside packageURL: URL) throws {
+        try validate(identifier: identifier)
         forgetStores(identifier: identifier)
         lock.lock()
         defer { lock.unlock() }

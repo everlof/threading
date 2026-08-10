@@ -51,11 +51,12 @@ final class PrivacyPreferencesViewController: NSViewController {
     private var keychainToggle: ThemedToggle?
     private var keychainSubtitleField: NSTextField?
     private var shownKeychainSubtitle: String?
+    private let activationEvents = AppEventObservations()
 
     /// Live while the page is on screen. Nil is the whole of "not watching" — the notification
     /// observer is added and removed alongside it, so there is one state rather than two that
     /// can disagree.
-    nonisolated(unsafe) private var refreshTimer: Timer?
+    private let refreshTimer = MainRunLoopTimer()
 
     // MARK: - Initialization
 
@@ -88,11 +89,6 @@ final class PrivacyPreferencesViewController: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        refreshTimer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Lifecycle
@@ -129,41 +125,29 @@ final class PrivacyPreferencesViewController: NSViewController {
     // MARK: - Watching
 
     private func startWatching() {
-        guard refreshTimer == nil else { return }
+        guard !refreshTimer.isInstalled else { return }
 
         // Coming back from System Settings is the common path and the one worth answering
         // immediately: a poll would leave the old word up for up to an interval, right at the
         // moment the user is looking for the new one.
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(applicationDidBecomeActive),
-            name: NSApplication.didBecomeActiveNotification,
-            object: nil
-        )
+        activationEvents.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
+            self?.refreshIfOnScreen()
+        }
 
         // …and the poll covers what activation does not. A TCC prompt is presented by another
         // process, so an approval given to one raised by an agent can land without Threading
         // ever having resigned active.
-        refreshTimer = Timer.scheduledTimer(
+        refreshTimer.install(Timer.scheduledTimer(
             withTimeInterval: refreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshIfOnScreen() }
-        }
+        })
     }
 
     private func stopWatching() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSApplication.didBecomeActiveNotification,
-            object: nil
-        )
-    }
-
-    @objc private func applicationDidBecomeActive() {
-        refreshIfOnScreen()
+        refreshTimer.invalidate()
+        activationEvents.removeAll()
     }
 
     /// A cached page is kept alive after being navigated away from, so "in a window" is what

@@ -60,7 +60,10 @@ enum AccountAvatarStore {
             return cached
         }
 
-        if let stored = NSImage(contentsOf: fileURL(for: account)), stored.isValid {
+        if let data = try? BoundedFileReader.read(
+            fileURL(for: account),
+            maximumBytes: ProjectIconDefaults.maximumSourceBytes
+        ), let stored = NSImage(data: data), stored.isValid {
             let composed = ProjectIconStore.roundedDisplay(stored)
             composedCache.setObject(composed, forKey: key)
             return composed
@@ -130,8 +133,21 @@ enum AccountAvatarStore {
 
     @MainActor
     private static func fileURL(for account: AgentAccount) -> URL {
-        let name = account.id.rawValue.replacingOccurrences(of: ":", with: "-")
-        return directory.appendingPathComponent(name + "." + ProjectIconDefaults.storedExtension)
+        directory.appendingPathComponent(fileName(for: account), isDirectory: false)
+    }
+
+    /// Account handles normally come from directory names, but old session state can carry any
+    /// string. Preserve readable legacy names when they are one safe component and fall back to
+    /// a stable digest otherwise; an identity is never a relative path into Application Support.
+    static func fileName(for account: AgentAccount) -> String {
+        let legacy = account.id.rawValue.replacingOccurrences(of: ":", with: "-")
+            + "." + ProjectIconDefaults.storedExtension
+        if ProjectIconStore.isSafeFileName(legacy) { return legacy }
+
+        let digest = SHA256.hash(data: Data(account.id.rawValue.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return digest + "." + ProjectIconDefaults.storedExtension
     }
 
     @MainActor
@@ -172,7 +188,10 @@ enum AccountAvatarStore {
     private static func claudeEmail(configPath: String) -> String? {
         let url = URL(fileURLWithPath: configPath)
             .appendingPathComponent(AccountAvatarDefaults.claudeConfigFile)
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: AccountAvatarDefaults.maximumAccountDocumentBytes
+        ),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let oauth = object[AccountAvatarDefaults.claudeOAuthKey] as? [String: Any]
         else { return nil }
@@ -183,7 +202,10 @@ enum AccountAvatarStore {
     private static func codexEmail(configPath: String) -> String? {
         let url = URL(fileURLWithPath: configPath)
             .appendingPathComponent(AccountAvatarDefaults.codexAuthFile)
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: AccountAvatarDefaults.maximumAccountDocumentBytes
+        ),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let tokens = object[AccountAvatarDefaults.codexTokensKey] as? [String: Any],
               let idToken = tokens[AccountAvatarDefaults.codexIDTokenKey] as? String,
@@ -228,6 +250,7 @@ enum AccountAvatarStore {
 
 enum AccountAvatarDefaults {
     static let directoryName = "AccountAvatars"
+    static let maximumAccountDocumentBytes = 1024 * 1024
 
     static let claudeConfigFile = ".claude.json"
     static let claudeOAuthKey = "oauthAccount"

@@ -5,6 +5,11 @@ import UniformTypeIdentifiers
 
 // MARK: - Project Icon Store
 
+enum ProjectIconStoreError: Error {
+    case unusableImage
+    case writeFailed
+}
+
 /// Owns the image files behind `ProjectIcon` records, under Application Support.
 ///
 /// Every icon is normalised on the way in — decoded with ImageIO, reduced to the largest
@@ -45,23 +50,55 @@ enum ProjectIconStore {
             .appendingPathComponent(ProjectIconDefaults.iconDirectoryName)
     }
 
+    /// `ProjectIcon.fileName` is persisted user-authored state and therefore untrusted on load.
+    /// It names one file in this store; it is never permission to walk out of the icon folder.
+    static func isSafeFileName(_ value: String) -> Bool {
+        StoredPathComponent.isValid(value)
+    }
+
+    private static func fileURL(for fileName: String) -> URL? {
+        guard isSafeFileName(fileName) else { return nil }
+        return directory.appendingPathComponent(fileName, isDirectory: false)
+    }
+
     // MARK: - Public Methods
 
     /// Whether ImageIO can decode this data into something at least icon-sized.
     static func isUsableImage(_ data: Data) -> Bool {
         guard data.count <= ProjectIconDefaults.maximumSourceBytes,
               let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
-        return largestFrame(of: source).width >= ProjectIconDefaults.minimumPixelSize
+        let frame = largestFrame(of: source)
+        return min(frame.width, frame.height) >= ProjectIconDefaults.minimumPixelSize
     }
 
-    /// Normalises and writes an icon for a project, returning the stored file name.
+    /// Reads and validates one local candidate within the same byte budget as fetched icons.
     ///
-    /// The file is named after the project, so replacing a project's icon overwrites in
-    /// place rather than accumulating orphans.
-    static func store(imageData: Data, for projectID: ProjectID) -> String? {
-        guard let png = normalizedPNGData(from: imageData) else { return nil }
+    /// The decoder's size check is too late if every caller has already used
+    /// `Data(contentsOf:)`: a selected or agent-named file can allocate arbitrarily before being
+    /// rejected. Reading one byte past the limit makes the stream itself the authority even if
+    /// the file grows between a metadata check and the read.
+    static func candidateData(at url: URL) -> Data? {
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: ProjectIconDefaults.maximumSourceBytes
+        ), isUsableImage(data) else { return nil }
+        return data
+    }
 
-        let fileName = projectID.uuidString + "." + ProjectIconDefaults.storedExtension
+    /// Normalises and writes an icon candidate for a project, returning the stored file name.
+    ///
+    /// Every candidate gets a distinct name. The project record is committed after this write;
+    /// overwriting the standing file here made a later database refusal impossible to roll back.
+    /// `ProjectStore` removes the old file after its metadata commits, or this candidate when it
+    /// does not, so steady state still holds one file per project without a cross-store race.
+    static func store(imageData: Data, for projectID: ProjectID) throws -> String {
+        guard isUsableImage(imageData),
+              let png = normalizedPNGData(from: imageData) else {
+            throw ProjectIconStoreError.unusableImage
+        }
+
+        let fileName = projectID.uuidString + "-" + UUID().uuidString
+            + "." + ProjectIconDefaults.storedExtension
         let fileManager = FileManager.default
 
         do {
@@ -69,7 +106,7 @@ enum ProjectIconStore {
             try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
         } catch {
             ThreadingLogger.agent.error("Failed to store project icon: \(error.localizedDescription, privacy: .public)")
-            return nil
+            throw ProjectIconStoreError.writeFailed
         }
 
         caches.source.removeObject(forKey: fileName as NSString)
@@ -83,7 +120,12 @@ enum ProjectIconStore {
             return cached
         }
 
-        guard let image = NSImage(contentsOf: directory.appendingPathComponent(icon.fileName)),
+        guard let url = fileURL(for: icon.fileName),
+              let data = try? BoundedFileReader.read(
+                url,
+                maximumBytes: ProjectIconDefaults.maximumSourceBytes
+              ),
+              let image = NSImage(data: data),
               image.isValid else { return nil }
 
         caches.source.setObject(image, forKey: icon.fileName as NSString)
@@ -93,13 +135,28 @@ enum ProjectIconStore {
     /// The stored PNG bytes as written, for handing the icon to a system service that draws
     /// it itself — the notification avatar — rather than drawing it ourselves.
     static func pngData(for icon: ProjectIcon) -> Data? {
-        try? Data(contentsOf: directory.appendingPathComponent(icon.fileName))
+        guard let url = fileURL(for: icon.fileName) else { return nil }
+        return try? BoundedFileReader.read(
+            url,
+            maximumBytes: ProjectIconDefaults.maximumSourceBytes
+        )
     }
 
-    static func remove(fileName: String) {
+    @discardableResult
+    static func remove(fileName: String) -> Bool {
         invalidateDerived(fileName: fileName)
         caches.source.removeObject(forKey: fileName as NSString)
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent(fileName))
+        guard let url = fileURL(for: fileName) else { return false }
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        do {
+            try FileManager.default.removeItem(at: url)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to remove project icon: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
     }
 
     // MARK: - Display Composition
@@ -124,7 +181,7 @@ enum ProjectIconStore {
         let composed = compose(base, plated: plated, on: ground)
         caches.display.setObject(composed, forKey: key)
         caches.composedGrounds.withLock {
-            $0[icon.fileName, default: []].insert(ground.cacheKey)
+            _ = $0[icon.fileName, default: []].insert(ground.cacheKey)
         }
         return composed
     }
@@ -288,15 +345,25 @@ enum ProjectIconStore {
 
     // MARK: - Private Methods
 
-    /// The index and pixel width of the source's largest frame.
-    private static func largestFrame(of source: CGImageSource) -> (index: Int, width: Int) {
-        var best = (index: 0, width: 0)
+    /// The frame with the largest usable square footprint.
+    ///
+    /// Width alone admitted a 64×1 tracking pixel as an icon and could choose it over a smaller
+    /// square frame in a multi-image container. The sidebar fits both axes, so the shorter axis
+    /// is the useful resolution; the longer axis breaks ties without multiplying hostile sizes.
+    private static func largestFrame(
+        of source: CGImageSource
+    ) -> (index: Int, width: Int, height: Int) {
+        var best = (index: 0, width: 0, height: 0)
 
         for index in 0..<CGImageSourceGetCount(source) {
             let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
             let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
-            if width > best.width {
-                best = (index, width)
+            let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
+            let shortSide = min(width, height)
+            let bestShortSide = min(best.width, best.height)
+            if shortSide > bestShortSide
+                || (shortSide == bestShortSide && max(width, height) > max(best.width, best.height)) {
+                best = (index, width, height)
             }
         }
 

@@ -1,9 +1,8 @@
 import Foundation
 
-struct PlaywrightAutomationOutput: Sendable {
-    let text: String
-    let screenshotPNG: Data?
-    let succeeded: Bool
+enum PlaywrightAutomationOutput: Sendable {
+    case success(text: String, screenshotPNG: Data?)
+    case failure(message: String)
 }
 
 /// Runs one Playwright scenario in a short-lived helper process.
@@ -201,11 +200,7 @@ final class PlaywrightAutomationRunner: Sendable {
             return failure("Could not encode isolated browser request: \(error.localizedDescription)")
         }
 
-        let process = Process()
-        process.executableURL = runtime.python
-        process.arguments = [runtime.script.path]
-        process.currentDirectoryURL = temporary
-
+        let termination: BoundedChildTermination
         do {
             let input = try FileHandle(forReadingFrom: requestURL)
             let output = try FileHandle(forWritingTo: responseURL)
@@ -215,30 +210,22 @@ final class PlaywrightAutomationRunner: Sendable {
                 try? output.close()
                 try? error.close()
             }
-            process.standardInput = input
-            process.standardOutput = output
-            process.standardError = error
-
-            let timeoutLock = NSLock()
-            var timedOut = false
-            let watchdog = DispatchWorkItem {
-                guard process.isRunning else { return }
-                timeoutLock.lock()
-                timedOut = true
-                timeoutLock.unlock()
-                process.terminate()
-            }
-            try process.run()
-            DispatchQueue.global(qos: .utility).asyncAfter(
-                deadline: .now() + timeout,
-                execute: watchdog
+            let process = try ChildProcessSpawn.spawn(
+                executableURL: runtime.python,
+                arguments: [runtime.script.path],
+                environment: ProcessInfo.processInfo.environment,
+                workingDirectory: temporary,
+                descriptors: [
+                    AgentChildProcessDefaults.standardInputDescriptor:
+                        .inherited(input.fileDescriptor),
+                    AgentChildProcessDefaults.standardOutputDescriptor:
+                        .inherited(output.fileDescriptor),
+                    AgentChildProcessDefaults.standardErrorDescriptor:
+                        .inherited(error.fileDescriptor)
+                ]
             )
-            process.waitUntilExit()
-            watchdog.cancel()
-            timeoutLock.lock()
-            let didTimeOut = timedOut
-            timeoutLock.unlock()
-            if didTimeOut {
+            termination = process.waitUntilExit(timeout: timeout)
+            if termination == .timedOut {
                 return failure(
                     "The browser automation run exceeded \(Int(timeout)) seconds and was stopped."
                 )
@@ -248,13 +235,15 @@ final class PlaywrightAutomationRunner: Sendable {
         }
 
         let stderr = boundedText(at: errorURL, maximumBytes: 4_096)
-        guard process.terminationStatus == 0 else {
+        guard termination == .exited(0) else {
             let detail = stderr.isEmpty ? "" : " \(stderr)"
             return failure("The Playwright helper exited unexpectedly.\(detail)")
         }
-        guard let responseData = try? Data(contentsOf: responseURL),
+        guard let responseData = try? BoundedFileReader.read(
+            responseURL,
+            maximumBytes: Self.maximumResponseBytes
+        ),
               !responseData.isEmpty,
-              responseData.count <= Self.maximumResponseBytes,
               let response = try? JSONSerialization.jsonObject(with: responseData)
                 as? [String: Any],
               let succeeded = response["ok"] as? Bool else {
@@ -275,18 +264,16 @@ final class PlaywrightAutomationRunner: Sendable {
 
         var screenshot: Data?
         if capturesScreenshot,
-           let data = try? Data(contentsOf: screenshotURL),
-           data.count <= Self.maximumScreenshotBytes {
+           let data = try? BoundedFileReader.read(
+            screenshotURL,
+            maximumBytes: Self.maximumScreenshotBytes
+           ) {
             screenshot = data
         }
         guard let formatted = prettyJSON(response) else {
             return failure("The Playwright helper result could not be encoded.")
         }
-        return PlaywrightAutomationOutput(
-            text: formatted,
-            screenshotPNG: screenshot,
-            succeeded: true
-        )
+        return .success(text: formatted, screenshotPNG: screenshot)
     }
 
     private func resolveRuntime() throws -> Runtime {
@@ -392,10 +379,6 @@ final class PlaywrightAutomationRunner: Sendable {
     }
 
     private func failure(_ message: String) -> PlaywrightAutomationOutput {
-        PlaywrightAutomationOutput(
-            text: message,
-            screenshotPNG: nil,
-            succeeded: false
-        )
+        .failure(message: message)
     }
 }

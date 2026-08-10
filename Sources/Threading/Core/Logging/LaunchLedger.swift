@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Launch Mode
 
@@ -583,8 +584,16 @@ final class LaunchLedger: @unchecked Sendable {
     // MARK: - Private Methods — Reading
 
     private func readLedger() -> LaunchLedgerRead {
-        guard fileManager.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else { return .missing }
+        guard fileManager.fileExists(atPath: url.path) else { return .missing }
+        let data: Data
+        do {
+            data = try BoundedFileReader.read(
+                url,
+                maximumBytes: LaunchLedgerDefaults.maximumFileBytes
+            )
+        } catch {
+            return .corrupt(quarantinedAt: quarantine())
+        }
 
         switch LaunchLedgerParser.parse(data) {
         case .valid(let history):
@@ -694,7 +703,7 @@ final class LaunchLedger: @unchecked Sendable {
             version: LaunchLedgerDefaults.formatVersion,
             kind: kind,
             launch: launch,
-            at: Self.timestampFormatter.string(from: Date()),
+            at: LaunchLedgerTimestamp.string(from: Date()),
             uptime: ProcessInfo.processInfo.systemUptime,
             boot: bootID,
             build: build,
@@ -774,13 +783,6 @@ final class LaunchLedger: @unchecked Sendable {
         return String(Int(booted.timeIntervalSince1970.rounded()))
     }
 
-    static let timestampFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = .current
-        return formatter
-    }()
-
     private static func quarantineStamp() -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -788,6 +790,35 @@ final class LaunchLedger: @unchecked Sendable {
         formatter.dateFormat = LaunchLedgerDefaults.quarantineStampFormat
         return formatter.string(from: Date())
     }
+}
+
+// MARK: - Launch Ledger Timestamps
+
+/// One synchronized formatter for the writer, parser and one-shot flags store.
+///
+/// `ISO8601DateFormatter` is mutable and not `Sendable`. These three users run on different
+/// serial queues, so a shared bare formatter was still a real cross-queue race even though each
+/// owning store was internally serialized.
+enum LaunchLedgerTimestamp {
+
+    static func string(from date: Date) -> String {
+        formatter.withLock { $0.value.string(from: date) }
+    }
+
+    static func date(from string: String) -> Date? {
+        formatter.withLock { $0.value.date(from: string) }
+    }
+
+    private final class Formatter: @unchecked Sendable {
+        let value: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            formatter.timeZone = .current
+            return formatter
+        }()
+    }
+
+    private static let formatter = OSAllocatedUnfairLock(initialState: Formatter())
 }
 
 // MARK: - Launch Ledger Defaults
@@ -817,6 +848,11 @@ enum LaunchLedgerDefaults {
     /// The second guard, against one pathological launch recording far more than the nine
     /// checkpoints a launch has. Whichever budget binds first decides.
     static let maximumRecords = 512
+
+    /// A healthy ledger is bounded to 512 small JSONL records and is normally tens of KiB.
+    /// Eight MiB is therefore corruption headroom, not an operating target; refusing above it
+    /// keeps crash recovery from making one unbounded allocation while diagnosing a crash.
+    static let maximumFileBytes = 8 * 1_024 * 1_024
 
     /// Ten interactive minutes: long enough that nothing about a launch is still in doubt, short
     /// enough that a user who fixed the problem is not still being counted an hour later.

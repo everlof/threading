@@ -20,7 +20,7 @@ final class ProjectTerminalViewController: NSViewController {
     var paneBackgroundColor: NSColor { session.terminalView.nativeBackgroundColor }
 
     private let appEvents = AppEventObservations()
-    private var directoryTimer: Timer?
+    private let directoryTimer = MainRunLoopTimer()
 
     init(terminal: ProjectTerminal) {
         terminalID = terminal.id
@@ -104,8 +104,7 @@ final class ProjectTerminalViewController: NSViewController {
     }
 
     func terminate() {
-        directoryTimer?.invalidate()
-        directoryTimer = nil
+        directoryTimer.invalidate()
         session.terminate()
     }
 
@@ -127,16 +126,15 @@ final class ProjectTerminalViewController: NSViewController {
     }
 
     private func startDirectoryTracking() {
-        directoryTimer?.invalidate()
         refreshFromProcess()
-        directoryTimer = Timer.scheduledTimer(
+        directoryTimer.install(Timer.scheduledTimer(
             withTimeInterval: ProjectTerminalDefaults.directoryRefreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshFromProcess()
             }
-        }
+        })
     }
 
     /// The two things about a running shell that change without producing any output we are
@@ -180,8 +178,7 @@ extension ProjectTerminalViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
-        directoryTimer?.invalidate()
-        directoryTimer = nil
+        directoryTimer.invalidate()
         notifyRunningState()
     }
 }

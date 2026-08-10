@@ -178,7 +178,7 @@ final class WindowEdgeTests: XCTestCase {
             "threading-window-resize-stress-\(UUID().uuidString)",
             isDirectory: true
         )
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let agentSession = try XCTUnwrap(
             store.addSession(to: project.id, kind: .claude, title: "Window resize stress")
         )
@@ -308,7 +308,7 @@ final class WindowEdgeTests: XCTestCase {
             "threading-display-pane-stress-\(UUID().uuidString)",
             isDirectory: true
         )
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let agentSession = try XCTUnwrap(
             store.addSession(to: project.id, kind: .codex, title: "Display pane stress")
         )

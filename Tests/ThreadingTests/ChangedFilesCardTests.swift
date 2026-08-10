@@ -13,6 +13,14 @@ final class ChangedFilesCardTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private var fixtureWindows: [NSWindow] = []
+
+    override func tearDown() {
+        fixtureWindows.forEach { $0.close() }
+        fixtureWindows.removeAll()
+        super.tearDown()
+    }
+
     private func makeTree(_ files: [(String, Int, Int)]) -> ChangedFilesTree {
         ChangedFilesTree.build(from: files.map {
             ChangedFilesTree.File(path: $0.0, added: $0.1, removed: $0.2)
@@ -40,24 +48,37 @@ final class ChangedFilesCardTests: XCTestCase {
         )
     }
 
-    /// A card in a container that states its width the way the conversation pane does. A
-    /// detached fixture with only a frame pins nothing, and its rows lay out at the width they
-    /// would prefer rather than the one they will ship at.
+    /// A card in a window-backed container that states its width the way the conversation pane
+    /// does. A frame pins nothing, and since rows became virtual an `NSTableView` detached from a
+    /// window is not obliged to materialize or finish laying out the same cells on every pass.
+    /// Geometry assertions must measure the production lifecycle, not whichever lazy AppKit work
+    /// happened to run for a detached fixture.
     private func makeCard(
         tree: ChangedFilesTree,
         previews: [String: ChangedFileDiffPreview] = [:]
     ) -> ChangedFilesCardView {
         let card = ChangedFilesCardView(tree: tree, previews: previews, onViewDiff: {})
-        let host = NSView()
-        host.translatesAutoresizingMaskIntoConstraints = false
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 700))
         host.addSubview(card)
         NSLayoutConstraint.activate([
-            host.widthAnchor.constraint(equalToConstant: 640),
             card.topAnchor.constraint(equalTo: host.topAnchor),
             card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: host.trailingAnchor)
         ])
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 700),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        // Programmatic windows default to release-on-close. ARC also owns this fixture through
+        // `fixtureWindows`, so leaving that legacy AppKit ownership enabled double-releases the
+        // window while XCTest drains the case's autorelease pool.
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        fixtureWindows.append(window)
         host.layoutSubtreeIfNeeded()
+        card.layoutSubtreeIfNeeded()
         return card
     }
 

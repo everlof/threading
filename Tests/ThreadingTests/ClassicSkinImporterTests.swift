@@ -64,6 +64,22 @@ final class ClassicSkinImporterTests: XCTestCase {
         }
     }
 
+    func testRejectsAnArchivePastTheByteLimitBeforeParsingIt() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Oversized.wsz")
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(ClassicSkinLimits.maximumArchiveBytes) + 1)
+        try handle.close()
+        temporaryURLs.append(directory)
+
+        XCTAssertThrowsError(try ClassicSkinImporter.importSkin(at: url)) { error in
+            XCTAssertEqual(error as? ClassicSkinImporter.Failure, .archiveTooLarge)
+        }
+    }
+
     private func skinArchive(entries: [ZipArchive.Entry], name: String) throws -> URL {
         let data = try ZipArchive.archive(entries, modified: Date(timeIntervalSince1970: 0))
         let directory = FileManager.default.temporaryDirectory

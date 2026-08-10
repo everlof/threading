@@ -106,10 +106,10 @@ enum ClaudeUsageProfileCache {
     }
 
     private static func read(fileAt url: URL) -> AccountUsage? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? Int,
-              size <= ClaudeUsageProfileDefaults.maxProfileBytes,
-              let data = try? Data(contentsOf: url)
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: ClaudeUsageProfileDefaults.maxProfileBytes
+        )
         else { return nil }
 
         let decoder = JSONDecoder()

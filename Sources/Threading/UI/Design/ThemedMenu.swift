@@ -37,6 +37,15 @@ struct ThemedMenuSubtitleSegment {
 }
 
 struct ThemedMenuItem {
+    /// What choosing this row can do. Kept as one value because an action and a submenu are
+    /// mutually exclusive interaction contracts: a row that carries both answers its press
+    /// with the action while its chevron and hover answer with the submenu.
+    private enum Destination {
+        case none
+        case action(() -> Void)
+        case submenu([ThemedMenuEntry])
+    }
+
     let title: String
     var subtitle: String?
     /// The action's command-key equivalent, without its modifier glyph. The row owns that
@@ -54,12 +63,44 @@ struct ThemedMenuItem {
     var representedValue: Any?
     var isSelected: Bool
     var isEnabled: Bool
-    var onChoose: (() -> Void)?
+    private let destination: Destination
+
+    var onChoose: (() -> Void)? {
+        guard case .action(let action) = destination else { return nil }
+        return action
+    }
+
     /// Entries this item opens beside itself. A row carrying these draws a chevron and opens on
     /// hover, on ⌘-less right-arrow, and on press; choosing anywhere in the chain closes the
-    /// whole menu. An item is a parent *or* an action — when both are set the action wins the
-    /// press and only the arrow and hover reach the submenu, which reads as a defect, so don't.
-    var submenu: [ThemedMenuEntry]?
+    /// whole menu. `Destination` makes the parent-or-action rule structural rather than a
+    /// convention each caller and interaction path has to remember.
+    var submenu: [ThemedMenuEntry]? {
+        guard case .submenu(let entries) = destination else { return nil }
+        return entries
+    }
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        keyEquivalent: String? = nil,
+        image: NSImage? = nil,
+        preview: ThemedMenuPreview? = nil,
+        representedValue: Any? = nil,
+        isSelected: Bool = false,
+        isEnabled: Bool = true
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            keyEquivalent: keyEquivalent,
+            image: image,
+            preview: preview,
+            representedValue: representedValue,
+            isSelected: isSelected,
+            isEnabled: isEnabled,
+            destination: .none
+        )
+    }
 
     init(
         title: String,
@@ -70,8 +111,55 @@ struct ThemedMenuItem {
         representedValue: Any? = nil,
         isSelected: Bool = false,
         isEnabled: Bool = true,
-        onChoose: (() -> Void)? = nil,
-        submenu: [ThemedMenuEntry]? = nil
+        onChoose: (() -> Void)?
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            keyEquivalent: keyEquivalent,
+            image: image,
+            preview: preview,
+            representedValue: representedValue,
+            isSelected: isSelected,
+            isEnabled: isEnabled,
+            destination: onChoose.map(Destination.action) ?? .none
+        )
+    }
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        keyEquivalent: String? = nil,
+        image: NSImage? = nil,
+        preview: ThemedMenuPreview? = nil,
+        representedValue: Any? = nil,
+        isSelected: Bool = false,
+        isEnabled: Bool = true,
+        submenu: [ThemedMenuEntry]
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            keyEquivalent: keyEquivalent,
+            image: image,
+            preview: preview,
+            representedValue: representedValue,
+            isSelected: isSelected,
+            isEnabled: isEnabled,
+            destination: .submenu(submenu)
+        )
+    }
+
+    private init(
+        title: String,
+        subtitle: String?,
+        keyEquivalent: String?,
+        image: NSImage?,
+        preview: ThemedMenuPreview?,
+        representedValue: Any?,
+        isSelected: Bool,
+        isEnabled: Bool,
+        destination: Destination
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -81,8 +169,7 @@ struct ThemedMenuItem {
         self.representedValue = representedValue
         self.isSelected = isSelected
         self.isEnabled = isEnabled
-        self.onChoose = onChoose
-        self.submenu = submenu
+        self.destination = destination
     }
 
     /// Sets both halves of a styled subtitle at once: the runs the row draws, and the plain
@@ -1057,7 +1144,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
             if let row = column.surface.row(underWindowPoint: point), row.item.isEnabled {
                 // Releasing on a parent row opens what it holds — the press stays a browse,
                 // exactly as it does on the platform's own menus.
-                if row.item.submenu != nil, row.item.onChoose == nil {
+                if row.item.submenu != nil {
                     openSubmenu(columnIndex: index, entryIndex: row.entryIndex, highlightFirst: false)
                     return .surface
                 }
@@ -1112,7 +1199,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
               let highlighted = columns[columnIndex].highlightedIndex,
               let row = columns[columnIndex].surface.row(at: highlighted)
         else { return false }
-        if row.item.isEnabled, row.item.submenu != nil, row.item.onChoose == nil {
+        if row.item.isEnabled, row.item.submenu != nil {
             openSubmenu(columnIndex: columnIndex, entryIndex: highlighted, highlightFirst: true)
             return true
         }
@@ -1125,7 +1212,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// A parent row's activation is "open"; everything else is the menu's answer.
     private func rowChosen(columnIndex: Int, entryIndex: Int, item: ThemedMenuItem) {
         guard !isTearingDown else { return }
-        if item.submenu != nil, item.onChoose == nil {
+        if item.submenu != nil {
             openSubmenu(columnIndex: columnIndex, entryIndex: entryIndex, highlightFirst: true)
             return
         }

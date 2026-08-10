@@ -11,7 +11,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     let allowsDirectInput: Bool
     let keyBridge: TerminalKeyBridge
     let initialScrollProgress: Double?
-    let onScrollProgress: (Double) -> Void
+    let onScrollProgress: @MainActor (Double) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -125,12 +125,13 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         view.setNeedsDisplay()
     }
 
+    @MainActor
     final class Coordinator: NSObject, TerminalViewDelegate {
         var connection: RemoteSessionConnection
         var allowsInput: Bool
         let keyBridge: TerminalKeyBridge
         var initialScrollProgress: Double?
-        var onScrollProgress: (Double) -> Void
+        var onScrollProgress: @MainActor (Double) -> Void
         private weak var terminalView: RemoteTerminalView?
         private var contentOffsetObservation: NSKeyValueObservation?
         private var hasRestoredViewport = false
@@ -140,7 +141,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             allowsInput: Bool,
             keyBridge: TerminalKeyBridge,
             initialScrollProgress: Double?,
-            onScrollProgress: @escaping (Double) -> Void
+            onScrollProgress: @escaping @MainActor (Double) -> Void
         ) {
             self.connection = connection
             self.allowsInput = allowsInput
@@ -155,9 +156,11 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             keyBridge.terminalView = view
             contentOffsetObservation = view.observe(\.contentOffset, options: [.new]) {
                 [weak self, weak view] _, _ in
-                guard let self, let view,
-                      view.isDragging || view.isDecelerating || view.isTracking else { return }
-                self.captureViewport()
+                Task { @MainActor in
+                    guard let self, let view,
+                          view.isDragging || view.isDecelerating || view.isTracking else { return }
+                    self.captureViewport()
+                }
             }
         }
 
@@ -195,36 +198,42 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             onScrollProgress(progress)
         }
 
-        func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            guard allowsInput else { return }
+        nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
             let bytes = Array(data)
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.allowsInput else { return }
                 let typed = self.keyBridge.applyLatchesToTyped(bytes)
                 self.connection.sendTerminalInput(typed[...])
             }
         }
 
-        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             Task { @MainActor [weak self] in
                 self?.connection.updateTerminalViewport(cols: newCols, rows: newRows)
             }
         }
-        func setTerminalTitle(source: TerminalView, title: String) {}
-        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func scrolled(source: TerminalView, position: Double) {}
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
+        nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+        nonisolated func scrolled(source: TerminalView, position: Double) {}
+        nonisolated func requestOpenLink(
+            source: TerminalView,
+            link: String,
+            params: [String: String]
+        ) {
             guard let url = URL(string: link) else { return }
-            UIApplication.shared.open(url)
+            Task { @MainActor in UIApplication.shared.open(url) }
         }
-        func bell(source: TerminalView) {
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        nonisolated func bell(source: TerminalView) {
+            Task { @MainActor in
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            }
         }
-        func clipboardCopy(source: TerminalView, content: Data) {
-            UIPasteboard.general.string = String(data: content, encoding: .utf8)
+        nonisolated func clipboardCopy(source: TerminalView, content: Data) {
+            let string = String(data: content, encoding: .utf8)
+            Task { @MainActor in UIPasteboard.general.string = string }
         }
-        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+        nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+        nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     }
 }
 
@@ -245,7 +254,7 @@ final class RemoteTerminalView: TerminalView {
         guard allowsKeyboardInput != allowed else { return }
         allowsKeyboardInput = allowed
         if !allowed, isFirstResponder {
-            resignFirstResponder()
+            _ = resignFirstResponder()
         }
     }
 

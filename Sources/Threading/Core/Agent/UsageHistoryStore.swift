@@ -30,6 +30,7 @@ final class UsageHistoryStore {
             url: root.appendingPathComponent(UsageHistoryDefaults.legacyFileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         ).load(defaultValue: [:]).value

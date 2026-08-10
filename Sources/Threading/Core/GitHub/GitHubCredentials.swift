@@ -4,6 +4,8 @@ enum GitHubDefaults {
     static let apiHost = "api.github.com"
     static let webHost = "github.com"
     static let requestTimeout: TimeInterval = 30
+    static let credentialProbeTimeout: TimeInterval = 10
+    static let maximumCredentialProbeBytes = 64 * 1024
     static let apiVersion = "2022-11-28"
     static let acceptHeader = "application/vnd.github+json"
     static let userAgent = "Threading-GitHub/1"
@@ -165,28 +167,23 @@ actor GitCredentialHelperSource: GitHubTokenSourcing {
 /// output read before waiting so a full pipe cannot deadlock the child.
 enum LoginShellProbe {
     static func run(_ command: String, shell: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", command]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: shell,
+                arguments: ["-l", "-c", command],
+                timeout: GitHubDefaults.credentialProbeTimeout,
+                maximumOutputBytes: GitHubDefaults.maximumCredentialProbeBytes,
+                output: .standardOutput
+            )
         } catch {
             ThreadingLogger.github.error(
                 "Login-shell probe could not start: \(error.localizedDescription)"
             )
             return nil
         }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard result.termination == .exited(0), !result.outputWasTruncated else { return nil }
+        return String(data: result.output, encoding: .utf8)
     }
 }
 

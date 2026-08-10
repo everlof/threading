@@ -999,9 +999,44 @@ final class RemoteProtocolTests: XCTestCase {
 
     func testConnectionLinkRejectsUnsafeOrAmbiguousShapes() {
         XCTAssertNil(RemoteConnectionLink(string: "ftp://example.com/#token"))
+        XCTAssertNil(RemoteConnectionLink(string: "https:/#token"))
+        XCTAssertNil(RemoteConnectionLink(string: "https:///#token"))
         XCTAssertNil(RemoteConnectionLink(string: "https://example.com/"))
         XCTAssertNil(RemoteConnectionLink(string: "https://user@example.com/#token"))
         XCTAssertNil(RemoteConnectionLink(string: "https://example.com/?token=visible#token"))
+    }
+
+    /// Synthesized `Codable` bypasses a failable initializer. A persisted or imported link could
+    /// therefore carry an FTP origin or empty bearer into the non-optional URL accessors even
+    /// though no ordinary caller could construct that state.
+    func testConnectionLinkDecodeRevalidatesItsConstructionInvariant() throws {
+        let decoder = JSONDecoder()
+        for json in [
+            #"{"baseURL":"ftp:\/\/example.com\/","token":"bearer"}"#,
+            #"{"baseURL":"https:\/\/example.com\/","token":"  \n "}"#,
+            #"{"baseURL":"https:\/\/user@example.com\/","token":"bearer"}"#,
+        ] {
+            XCTAssertThrowsError(
+                try decoder.decode(RemoteConnectionLink.self, from: Data(json.utf8)),
+                "decoded an invalid link: \(json)"
+            )
+        }
+    }
+
+    func testConnectionLinkCodableRoundTripKeepsOnlyValidatedSourceFields() throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "HTTPS://EXAMPLE.COM/path?discarded=true#old")),
+            token: "  MixedCase-Bearer  "
+        ))
+
+        XCTAssertEqual(link.baseURL.absoluteString, "https://example.com/")
+        XCTAssertEqual(link.token, "MixedCase-Bearer")
+        XCTAssertEqual(link.shareURL.absoluteString, "https://example.com/#MixedCase-Bearer")
+
+        let encoded = try JSONEncoder().encode(link)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteConnectionLink.self, from: encoded), link)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["baseURL", "token"])
     }
 
     /// The pairing code writes the origin in upper case to reach QR's alphanumeric mode. That

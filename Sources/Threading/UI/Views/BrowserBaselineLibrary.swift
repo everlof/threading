@@ -185,11 +185,12 @@ enum BrowserBaselineUI {
                 ),
                 onChoose: { [weak browser] in
                     guard let browser,
-                          let image = NSImage(contentsOf: store.pngURL(
+                          let data = try? store.pngData(
                               forRevision: revision.id,
                               of: baseline.id,
                               in: project.id
-                          )) else { return }
+                          ),
+                          let image = NSImage(data: data) else { return }
                     browser.showBaselineOverlay(
                         image: image,
                         name: baseline.name,
@@ -421,7 +422,13 @@ final class BrowserBaselineLibraryViewController: NSViewController {
                 of: baseline.id,
                 in: projectID
             )
-            thumbnail.image = NSImage(contentsOf: url)
+            if let data = try? store.pngData(
+                forRevision: revision.id,
+                of: baseline.id,
+                in: projectID
+            ) {
+                thumbnail.image = NSImage(data: data)
+            }
             thumbnail.fileURL = url
         }
 

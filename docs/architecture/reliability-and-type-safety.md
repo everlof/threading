@@ -37,6 +37,10 @@ An invalid value must not accidentally become a permissive or destructive defaul
   quarantined; it is never interpreted as an empty store and overwritten.
 - Decode wire envelopes into `Codable` value types. Arbitrary tool-owned JSON uses `JSONValue`,
   not `[String: Any]`, and container conversion is all-or-nothing.
+- A failable or validating initializer is not a `Codable` invariant: synthesized decoding assigns
+  stored properties directly. Types whose methods rely on normalized, non-empty or authority-safe
+  fields implement `init(from:)` by decoding source fields and re-entering the authoritative
+  initializer. Derived values are built there and omitted from the wire representation.
 - Use distinct identifier wrappers and algebraic state (`ResumeState`, session lineage and
   configuration variants) where two strings or two `nil` values mean different things.
 - Permission and capability lookups default to refusal. Unknown commands are not advertised or
@@ -79,6 +83,12 @@ Every input-controlled collection needs a named budget: request bytes, frame byt
 process output, concurrent connections, pending sends, journal records, or cached entries.
 Exceeding a budget returns a typed refusal or closes the untrustworthy transport; it never grows
 until the process is unstable.
+
+Enforce a directory budget while enumerating, before filtering, sorting or materializing the
+result. `contentsOfDirectory(...).filter(...).prefix(n)` is not bounded: it has already allocated
+every visible entry, and malformed names can hide valid entries beyond the prefix. Support-data
+directories use a shallow lazy enumerator, count every visible entry, and fail closed with a typed
+overflow once the directory budget is exceeded.
 
 Use `ThreadingLogger` for live diagnosis and `EventLog` for the small set of durable lifecycle
 facts needed to reconstruct a failure after restart. Logs must identify the subsystem and

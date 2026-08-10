@@ -36,7 +36,7 @@ final class ClaudeStreamSession:
 
     let sessionID: SessionID
 
-    private let plan: () -> AgentLaunchPlan
+    private let plan: () throws -> AgentLaunchPlan
     private let effort: String?
     private let subagentTranscriptPlan: () -> ClaudeSubagentTranscriptPlan?
 
@@ -120,7 +120,7 @@ final class ClaudeStreamSession:
         sessionID: SessionID,
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
-        plan: @escaping () -> AgentLaunchPlan
+        plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.effort = effort
@@ -133,8 +133,6 @@ final class ClaudeStreamSession:
     /// Starts the CLI. Does nothing if it is already running.
     func start() {
         guard !isRunning else { return }
-
-        let plan = plan()
 
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
@@ -150,6 +148,7 @@ final class ClaudeStreamSession:
 
         let process: AgentChildProcess
         do {
+            let plan = try plan()
             process = try AgentChildProcess.launch(
                 executable: plan.executable,
                 arguments: plan.arguments,

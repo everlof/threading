@@ -200,6 +200,11 @@ struct ExecutionAuditReadResult: Equatable, Sendable {
 final class ExecutionAuditStore: @unchecked Sendable {
     static let shared = ExecutionAuditStore()
 
+    /// A segment is 4 MiB by default, so an unbounded rotation count would also be an unbounded
+    /// per-session disk and read-work promise. Production has always retained three; eight leaves
+    /// room for explicit test/support policies while keeping the filename namespace closed.
+    static let maximumRetainedRotatedSegments = 8
+
     private struct ChainState {
         var sequence: Int
         var digest: String?
@@ -265,7 +270,10 @@ final class ExecutionAuditStore: @unchecked Sendable {
     ) {
         self.directory = directory ?? Self.defaultDirectory
         self.maximumSegmentBytes = max(1_024, maximumSegmentBytes)
-        self.retainedRotatedSegments = max(0, retainedRotatedSegments)
+        self.retainedRotatedSegments = min(
+            max(0, retainedRotatedSegments),
+            Self.maximumRetainedRotatedSegments
+        )
     }
 
     /// Records only execution-bearing stream events. Text deltas, prompts, reasoning, assistant
@@ -590,14 +598,13 @@ final class ExecutionAuditStore: @unchecked Sendable {
             chainStates.removeValue(forKey: sessionID)
             pendingTools.removeValue(forKey: sessionID)
 
-            let baseName = "\(sessionID.uuidString).audit.jsonl"
-            guard let urls = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil
-            ) else { return }
-            for url in urls where url.lastPathComponent == baseName
-                || url.lastPathComponent.hasPrefix("\(baseName).") {
-                try? FileManager.default.removeItem(at: url)
+            // The store owns a closed set of names for one session. Address those names directly
+            // instead of enumerating every other session's ledger (and accepting arbitrary
+            // `baseName.*` files as ours) whenever a session is deleted.
+            let manager = FileManager.default
+            try? manager.removeItem(at: currentURL(for: sessionID))
+            for index in 1...Self.maximumRetainedRotatedSegments {
+                try? manager.removeItem(at: rotatedURL(for: sessionID, index: index))
             }
         }
     }
@@ -642,6 +649,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
         let encoder = Self.encoder
         guard var line = try? encoder.encode(record) else { return false }
         line.append(0x0A)
+        guard line.count <= maximumSegmentBytes else { return false }
         rotateIfNeeded(sessionID: sessionID, incomingBytes: line.count)
 
         let url = currentURL(for: sessionID)
@@ -667,7 +675,10 @@ final class ExecutionAuditStore: @unchecked Sendable {
     private func rotateIfNeeded(sessionID: SessionID, incomingBytes: Int) {
         let file = currentURL(for: sessionID)
         let currentBytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard currentBytes > 0, currentBytes + incomingBytes > maximumSegmentBytes else { return }
+        guard currentBytes > 0,
+              currentBytes > maximumSegmentBytes - incomingBytes else {
+            return
+        }
         let manager = FileManager.default
         if retainedRotatedSegments == 0 {
             try? manager.removeItem(at: file)
@@ -695,7 +706,14 @@ final class ExecutionAuditStore: @unchecked Sendable {
             + [currentURL(for: sessionID)]
 
         for url in urls where FileManager.default.fileExists(atPath: url.path) {
-            guard let data = try? Data(contentsOf: url), !data.isEmpty else { continue }
+            let data: Data
+            do {
+                data = try BoundedFileReader.read(url, maximumBytes: maximumSegmentBytes)
+            } catch {
+                malformed += 1
+                continue
+            }
+            guard !data.isEmpty else { continue }
             for line in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
                 do {
                     records.append(try Self.decoder.decode(ExecutionAuditRecord.self, from: Data(line)))

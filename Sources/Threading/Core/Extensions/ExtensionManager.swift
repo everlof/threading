@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import ThreadingExtensionKit
 
 struct ExtensionsDidChange: AppEvent {
@@ -577,15 +578,24 @@ final class ExtensionManager:
         )
     }
 
-    func customSurfaceResourceURL(
+    /// Resolves and reads package-owned Metal source through the actual opened-file boundary.
+    /// The metadata preflight in `resourceURL` is only an early refusal: an extension can replace
+    /// or grow its resource afterwards, so it is not the allocation limit.
+    func customSurfaceSource(
         relativePath: String,
         extensionIdentifier: String
-    ) -> URL? {
-        resourceURL(
+    ) -> String? {
+        guard let url = resourceURL(
             relativePath: relativePath,
             extensionIdentifier: extensionIdentifier,
             maximumBytes: ExtensionResourceDefaults.maximumCustomSurfaceBytes
-        )
+        ), let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: ExtensionResourceDefaults.maximumCustomSurfaceBytes
+        ) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     private func resourceURL(
@@ -2060,8 +2070,33 @@ final class ExtensionManager:
     }
 }
 
+enum ExtensionImageResourcePolicy {
+    static let maximumBytes = 4 * 1024 * 1024
+    static let maximumPixelDimension = 1_024
+
+    /// Re-opens the resolved file and validates the bytes which will actually be decoded.
+    /// The URL resolver's metadata check is intentionally only a cheap early refusal because an
+    /// installed package can change between lookup and use.
+    static func validatedData(at url: URL) -> Data? {
+        guard let data = try? BoundedFileReader.read(url, maximumBytes: maximumBytes),
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.intValue > 0,
+              height.intValue > 0,
+              width.intValue <= maximumPixelDimension,
+              height.intValue <= maximumPixelDimension else {
+            return nil
+        }
+        return data
+    }
+}
+
 private enum ExtensionResourceDefaults {
-    static let maximumImageBytes = 4 * 1024 * 1024
+    static let maximumImageBytes = ExtensionImageResourcePolicy.maximumBytes
     static let maximumCustomSurfaceBytes = 256 * 1024
 }
 

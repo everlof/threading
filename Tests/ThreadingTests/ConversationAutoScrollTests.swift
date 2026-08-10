@@ -124,7 +124,7 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
     }
 
     private func makeDeepConversationController() -> ConversationViewController {
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: AgentSession(kind: .codex, title: "Scroll anchor", usesNativeUI: true),
             project: Project(
                 name: "Scroll anchor",

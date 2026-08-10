@@ -15,6 +15,17 @@ struct AgentLaunchPlan {
     let resumeState: ResumeState
 }
 
+enum AgentLaunchPlanningError: LocalizedError, Equatable {
+    case unsupportedNativeConversation(AgentKind)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedNativeConversation(let kind):
+            return "\(kind.displayName) does not provide a native conversation transport."
+        }
+    }
+}
+
 // MARK: - Shell Command
 
 /// A shell command assembled from arguments rather than source-code fragments.
@@ -168,7 +179,10 @@ enum AgentLauncher {
     ///
     /// No `initialPrompt`: the first turn is sent over the stream like every other, so the
     /// opening message needs no special path.
-    static func streamPlan(for session: AgentSession, in project: Project) -> AgentLaunchPlan {
+    static func streamPlan(
+        for session: AgentSession,
+        in project: Project
+    ) throws -> AgentLaunchPlan {
         var executionProject = project
         executionProject.folderPath = session.workingDirectory(in: project)
         switch session.kind {
@@ -179,7 +193,7 @@ enum AgentLauncher {
         case .grok:
             return grokStreamPlan(for: session, in: executionProject)
         case .openCode:
-            preconditionFailure("OpenCode does not yet expose a Threading native conversation transport")
+            throw AgentLaunchPlanningError.unsupportedNativeConversation(.openCode)
         }
     }
 

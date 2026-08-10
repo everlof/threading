@@ -310,6 +310,41 @@ final class TerminalThemeIdentityTests: XCTestCase {
         XCTAssertEqual(migration.first?.id, .legacyName("ocean"))
     }
 
+    /// Normalization happens before the best-effort rewrite. If that write is refused, the same
+    /// input must still produce the same ID next launch or assignments made during this launch
+    /// point at an identity that will never exist again.
+    func testCollidingPersistedThemeIDsRecoverDeterministically() throws {
+        var first = TerminalTheme.basic.renamed("Imported")
+        first.id = .basic
+        var second = TerminalTheme.basic.renamed("Imported")
+        second.id = .basic
+
+        let initial = ThemeManager.normaliseLegacyThemes([first, second])
+        let relaunched = ThemeManager.normaliseLegacyThemes([first, second])
+
+        XCTAssertEqual(initial.map(\.id), relaunched.map(\.id))
+        XCTAssertEqual(Set(initial.map(\.id)).count, 2)
+        XCTAssertTrue(initial.allSatisfy { $0.id != .basic })
+        XCTAssertTrue(initial.allSatisfy { $0.id.legacyName == nil })
+    }
+
+    func testTerminalThemeImportRefusesAnOversizedFileBeforeParsing() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "oversized-terminal-theme-\(UUID().uuidString).terminal"
+        )
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data(
+            repeating: 0x20,
+            count: ThemeImportLimits.maximumFileBytes + 1
+        ).write(to: file)
+
+        XCTAssertThrowsError(try ThemeManager.shared.importAppleTerminalTheme(from: file)) {
+            guard case ThemeImportError.fileTooLarge = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+    }
+
     func testLegacySessionAndProjectNamesDecodeButOnlyIDsAreReencoded() throws {
         let sessionID = SessionID()
         let projectID = ProjectID()

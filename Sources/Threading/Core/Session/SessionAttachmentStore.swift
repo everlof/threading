@@ -182,6 +182,11 @@ final class SessionAttachmentStore {
             )
             return SessionAttachmentStore(
                 copiesDirectory: { scratch },
+                referenceRoot: { sessionID in
+                    ProjectStore.shared.workingDirectory(forSessionID: sessionID).map {
+                        URL(fileURLWithPath: $0, isDirectory: true)
+                    }
+                },
                 allowsFilesOutsideProject: { AppSettings.shared.includesAttachmentsOutsideProject }
             )
         }
@@ -190,6 +195,11 @@ final class SessionAttachmentStore {
             savePayload: { StateManager.shared.saveAttachmentsPayload($0, for: $1) },
             retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) },
             copiesDirectory: { StateManager.shared.attachmentCopiesDirectory },
+            referenceRoot: { sessionID in
+                ProjectStore.shared.workingDirectory(forSessionID: sessionID).map {
+                    URL(fileURLWithPath: $0, isDirectory: true)
+                }
+            },
             allowsFilesOutsideProject: { AppSettings.shared.includesAttachmentsOutsideProject }
         )
     }()
@@ -208,6 +218,11 @@ final class SessionAttachmentStore {
     /// listed as a path that will rot — the invariant holds either way.
     private let copiesDirectory: (() -> URL)?
 
+    /// The one external directory persisted references may name for a session. The root stored
+    /// in SQLite is evidence, not authority: accepting an arbitrary absolute root from a damaged
+    /// row would turn a harmless relative path into a remote-readable file anywhere on disk.
+    private let referenceRoot: ((SessionID) -> URL?)?
+
     /// Whether a *scanned* file outside the project may be listed. Read on every admission and
     /// every read rather than cached: the answer is a user setting that can change at any moment,
     /// and a stale copy of it is the difference between a rule and a suggestion. The default is
@@ -221,6 +236,7 @@ final class SessionAttachmentStore {
         savePayload: ((String, SessionID) -> Void)? = nil,
         retainPersisted: ((Set<SessionID>) -> Void)? = nil,
         copiesDirectory: (() -> URL)? = nil,
+        referenceRoot: ((SessionID) -> URL?)? = nil,
         allowsFilesOutsideProject: @escaping () -> Bool = { false }
     ) {
         self.fileManager = fileManager
@@ -229,6 +245,7 @@ final class SessionAttachmentStore {
         self.savePayload = savePayload
         self.retainPersisted = retainPersisted
         self.copiesDirectory = copiesDirectory
+        self.referenceRoot = referenceRoot
         self.allowsFilesOutsideProject = allowsFilesOutsideProject
     }
 
@@ -435,6 +452,31 @@ final class SessionAttachmentStore {
             isOutsideProject: false,
             referencedAt: now(),
             isImmutableSnapshot: true
+        )
+        return attachment.flatMap { admit([$0], for: sessionID).first }
+    }
+
+    /// Captures bytes the caller already validated. This prevents the preview and its durable
+    /// attachment from becoming two different revisions when an agent rewrites the source path
+    /// between decoding and custody.
+    @discardableResult
+    func recordSnapshot(
+        _ data: Data,
+        of url: URL,
+        sessionID: SessionID,
+        origin: SessionAttachment.Origin,
+        preferredName: String? = nil
+    ) -> SessionAttachment? {
+        loadIfNeeded(sessionID)
+        let attachment = copiedAttachment(
+            at: url,
+            sessionID: sessionID,
+            origin: origin,
+            preferredName: preferredName,
+            isOutsideProject: false,
+            referencedAt: now(),
+            isImmutableSnapshot: true,
+            snapshotData: data
         )
         return attachment.flatMap { admit([$0], for: sessionID).first }
     }
@@ -681,7 +723,9 @@ final class SessionAttachmentStore {
         else { return }
 
         attachmentsBySession[sessionID] = document.entries.compactMap { entry in
-            let root = URL(fileURLWithPath: entry.root, isDirectory: true)
+            guard let root = trustedPersistedRoot(entry.root, for: sessionID) else {
+                return nil
+            }
             let url = root.appendingPathComponent(entry.relativePath)
             // A kind this build has no case for — a payload from a newer build — re-derives
             // from the file itself, the authority every read already trusts. A row unknown both
@@ -736,6 +780,18 @@ final class SessionAttachmentStore {
     }
 
     // MARK: Validation
+
+    /// Resolves a persisted root only against live authority. Both legitimate roots are known
+    /// independently of the payload: the session's current checkout and its app-owned custody
+    /// directory. This also makes a moved/deleted managed workspace prune its old references
+    /// instead of retaining authority to a directory the session no longer owns.
+    private func trustedPersistedRoot(_ path: String, for sessionID: SessionID) -> URL? {
+        let candidate = URL(fileURLWithPath: path, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        let trusted = [referenceRoot?(sessionID), copiesRoot(for: sessionID)]
+            .compactMap { $0?.standardizedFileURL.resolvingSymlinksInPath() }
+        return trusted.contains(candidate) ? candidate : nil
+    }
 
     /// A file kept as a reference, proven to be a regular supported file inside `root`.
     private func referencedAttachment(
@@ -822,15 +878,20 @@ final class SessionAttachmentStore {
         preferredName: String?,
         isOutsideProject: Bool,
         referencedAt: Date,
-        isImmutableSnapshot: Bool = false
+        isImmutableSnapshot: Bool = false,
+        snapshotData: Data? = nil
     ) -> SessionAttachment? {
         let file = url.standardizedFileURL.resolvingSymlinksInPath()
 
         guard let kind = AttachmentReferenceDetector.kind(for: file),
-              let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
-              values.isRegularFile == true,
               let root = copiesRoot(for: sessionID) else {
             return nil
+        }
+        if snapshotData == nil {
+            guard let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true else {
+                return nil
+            }
         }
 
         // A second mention of the same source reuses the slot it already has, so the row keeps
@@ -844,7 +905,12 @@ final class SessionAttachmentStore {
         let relativePath = existing?.relativePath ?? "\(UUID().uuidString)/\(name)"
         let destination = root.appendingPathComponent(relativePath)
 
-        guard copy(file, to: destination) else { return nil }
+        let stored = if let snapshotData {
+            writeSnapshot(snapshotData, to: destination, sourceName: file.lastPathComponent)
+        } else {
+            copy(file, to: destination)
+        }
+        guard stored else { return nil }
 
         return SessionAttachment(
             sessionID: sessionID,
@@ -898,19 +964,58 @@ final class SessionAttachmentStore {
     }
 
     private func copy(_ file: URL, to destination: URL) -> Bool {
+        let directory = destination.deletingLastPathComponent()
+        let candidate = directory.appendingPathComponent(".threading-copy-\(UUID().uuidString)")
+        let backup = directory.appendingPathComponent(".threading-backup-\(UUID().uuidString)")
+        var movedStandingCopy = false
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            try fileManager.copyItem(at: file, to: candidate)
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.moveItem(at: destination, to: backup)
+                movedStandingCopy = true
+            }
+            try fileManager.moveItem(at: candidate, to: destination)
+            if movedStandingCopy { try? fileManager.removeItem(at: backup) }
+            return true
+        } catch {
+            try? fileManager.removeItem(at: candidate)
+            if movedStandingCopy {
+                if !fileManager.fileExists(atPath: destination.path) {
+                    do {
+                        try fileManager.moveItem(at: backup, to: destination)
+                    } catch {
+                        ThreadingLogger.session.fault(
+                            "Attachment rollback left its previous copy at \(backup.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                } else {
+                    ThreadingLogger.session.fault(
+                        "Attachment replacement conflicted; its previous copy remains recoverable at \(backup.path, privacy: .public)"
+                    )
+                }
+            }
+            ThreadingLogger.session.error(
+                "Failed to keep attachment \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    private func writeSnapshot(_ data: Data, to destination: URL, sourceName: String) -> Bool {
         do {
             try fileManager.createDirectory(
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            if fileManager.fileExists(atPath: destination.path) {
-                try fileManager.removeItem(at: destination)
-            }
-            try fileManager.copyItem(at: file, to: destination)
+            try data.write(to: destination, options: .atomic)
             return true
         } catch {
             ThreadingLogger.session.error(
-                "Failed to keep attachment \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to keep attachment \(sourceName, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             return false
         }
@@ -998,7 +1103,7 @@ enum AttachmentReferenceDetector {
         expression(#"[`"]([^`"\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)[`"]"#),
         expression(#"'([^'\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)'"#),
         expression(#"((?:file://)?[^\s<>"'`()\[\]{}]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)"#)
-    ]
+    ].compactMap { $0 }
 
     /// Every real supported file the text names, sorted by whether it lives in the project.
     ///
@@ -1143,13 +1248,13 @@ enum AttachmentReferenceDetector {
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;!?"))
     }
 
-    private static func expression(_ pattern: String) -> NSRegularExpression {
+    private static func expression(_ pattern: String) -> NSRegularExpression? {
         // These are compile-time-owned patterns. A failed pattern should make detection inert,
         // not take down the session displaying untrusted terminal text.
-        (try? NSRegularExpression(
+        try? NSRegularExpression(
             pattern: pattern,
             options: [.caseInsensitive]
-        )) ?? (try! NSRegularExpression(pattern: "(?!)"))
+        )
     }
 }
 
@@ -1170,7 +1275,7 @@ final class TerminalAttachmentObserver {
     private let text: () -> String
     private let isEnabled: () -> Bool
     private let now: () -> Date
-    nonisolated(unsafe) private var pendingScan: DispatchWorkItem?
+    private var pendingScan: Task<Void, Never>?
     private var lastScan: Date?
     private var pathsInLastScan: Set<String> = []
 
@@ -1213,12 +1318,17 @@ final class TerminalAttachmentObserver {
             return
         }
 
-        let work = DispatchWorkItem { [weak self] in self?.scanNow() }
-        pendingScan = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + SessionAttachmentDefaults.terminalQuietInterval,
-            execute: work
-        )
+        let delay = UInt64(SessionAttachmentDefaults.terminalQuietInterval * 1_000_000_000)
+        pendingScan = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.pendingScan = nil
+            self.scanNow()
+        }
     }
 
     func scanNow() {
@@ -1301,9 +1411,7 @@ final class TerminalTranscriptAttachmentObserver {
     private let isEnabled: () -> Bool
 
     private var generation = 0
-    // Dispatch work items are not Sendable. All mutation is main-actor isolated; deinit only
-    // cancels the now-unreachable weak-self callbacks, matching TerminalAttachmentObserver.
-    nonisolated(unsafe) private var pendingScans: [DispatchWorkItem] = []
+    private var pendingScans: [Task<Void, Never>] = []
     private var pathsRecordedThisTurn: Set<String> = []
 
     init(
@@ -1349,7 +1457,14 @@ final class TerminalTranscriptAttachmentObserver {
         let lookup = transcript == nil ? transcriptLookup() : nil
 
         for delay in TranscriptAttachmentDefaults.stabilityDelays {
-            let work = DispatchWorkItem { [weak self] in
+            let nanoseconds = UInt64(max(delay, 0) * 1_000_000_000)
+            let work = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
                 self?.scan(
                     generation: thisGeneration,
                     transcript: transcript,
@@ -1358,7 +1473,6 @@ final class TerminalTranscriptAttachmentObserver {
                 )
             }
             pendingScans.append(work)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
     }
 

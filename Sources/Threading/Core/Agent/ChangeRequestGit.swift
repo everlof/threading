@@ -243,7 +243,10 @@ enum ChangeRequestGit {
         ]
         for path in candidates {
             let url = root.appendingPathComponent(path)
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            guard let data = try? BoundedFileReader.read(
+                url,
+                maximumBytes: ChangeRequestGitDefaults.templateByteLimit
+            ), let text = String(data: data, encoding: .utf8) else { continue }
             let bounded = String(text.prefix(ChangeRequestGitDefaults.templateCharacterLimit))
             if !bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return bounded }
         }
@@ -269,6 +272,7 @@ enum ChangeRequestGit {
 
 enum ChangeRequestGitDefaults {
     static let templateCharacterLimit = 30_000
+    static let templateByteLimit = templateCharacterLimit * 4
     static let pushOutputLimit = 512 * 1024
     static let remoteRefOutputLimit = 8 * 1024
 }

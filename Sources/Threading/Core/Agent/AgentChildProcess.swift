@@ -77,9 +77,12 @@ final class AgentChildProcess {
                 environment: environment,
                 workingDirectory: nil,
                 descriptors: [
-                    AgentChildProcessDefaults.standardInputDescriptor: inputPipe.readEnd,
-                    AgentChildProcessDefaults.standardOutputDescriptor: outputPipe.writeEnd,
-                    AgentChildProcessDefaults.standardErrorDescriptor: errorPipe.writeEnd
+                    AgentChildProcessDefaults.standardInputDescriptor:
+                        .inherited(inputPipe.readEnd),
+                    AgentChildProcessDefaults.standardOutputDescriptor:
+                        .inherited(outputPipe.writeEnd),
+                    AgentChildProcessDefaults.standardErrorDescriptor:
+                        .inherited(errorPipe.writeEnd)
                 ]
             )
         } catch {
@@ -101,7 +104,19 @@ final class AgentChildProcess {
             standardError: FileHandle(fileDescriptor: errorPipe.readEnd, closeOnDealloc: true)
         )
 
-        process.enrol(in: ledger, sessionID: sessionID, executable: executable)
+        do {
+            try process.enrol(in: ledger, sessionID: sessionID, executable: executable)
+        } catch {
+            // A native child without a durable ownership record is not a partially available
+            // conversation. End its whole group before throwing so a launch failure cannot be
+            // the mechanism that creates the orphan this wrapper exists to prevent.
+            let escalation = ChildProcessEscalation(child: process.child)
+            process.child.observeExit { _ in escalation.complete() }
+            try? process.standardInput.close()
+            try? process.standardOutput.close()
+            try? process.standardError.close()
+            throw error
+        }
         // The pid rather than the child: the supervisor stores this handler, so capturing it
         // here would be a cycle that only the reap could break — including for a child that
         // never exits.
@@ -131,8 +146,19 @@ final class AgentChildProcess {
     /// way to tell our child from whatever the kernel later gives that number to, and its only
     /// safe move would be to skip it anyway. So an unreadable start time refuses the record and
     /// says so, rather than writing an entry that can only ever be ignored.
-    private func enrol(in ledger: AgentChildLedger, sessionID: SessionID, executable: String) {
-        guard let startTime = ProcessUtility.startTime(forPid: processIdentifier) else {
+    private func enrol(
+        in ledger: AgentChildLedger,
+        sessionID: SessionID,
+        executable: String
+    ) throws {
+        switch ledger.recordSpawnedChild(
+            child,
+            sessionID: sessionID.uuidString,
+            executable: executable
+        ) {
+        case .recorded:
+            return
+        case .identityUnavailable:
             ThreadingLogger.agent.error(
                 """
                 Could not read the start time of agent child \
@@ -140,57 +166,36 @@ final class AgentChildProcess {
                 launch crashes.
                 """
             )
-            return
+            throw AgentChildLaunchError.identityUnavailable(processIdentifier)
+        case .persistenceRefused:
+            ThreadingLogger.agent.error(
+                """
+                Could not record agent child \(self.processIdentifier, privacy: .public); \
+                refusing to run a child that crash recovery cannot own.
+                """
+            )
+            throw AgentChildLaunchError.ledgerWriteFailed(processIdentifier)
         }
-
-        ledger.record(AgentChildRecord(
-            pid: processIdentifier,
-            startTime: startTime,
-            sessionID: sessionID.uuidString,
-            executable: URL(fileURLWithPath: executable).lastPathComponent,
-            recordedAt: Date()
-        ))
     }
 }
 
-// MARK: - Child Pipe
+enum AgentChildLaunchError: LocalizedError {
+    case identityUnavailable(pid_t)
+    case ledgerWriteFailed(pid_t)
 
-/// One `pipe(2)`, before either end has been handed to a `FileHandle`.
-///
-/// Raw descriptors rather than `Pipe`, because the parent must close the child's ends the
-/// instant `posix_spawn` returns and `Pipe` owns both of its handles until it is released.
-private final class ChildPipe {
-    private(set) var readEnd: Int32
-    private(set) var writeEnd: Int32
-
-    /// - Parameter closingOnFailure: pipes already created for this spawn, closed if this one
-    ///   cannot be made. A descriptor leak here is permanent for the life of the app.
-    init(closingOnFailure opened: [ChildPipe] = []) throws {
-        var descriptors: [Int32] = [-1, -1]
-        guard pipe(&descriptors) == 0 else {
-            let code = errno
-            opened.forEach { $0.closeBothEnds() }
-            throw ChildSpawnError.pipeFailed(code: code)
+    var processIdentifier: pid_t {
+        switch self {
+        case .identityUnavailable(let pid), .ledgerWriteFailed(let pid): return pid
         }
-        readEnd = descriptors[0]
-        writeEnd = descriptors[1]
     }
 
-    func closeReadEnd() {
-        guard readEnd >= 0 else { return }
-        close(readEnd)
-        readEnd = -1
-    }
-
-    func closeWriteEnd() {
-        guard writeEnd >= 0 else { return }
-        close(writeEnd)
-        writeEnd = -1
-    }
-
-    func closeBothEnds() {
-        closeReadEnd()
-        closeWriteEnd()
+    var errorDescription: String? {
+        switch self {
+        case .identityUnavailable:
+            return "The agent process started, but its process identity could not be verified."
+        case .ledgerWriteFailed:
+            return "The agent process started, but its crash-recovery record could not be saved."
+        }
     }
 }
 

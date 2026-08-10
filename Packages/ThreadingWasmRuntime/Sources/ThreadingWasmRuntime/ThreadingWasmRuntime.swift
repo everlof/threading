@@ -46,7 +46,10 @@ public enum ThreadingWasmRuntime {
             throw ThreadingWasmRuntimeError.moduleTooLarge(maximum: maximumModuleBytes)
         }
 
-        let bytes = try Data(contentsOf: moduleURL)
+        let bytes = try readModuleBytes(
+            moduleURL: moduleURL,
+            maximumBytes: maximumModuleBytes
+        )
         return try run(
             moduleBytes: bytes,
             moduleName: moduleURL.lastPathComponent,
@@ -142,6 +145,30 @@ public enum ThreadingWasmRuntime {
 
         let instance = try module.instantiate(store: store, imports: imports)
         return try wasi.start(instance)
+    }
+
+    /// Reads one byte beyond the allowance rather than trusting the metadata preflight above.
+    /// Package directories can be updated or replaced while a runner is launching; the size
+    /// observed before opening the file is therefore only a quick refusal, never the allocation
+    /// authority.
+    static func readModuleBytes(moduleURL: URL, maximumBytes: Int64) throws -> Data {
+        precondition(maximumBytes >= 0 && maximumBytes < Int64(Int.max))
+        let handle = try FileHandle(forReadingFrom: moduleURL)
+        defer { try? handle.close() }
+
+        let limit = Int(maximumBytes)
+        var data = Data()
+        data.reserveCapacity(min(limit, 64 * 1_024))
+        while data.count <= limit {
+            let remaining = limit + 1 - data.count
+            guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
+                  !chunk.isEmpty else { break }
+            data.append(chunk)
+        }
+        guard data.count <= limit else {
+            throw ThreadingWasmRuntimeError.moduleTooLarge(maximum: maximumBytes)
+        }
+        return data
     }
 
     private static func checkedRange(

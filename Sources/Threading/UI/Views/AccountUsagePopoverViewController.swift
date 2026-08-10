@@ -93,7 +93,8 @@ final class AccountUsagePopoverViewController: NSViewController {
     private func render() {
         contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        let usage = AccountUsageService.shared.usage(for: account)
+        let reading = AccountUsageService.shared.reading(for: account)
+        let usage = reading.usage
 
         contentStack.addArrangedSubview(headerRow(planLabel: usage?.planLabel))
 
@@ -108,7 +109,7 @@ final class AccountUsagePopoverViewController: NSViewController {
             }
         }
 
-        if let footer = footerText(usage: usage) {
+        if let footer = footerText(reading: reading) {
             let label = NSTextField(labelWithString: footer)
             label.applyFont(.caption)
             label.textColor = Design.Text.tertiary
@@ -148,8 +149,8 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     /// The freshness line, with the source named when the reading is second-hand — a cached
     /// value observed an hour ago should say so rather than posing as live.
-    private func footerText(usage: AccountUsage?) -> String? {
-        if let usage {
+    private func footerText(reading: AccountUsageReading) -> String? {
+        if let usage = reading.usage {
             var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt))
             if usage.source == .localCache {
                 text += L10n.string(" · via Claude's status-line feed")
@@ -157,8 +158,7 @@ final class AccountUsagePopoverViewController: NSViewController {
             return text
         }
 
-        return AccountUsageService.shared.errorMessage(for: account)
-            ?? L10n.string("Fetching usage…")
+        return reading.error?.message ?? L10n.string("Fetching usage…")
     }
 }
 

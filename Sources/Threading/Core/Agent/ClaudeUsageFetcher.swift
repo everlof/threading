@@ -227,13 +227,16 @@ enum ClaudeUsageFetcher {
     }
 
     /// `.absent` when the file simply is not there; otherwise whatever the payload can offer.
-    private static func readCredentialsFile(account: AgentAccount) -> CredentialSource {
+    static func readCredentialsFile(account: AgentAccount) -> CredentialSource {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(ClaudeUsageDefaults.credentialsFileName)
 
         guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
 
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: ClaudeUsageDefaults.credentialsMaxBytes
+        ) else {
             return .unusable(reason: .noCredential("The account's credentials file is unreadable."))
         }
 

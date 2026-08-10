@@ -52,44 +52,28 @@ enum CodeStatsRunner {
     }
 
     private static func runLocateCommand(shell: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", CodeStatsDefaults.locateCommand]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        // Discarded rather than piped: a pipe nobody drains can fill and deadlock the child.
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        // Read before waiting: a full pipe buffer with nobody draining it deadlocks the child.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let result = try? BoundedChildProcess.run(
+            executable: shell,
+            arguments: ["-l", "-c", CodeStatsDefaults.locateCommand],
+            timeout: CodeStatsDefaults.locateTimeout,
+            maximumOutputBytes: CodeStatsDefaults.maximumLocateOutputBytes
+        ), result.termination == .exited(0) else { return nil }
+        return String(decoding: result.output, as: UTF8.self)
     }
 
     // MARK: - Measuring
 
     /// Counts one folder. Blocking; nil when scc failed or the folder is gone.
     static func measure(folder: String, executable: String) -> CodeStats? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = CodeStatsDefaults.arguments + [folder]
-
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
-
         let started = Date()
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: executable,
+                arguments: CodeStatsDefaults.arguments + [folder],
+                timeout: CodeStatsDefaults.timeout,
+                maximumOutputBytes: CodeStatsDefaults.maximumOutputBytes
+            )
         } catch {
             ThreadingLogger.agent.error(
                 "Could not run scc: \(error.localizedDescription, privacy: .public)"
@@ -97,26 +81,14 @@ enum CodeStatsRunner {
             return nil
         }
 
-        // scc answers a whole repository in tens of milliseconds, so the timeout is not a
-        // budget but a leak guard: a wedged child on an unreadable mount must not outlive
-        // the scan that spawned it.
-        let timeoutItem = DispatchWorkItem { process.terminate() }
-        DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + CodeStatsDefaults.timeout, execute: timeoutItem
-        )
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeoutItem.cancel()
-
-        guard process.terminationStatus == 0 else { return nil }
+        guard result.termination == .exited(0), !result.outputWasTruncated else { return nil }
 
         let elapsed = Int(-started.timeIntervalSinceNow * 1000)
         ThreadingLogger.agent.debug(
-            "scc measured \(folder, privacy: .public) in \(elapsed)ms, \(data.count) bytes"
+            "scc measured \(folder, privacy: .public) in \(elapsed)ms, \(result.output.count) bytes"
         )
 
-        return try? CodeStats.parse(sccJSON: data)
+        return try? CodeStats.parse(sccJSON: result.output)
     }
 }
 
@@ -139,6 +111,9 @@ enum CodeStatsDefaults {
     static let arguments = ["--format", "json", "--no-cocomo", "--no-min-gen"]
 
     static let timeout: TimeInterval = 30
+    static let locateTimeout: TimeInterval = 5
+    static let maximumLocateOutputBytes = 64 * 1024
+    static let maximumOutputBytes = 32 * 1024 * 1024
 
     static let fileName = "code-stats.json"
 

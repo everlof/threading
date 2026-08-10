@@ -184,6 +184,7 @@ extension AgentToolCoordinator {
         // first and put back on any failure — otherwise the standing document would show the
         // new image under the old everything-else.
         var replacedAssets: [(name: String, data: Data)] = []
+        var introducedAssets: [String] = []
         for (rawKind, patch) in arguments.variants ?? [:] {
             guard let sidebar = patch.sidebar,
                   let kind = AppTheme.VariantKind(rawValue: rawKind.lowercased()) else { continue }
@@ -194,6 +195,12 @@ extension AgentToolCoordinator {
                 let fileName = slot.fileName(for: kind)
                 if let existing = ThemeAssetStore.pngData(named: fileName, for: source.id) {
                     replacedAssets.append((fileName, existing))
+                } else if ThemeAssetStore.assetExists(named: fileName, for: source.id) {
+                    return .failure(
+                        "The existing sidebar image could not be backed up, so no changes were made."
+                    )
+                } else {
+                    introducedAssets.append(fileName)
                 }
             }
         }
@@ -273,10 +280,31 @@ extension AgentToolCoordinator {
                 : " It remains inactive; call set_app_theme to inspect it live."
             return .success("Updated \(updated.name) (\(updated.id.rawValue)).\(state)")
         } catch {
+            var rollbackFailure: Error?
             for (fileName, data) in replacedAssets {
-                ThemeAssetStore.restore(pngData: data, named: fileName, for: source.id)
+                do {
+                    try ThemeAssetStore.restore(
+                        pngData: data,
+                        named: fileName,
+                        for: source.id
+                    )
+                } catch {
+                    rollbackFailure = rollbackFailure ?? error
+                }
             }
-            return .failure(error.localizedDescription)
+            for fileName in introducedAssets {
+                do {
+                    try ThemeAssetStore.remove(assetName: fileName, for: source.id)
+                } catch {
+                    rollbackFailure = rollbackFailure ?? error
+                }
+            }
+            guard let rollbackFailure else { return .failure(error.localizedDescription) }
+            return .failure(
+                error.localizedDescription
+                    + " The sidebar image rollback also failed: "
+                    + rollbackFailure.localizedDescription
+            )
         }
     }
 
@@ -879,14 +907,19 @@ extension AgentToolCoordinator {
     ) throws -> Data {
         if let rawPath = cleaned(source.path) {
             let path = (rawPath as NSString).expandingTildeInPath
-            guard let data = FileManager.default.contents(atPath: path) else {
-                throw AppThemeEditingError.invalid("\(field): no readable file at \(path).")
-            }
-            guard data.count <= SidebarStyleLimits.maximumImageBytes else {
+            let data: Data
+            do {
+                data = try BoundedFileReader.read(
+                    URL(fileURLWithPath: path),
+                    maximumBytes: SidebarStyleLimits.maximumImageBytes
+                )
+            } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
                 throw AppThemeEditingError.invalid(
                     "\(field): file exceeds "
                         + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB."
                 )
+            } catch {
+                throw AppThemeEditingError.invalid("\(field): no readable file at \(path).")
             }
             return data
         }

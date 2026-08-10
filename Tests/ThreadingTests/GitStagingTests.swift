@@ -124,6 +124,28 @@ final class GitStagingTests: XCTestCase {
         XCTAssertTrue(try output("diff", "--cached", "--name-only").contains("added.txt"))
     }
 
+    func testUntrackedSymlinkDoesNotExposeBytesOutsideTheCheckout() throws {
+        let outside = root.deletingLastPathComponent()
+            .appendingPathComponent("threading-secret-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try "outside secret\n".write(to: outside, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("leak.txt"),
+            withDestinationURL: outside
+        )
+
+        let file = try XCTUnwrap(try unstagedDiff().first { $0.path == "leak.txt" })
+        XCTAssertEqual(file.change, .untracked)
+        XCTAssertTrue(file.hunks.isEmpty)
+        XCTAssertEqual(file.added, 0)
+
+        let summary = try performValue {
+            GitReviewReader.uncommittedSummary(in: self.root, completion: $0)
+        }
+        XCTAssertEqual(summary.files, 1)
+        XCTAssertEqual(summary.added, 0)
+    }
+
     // MARK: - Added and Deleted Files
 
     /// A rebuilt one-hunk patch has no `new file mode` header and no `/dev/null` side, and git

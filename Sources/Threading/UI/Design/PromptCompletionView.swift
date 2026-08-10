@@ -8,10 +8,8 @@ final class PromptCompletionPresenter {
     private weak var source: NSView?
     private weak var root: NSView?
     private var panel: PromptCompletionPanel?
-    // These handles are created and mutated on the main actor. `nonisolated(unsafe)` only lets
-    // deinit remove them after the presenter becomes uniquely owned, matching ThemedPopover.
-    nonisolated(unsafe) private var eventMonitor: Any?
-    nonisolated(unsafe) private var observations: [NSObjectProtocol] = []
+    private let eventMonitor = LocalEventMonitor()
+    private let windowEvents = AppEventObservations()
     private var onChoose: ((Int) -> Void)?
     private var onDismiss: (() -> Void)?
 
@@ -105,9 +103,8 @@ final class PromptCompletionPresenter {
     }
 
     private func installDismissMonitor() {
-        eventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
+        eventMonitor.install(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) {
+            [weak self] event in
             guard let self, let panel = self.panel, let root = self.root else { return event }
             guard event.window === root.window else {
                 self.dismiss()
@@ -123,36 +120,21 @@ final class PromptCompletionPresenter {
 
     private func installWindowObservers() {
         guard let window = source?.window else { return }
-        let center = NotificationCenter.default
-        observations = [
+        windowEvents.removeAll()
+        for name in [
             NSWindow.didResizeNotification,
             NSWindow.didMoveNotification
-        ].map { name in
-            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.reposition()
-                }
-            }
+        ] {
+            windowEvents.observe(name, object: window) { [weak self] in self?.reposition() }
         }
-        observations.append(center.addObserver(
-            forName: NSWindow.willCloseNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.dismiss() }
-        })
+        windowEvents.observe(NSWindow.willCloseNotification, object: window) { [weak self] in
+            self?.dismiss()
+        }
     }
 
     private func removeMonitorAndObservers() {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = nil
-        observations.forEach(NotificationCenter.default.removeObserver)
-        observations.removeAll()
-    }
-
-    deinit {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        observations.forEach(NotificationCenter.default.removeObserver)
+        eventMonitor.remove()
+        windowEvents.removeAll()
     }
 }
 
@@ -265,7 +247,7 @@ private final class PromptCompletionRow: ThemedControl {
         didSet { needsDisplay = true }
     }
     private var pressTarget: NSRect = .zero
-    nonisolated(unsafe) private var releaseWatch: Any?
+    private let releaseWatch = LocalEventMonitor()
     var onChoose: (() -> Void)?
     var isSelected = false {
         didSet {
@@ -369,9 +351,8 @@ private final class PromptCompletionRow: ThemedControl {
         }
         pressTarget = window.convertToScreen(convert(bounds, to: nil))
         endWatchingForRelease()
-        releaseWatch = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]
-        ) { [weak self] event in
+        releaseWatch.install(matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]) {
+            [weak self] event in
             self?.track(event)
             return event
         }
@@ -419,13 +400,7 @@ private final class PromptCompletionRow: ThemedControl {
     }
 
     private func endWatchingForRelease() {
-        guard let releaseWatch else { return }
-        NSEvent.removeMonitor(releaseWatch)
-        self.releaseWatch = nil
-    }
-
-    deinit {
-        if let releaseWatch { NSEvent.removeMonitor(releaseWatch) }
+        releaseWatch.remove()
     }
 }
 

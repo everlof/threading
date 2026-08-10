@@ -96,7 +96,10 @@ final class RecoveryModeStartupTests: XCTestCase {
     func testARecoveryStoreReadsItsProjectsAndWritesNothingBack() throws {
         let manager = StateManager(appSupportDirectory: directory)
         let seed = ProjectStore(stateManager: manager, refusesWrites: false)
-        seed.addProject(folderURL: directory)
+        let seededProject = try XCTUnwrap(seed.addProject(folderURL: directory))
+        let seededSession = try XCTUnwrap(
+            seed.addSession(to: seededProject.id, kind: .claude)
+        )
         seed.flushPendingSave()
 
         let store = ProjectStore(stateManager: manager, refusesWrites: true)
@@ -105,8 +108,30 @@ final class RecoveryModeStartupTests: XCTestCase {
         // Everything a person can do to the store from a recovery window: browse, and have the
         // sidebar record where they went.
         store.selectedSessionID = SessionID()
-        store.addProject(folderURL: directory.appendingPathComponent("second"))
+        XCTAssertNil(
+            store.addProject(folderURL: directory.appendingPathComponent("second")),
+            "a refused creation must not return the project it already rolled back"
+        )
+        XCTAssertNil(
+            store.addSession(to: seededProject.id, kind: .claude),
+            "a refused creation must not return the session it already rolled back"
+        )
+        XCTAssertNil(
+            store.addTerminal(to: seededProject.id),
+            "a refused creation must not return the terminal it already rolled back"
+        )
         store.flushPendingSave()
+        XCTAssertEqual(store.projects.count, 1, "recovery presented a refused project as saved")
+        XCTAssertEqual(
+            store.project(withID: seededProject.id)?.sessions.map(\.id),
+            [seededSession.id],
+            "recovery presented a refused session as saved"
+        )
+        XCTAssertTrue(
+            store.project(withID: seededProject.id)?.terminals.isEmpty == true,
+            "recovery presented a refused terminal as saved"
+        )
+        XCTAssertNil(store.selectedSessionID, "recovery presented a refused selection as saved")
 
         let reopened = ProjectStore(stateManager: StateManager(appSupportDirectory: directory))
         XCTAssertEqual(

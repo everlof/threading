@@ -47,7 +47,8 @@ final class ShortcutOverrideStore {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.overrides,
-            criticality: .preference
+            criticality: .preference,
+            sizePolicy: .compactMetadata
         )
         self.payload = persistence.load(defaultValue: Payload()).value
     }

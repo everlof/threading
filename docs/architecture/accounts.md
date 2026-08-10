@@ -155,6 +155,11 @@ per account and keeps the last good reading through failed refreshes. The creden
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, use
 them read-only, never refresh them.
 
+The cache state is one `AccountUsageReading`, not a usage optional beside an error optional:
+`.notFetched`, `.current`, `.stale(lastGood, error:)`, or `.failed`. A consumer that needs both
+halves takes one snapshot, so it cannot observe the usage before a refresh and the error after
+it, and a stale reading cannot be confused with either a fresh one or a first-fetch failure.
+
 **The Keychain is read only with a standing opt-in** (`readsClaudeLoginFromKeychain`, the
 Privacy page's "Live usage from your Claude login"). The old rule here was "never", for two
 stated reasons, and both were retired by measurement rather than argument
@@ -187,6 +192,10 @@ path that refreshes when a session *leaves* `working` — the one moment the ser
 has just moved. That last is CodexBar's "agent-aware refresh" done with certainty instead of
 guesswork (Threading is told the turn boundary), and it is also the back-off: an idle app
 generates no turn boundaries and therefore no extra requests.
+
+The 429 counter means *consecutive 429 responses*: a success or any non-429 failure resets it.
+Previously a network/decoding failure between two refusals left the counter intact, so the later
+refusal inherited exponential backoff from a sequence that had actually ended.
 
 Sources, per provider:
 

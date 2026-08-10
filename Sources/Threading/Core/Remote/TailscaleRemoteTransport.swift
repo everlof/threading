@@ -11,11 +11,15 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
 
     private(set) var state: RemoteTransportState = .stopped
     private(set) var readiness: TailscaleReadiness = .notChecked
-    private var command: Process?
-    private var cleanupCommand: Process?
-    private var outputPipe: Pipe?
+    private var command: SpawnedChildProcess?
+    private var cleanupCommand: SpawnedChildProcess?
+    private var outputHandle: FileHandle?
     private var outputCollector: CommandOutputCollector?
-    private var commandTimeoutTask: Task<Void, Never>?
+    private var commandDeadline: ChildProcessDeadline?
+    private var cleanupDeadline: ChildProcessDeadline?
+    /// Cancellation can overlap a replacement command. Retaining each escalation until reap
+    /// prevents its delayed KILL from ever reaching a recycled process-group id.
+    private var shutdownEscalations: [pid_t: ChildProcessEscalation] = [:]
     private var launchID: UUID?
     private var onStateChange: (@MainActor @Sendable (RemoteTransportState) -> Void)?
     private var pendingStart: (
@@ -114,27 +118,44 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         readiness = .notChecked
 
         guard let executable else { return }
-        let cleanup = Process()
-        cleanup.executableURL = executable
-        cleanup.arguments = Self.stopArguments
-        cleanup.standardOutput = FileHandle.nullDevice
-        cleanup.standardError = FileHandle.nullDevice
-        cleanup.terminationHandler = { [weak self, weak cleanup] _ in
+        let cleanup: SpawnedChildProcess
+        do {
+            cleanup = try ChildProcessSpawn.spawn(
+                executableURL: executable,
+                arguments: Self.stopArguments,
+                environment: ProcessInfo.processInfo.environment,
+                workingDirectory: nil,
+                descriptors: [
+                    AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
+                    AgentChildProcessDefaults.standardOutputDescriptor: .nullDevice,
+                    AgentChildProcessDefaults.standardErrorDescriptor: .nullDevice
+                ]
+            )
+        } catch {
+            // The backend listener has already closed, so a stale Serve handler reaches nothing.
+            // The next start retries removal before publishing this exact port.
+            return
+        }
+        cleanupCommand = cleanup
+        cleanupDeadline = ChildProcessDeadline(
+            child: cleanup,
+            timeout: RemoteTailscaleDefaults.commandTimeoutSeconds,
+            terminationGrace: BoundedChildDefaults.terminationGrace
+        )
+        let pid = cleanup.processIdentifier
+        cleanup.observeExit { [weak self, weak cleanup] _ in
             Task { @MainActor in
-                guard let self, self.cleanupCommand === cleanup else { return }
+                guard let self else { return }
+                self.shutdownEscalations.removeValue(forKey: pid)?.complete()
+                guard self.cleanupCommand === cleanup else { return }
+                _ = self.cleanupDeadline?.complete()
+                self.cleanupDeadline = nil
                 self.cleanupCommand = nil
                 guard let pending = self.pendingStart else { return }
                 self.pendingStart = nil
                 self.onStateChange = pending.onStateChange
                 self.beginStart(port: pending.port)
             }
-        }
-        do {
-            try cleanup.run()
-            cleanupCommand = cleanup
-        } catch {
-            // The backend listener has already closed, so a stale Serve handler reaches nothing.
-            // The next start overwrites this exact port and is the recovery path.
         }
     }
 
@@ -146,73 +167,87 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         launchID: UUID,
         completion: @escaping @MainActor @Sendable (Int32, Data) -> Void
     ) {
-        let process = Process()
-        let pipe = Pipe()
+        let pipe: ChildPipe
+        do {
+            pipe = try ChildPipe()
+        } catch {
+            finishUnavailable(.statusUnavailable)
+            return
+        }
         let collector = CommandOutputCollector()
-        outputCollector = collector
-        outputPipe = pipe
-        command = process
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let process: SpawnedChildProcess
+        do {
+            process = try ChildProcessSpawn.spawn(
+                executableURL: executable,
+                arguments: arguments,
+                environment: ProcessInfo.processInfo.environment,
+                workingDirectory: nil,
+                descriptors: [
+                    AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
+                    AgentChildProcessDefaults.standardOutputDescriptor: .inherited(pipe.writeEnd),
+                    AgentChildProcessDefaults.standardErrorDescriptor: .inherited(pipe.writeEnd)
+                ]
+            )
+            pipe.closeWriteEnd()
+        } catch {
+            pipe.closeBothEnds()
+            finishUnavailable(.statusUnavailable)
+            return
+        }
 
-        pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            guard self != nil, process != nil else { return }
+        let output = pipe.takeReadHandle()
+        outputCollector = collector
+        outputHandle = output
+        command = process
+        output.readabilityHandler = { [weak self, weak process] handle in
+            guard let data = try? handle.read(
+                upToCount: RemoteTailscaleDefaults.outputReadChunkBytes
+            ), !data.isEmpty, self != nil, process != nil else { return }
             collector.append(data)
         }
-        process.terminationHandler = { [weak self, weak process] terminated in
-            // Process termination can race the final readability callback. Stop installing new
-            // callbacks, synchronously drain the pipe, then take a lock-protected snapshot so a
-            // short error written immediately before exit is not lost.
-            pipe.fileHandleForReading.readabilityHandler = nil
-            collector.append(pipe.fileHandleForReading.readDataToEndOfFile())
-            let output = collector.snapshot()
+        commandDeadline = ChildProcessDeadline(
+            child: process,
+            timeout: RemoteTailscaleDefaults.commandTimeoutSeconds,
+            terminationGrace: BoundedChildDefaults.terminationGrace
+        )
+        let pid = process.processIdentifier
+        process.observeExit { [weak self, weak process] status in
+            output.readabilityHandler = nil
+            try? output.close()
             Task { @MainActor in
-                guard let self,
+                guard let self else { return }
+                self.shutdownEscalations.removeValue(forKey: pid)?.complete()
+                guard
                       self.launchID == launchID,
                       self.command === process else { return }
-                self.outputPipe = nil
+                let timedOut = self.commandDeadline?.complete() == true
+                self.commandDeadline = nil
+                if timedOut {
+                    collector.append(Data("\nThreading command timeout".utf8))
+                }
+                let capturedOutput = collector.snapshot()
+                self.outputHandle = nil
                 self.outputCollector = nil
                 self.command = nil
-                completion(terminated.terminationStatus, output)
+                completion(status, capturedOutput)
             }
-        }
-
-        do {
-            try process.run()
-            commandTimeoutTask?.cancel()
-            commandTimeoutTask = Task { [weak self, weak process] in
-                try? await Task.sleep(for: .seconds(
-                    RemoteTailscaleDefaults.commandTimeoutSeconds
-                ))
-                guard !Task.isCancelled, let self,
-                      self.launchID == launchID,
-                      self.command === process else { return }
-                collector.append(Data("\nThreading command timeout".utf8))
-                process?.terminate()
-            }
-        } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            outputPipe = nil
-            outputCollector = nil
-            command = nil
-            finishUnavailable(.statusUnavailable)
         }
     }
 
     private func cancelActiveCommand() {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        outputPipe = nil
+        outputHandle?.readabilityHandler = nil
+        try? outputHandle?.close()
+        outputHandle = nil
         outputCollector = nil
-        commandTimeoutTask?.cancel()
-        commandTimeoutTask = nil
+        _ = commandDeadline?.complete()
+        commandDeadline = nil
         launchID = nil
 
-        command?.terminationHandler = nil
-        if command?.isRunning == true { command?.terminate() }
+        if let command, command.isRunning {
+            shutdownEscalations[command.processIdentifier] = ChildProcessEscalation(
+                child: command
+            )
+        }
         command = nil
     }
 
@@ -220,16 +255,21 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         cancelActiveCommand()
         pendingStart = nil
 
-        cleanupCommand?.terminationHandler = nil
-        if cleanupCommand?.isRunning == true { cleanupCommand?.terminate() }
+        _ = cleanupDeadline?.complete()
+        cleanupDeadline = nil
+        if let cleanupCommand, cleanupCommand.isRunning {
+            shutdownEscalations[cleanupCommand.processIdentifier] = ChildProcessEscalation(
+                child: cleanupCommand
+            )
+        }
         cleanupCommand = nil
     }
 
     private func finish(_ state: RemoteTransportState) {
-        commandTimeoutTask?.cancel()
-        commandTimeoutTask = nil
+        _ = commandDeadline?.complete()
+        commandDeadline = nil
         launchID = nil
-        outputPipe = nil
+        outputHandle = nil
         outputCollector = nil
         command = nil
         setState(state)
@@ -420,5 +460,6 @@ private enum RemoteTailscaleDefaults {
     static let httpsPort = 8443
     static let maximumCommandOutputBytes = 64 * 1024
     static let retainedCommandOutputBytes = 32 * 1024
+    static let outputReadChunkBytes = 16 * 1024
     static let commandTimeoutSeconds: TimeInterval = 12
 }

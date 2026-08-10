@@ -85,8 +85,24 @@ final class ProjectDatabase {
     // MARK: - Initialization
 
     init(url: URL) throws {
-        database = try SQLiteDatabase(path: url.path)
+        database = try SQLiteDatabase(
+            path: url.path,
+            maximumSchemaVersion: ProjectDatabaseSchema.version
+        )
         try migrate()
+    }
+
+    /// Ends this owner's native connection deterministically. The process store normally keeps
+    /// it for the launch; app-data moves and temporary stores must close it before moving or
+    /// unlinking the database and its WAL sidecars.
+    func close() {
+        database.close()
+    }
+
+    /// Checkpoints WAL and obtains SQLite's own journal-mode transition before a filesystem move.
+    /// A false result means another connection still owns part of the database bundle.
+    func prepareForFileMove() -> Bool {
+        database.prepareForFileMove()
     }
 
     // MARK: - Schema

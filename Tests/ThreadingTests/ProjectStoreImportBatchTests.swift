@@ -10,10 +10,10 @@ final class ProjectStoreImportBatchTests: XCTestCase {
 
     func testBatchAdoptsResumableSessionsAndSkipsDuplicates() throws {
         let store = ProjectStore.shared
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-import-batch-\(UUID().uuidString)")
-        )
+        ))
         defer { store.removeProject(id: project.id) }
 
         func conversation(_ id: String, daysAgo: Double) -> ImportableSession {
@@ -55,12 +55,12 @@ final class ProjectStoreImportBatchTests: XCTestCase {
         XCTAssertTrue(stored.sessions.contains { $0.id == existing.id })
     }
 
-    func testEmptyBatchTouchesNothing() {
+    func testEmptyBatchTouchesNothing() throws {
         let store = ProjectStore.shared
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-import-empty-\(UUID().uuidString)")
-        )
+        ))
         defer { store.removeProject(id: project.id) }
 
         XCTAssertTrue(store.importSessions([], into: project.id).isEmpty)

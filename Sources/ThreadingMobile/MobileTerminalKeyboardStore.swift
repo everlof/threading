@@ -23,6 +23,13 @@ final class MobileTerminalKeyboardStore: ObservableObject {
         static let archiveKey = "threading.mobile.terminal-keyboard.v1"
         static let archiveVersion = 1
         static let unreadableKeyPrefix = "threading.mobile.terminal-keyboard.unreadable."
+        static let maximumArchiveBytes = 1 * 1_024 * 1_024
+        static let maximumLayoutCount = 64
+        static let maximumKeysPerLayout = 64
+        static let maximumAgentKindBytes = 1_024
+        static let maximumLabelBytes = 256
+        static let maximumActionBytes = 64 * 1_024
+        static let maximumAggregateStringBytes = 768 * 1_024
     }
 
     private let defaults: UserDefaults
@@ -36,6 +43,9 @@ final class MobileTerminalKeyboardStore: ObservableObject {
             return
         }
         do {
+            guard data.count <= Defaults.maximumArchiveBytes else {
+                throw ValidationError.invalidArchive
+            }
             let decoded = try JSONDecoder().decode(Archive.self, from: data)
             guard (decoded.version ?? 1) <= Defaults.archiveVersion else {
                 customLayouts = [:]
@@ -43,6 +53,7 @@ final class MobileTerminalKeyboardStore: ObservableObject {
                 recoveryMessage = "Saved keyboards were created by a newer version."
                 return
             }
+            try Self.validate(decoded.layouts)
             customLayouts = decoded.layouts
         } catch {
             let recoveryKey = Defaults.unreadableKeyPrefix + UUID().uuidString.lowercased()
@@ -87,10 +98,16 @@ final class MobileTerminalKeyboardStore: ObservableObject {
 
     private func commit(_ layouts: [String: RemoteTerminalKeyboardLayout]) {
         guard writesAllowed else { return }
+        do {
+            try Self.validate(layouts)
+        } catch {
+            recoveryMessage = "Keyboards exceeded their safe storage limits and were not changed."
+            return
+        }
         let archive = Archive(version: Defaults.archiveVersion, layouts: layouts)
-        guard let data = try? JSONEncoder().encode(archive) else {
-            writesAllowed = false
-            recoveryMessage = "Keyboards could not be encoded. Changes are paused."
+        guard let data = try? JSONEncoder().encode(archive),
+              data.count <= Defaults.maximumArchiveBytes else {
+            recoveryMessage = "Keyboards exceeded their safe storage limit and were not changed."
             return
         }
         defaults.set(data, forKey: Defaults.archiveKey)
@@ -100,5 +117,64 @@ final class MobileTerminalKeyboardStore: ObservableObject {
             return
         }
         customLayouts = layouts
+        recoveryMessage = nil
+    }
+
+    private enum ValidationError: Error {
+        case invalidArchive
+    }
+
+    private static func validate(
+        _ layouts: [String: RemoteTerminalKeyboardLayout]
+    ) throws {
+        guard layouts.count <= Defaults.maximumLayoutCount else {
+            throw ValidationError.invalidArchive
+        }
+
+        var aggregateBytes = 0
+        func count(_ value: String, maximum: Int, mayBeEmpty: Bool = false) throws {
+            let bytes = value.utf8.count
+            guard (mayBeEmpty || !value.isEmpty), bytes <= maximum else {
+                throw ValidationError.invalidArchive
+            }
+            let (total, overflow) = aggregateBytes.addingReportingOverflow(bytes)
+            guard !overflow, total <= Defaults.maximumAggregateStringBytes else {
+                throw ValidationError.invalidArchive
+            }
+            aggregateBytes = total
+        }
+
+        for (agentKind, layout) in layouts {
+            try count(agentKind, maximum: Defaults.maximumAgentKindBytes)
+            guard layout.keys.count <= Defaults.maximumKeysPerLayout,
+                  Set(layout.keys.map(\.id)).count == layout.keys.count else {
+                throw ValidationError.invalidArchive
+            }
+            for key in layout.keys {
+                if let customLabel = key.customLabel {
+                    try count(
+                        customLabel,
+                        maximum: Defaults.maximumLabelBytes,
+                        mayBeEmpty: true
+                    )
+                }
+                switch key.action {
+                case .sequence(let sequence):
+                    try count(
+                        sequence,
+                        maximum: Defaults.maximumActionBytes,
+                        mayBeEmpty: true
+                    )
+                case .snippet(let text, _):
+                    try count(
+                        text,
+                        maximum: Defaults.maximumActionBytes,
+                        mayBeEmpty: true
+                    )
+                case .named, .latch:
+                    break
+                }
+            }
+        }
     }
 }

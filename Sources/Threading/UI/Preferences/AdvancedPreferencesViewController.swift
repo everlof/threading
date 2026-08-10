@@ -194,8 +194,8 @@ final class AdvancedPreferencesViewController: NSViewController {
     ///
     /// The restart is not a convenience. Every store here is a singleton holding its state in
     /// memory, so a running app carries on from what it read at launch and would write that
-    /// back over the reset at the first save — see `AppRelaunch.discardingState`, which is also
-    /// why nothing is offered here to reset *without* restarting.
+    /// back over the reset at the first save — see `AppRelaunch.PreparedRelaunch.commit`, which
+    /// is also why nothing is offered here to reset *without* restarting.
     private func reset(
         _ scope: AppDataReset.Scope,
         title: String,

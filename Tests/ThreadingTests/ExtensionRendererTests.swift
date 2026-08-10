@@ -504,7 +504,7 @@ final class ExtensionRendererTests: XCTestCase {
         )
     }
 
-    func testWorkspaceNavigatorSelectionPersistsAndNativeClearsTheOverride() throws {
+    func testWorkspaceNavigatorSelectionPersistsAndNativeReplacesTheOverride() throws {
         let suite = "WorkspaceNavigatorSelectionTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -524,7 +524,35 @@ final class ExtensionRendererTests: XCTestCase {
             AppSettings(defaults: defaults).workspaceNavigatorSelection,
             .native
         )
-        XCTAssertNil(defaults.data(forKey: "workspaceNavigatorSelection"))
+        XCTAssertNotNil(defaults.data(forKey: "workspaceNavigatorSelection"))
+    }
+
+    func testWorkspaceNavigatorSelectionPreservesCorruptBytesAndRefusesInvalidIdentity() throws {
+        let suite = "WorkspaceNavigatorSelectionRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "workspaceNavigatorSelection"
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: key)
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.workspaceNavigatorSelection, .native)
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: key)),
+            corrupt
+        )
+        let valid = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: "com.example.navigator",
+            navigatorID: "projects"
+        )
+        settings.workspaceNavigatorSelection = valid
+        settings.workspaceNavigatorSelection = .extensionNavigator(
+            extensionIdentifier: "",
+            navigatorID: "projects"
+        )
+
+        XCTAssertEqual(settings.workspaceNavigatorSelection, valid)
+        XCTAssertEqual(AppSettings(defaults: defaults).workspaceNavigatorSelection, valid)
     }
 
   /// The screenshot is the visual contract for the generic scene. Assertions can prove that
@@ -4106,7 +4134,7 @@ final class ExtensionRendererTests: XCTestCase {
       ]
     )
 
-    let replyComposer = ConversationViewController(
+    let replyComposer = requireConversationViewController(
       agentSession: session,
       project: project,
       customizationLookup: registry.customization(for:)
@@ -4167,7 +4195,7 @@ final class ExtensionRendererTests: XCTestCase {
       folderURL: URL(fileURLWithPath: "/tmp/LateCustomRow")
     )
     let sessionID = session.id.uuidString.lowercased()
-    let controller = ConversationViewController(
+    let controller = requireConversationViewController(
       agentSession: session,
       project: project,
       customizationLookup: registry.customization(for:)
@@ -4318,7 +4346,7 @@ final class ExtensionRendererTests: XCTestCase {
       from: source
     )
 
-    let controller = ConversationViewController(
+    let controller = requireConversationViewController(
       agentSession: session,
       project: project,
       customizationLookup: registry.customization(for:)

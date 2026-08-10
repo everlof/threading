@@ -22,6 +22,10 @@ fi
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 
+# An unregistered source produces a passing Xcode run with zero cases from that file. Refuse the
+# command before selecting a plan so focused runs cannot accidentally provide false evidence.
+python3 "${script_directory}/check_test_registration.py"
+
 if [[ "${level}" == "e2e" ]]; then
   exec "${script_directory}/run_notification_e2e.sh" "$@"
 fi

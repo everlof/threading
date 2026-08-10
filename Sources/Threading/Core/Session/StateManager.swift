@@ -230,6 +230,13 @@ final class StateManager {
 
             let state = load.state
             return state.projects.isEmpty && state.selectedSessionID == nil ? .missing : .loaded(state)
+        } catch SQLiteDatabase.Failure.newerSchema(let found, let supported) {
+            ThreadingLogger.agent.error(
+                "Refusing projects database schema \(found, privacy: .public); this build supports \(supported, privacy: .public)"
+            )
+            closeDatabase()
+            requireRecovery()
+            return .failed(quarantinedAt: nil)
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to load projects state: \(error.localizedDescription, privacy: .public)"
@@ -250,7 +257,10 @@ final class StateManager {
         let data: Data
         let state: ProjectsState
         do {
-            data = try Data(contentsOf: projectsStateURL)
+            data = try BoundedFileReader.read(
+                projectsStateURL,
+                maximumBytes: StateManagerDefaults.maximumLegacyProjectsBytes
+            )
             state = try decodeAndMigrateProjectsState(from: data)
         } catch {
             ThreadingLogger.agent.error(
@@ -381,20 +391,61 @@ final class StateManager {
     /// Moves an unopenable database aside, so the next launch starts on a fresh one rather than
     /// failing forever — and so the broken file is still there to look at.
     ///
-    /// **The write-ahead log moves with it, and that is the whole point.** Deleting the sidecars
-    /// was the old behaviour, and it turned quarantine into the data loss it exists to prevent:
-    /// in WAL mode the committed rows live in `-wal` until a checkpoint, and a checkpoint happens
-    /// when the *last* connection to the database closes — which never happens while a second
-    /// build or a hosted test target holds the same store open. Measured on the store that hit
-    /// this: the main file had zero project rows and every project was in a 498KB `-wal`. So the
-    /// file left behind for recovery was empty, and the only copy had been unlinked.
-    ///
-    /// SQLite recovers a WAL by name, so the log has to land beside the file it belongs to under
-    /// the quarantined name. `-shm` is only an index over that log, rebuilt on demand, and it is
-    /// the one sidecar that must not stay behind: left next to a database that is no longer there,
-    /// it is what would let the next open recover a fresh database from someone else's bytes.
+    /// The database moves only after SQLite itself has folded WAL into the main file and switched
+    /// out of WAL mode. A second build or hosted test can pin committed frames in the log; moving
+    /// the three filenames underneath that live connection is an SQLite API violation and can
+    /// split one logical database across two names. In that state quarantine refuses, leaves every
+    /// byte in place, and recovery remains required. Once the other owner closes, the next launch
+    /// can checkpoint and quarantine the now-single-file artifact safely.
     private func quarantineDatabase() -> URL? {
-        openDatabase = nil
+        let log = URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.walSuffix)
+        let sharedMemory = URL(
+            fileURLWithPath: databaseURL.path + SQLiteDefaults.sharedMemorySuffix
+        )
+
+        if let database = openDatabase {
+            let isSafeToMove = database.prepareForFileMove()
+            database.close()
+            openDatabase = nil
+            guard isSafeToMove else {
+                ThreadingLogger.agent.error(
+                    "Left the unreadable database in place because another SQLite connection is active"
+                )
+                return nil
+            }
+        } else {
+            // Initialization failed before this manager owned a connection. Sidecars are evidence
+            // that the main file may still depend on WAL bytes we cannot checkpoint safely.
+            guard !fileManager.fileExists(atPath: log.path),
+                  !fileManager.fileExists(atPath: sharedMemory.path) else {
+                ThreadingLogger.agent.error(
+                    "Left the unreadable database bundle in place because it could not be checkpointed"
+                )
+                return nil
+            }
+        }
+
+        // DELETE mode means every committed frame is now in the main file. SQLite may leave empty
+        // sidecar names behind after the connection closes; remove those known-non-authoritative
+        // indexes before moving the single authoritative artifact.
+        do {
+            for sidecar in [log, sharedMemory] where fileManager.fileExists(atPath: sidecar.path) {
+                try fileManager.removeItem(at: sidecar)
+            }
+        } catch {
+            ThreadingLogger.agent.error(
+                "Left the unreadable database bundle in place because a retired sidecar could not be removed: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+
+        guard !fileManager.fileExists(atPath: log.path),
+              !fileManager.fileExists(atPath: sharedMemory.path) else {
+            ThreadingLogger.agent.error(
+                "Left the unreadable database bundle in place because SQLite retained a sidecar"
+            )
+            return nil
+        }
 
         let destination = uniqueQuarantineURL(named: "\(SQLiteDefaults.databaseName).corrupt")
         do {
@@ -405,29 +456,6 @@ final class StateManager {
             )
             return nil
         }
-
-        let log = URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.walSuffix)
-        if fileManager.fileExists(atPath: log.path) {
-            do {
-                try fileManager.moveItem(
-                    at: log,
-                    to: URL(fileURLWithPath: destination.path + SQLiteDefaults.walSuffix)
-                )
-            } catch {
-                // Keeping it where it is would be worse than losing it: it would be read as the
-                // log of whatever database is created here next.
-                try? fileManager.removeItem(at: log)
-                ThreadingLogger.agent.error(
-                    """
-                    Could not keep the write-ahead log with the quarantined database: \
-                    \(error.localizedDescription, privacy: .public)
-                    """
-                )
-            }
-        }
-        try? fileManager.removeItem(
-            at: URL(fileURLWithPath: databaseURL.path + SQLiteDefaults.sharedMemorySuffix)
-        )
 
         ThreadingLogger.agent.error(
             "Quarantined unreadable database at \(destination.path, privacy: .public)"
@@ -622,7 +650,13 @@ final class StateManager {
                 continue
             }
             do {
-                let payload = try String(contentsOf: file, encoding: .utf8)
+                let data = try BoundedFileReader.read(
+                    file,
+                    maximumBytes: DisplayPaneStoreDefaults.maximumLayoutBytes
+                )
+                guard let payload = String(data: data, encoding: .utf8) else {
+                    throw CocoaError(.fileReadInapplicableStringEncoding)
+                }
                 if try database.panelPayload(for: sessionID) == nil {
                     try database.savePanelPayload(payload, for: sessionID)
                     imported += 1
@@ -670,6 +704,14 @@ final class StateManager {
         let database = try ProjectDatabase(url: databaseURL)
         openDatabase = database
         return database
+    }
+
+    /// Closes the cached WAL connection before its containing directory is moved or removed.
+    /// A later operation may reopen it, which keeps a failed reset recoverable without leaving
+    /// an invalid file descriptor behind. Ordinary app lifetime still uses one long-lived open.
+    func closeDatabase() {
+        openDatabase?.close()
+        openDatabase = nil
     }
 
     // MARK: - Persistence Health
@@ -758,4 +800,11 @@ final class StateManager {
     func clearLegacySessionState() {
         try? fileManager.removeItem(at: sessionStateURL)
     }
+}
+
+enum StateManagerDefaults {
+    /// Legacy `projects.json` was a whole-store document. Sixteen MiB leaves room for tens of
+    /// thousands of ordinary rows while preventing a corrupt or externally replaced migration
+    /// source from becoming an unbounded allocation before SQLite takes ownership.
+    static let maximumLegacyProjectsBytes = 16 * 1_024 * 1_024
 }

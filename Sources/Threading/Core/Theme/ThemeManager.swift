@@ -39,7 +39,8 @@ final class ThemeManager {
         let persistence = RecoverableDefaultsStore<[TerminalTheme]>(
             defaults: defaults,
             key: Keys.customThemes,
-            criticality: .userAuthored
+            criticality: .userAuthored,
+            sizePolicy: .compactMetadata
         )
         self.persistence = persistence
 
@@ -49,7 +50,8 @@ final class ThemeManager {
         self.customThemes = normalized
 
         // A successful legacy decode is version zero. Persist its normalized identities now so
-        // a later lookup cannot assign the same legacy palette a different identity.
+        // readers no longer need migration. Collision recovery is deterministic as a second
+        // line of defence: a refused rewrite must not mint a different identity next launch.
         if case .loaded = outcome, normalized != decoded {
             _ = persistence.save(normalized)
         }
@@ -68,19 +70,20 @@ final class ThemeManager {
     }
 
     /// Add a new custom theme
-    func addTheme(_ theme: TerminalTheme) {
-        guard !isReserved(theme.name), theme.id != .followsAppTheme else { return }
+    @discardableResult
+    func addTheme(_ theme: TerminalTheme) -> Bool {
+        guard !isReserved(theme.name), theme.id != .followsAppTheme else { return false }
         var themes = customThemes
         guard !allThemes.contains(where: {
             $0.id != theme.id && namesEqual($0.name, theme.name)
-        }) else { return }
+        }) else { return false }
         // Identity decides replacement; names are only labels and stay unique for clarity.
         if let index = themes.firstIndex(where: { $0.id == theme.id }) {
             themes[index] = theme
         } else {
             themes.append(theme)
         }
-        commit(themes)
+        return commit(themes)
     }
 
     /// Delete a custom theme (cannot delete built-in themes)
@@ -130,7 +133,7 @@ final class ThemeManager {
     }
 
     /// Duplicate a theme with a new name
-    func duplicateTheme(_ theme: TerminalTheme) -> TerminalTheme {
+    func duplicateTheme(_ theme: TerminalTheme) -> TerminalTheme? {
         var newTheme = theme
         var counter = 1
         var newName = "\(theme.name) Copy"
@@ -141,15 +144,14 @@ final class ThemeManager {
         }
 
         newTheme = theme.duplicated(named: newName)
-        addTheme(newTheme)
-        return newTheme
+        return addTheme(newTheme) ? newTheme : nil
     }
 
     // MARK: - Apple Terminal Import
 
     /// Import a theme from Apple Terminal's .terminal file
     func importAppleTerminalTheme(from url: URL) throws -> TerminalTheme {
-        let data = try Data(contentsOf: url)
+        let data = try Self.boundedImportData(from: url)
 
         guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             throw ThemeImportError.invalidFormat
@@ -199,7 +201,7 @@ final class ThemeManager {
             brightWhite: ansiColors[15]
         )
 
-        addTheme(theme)
+        guard addTheme(theme) else { throw ThemeImportError.persistenceFailed }
         return theme
     }
 
@@ -207,6 +209,20 @@ final class ThemeManager {
 
     private func namesEqual(_ first: String, _ second: String) -> Bool {
         first.caseInsensitiveCompare(second) == .orderedSame
+    }
+
+    /// Reads at most one byte past the policy limit, so a user-selected file cannot make this
+    /// main-actor import allocate and parse an arbitrary amount of data. The loop is the
+    /// authority rather than a metadata preflight: a file can grow after its size is queried.
+    private static func boundedImportData(from url: URL) throws -> Data {
+        do {
+            return try BoundedFileReader.read(
+                url,
+                maximumBytes: ThemeImportLimits.maximumFileBytes
+            )
+        } catch BoundedFileReadError.exceedsLimit {
+            throw ThemeImportError.fileTooLarge
+        }
     }
 
     @discardableResult
@@ -228,7 +244,11 @@ final class ThemeManager {
         return themes.map { original in
             var theme = original
             if usedIDs.contains(theme.id) {
-                theme.id = .makeCustom()
+                var ordinal = 1
+                repeat {
+                    theme.id = .recoveredFromCollision(name: theme.name, ordinal: ordinal)
+                    ordinal += 1
+                } while usedIDs.contains(theme.id)
             }
             usedIDs.insert(theme.id)
 
@@ -345,6 +365,8 @@ enum ThemeImportError: LocalizedError {
     case invalidFormat
     case missingColors
     case fileNotFound
+    case fileTooLarge
+    case persistenceFailed
 
     var errorDescription: String? {
         switch self {
@@ -354,6 +376,16 @@ enum ThemeImportError: LocalizedError {
             return L10n.string("The theme file is missing required color definitions.")
         case .fileNotFound:
             return L10n.string("The theme file could not be found.")
+        case .fileTooLarge:
+            return L10n.string("The Terminal theme is too large to import (maximum 2 MB).")
+        case .persistenceFailed:
+            return L10n.string("The terminal theme could not be saved.")
         }
     }
+}
+
+enum ThemeImportLimits {
+    /// A Terminal profile is normally a few kilobytes; this leaves ample headroom for archived
+    /// colour payloads while bounding both the main-thread read and property-list expansion.
+    static let maximumFileBytes = 2 * 1_024 * 1_024
 }

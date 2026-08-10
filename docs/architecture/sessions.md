@@ -38,6 +38,15 @@ What the lint cannot catch is the *same* allowed switch written twice, so keep o
 the migration check each carried their own identical dispatch over the two transcript readers.
 Both would have needed editing to add a third, and neither would have failed to compile.
 
+The corresponding base fact is `AgentCapabilities.transcriptReplay`: Claude and Codex have
+measured local conversation JSONL that Threading can normalize. It intentionally excludes
+OpenCode, whose supported export is enough for `.transcriptUsageIndex` but is not a replayable
+conversation, and Grok, whose native history arrives over ACP `session/load` rather than a local
+parser. `TranscriptReplayFormat` is the closed implementation set behind the capability. Replay,
+subagent loading, title backfill and both import scans dispatch on that format instead of each
+maintaining a Claude/Codex list; `AgentCapabilitiesTests` requires the set and capability to agree
+exactly and requires narrower transcript-record capabilities to imply replay.
+
 **A capability and the code it governs must not be able to drift.** `AgentCapabilitiesTests`
 holds each pair to the other, because the failure mode is silent in both directions:
 
@@ -665,7 +674,10 @@ about which CLI is at the other end.
   launched file's name — lifecycle facts, nothing about what was said. It is bounded
   (`maximumRecords`), written atomically through `RecoverableFileStore` at
   `.rebuildableCache`, and **missing, readable and unreadable stay three different answers**: a
-  ledger nobody could read must never be acted on as "there were no children".
+  ledger nobody could read must never be acted on as "there were no children". Enrollment is
+  part of launch, not telemetry after it: if the kernel identity cannot be read or the record
+  cannot reach disk, `AgentChildProcess` terminates the new process group and throws. Letting the
+  conversation run would create exactly the unowned child this layer exists to prevent.
 - **A sweep at the next launch.** `OrphanedAgentChildSweep.run()` is called from
   `applicationDidFinishLaunching`, after `EventLog.beginLaunch()` — so it has somewhere to
   report — and before anything can start a conversation, because it decides by pid and a pid is
@@ -714,7 +726,7 @@ The rules, each of which is the answer to a way this goes wrong:
   outlived the launch that read it would relaunch sessions the user has since closed the
   first time that launch crashed. After a crash nothing auto-relaunches, which is the
   conservative direction. It is consumed even with the setting off, so enabling it later
-  cannot act on a list from some earlier quit. `AppRelaunch.discardingState()` skips the
+  cannot act on a list from some earlier quit. `AppRelaunch.PreparedRelaunch.commit` skips the
   quit path deliberately — a reset comes back to nothing running.
 - **Launches are staggered, one per `StartupRelaunchDefaults.staggerInterval`.** The
   expensive part of a launch is the agent CLI's own boot — a burst of CPU per process — and
@@ -1176,6 +1188,13 @@ million characters and stored under the destination id. The snapshot belongs to 
 row and is removed with it (or its project), so a future launch can regenerate the same bootstrap
 without depending on a mutable source transcript.
 
+The character budget is not trusted as a byte budget. The durable handoff envelope is encoded and
+refused above 8 MiB, and reopened through the same bounded reader. An oversized current-format file
+does not become “no context”; legacy provider snapshots may still take the streaming
+`TranscriptReplay` compatibility path, which never requires a whole-file allocation. Provider
+exports are likewise read through a 32 MiB result ceiling, with only the final 64 KiB of stderr
+retained for a visible failure.
+
 Delivery follows runtime capability. Claude/Codex Terminal and all native Chat surfaces read
 pages from the session-scoped `conversation_history` tool. OpenCode receives the JSON snapshot as
 its documented `--file` attachment. Grok Terminal, whose TUI offers no ephemeral MCP registration
@@ -1288,11 +1307,13 @@ search again, take more, and the earlier choices are still there. What that cost
 selection the current query can hide, so the Import button carries the count — it is the only
 thing on screen saying that six conversations are about to be adopted when one row is visible.
 
-**What is still not offered: Grok and OpenCode.** `discover` scans Claude and Codex only, so a
-Grok conversation (`~/.grok/sessions/<url-encoded cwd>/<id>/`) cannot be adopted by any path in
-the app, and neither can an OpenCode session. Both runtimes are otherwise first-class, and both
-keep their conversations somewhere this file's rules do not reach — Grok's listing is a CLI
-command rather than a directory of transcripts.
+**What is still not offered: Grok and OpenCode.** `discover` scans every
+`TranscriptReplayFormat`, currently Claude and Codex, so a Grok conversation
+(`~/.grok/sessions/<url-encoded cwd>/<id>/`) cannot be adopted by any path in the app, and neither
+can an OpenCode session. Both runtimes are otherwise first-class, and both keep their
+conversations behind boundaries this local replay format does not claim — Grok's listing is a CLI
+command rather than a directory of transcripts, while OpenCode's supported export currently
+feeds usage accounting rather than conversation replay.
 
 Titles prefer the provider's retained name: Claude's `ai-title`, or Codex's account-wide
 `session_index.jsonl`. The first real user prompt is the fallback, read from Codex's

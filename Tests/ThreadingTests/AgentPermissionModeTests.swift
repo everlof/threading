@@ -57,7 +57,10 @@ final class AgentPermissionModeTests: XCTestCase {
     func testTheNativeClaudeTransportStatesTheModeAsWell() throws {
         let session = Self.session(kind: .claude, mode: .plan)
         let words = try Self.tokenizing(
-            XCTUnwrap(AgentLauncher.streamPlan(for: session, in: Self.project).arguments.last)
+            XCTUnwrap(try AgentLauncher.streamPlan(
+                for: session,
+                in: Self.project
+            ).arguments.last)
         )
 
         XCTAssertEqual(Self.value(after: "--permission-mode", in: words), "plan")
@@ -79,7 +82,10 @@ final class AgentPermissionModeTests: XCTestCase {
             && kind.supports(.permissionModes) {
             let session = Self.session(kind: kind, mode: .plan, usesNativeUI: true)
             let words = try Self.tokenizing(
-                XCTUnwrap(AgentLauncher.streamPlan(for: session, in: Self.project).arguments.last)
+                XCTUnwrap(try AgentLauncher.streamPlan(
+                    for: session,
+                    in: Self.project
+                ).arguments.last)
             )
 
             // Codex spends the mode on two axes and names neither `--permission-mode`; the
@@ -149,7 +155,10 @@ final class AgentPermissionModeTests: XCTestCase {
         for mode in [nil] + AgentPermissionMode.allCases.map(Optional.init) {
             let session = Self.session(kind: .codex, mode: mode)
             let words = try Self.tokenizing(
-                XCTUnwrap(AgentLauncher.streamPlan(for: session, in: Self.project).arguments.last)
+                XCTUnwrap(try AgentLauncher.streamPlan(
+                    for: session,
+                    in: Self.project
+                ).arguments.last)
             )
 
             XCTAssertEqual(
@@ -473,10 +482,10 @@ final class AgentPermissionModeTests: XCTestCase {
         // A path of its own: `addProject` returns the existing project for a folder it already
         // knows, so a shared temp directory would hand this test a sibling's project and then
         // delete it on the way out.
-        let project = store.addProject(
+        let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-permission-mode-\(UUID().uuidString)")
-        )
+        ))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
         defer { store.removeProject(id: project.id) }
 
@@ -571,7 +580,7 @@ final class AgentPermissionModeTests: XCTestCase {
     ) -> ConversationViewController {
         var session = AgentSession(kind: kind, title: "Reply", usesNativeUI: true)
         session.permissionMode = mode
-        let controller = ConversationViewController(
+        let controller = requireConversationViewController(
             agentSession: session,
             project: Project(
                 name: "Reply",

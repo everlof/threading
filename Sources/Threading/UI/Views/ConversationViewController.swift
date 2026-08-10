@@ -337,7 +337,7 @@ final class ConversationViewController: NSViewController {
     var workingWords = WorkingWordCycle()
     private let account: AgentAccount?
     var workingStartedAt: TimeInterval?
-    nonisolated(unsafe) var workingStatusTimer: Timer?
+    var workingStatusTimer: Timer?
 
     /// The structured plan position most recently reported in this turn.
     var runProgress: RunProgress?
@@ -572,7 +572,7 @@ final class ConversationViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(
+    init?(
         agentSession: AgentSession,
         project: Project,
         subagentState: SubagentSessionState? = nil,
@@ -580,6 +580,10 @@ final class ConversationViewController: NSViewController {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
     ) {
+        // Persistence and the composer clamp this today, but the controller is also constructed
+        // by runtime coordination and tests. Refuse at the object boundary so a future caller
+        // cannot turn an ordinary unsupported session into a process-ending switch case.
+        guard agentSession.kind.supportsNativeUI else { return nil }
         self.agentSession = agentSession
         self.project = project
         self.customizationLookup = customizationLookup
@@ -604,7 +608,7 @@ final class ConversationViewController: NSViewController {
         // current when a dormant native conversation is reopened.
         let plan = {
             let current = ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
-            return AgentLauncher.streamPlan(for: current, in: project)
+            return try AgentLauncher.streamPlan(for: current, in: project)
         }
 
         switch agentSession.kind {
@@ -619,14 +623,14 @@ final class ConversationViewController: NSViewController {
                           let transcriptAccount = AgentAccountDiscovery.account(
                               for: current.kind,
                               handle: current.accountHandle
+                          ), let directory = ClaudeTranscript.subagentsDirectory(
+                              sessionID: transcriptID,
+                              account: transcriptAccount,
+                              in: project
                           ) else { return nil }
                     return ClaudeSubagentTranscriptPlan(
                         rootThreadID: transcriptID.rawValue,
-                        directory: ClaudeTranscript.subagentsDirectory(
-                            sessionID: transcriptID,
-                            account: transcriptAccount,
-                            in: project
-                        )
+                        directory: directory
                     )
                 },
                 plan: plan
@@ -674,7 +678,7 @@ final class ConversationViewController: NSViewController {
                 plan: plan
             )
         case .openCode:
-            preconditionFailure("This agent runtime uses the terminal surface")
+            return nil
         }
         super.init(nibName: nil, bundle: nil)
         if let handoff = agentSession.handoff {
@@ -706,12 +710,6 @@ final class ConversationViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        viewportSaveWorkItem?.cancel()
-        saveConversationViewport()
-        workingStatusTimer?.invalidate()
     }
 
     // MARK: - Lifecycle
@@ -1529,8 +1527,15 @@ final class ConversationViewController: NSViewController {
             return
         }
 
-        ProjectStore.shared.update(sessionID: agentSession.id) {
+        let launchRecord = ProjectStore.shared.update(sessionID: agentSession.id) {
             $0.hasLaunched = true
+        }
+        guard launchRecord.succeeded else {
+            appendNotice(
+                "Could not start the conversation: the project data could not be saved.",
+                kind: .error
+            )
+            return
         }
 
         // Replay before starting, so past turns cannot interleave with new ones. The read is
@@ -1603,6 +1608,16 @@ final class ConversationViewController: NSViewController {
     }
 
     func terminate() {
+        // Runtime ownership has an explicit end edge (`discard` and `terminateAll` both come
+        // through here), so actor-isolated UI state is settled there rather than from `deinit`.
+        // Swift 6 correctly treats a class deinitializer as nonisolated: the previous workaround
+        // marked the timer `nonisolated(unsafe)` and still raced the pending DispatchWorkItem.
+        // Saving before the stream is stopped also preserves the last viewport if termination
+        // synchronously changes presentation state.
+        saveConversationViewport()
+        workingStatusTimer?.invalidate()
+        workingStatusTimer = nil
+
         // Anything still waiting on the user is denied rather than left to hang on the CLI's
         // timeout: the session it belonged to is going away. The card on screen resolves
         // visibly; the queued ones behind it are answered directly, having no card yet.
@@ -2594,8 +2609,12 @@ final class ConversationViewController: NSViewController {
               effort == nil || option.supports(reasoningEffort: effort)
         else { return }
 
-        ProjectStore.shared.update(sessionID: agentSession.id) {
+        let mutation = ProjectStore.shared.update(sessionID: agentSession.id) {
             $0.setReasoningEffort(effort)
+        }
+        guard mutation.succeeded else {
+            configurationChangeFailed(projectPersistenceFailure(changedLiveAgent: false))
+            return
         }
         refreshConversationControls()
     }
@@ -2617,9 +2636,15 @@ final class ConversationViewController: NSViewController {
         guard !isChangingConversationConfiguration,
               storedSession.kind.supportsPermissionModes else { return }
 
-        let persist = { [weak self] in
+        let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            ProjectStore.shared.setPermissionMode(mode, for: self.agentSession.id)
+            let result = ProjectStore.shared.setPermissionMode(mode, for: self.agentSession.id)
+            guard result.succeeded else {
+                self.configurationChangeFailed(self.projectPersistenceFailure(
+                    changedLiveAgent: changedLiveAgent
+                ))
+                return
+            }
             self.isChangingConversationConfiguration = false
             self.refreshConversationControls()
         }
@@ -2627,12 +2652,12 @@ final class ConversationViewController: NSViewController {
         guard permissionModeTiming == .immediately,
               let switcher = stream as? PermissionModeSwitchableConversation
         else {
-            persist()
+            persist(false)
             return
         }
 
         guard let resolved = mode ?? PermissionModePresentation.appDefault else {
-            persist()
+            persist(false)
             appendNotice(PermissionModePresentation.inheritRecordedOnly, kind: .muted)
             return
         }
@@ -2642,7 +2667,7 @@ final class ConversationViewController: NSViewController {
         switcher.setPermissionMode(resolved) { [weak self] result in
             switch result {
             case .success:
-                persist()
+                persist(true)
             case .failure(let error):
                 self?.configurationChangeFailed(error)
             }
@@ -2671,9 +2696,9 @@ final class ConversationViewController: NSViewController {
             startupSpeed: AppSettings.shared.startupSpeed(for: session.kind)
         ) ?? false
 
-        let persist = { [weak self] in
+        let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            ProjectStore.shared.update(sessionID: self.agentSession.id) {
+            let mutation = ProjectStore.shared.update(sessionID: self.agentSession.id) {
                 $0.model = model
                 // Both provider pickers turn Fast off when the newly selected model cannot
                 // run it. For Codex, explicit Standard also overrides an account Fast default.
@@ -2687,6 +2712,12 @@ final class ConversationViewController: NSViewController {
                 }
             }
             self.reportedModel = resolved
+            guard mutation.succeeded else {
+                self.configurationChangeFailed(self.projectPersistenceFailure(
+                    changedLiveAgent: changedLiveAgent
+                ))
+                return
+            }
             self.isChangingConversationConfiguration = false
             self.refreshConversationControls()
         }
@@ -2707,21 +2738,27 @@ final class ConversationViewController: NSViewController {
                         speedSwitcher.setFastMode(false) { [weak self] result in
                             switch result {
                             case .success:
-                                persist()
+                                persist(true)
                             case .failure(let error):
                                 // The model change already landed. Record that part while leaving
                                 // the still-enabled Fast flag truthful, then surface the partial
                                 // failure.
                                 guard let self else { return }
-                                ProjectStore.shared.update(sessionID: self.agentSession.id) {
+                                let mutation = ProjectStore.shared.update(
+                                    sessionID: self.agentSession.id
+                                ) {
                                     $0.model = model
                                 }
                                 self.reportedModel = resolved
-                                self.configurationChangeFailed(error)
+                                self.configurationChangeFailed(
+                                    mutation.succeeded
+                                        ? error
+                                        : self.projectPersistenceFailure(changedLiveAgent: true)
+                                )
                             }
                         }
                     } else {
-                        persist()
+                        persist(true)
                     }
                 case .failure(let error):
                     self?.configurationChangeFailed(error)
@@ -2730,7 +2767,7 @@ final class ConversationViewController: NSViewController {
 
         case .codex:
             guard stream.canSend else { return }
-            persist()
+            persist(false)
 
         case .grok, .openCode:
             // Unreachable today, and deliberately not silent. The chip is already hidden when
@@ -2747,10 +2784,16 @@ final class ConversationViewController: NSViewController {
     private func selectFastMode(_ fast: Bool?) {
         guard !isChangingConversationConfiguration else { return }
 
-        let persist = { [weak self] in
+        let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            ProjectStore.shared.update(sessionID: self.agentSession.id) {
+            let mutation = ProjectStore.shared.update(sessionID: self.agentSession.id) {
                 $0.fastMode = fast
+            }
+            guard mutation.succeeded else {
+                self.configurationChangeFailed(self.projectPersistenceFailure(
+                    changedLiveAgent: changedLiveAgent
+                ))
+                return
             }
             self.isChangingConversationConfiguration = false
             self.refreshConversationControls()
@@ -2762,7 +2805,7 @@ final class ConversationViewController: NSViewController {
         guard let resolved = fast
             ?? AppSettings.shared.startupSpeed(for: storedSession.kind).fastModeOverride
         else {
-            persist()
+            persist(false)
             appendNotice(ConversationSpeedPresentation.inheritRecordedOnly, kind: .muted)
             return
         }
@@ -2775,14 +2818,14 @@ final class ConversationViewController: NSViewController {
             switcher.setFastMode(resolved) { [weak self] result in
                 switch result {
                 case .success:
-                    persist()
+                    persist(true)
                 case .failure(let error):
                     self?.configurationChangeFailed(error)
                 }
             }
         case .codex:
             guard stream.canSend else { return }
-            persist()
+            persist(false)
 
         case .grok, .openCode:
             // Unreachable today, and deliberately not silent. The chip is already hidden when
@@ -2821,6 +2864,18 @@ final class ConversationViewController: NSViewController {
         appendNotice(
             "Could not change conversation settings: \(error.localizedDescription)",
             kind: .error
+        )
+    }
+
+    private func projectPersistenceFailure(changedLiveAgent: Bool) -> Error {
+        let message = changedLiveAgent
+            ? "The live agent changed, but the project data could not be saved; the setting "
+                + "may revert after relaunch."
+            : "The project data could not be saved."
+        return NSError(
+            domain: "ProjectStore",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
         )
     }
 }

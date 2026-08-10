@@ -34,6 +34,38 @@ final class ProjectDatabaseTests: XCTestCase {
         return project
     }
 
+    // MARK: - Native Resource Ownership
+
+    func testAStatementFinalizesWhenBindingThrowsBeforeRun() throws {
+        enum Expected: Error { case stop }
+
+        func valueThatThrows() throws -> String { throw Expected.stop }
+
+        let database = try SQLiteDatabase(
+            path: directory.appendingPathComponent("ownership.db").path
+        )
+        try database.execute("CREATE TABLE sample (value TEXT)")
+
+        do {
+            try database.prepare("INSERT INTO sample (value) VALUES (?)")
+                .bind(1, try valueThatThrows())
+                .run()
+            XCTFail("the bound value should have thrown")
+        } catch Expected.stop {
+            // The temporary Statement must unwind its native sqlite3_stmt with it. Before the
+            // RAII boundary this left a statement attached to a zombie close_v2 connection.
+        }
+
+        XCTAssertFalse(database.hasOpenStatements)
+
+        // Explicit cleanup and deinit may meet on different paths; both must remain harmless.
+        let statement = try database.prepare("SELECT value FROM sample")
+        XCTAssertTrue(database.hasOpenStatements)
+        statement.finalize()
+        statement.finalize()
+        XCTAssertFalse(database.hasOpenStatements)
+    }
+
     // MARK: - Round Trip
 
     func testEmptyDatabaseIsEmpty() throws {

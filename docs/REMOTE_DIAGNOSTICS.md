@@ -55,7 +55,11 @@ Every record has:
 - App/build, OS and remote-protocol versions in the report manifest.
 
 The shared writer strips control characters, bounds each value, keeps seven days, and caps an
-export at 5,000 newest events.
+export at 5,000 newest events. Report assembly prunes before reading, accepts only regular files
+with the exact `remote-diagnostics-YYYY-MM-DD.jsonl` spelling, and reads at most the newest 8 MiB
+of each journal. A partial first line and any record above 64 KiB are discarded. The bound is
+enforced on the opened file, so an externally enlarged or replaced journal cannot make a support
+report allocate the whole file merely to throw away its old prefix.
 
 Client-to-Mac upload has a second trust boundary: only an interactive all-sessions owner bearer
 may call it; the declared source must match the shipping client header; batches are capped at 250

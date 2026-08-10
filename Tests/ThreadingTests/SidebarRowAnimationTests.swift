@@ -28,20 +28,25 @@ final class SidebarRowAnimationTests: XCTestCase {
     // MARK: - Fixtures
 
     private var directories: [URL] = []
+    private var stateManagers: [StateManager] = []
     private var windows: [NSWindow] = []
 
     override func tearDown() {
-        for window in windows {
-            window.orderOut(nil)
-            window.contentViewController = nil
-            window.close()
+        MainActor.assumeIsolated {
+            for window in windows {
+                window.orderOut(nil)
+                window.contentViewController = nil
+                window.close()
+            }
+            windows = []
+            for manager in stateManagers { manager.closeDatabase() }
+            stateManagers = []
+            for directory in directories {
+                try? FileManager.default.removeItem(at: directory)
+            }
+            directories = []
+            Design.Motion.reduceMotionOverrideForTesting = nil
         }
-        windows = []
-        for directory in directories {
-            try? FileManager.default.removeItem(at: directory)
-        }
-        directories = []
-        Design.Motion.reduceMotionOverrideForTesting = nil
         super.tearDown()
     }
 
@@ -71,6 +76,7 @@ final class SidebarRowAnimationTests: XCTestCase {
         }
 
         let manager = StateManager(appSupportDirectory: directory)
+        stateManagers.append(manager)
         XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: built)))
         let store = ProjectStore(stateManager: manager)
         let controller = ProjectSidebarViewController(projectStore: store)

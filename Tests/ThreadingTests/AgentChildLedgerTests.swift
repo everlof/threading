@@ -39,6 +39,22 @@ final class AgentChildLedgerTests: XCTestCase {
         XCTAssertEqual(records, [record])
     }
 
+    func testAnInfrastructureChildRoundTripsWithoutInventingASession() {
+        let record = AgentChildRecord(
+            pid: 4322,
+            startTime: ProcessStartTime(seconds: 1_700_000_000, microseconds: 123_456),
+            sessionID: nil,
+            executable: "cloudflared",
+            recordedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertTrue(AgentChildLedger(url: url).record(record))
+
+        guard case .loaded(let records) = AgentChildLedger(url: url).consumeInheritedRecords()
+        else { return XCTFail("expected a readable ledger") }
+        XCTAssertEqual(records, [record])
+        XCTAssertNil(records.first?.sessionID)
+    }
+
     func testClearingARecordEmptiesTheLedgerForTheNextLaunch() {
         let ledger = AgentChildLedger(url: url)
         ledger.record(makeRecord(pid: 11))
@@ -122,6 +138,34 @@ final class AgentChildLedgerTests: XCTestCase {
 
         XCTAssertEqual(ledger.currentRecords.count, 1)
         XCTAssertEqual(ledger.currentRecords.first?.executable, "codex")
+    }
+
+    // MARK: - Failed Writes Stay Transactional
+
+    func testAFailedRecordDoesNotBecomeCurrentOnlyInMemory() throws {
+        let blocker = directory.appendingPathComponent("not-a-directory")
+        try Data("block".utf8).write(to: blocker)
+        let ledger = AgentChildLedger(url: blocker.appendingPathComponent("children.json"))
+
+        XCTAssertFalse(ledger.record(makeRecord(pid: 17)))
+        XCTAssertTrue(
+            ledger.currentRecords.isEmpty,
+            "memory claimed enrollment even though no crash-recovery record reached disk"
+        )
+    }
+
+    func testAFailedClearKeepsTheRecordCurrentForARetry() throws {
+        let ledger = AgentChildLedger(url: url)
+        XCTAssertTrue(ledger.record(makeRecord(pid: 18)))
+
+        // Turn the ledger's parent path into a regular file so the next atomic replacement
+        // fails. The current state must remain the last state that actually reached disk.
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.removeItem(at: directory)
+        try Data("block".utf8).write(to: directory)
+
+        ledger.clear(pid: 18)
+        XCTAssertEqual(ledger.currentRecords.map(\.pid), [18])
     }
 
     // MARK: - Helpers

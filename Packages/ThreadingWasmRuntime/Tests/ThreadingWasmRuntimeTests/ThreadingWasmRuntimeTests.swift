@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import ThreadingWasmRuntime
+@testable import ThreadingWasmRuntime
 import Testing
 import WAT
 
@@ -114,6 +114,29 @@ struct ThreadingWasmRuntimeTests {
             environment: [:],
             hostDescriptor: nil
         ) == 0)
+    }
+
+    @Test("The opened module cannot grow past its allocation boundary")
+    func boundedModuleRead() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let module = directory.appendingPathComponent("oversized.wasm")
+        #expect(FileManager.default.createFile(atPath: module.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: module)
+        try handle.truncate(atOffset: 1_025)
+        try handle.close()
+
+        do {
+            _ = try ThreadingWasmRuntime.readModuleBytes(
+                moduleURL: module,
+                maximumBytes: 1_024
+            )
+            Issue.record("An oversized module was read")
+        } catch ThreadingWasmRuntimeError.moduleTooLarge(let maximum) {
+            #expect(maximum == 1_024)
+        }
     }
 
     private func temporaryModule(_ source: String) throws -> URL {

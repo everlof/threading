@@ -253,7 +253,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// application, outlives this view, and completes the gesture the user actually made whether
     /// or not the row survived it. Every action button gets this by construction — a button a row
     /// grows later, ours or an extension's, is not one more call site that has to know.
-    nonisolated(unsafe) private var releaseWatch: Any?
+    private let releaseWatch = LocalEventMonitor()
 
     init(
         symbolName: String,
@@ -469,18 +469,15 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         guard let window else { return }
         pressTarget = window.convertToScreen(convert(bounds, to: nil))
 
-        releaseWatch = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]
-        ) { [weak self] event in
+        releaseWatch.install(matching: [.leftMouseUp, .leftMouseDragged, .leftMouseDown]) {
+            [weak self] event in
             self?.track(event)
             return event
         }
     }
 
     private func endWatchingForRelease() {
-        guard let releaseWatch else { return }
-        NSEvent.removeMonitor(releaseWatch)
-        self.releaseWatch = nil
+        releaseWatch.remove()
     }
 
     /// Where an event happened, in screen space — the one frame of reference that outlives the
@@ -535,10 +532,6 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         completePress(
             firing: isPressed && bounds.contains(convert(event.locationInWindow, from: nil))
         )
-    }
-
-    deinit {
-        if let releaseWatch { NSEvent.removeMonitor(releaseWatch) }
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .button }

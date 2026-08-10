@@ -441,6 +441,19 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
         XCTAssertNil(ClaudeAccountLastRunModel.lastRunModel(account: account()))
     }
 
+    func testAMissingModelIsCachedExplicitlyUntilTheCacheIsInvalidated() throws {
+        XCTAssertNil(ClaudeAccountLastRunModel.lastRunModel(account: account()))
+        try transcript("arrived-later", in: "project-a", model: "claude-opus-5")
+
+        XCTAssertNil(
+            ClaudeAccountLastRunModel.lastRunModel(account: account()),
+            "A cached miss must be distinguishable from no cache entry"
+        )
+
+        ClaudeAccountLastRunModel.forgetAll()
+        XCTAssertEqual(ClaudeAccountLastRunModel.lastRunModel(account: account()), "claude-opus-5")
+    }
+
     /// Only Claude records the model in its transcripts, and the capability says so rather than
     /// this type naming the runtime — `check_architecture_boundaries.sh` fails the build on the
     /// latter.

@@ -323,6 +323,11 @@ public enum RemoteDiagnosticUploadPolicy {
 /// Remote lifecycle produces a few records per state transition, not per terminal byte. A
 /// synchronous append therefore buys crash resilience without becoming a hot-path cost.
 public final class RemoteDiagnosticJournal: @unchecked Sendable {
+    static let maximumJournalReadBytes = 8 * 1_024 * 1_024
+    static let maximumRecordBytes = 64 * 1_024
+    static let maximumJournalDirectoryEntries = 256
+    public static let maximumSupportReportBytes = 64 * 1_024 * 1_024
+
     public let directory: URL
     public let source: RemoteDiagnosticSource
 
@@ -358,6 +363,8 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         retention: TimeInterval = 7 * 24 * 60 * 60,
         maximumReportRecords: Int = 5_000
     ) {
+        precondition(retention >= 0)
+        precondition(maximumReportRecords >= 0)
         self.directory = directory
         self.source = source
         self.retention = retention
@@ -417,11 +424,19 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
 
     public func records() -> [RemoteDiagnosticRecord] {
         queue.sync {
+            if !didPrune {
+                pruneExpiredJournals()
+                didPrune = true
+            }
             let urls = journalURLs()
             let decoded = urls.flatMap { url -> [RemoteDiagnosticRecord] in
-                guard let data = try? Data(contentsOf: url) else { return [] }
+                guard let data = Self.boundedJournalSuffix(at: url) else { return [] }
                 return data.split(separator: 0x0A).compactMap {
-                    try? JSONDecoder().decode(RemoteDiagnosticRecord.self, from: Data($0))
+                    guard $0.count <= Self.maximumRecordBytes else { return nil }
+                    return try? JSONDecoder().decode(
+                        RemoteDiagnosticRecord.self,
+                        from: Data($0)
+                    )
                 }
             }
             let ordered = decoded.enumerated().sorted { lhs, rhs in
@@ -463,6 +478,9 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
             records: records()
         )
         let data = try JSONEncoder.pretty.encode(report)
+        guard data.count <= Self.maximumSupportReportBytes else {
+            throw RemoteDiagnosticJournalError.reportTooLarge
+        }
         try FileManager.default.createDirectory(
             at: outputDirectory,
             withIntermediateDirectories: true
@@ -474,8 +492,17 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         return url
     }
 
+    public static func readSupportReport(at url: URL) throws -> RemoteDiagnosticReport {
+        let data = try RemoteBoundedFileReader.read(
+            url,
+            maximumBytes: maximumSupportReportBytes
+        )
+        return try JSONDecoder().decode(RemoteDiagnosticReport.self, from: data)
+    }
+
     private func append(_ record: RemoteDiagnosticRecord) {
         guard let data = try? JSONEncoder().encode(record),
+              data.count <= Self.maximumRecordBytes,
               let handle = handle(forDay: dayFormatter.string(from: Date())) else {
             return
         }
@@ -519,20 +546,64 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
     }
 
     private func journalURLs() -> [URL] {
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        )) ?? []
+        guard let urls = try? RemoteBoundedDirectoryReader.shallowContents(
+            of: directory,
+            includingPropertiesForKeys: [
+                .contentModificationDateKey,
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ],
+            maximumEntries: Self.maximumJournalDirectoryEntries
+        ) else { return [] }
         return urls
             .filter {
-                $0.lastPathComponent.hasPrefix("remote-diagnostics-")
-                    && $0.pathExtension == "jsonl"
+                let values = try? $0.resourceValues(forKeys: [
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey,
+                ])
+                guard values?.isRegularFile == true,
+                      values?.isSymbolicLink != true else { return false }
+                let name = $0.deletingPathExtension().lastPathComponent
+                let prefix = "remote-diagnostics-"
+                guard $0.pathExtension == "jsonl", name.hasPrefix(prefix) else { return false }
+                let day = name.dropFirst(prefix.count)
+                guard day.utf8.count == 10 else { return false }
+                return day.enumerated().allSatisfy { offset, character in
+                    (offset == 4 || offset == 7) ? character == "-" : character.isNumber
+                }
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     private func journalURL(day: String) -> URL {
         directory.appendingPathComponent("remote-diagnostics-\(day).jsonl")
+    }
+
+    /// Reads only the newest bounded suffix. Reports retain their newest records, so walking a
+    /// multi-day journal from byte zero did unbounded work for data the final `suffix` discarded
+    /// anyway. If the read begins mid-record, that fragment is dropped before JSON decoding.
+    private static func boundedJournalSuffix(at url: URL) -> Data? {
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+        guard values?.isRegularFile == true,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        do {
+            let end = try handle.seekToEnd()
+            let allowance = UInt64(maximumJournalReadBytes)
+            let start = end > allowance ? end - allowance : 0
+            try handle.seek(toOffset: start)
+            guard var data = try handle.read(upToCount: maximumJournalReadBytes) else {
+                return nil
+            }
+            if start > 0 {
+                guard let newline = data.firstIndex(of: 0x0A) else { return Data() }
+                data.removeSubrange(data.startIndex...newline)
+            }
+            return data
+        } catch {
+            return nil
+        }
     }
 
     private static func safeValue(_ value: String) -> String {
@@ -549,6 +620,90 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         }
         return String(decoding: prefix, as: UTF8.self) + "…"
     }
+}
+
+public enum RemoteDiagnosticJournalError: LocalizedError {
+    case reportTooLarge
+
+    public var errorDescription: String? {
+        switch self {
+        case .reportTooLarge:
+            return "The remote diagnostics report is too large to export safely."
+        }
+    }
+}
+
+/// The package-local allocation boundary shared by remote persistence APIs.
+enum RemoteBoundedFileReader {
+    static func read(_ url: URL, maximumBytes: Int) throws -> Data {
+        precondition(maximumBytes >= 0 && maximumBytes < Int.max)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var data = Data()
+        data.reserveCapacity(min(maximumBytes, 64 * 1_024))
+        while data.count <= maximumBytes {
+            let remaining = maximumBytes + 1 - data.count
+            guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
+                  !chunk.isEmpty else { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumBytes else {
+            throw CocoaError(.fileReadTooLarge)
+        }
+        return data
+    }
+}
+
+/// A shallow, allocation-bounded alternative to `FileManager.contentsOfDirectory` for support
+/// directories whose contents can outlive or be modified independently of the current process.
+///
+/// The limit applies to every visible entry, not only the entries a caller later recognizes. A
+/// directory filled with malformed names must therefore fail closed instead of making validation
+/// itself unbounded or hiding valid entries beyond an attacker-controlled prefix.
+public enum RemoteBoundedDirectoryReader {
+    public static func shallowContents(
+        of directory: URL,
+        includingPropertiesForKeys keys: [URLResourceKey] = [],
+        maximumEntries: Int
+    ) throws -> [URL] {
+        precondition(maximumEntries >= 0 && maximumEntries < Int.max)
+
+        var enumerationError: Swift.Error?
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants],
+            errorHandler: { _, error in
+                enumerationError = error
+                return false
+            }
+        ) else {
+            throw enumerationError ?? CocoaError(.fileReadNoSuchFile)
+        }
+
+        var urls: [URL] = []
+        urls.reserveCapacity(min(maximumEntries, 64))
+        while let entry = enumerator.nextObject() {
+            guard let url = entry as? URL else { continue }
+            guard urls.count < maximumEntries else {
+                throw RemoteDirectoryEnumerationError.entryLimitExceeded(
+                    maximumEntries: maximumEntries
+                )
+            }
+            urls.append(url)
+        }
+        if let enumerationError { throw enumerationError }
+        return urls
+    }
+}
+
+public enum RemoteDirectoryEnumerationError: Error, Equatable, Sendable {
+    case entryLimitExceeded(maximumEntries: Int)
 }
 
 private extension JSONEncoder {

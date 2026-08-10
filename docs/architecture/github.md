@@ -134,6 +134,11 @@ separate, nested publication checkbox explicitly grants Threading permission to 
 agent's finish handshake. It is still off by default, and enabling isolation alone never grants
 it. Uncommitted work is called out and remains local. Pushes and creations get bounded durable
 receipts naming the repository, branch, resulting URL, and credential tier where one was used.
+Repository policy and those receipts are versioned recoverable preferences: unreadable or
+oversized bytes are preserved before replacement, policy is capped by repository count and key
+size, and a receipt accepts only a bounded repository/branch plus an authority-safe HTTPS result
+URL. A mutation becomes visible in memory only after the encoded candidate has been written and
+read back successfully.
 
 Reads use the normal credential-tier walk because they are idempotent. Creation may walk after an
 explicit 401/403/404 refusal, but it **never retries after a transport failure**: GitHub may have

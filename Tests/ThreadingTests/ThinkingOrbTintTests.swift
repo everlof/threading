@@ -274,21 +274,28 @@ final class ThinkingOrbTintTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let settings = AppSettings(defaults: defaults)
-        XCTAssertTrue(settings.detectsAttachmentReferences(for: .claude))
-        XCTAssertTrue(settings.detectsAttachmentReferences(for: .codex))
+        for kind in AgentKind.allCases {
+            XCTAssertTrue(settings.detectsAttachmentReferences(for: kind))
+        }
 
         settings.setAttachmentReferenceDetection(for: .claude, enabled: false)
         XCTAssertFalse(settings.detectsAttachmentReferences(for: .claude))
-        XCTAssertTrue(settings.detectsAttachmentReferences(for: .codex))
+        for kind in AgentKind.allCases where kind != .claude {
+            XCTAssertTrue(settings.detectsAttachmentReferences(for: kind))
+        }
 
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertFalse(reloaded.detectsAttachmentReferences(for: .claude))
-        XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .codex))
+        for kind in AgentKind.allCases where kind != .claude {
+            XCTAssertTrue(reloaded.detectsAttachmentReferences(for: kind))
+        }
 
         reloaded.setAttachmentReferenceDetection(for: .codex, enabled: false)
         reloaded.setAttachmentReferenceDetection(for: .claude, enabled: true)
         XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .claude))
         XCTAssertFalse(reloaded.detectsAttachmentReferences(for: .codex))
+        XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .grok))
+        XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .openCode))
     }
 
     func testTerminalAttachmentObserverStopsAndRestartsWithItsAgentSetting() throws {

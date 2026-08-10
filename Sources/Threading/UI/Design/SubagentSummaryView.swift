@@ -11,21 +11,37 @@ struct SubagentSummaryItem: Equatable {
         case stopped
     }
 
+    /// What opening the child can reach. A file is necessarily openable, so keeping the URL
+    /// inside the state prevents the contradictory "revealable but not openable" combination
+    /// that separate `URL?` and `Bool` properties allowed.
+    enum TranscriptAvailability: Equatable {
+        /// The provider finished without streamed rows or a transcript file.
+        case unavailable
+        /// Rows are already in memory, or a working child is expected to produce them.
+        case openable
+        /// A provider transcript exists on disk and can also be revealed in Finder.
+        case onDisk(URL)
+
+        var isOpenable: Bool {
+            switch self {
+            case .unavailable: false
+            case .openable, .onDisk: true
+            }
+        }
+
+        var fileURL: URL? {
+            guard case .onDisk(let url) = self else { return nil }
+            return url
+        }
+    }
+
     let id: String
     let title: String
     let subtitle: String?
     let state: State
     let statusDetail: String?
     let detailLines: [String]
-    let transcriptURL: URL?
-
-    /// Whether opening this child leads to a transcript — one already replayed, one on disk, or
-    /// one a still-running child is about to write.
-    ///
-    /// The component cannot work this out: a live child streams rows it has no file for, and a
-    /// finished one may name a path the provider never wrote. Feature code owns the answer, and
-    /// the component owns what a row that leads nowhere looks like — see `isExpandable`.
-    let canOpenTranscript: Bool
+    let transcriptAvailability: TranscriptAvailability
 
     init(
         id: String,
@@ -34,8 +50,7 @@ struct SubagentSummaryItem: Equatable {
         state: State,
         statusDetail: String?,
         detailLines: [String],
-        transcriptURL: URL? = nil,
-        canOpenTranscript: Bool = true
+        transcriptAvailability: TranscriptAvailability = .openable
     ) {
         self.id = id
         self.title = title
@@ -43,8 +58,7 @@ struct SubagentSummaryItem: Equatable {
         self.state = state
         self.statusDetail = statusDetail
         self.detailLines = detailLines
-        self.transcriptURL = transcriptURL
-        self.canOpenTranscript = canOpenTranscript
+        self.transcriptAvailability = transcriptAvailability
     }
 }
 
@@ -223,7 +237,7 @@ final class SubagentSummaryView: NSView {
         case .inline:
             return !(item.subtitle ?? "").isEmpty || !item.detailLines.isEmpty
         case .navigation:
-            return item.canOpenTranscript
+            return item.transcriptAvailability.isOpenable
         }
     }
 
@@ -279,7 +293,7 @@ final class SubagentSummaryView: NSView {
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         var headingViews: [NSView] = [title, spacer]
-        if let transcriptURL = item.transcriptURL {
+        if let transcriptURL = item.transcriptAvailability.fileURL {
             let reveal = ThemedIconButton(
                 symbolName: "folder",
                 accessibility: L10n.string("Reveal in Finder"),

@@ -60,6 +60,14 @@ condition.
 (`ScheduledMessageStore.Refusal`) so the strip and any later adapter word them their own way. A
 queue that quietly forgets what somebody wrote is worse than one that says it is full.
 
+**Disk commits before memory.** Every add, replacement, state transition and removal is built as
+a candidate array, synchronously written and read-back verified by `RecoverableFileStore`, and
+only then installed in memory and announced. A failed add returns `.writesBlocked`; other failed
+mutations leave the last durable state current. Because an unattended delivery must subsequently
+record either waiting, failure or completion, the store also stops returning due work and refuses
+new claims once persistence disables writes. Continuing to send after that point could duplicate
+a message on the next launch or delete its only copy in memory while the disk still calls it due.
+
 **Pruned inside `ProjectStore` itself**, beside `ConversationHandoffStore.remove` and
 `ExecutionAuditStore.remove`. Not from the sidebar's delete gesture, which is where
 `SubagentStateStore`'s sweep lives: Settings ▸ Archived deletes sessions straight through

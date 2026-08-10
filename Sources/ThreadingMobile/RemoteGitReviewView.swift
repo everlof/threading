@@ -677,7 +677,7 @@ private extension RemoteThemePalette {
 }
 
 private struct ReviewScrollBottomPreferenceKey: PreferenceKey {
-    static var defaultValue = CGFloat.greatestFiniteMagnitude
+    static let defaultValue = CGFloat.greatestFiniteMagnitude
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()

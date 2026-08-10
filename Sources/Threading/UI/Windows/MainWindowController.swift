@@ -633,10 +633,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) -> NSView? {
         switch surface {
         case .metal(let specification):
-            guard let resourceURL = ExtensionManager.shared.customSurfaceResourceURL(
+            guard let source = ExtensionManager.shared.customSurfaceSource(
                 relativePath: specification.shaderResource,
                 extensionIdentifier: extensionIdentifier
-            ), let source = try? String(contentsOf: resourceURL, encoding: .utf8) else {
+            ) else {
                 return nil
             }
             do {

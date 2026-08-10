@@ -19,7 +19,8 @@ enum ClaudeTranscript {
         return url(sessionID: sessionID, account: account, in: project)
     }
 
-    static func url(sessionID: TranscriptID, account: AgentAccount, in project: Project) -> URL {
+    static func url(sessionID: TranscriptID, account: AgentAccount, in project: Project) -> URL? {
+        guard sessionID.isSafePathComponent else { return nil }
         return URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
             .appendingPathComponent(projectSlug(for: project))
@@ -35,8 +36,8 @@ enum ClaudeTranscript {
         sessionID: TranscriptID,
         account: AgentAccount,
         in project: Project
-    ) -> URL {
-        url(sessionID: sessionID, account: account, in: project)
+    ) -> URL? {
+        url(sessionID: sessionID, account: account, in: project)?
             .deletingPathExtension()
             .appendingPathComponent(AgentDefaults.claudeSubagentsSubdirectory)
     }

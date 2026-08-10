@@ -20,7 +20,7 @@ final class UsageWindowSettings {
 
     // MARK: - Properties
 
-    private let defaults: UserDefaults
+    private let persistence: RecoverableDefaultsStore<UsageWindowSchedule>
 
     /// Decoded once and written through, so the page can read it on every layout pass without
     /// paying for JSON each time.
@@ -29,8 +29,17 @@ final class UsageWindowSettings {
     // MARK: - Initialization
 
     init(defaults: UserDefaults = PreferenceStore.shared) {
-        self.defaults = defaults
-        self.cached = Self.load(from: defaults)
+        let persistence = RecoverableDefaultsStore<UsageWindowSchedule>(
+            defaults: defaults,
+            key: Keys.schedule,
+            criticality: .preference,
+            sizePolicy: .compactMetadata
+        )
+        self.persistence = persistence
+        self.cached = persistence.load(
+            defaultValue: .default,
+            validate: Self.validate
+        ).value
     }
 
     // MARK: - Public Methods
@@ -39,8 +48,14 @@ final class UsageWindowSettings {
         get { cached }
         set {
             guard newValue != cached else { return }
+            do {
+                try Self.validate(newValue)
+            } catch {
+                ThreadingLogger.session.error("Refusing invalid usage-window schedule")
+                return
+            }
+            guard persistence.save(newValue) else { return }
             cached = newValue
-            store(newValue)
             NotificationCenter.default.post(UsageWindowScheduleDidChange())
         }
     }
@@ -62,16 +77,22 @@ final class UsageWindowSettings {
 
     // MARK: - Private Methods
 
-    private static func load(from defaults: UserDefaults) -> UsageWindowSchedule {
-        guard let data = defaults.data(forKey: Keys.schedule),
-              let decoded = try? JSONDecoder().decode(UsageWindowSchedule.self, from: data)
-        else { return .default }
-        return decoded
+    private enum ValidationError: Error {
+        case invalidSchedule
     }
 
-    private func store(_ schedule: UsageWindowSchedule) {
-        guard let data = try? JSONEncoder().encode(schedule) else { return }
-        defaults.set(data, forKey: Keys.schedule)
+    private static func validate(_ schedule: UsageWindowSchedule) throws {
+        let maximumAccounts = 64
+        let maximumAccountIDBytes = 1_024
+        guard (0 ..< 24 * 60).contains(schedule.startMinute),
+              (0 ... 24 * 60).contains(schedule.endMinute),
+              schedule.weekdays.isSubset(of: Set(1 ... 7)),
+              schedule.accountIDs.count <= maximumAccounts,
+              schedule.accountIDs.allSatisfy({
+                  !$0.isEmpty && $0.utf8.count <= maximumAccountIDBytes
+              }) else {
+            throw ValidationError.invalidSchedule
+        }
     }
 
     private enum Keys {

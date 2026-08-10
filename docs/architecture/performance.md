@@ -149,7 +149,7 @@ external data reaches eager AppKit work.
 | High | Extension panels | `ExtensionPanel` accepts 500 semantic nodes / 1,000 rendered elements; `ExtensionNodeRenderer` turns the whole recursive value into stacks, and `ExtensionPanelViewController.render()` replaces the whole tree after updates. The validation cap is a transport/safety bound, not an eager-render budget. |
 | High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
-| High | Browser baseline library | Up to a couple hundred rich rows are rebuilt in one stack, with every thumbnail synchronously loaded through `NSImage(contentsOf:)`. The explicit cap makes the work finite but not frame-cheap. |
+| High | Browser baseline library | Up to a couple hundred rich rows are rebuilt in one stack, with every thumbnail synchronously hash-verified and downsampled. The decode policy bounds each row, but the explicit record cap still does not make aggregate eager work frame-cheap. |
 | High | File pane refresh | The outline virtualizes cells, but directory enumeration, resource-value reads, natural sorting, and reconciliation remain synchronous in `refresh()`. The existing 20,000-entry fixture measures about 200–230 ms for the correct refresh, already above a frame and near the stall threshold. |
 | Medium | Archived settings | `reload()` maps every archived session to an AppKit row and only then takes the recent prefix. The "Older" fold currently reduces visible rows but not cold construction. |
 | Medium | Tools dynamic sections | Tool rows and extension-contributed settings are virtualized at their repeating unit. Browser Sign-In and Website Access remain one coarse table row each, so a large credential or origin inventory can still defeat the outer table's bound. |
@@ -159,6 +159,12 @@ external data reaches eager AppKit work.
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
+
+Installed-extension discovery has a separate refusal boundary from that remaining presentation
+cost: enumeration stops one entry past 1,024 visible names and inventory refuses more than 256
+package directories before loading any manifest. Those are safety/cardinality ceilings, not a claim
+that eagerly constructing 256 preference cards is frame-cheap; the High item above still requires
+virtualization.
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
 search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
@@ -676,6 +682,14 @@ That finding is now repaired. The pane installs only the selected image, documen
 TextKit surface and retains surfaces that have actually been used. The document surface applies
 the same boundary again, installing PDFKit for a PDF or Quick Look for other documents without
 constructing its unused sibling. Layout tests pin both halves of that contract.
+
+Raster work is bounded separately from surface construction. Selected images are reopened through
+one authoritative byte/dimension/pixel-area policy, while the rail forces bounded ImageIO
+thumbnails instead of retaining full lazy `NSImage(contentsOf:)` decoders for every row. A raster
+that exceeds that contract is an unavailable image, not a document that falls through to Quick
+Look. Extension package images use a stricter 4 MiB, 1,024-pixel, single-frame policy at both host
+decode and remote delivery; browser-baseline UI reopens pixels through the store's hash and
+dimension claim rather than bypassing it with a raw URL.
 
 The immediate post-fix fresh-process sweep measured:
 

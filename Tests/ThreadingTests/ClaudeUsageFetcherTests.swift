@@ -92,6 +92,16 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         }
     }
 
+    func testOversizedCredentialsFileIsBoundedBeforeAllocationAndParsing() throws {
+        try Data(count: ClaudeUsageDefaults.credentialsMaxBytes + 1).write(
+            to: configDirectory.appendingPathComponent(".credentials.json")
+        )
+
+        guard case .unusable = ClaudeUsageFetcher.readCredentialsFile(account: account()) else {
+            return XCTFail("an oversized credentials file must be refused at the read boundary")
+        }
+    }
+
     // MARK: - The Chain
 
     /// The regression itself. A stale credentials file must not answer for the whole account:

@@ -102,7 +102,7 @@ final class GrokACPStreamSessionTests: XCTestCase {
             folderURL: URL(fileURLWithPath: "/tmp/project")
         )
 
-        let plan = AgentLauncher.streamPlan(for: session, in: project)
+        let plan = try AgentLauncher.streamPlan(for: session, in: project)
         let source = try XCTUnwrap(plan.arguments.last)
 
         XCTAssertTrue(

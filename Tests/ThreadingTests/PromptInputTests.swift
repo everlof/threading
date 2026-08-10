@@ -224,7 +224,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertNotNil(standalone.textContainer)
 
         let scrolling = ThemedTextView.scrolling()
-        let document = try XCTUnwrap(scrolling.documentView as? NSTextView)
+        let document = scrolling.textView
         XCTAssertNotNil(document.textStorage)
         XCTAssertNotNil(document.layoutManager)
         XCTAssertNotNil(document.textContainer)
@@ -402,6 +402,27 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.submissionValue, "Compare this layout")
     }
 
+    func testImagePreviewRefusesAFileThatGrowsPastItsDecodePolicy() throws {
+        let imageURL = try makeImageFile(named: "oversized-preview.png")
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        let handle = try FileHandle(forWritingTo: imageURL)
+        try handle.truncate(atOffset: UInt64(
+            BoundedImageDecodePolicy.composerPreview.maximumBytes + 1
+        ))
+        try handle.close()
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        prompt.attachFiles(at: [imageURL.path])
+
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+        XCTAssertEqual(
+            prompt.stringValue,
+            imageURL.path,
+            "an unsafe preview must remain a literal path the agent can still inspect"
+        )
+    }
+
     func testImagePreviewOpensTheInWindowMediaInspector() throws {
         let imageURL = try makeImageFile(
             named: "quick look.png",
@@ -551,7 +572,7 @@ final class PromptInputTests: XCTestCase {
             name: "Attachments",
             folderURL: URL(fileURLWithPath: "/tmp/Attachments")
         )
-        let replyComposer = ConversationViewController(
+        let replyComposer = requireConversationViewController(
             agentSession: session,
             project: project,
             customizationLookup: { _ in .empty }

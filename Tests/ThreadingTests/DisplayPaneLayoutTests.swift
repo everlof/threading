@@ -11,6 +11,17 @@ import XCTest
 @MainActor
 final class DisplayPaneLayoutTests: XCTestCase {
 
+    func testDisplayImagePixelGateBoundsDimensionsAndDecodedMemoryWithoutOverflow() {
+        XCTAssertTrue(DisplayImageSafety.accepts(width: 1_440, height: 20_000))
+        XCTAssertFalse(DisplayImageSafety.accepts(width: 0, height: 100))
+        XCTAssertFalse(DisplayImageSafety.accepts(
+            width: MCPDefaults.maximumImagePixelDimension + 1,
+            height: 1
+        ))
+        XCTAssertFalse(DisplayImageSafety.accepts(width: 10_000, height: 10_000))
+        XCTAssertFalse(DisplayImageSafety.accepts(width: Int.max, height: Int.max))
+    }
+
     // MARK: - Fixtures
 
     /// A picture with a file behind it, since inspection and file actions need one that exists.
@@ -169,31 +180,24 @@ final class DisplayPaneLayoutTests: XCTestCase {
     // MARK: - The Panel Does Not Size the Window
 
     /// A split item's `minimumThickness` is a **required** constraint, so a pane minimum is
-    /// also a window minimum — and `display_image` opens this panel, which meant showing a
+    /// also a window minimum — and `display_image` opens this panel, which once meant showing a
     /// picture quietly took 200pt off how small the window was allowed to be.
     ///
-    /// The claim is not that opening a pane is free; it is that it costs the panel's own
-    /// chrome rather than the width it happens to open at.
-    func testOpeningThePanelDoesNotCostTheWindowTheWidthItOpensAt() throws {
+    /// Inspect the property that creates that required constraint. `NSView.fittingSize` is not
+    /// a proxy for it: the split item's non-required holding constraint deliberately carries
+    /// the *current* divider width into fitting-size calculation. This test used to pass only
+    /// because it measured before the asynchronous width restoration completed; moving that
+    /// restoration into the reveal correctly made the race deterministic and exposed the bad
+    /// measurement. The next test owns the separate claim that the panel opens wide enough.
+    func testThePanelHardFloorCostsOnlyItsOwnChrome() throws {
         let controller = MainWindowController()
-        let window = try XCTUnwrap(controller.window)
-        let root = try XCTUnwrap(window.contentView)
+        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
 
-        // Opened first: the very first `fittingSize` on a window that has never been laid out
-        // answers for a tree that has not settled, and the difference is the measurement.
-        controller.setDisplayPaneVisible(true)
-        window.layoutIfNeeded()
-        let open = root.fittingSize.width
-
-        controller.setDisplayPaneVisible(false)
-        window.layoutIfNeeded()
-        let closed = root.fittingSize.width
-
-        XCTAssertGreaterThan(closed, 0, "the window never laid out, so nothing was measured")
+        XCTAssertEqual(item.minimumThickness, DisplayPaneDefaults.slimmestWidth)
         XCTAssertLessThan(
-            open - closed,
+            item.minimumThickness,
             DisplayPaneDefaults.minWidth,
-            "opening the panel put its whole opening width under the window"
+            "the panel's required floor is its readable opening width rather than its chrome"
         )
     }
 
@@ -209,7 +213,20 @@ final class DisplayPaneLayoutTests: XCTestCase {
     /// the passes that follow.
     func testThePanelOpensAtTheWidthItRemembersRatherThanItsChromeFloor() throws {
         let previous = DisplayPaneWidth.stored
-        defer { DisplayPaneWidth.stored = previous }
+        let previousSidebar = SidebarWidth.stored
+        defer {
+            DisplayPaneWidth.stored = previous
+            if let previousSidebar {
+                SidebarWidth.record(previousSidebar)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+        // The hosted-test preference suite survives test processes. A width left by an
+        // unrelated sidebar test can legitimately leave the terminal too little room for a
+        // 420pt panel, turning this into an order-dependent test of AppKit's clamping instead
+        // of the remembered-width contract named here.
+        SidebarWidth.reset()
         DisplayPaneWidth.stored = 420
 
         let controller = MainWindowController()
@@ -1000,6 +1017,45 @@ final class DisplayPaneLayoutTests: XCTestCase {
         )
     }
 
+    func testPersistedImageNameCannotEscapeItsSessionCache() throws {
+        let sessionID = SessionID()
+        let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            NSColor.systemBlue.setFill()
+            rect.fill()
+            return true
+        }
+        let cacheFile = try XCTUnwrap(
+            DisplayPaneStore.shared.cacheImage(image, tabID: UUID(), for: sessionID)
+        )
+        defer { DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID) }
+
+        let traversal = "../\(sessionID.uuidString)/\(cacheFile)"
+        XCTAssertNil(DisplayPaneStore.shared.loadImage(traversal, for: sessionID))
+        DisplayPaneStore.shared.removeCachedImage(traversal, for: sessionID)
+        XCTAssertNotNil(
+            DisplayPaneStore.shared.loadImage(cacheFile, for: sessionID),
+            "a persisted traversal name escaped the cache and deleted a valid image"
+        )
+
+        let cacheURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("Threading", isDirectory: true)
+            .appendingPathComponent(DisplayPaneStoreDefaults.rootDirectory, isDirectory: true)
+            .appendingPathComponent(sessionID.uuidString, isDirectory: true)
+            .appendingPathComponent(cacheFile)
+        let handle = try FileHandle(forWritingTo: cacheURL)
+        try handle.truncate(atOffset: UInt64(
+            DisplayPaneStoreDefaults.maximumCachedImageBytes + 1
+        ))
+        try handle.close()
+        XCTAssertNil(
+            DisplayPaneStore.shared.loadImage(cacheFile, for: sessionID),
+            "a cached image that grew after persistence bypassed the decode boundary"
+        )
+    }
+
     // MARK: - Fixtures for the list
 
     /// A real project and session — `makeAttachments` asks `ProjectStore` for a folder — with a
@@ -1031,7 +1087,7 @@ final class DisplayPaneLayoutTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         let store = ProjectStore.shared
-        let project = store.addProject(folderURL: folder)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
         let session = try XCTUnwrap(
             store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Shown")
         )

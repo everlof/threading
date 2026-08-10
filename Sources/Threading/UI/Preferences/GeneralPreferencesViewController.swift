@@ -14,8 +14,12 @@ final class GeneralPreferencesViewController: NSViewController {
     private let branchFollowToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
-    private let claudeAttachmentToggle = ThemedToggle()
-    private let codexAttachmentToggle = ThemedToggle()
+    /// One path-detection switch per runtime. The scanner setting is keyed by `AgentKind`, so
+    /// constructing the page from the same closed set prevents a new runtime from getting a
+    /// setting the empty state can name but no row the user can reach.
+    private let attachmentDetectionToggles: [AgentKind: ThemedToggle] = Dictionary(
+        uniqueKeysWithValues: AgentKind.allCases.map { ($0, ThemedToggle()) }
+    )
     private let outsideProjectAttachmentToggle = ThemedToggle()
     private let beforeActionCaptureToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
@@ -106,16 +110,17 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(accountAvatarToggle,
                   isOn: AppSettings.shared.discoversAccountAvatars,
                   action: #selector(accountAvatarChanged))
-        configure(
-            claudeAttachmentToggle,
-            isOn: AppSettings.shared.detectsAttachmentReferences(for: .claude),
-            action: #selector(claudeAttachmentDetectionChanged)
-        )
-        configure(
-            codexAttachmentToggle,
-            isOn: AppSettings.shared.detectsAttachmentReferences(for: .codex),
-            action: #selector(codexAttachmentDetectionChanged)
-        )
+        for kind in AgentKind.allCases {
+            guard let toggle = attachmentDetectionToggles[kind] else { continue }
+            configure(
+                toggle,
+                isOn: AppSettings.shared.detectsAttachmentReferences(for: kind),
+                action: #selector(attachmentDetectionChanged(_:))
+            )
+            toggle.setAccessibilityIdentifier(
+                "settings.general.\(kind.rawValue)-attachment-detection"
+            )
+        }
         configure(
             outsideProjectAttachmentToggle,
             isOn: AppSettings.shared.includesAttachmentsOutsideProject,
@@ -360,19 +365,17 @@ final class GeneralPreferencesViewController: NSViewController {
     }
 
     private func attachmentDetectionCard() -> SettingsCard {
-        SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Detect attachments from Claude Code",
-                subtitle: "Scans Claude's terminal output and Native replies for image and PDF paths. "
-                    + "Turn this off if a Claude update changes how paths are rendered.",
-                control: claudeAttachmentToggle
-            ),
-            SettingsUI.row(
-                title: "Detect attachments from Codex",
-                subtitle: "Scans Codex's terminal output and Native replies for image and PDF paths. "
-                    + "Turn this off if a Codex update changes how paths are rendered.",
-                control: codexAttachmentToggle
-            ),
+        let runtimeRows = AgentKind.allCases.compactMap { kind -> NSView? in
+            guard let toggle = attachmentDetectionToggles[kind] else { return nil }
+            return SettingsUI.row(
+                title: "Detect attachments from \(kind.displayName)",
+                subtitle: "Scans \(kind.displayName) output for image, PDF, document, archive, "
+                    + "and diagram paths. Turn this off if an agent update changes how paths "
+                    + "are rendered.",
+                control: toggle
+            )
+        }
+        return SettingsCard(rows: runtimeRows + [
             SettingsUI.row(
                 title: "Include files outside the project",
                 subtitle: "Detected paths are normally kept to the session's own project, because "
@@ -701,17 +704,12 @@ final class GeneralPreferencesViewController: NSViewController {
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
-    @objc private func claudeAttachmentDetectionChanged() {
+    @objc private func attachmentDetectionChanged(_ sender: ThemedToggle) {
+        guard let kind = attachmentDetectionToggles.first(where: { $0.value === sender })?.key
+        else { return }
         AppSettings.shared.setAttachmentReferenceDetection(
-            for: .claude,
-            enabled: claudeAttachmentToggle.state == .on
-        )
-    }
-
-    @objc private func codexAttachmentDetectionChanged() {
-        AppSettings.shared.setAttachmentReferenceDetection(
-            for: .codex,
-            enabled: codexAttachmentToggle.state == .on
+            for: kind,
+            enabled: sender.state == .on
         )
     }
 

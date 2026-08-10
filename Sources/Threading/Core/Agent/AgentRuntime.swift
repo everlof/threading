@@ -458,16 +458,16 @@ final class AgentRuntime {
     func makeConversation(
         for agentSession: AgentSession,
         in project: Project
-    ) -> ConversationViewController {
+    ) -> ConversationViewController? {
         if let existing = conversations[agentSession.id] {
             return existing
         }
 
-        let conversation = ConversationViewController(
+        guard let conversation = ConversationViewController(
             agentSession: agentSession,
             project: project,
             subagentState: subagentState(for: agentSession.id)
-        )
+        ) else { return nil }
         conversations[agentSession.id] = conversation
         return conversation
     }

@@ -609,8 +609,9 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let revealElapsed = DispatchTime.now().uptimeNanoseconds - revealStarted
 
         let titleEventStarted = DispatchTime.now().uptimeNanoseconds
-        XCTAssertTrue(
-            store.updateAgentTitle("Indexed sidebar title", for: fixture.deepSessionID)
+        XCTAssertEqual(
+            store.updateAgentTitle("Indexed sidebar title", for: fixture.deepSessionID),
+            .accepted
         )
         let titleEventElapsed = DispatchTime.now().uptimeNanoseconds - titleEventStarted
 

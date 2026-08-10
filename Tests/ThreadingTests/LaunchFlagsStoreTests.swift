@@ -51,13 +51,33 @@ final class LaunchFlagsStoreTests: XCTestCase {
         let raw = Data(#"{"version":99,"forceNormalNextLaunch":true,"disableExtensionsNextLaunch":true}"#.utf8)
         try raw.write(to: flagsURL)
 
-        XCTAssertEqual(store().read(), .none)
+        let store = store()
+        XCTAssertEqual(store.read(), .none)
+        XCTAssertFalse(store.set(.forceNormalNextLaunch, armed: true, launchID: "launch-1"))
         XCTAssertEqual(try Data(contentsOf: flagsURL), raw)
     }
 
     func testDamageIsReadAsNoFlagsRatherThanCrashing() throws {
-        try Data("{not json".utf8).write(to: flagsURL)
-        XCTAssertEqual(store().read(), .none)
+        let raw = Data("{not json".utf8)
+        try raw.write(to: flagsURL)
+        let store = store()
+        XCTAssertEqual(store.read(), .none)
+        XCTAssertFalse(store.set(.forceNormalNextLaunch, armed: true, launchID: "launch-1"))
+        XCTAssertEqual(
+            try Data(contentsOf: flagsURL),
+            raw,
+            "arming a flag replaced the only copy of an unreadable shared record"
+        )
+    }
+
+    func testOversizedFlagsAreIgnoredAndPreserved() throws {
+        let raw = Data(repeating: 0x61, count: LaunchFlagsDefaults.maximumFileBytes + 1)
+        try raw.write(to: flagsURL)
+        let store = store()
+
+        XCTAssertEqual(store.read(), .none)
+        XCTAssertFalse(store.set(.disableExtensionsNextLaunch, armed: true, launchID: "launch-1"))
+        XCTAssertEqual(try Data(contentsOf: flagsURL), raw)
     }
 
     // MARK: - Arming

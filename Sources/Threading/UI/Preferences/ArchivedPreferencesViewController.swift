@@ -202,8 +202,15 @@ final class ArchivedPreferencesViewController: NSViewController {
 
         guard ConfirmationAlert.ask(request) else { return }
 
+        guard ProjectStore.shared.removeSession(id: entry.session.id) == .applied else {
+            NoticeAlert.show(NoticeRequest(
+                title: L10n.format("Couldn’t delete “%@”", entry.session.displayTitle),
+                message: L10n.string("The project data could not be saved."),
+                style: .critical
+            ), in: view.window)
+            return
+        }
         AgentRuntime.shared.discard(sessionID: entry.session.id)
-        ProjectStore.shared.removeSession(id: entry.session.id)
         reload()
     }
 }

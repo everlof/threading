@@ -157,17 +157,36 @@ struct ProviderArchiveCommand: Equatable, Sendable {
 
 enum ProviderArchiveFailure: LocalizedError, Equatable, Sendable {
     case alreadyChanging
+    case sessionNotFound
+    case persistenceUnavailable(processStopped: Bool)
     case accountUnavailable(String)
-    case commandCouldNotLaunch(provider: String, detail: String)
+    case commandCouldNotLaunch(provider: String, archives: Bool, detail: String)
     case commandRejected(provider: String, archives: Bool, detail: String)
+
+    /// Whether an archive failure happened after the running writer had to be stopped.
+    /// Presentation uses this instead of inferring from "the session used to be running": known
+    /// persistence and account refusals happen before teardown, while provider command failures
+    /// happen after it.
+    var stoppedAgentBeforeFailure: Bool {
+        switch self {
+        case .persistenceUnavailable(let processStopped): return processStopped
+        case .commandCouldNotLaunch(_, let archives, _),
+             .commandRejected(_, let archives, _): return archives
+        case .alreadyChanging, .sessionNotFound, .accountUnavailable: return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .alreadyChanging:
             return L10n.string("This conversation’s archive state is already changing.")
+        case .sessionNotFound:
+            return L10n.string("This conversation no longer exists.")
+        case .persistenceUnavailable:
+            return L10n.string("The archive state could not be saved.")
         case .accountUnavailable(let provider):
             return L10n.format("%@ could not find the account that owns this conversation.", provider)
-        case .commandCouldNotLaunch(let provider, let detail):
+        case .commandCouldNotLaunch(let provider, _, let detail):
             return L10n.format("%@ could not start its archive command: %@", provider, detail)
         case .commandRejected(let provider, let archives, let detail):
             return archives
@@ -191,32 +210,36 @@ private enum ProviderArchiveCommandRunner {
     private static func runSynchronously(
         _ command: ProviderArchiveCommand
     ) -> Result<Void, ProviderArchiveFailure> {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command.shellPath)
-        process.arguments = ["-l", "-c", command.source]
-        process.environment = AgentEnvironment.launchEnvironment()
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-
+        let result: BoundedChildResult
         do {
-            try process.run()
+            result = try BoundedChildProcess.run(
+                executable: command.shellPath,
+                arguments: ["-l", "-c", command.source],
+                environment: AgentEnvironment.launchEnvironment(),
+                timeout: ProviderArchiveDefaults.commandTimeout,
+                maximumOutputBytes: ProviderArchiveDefaults.maximumCommandOutputBytes
+            )
         } catch {
             return .failure(.commandCouldNotLaunch(
                 provider: command.providerName,
+                archives: command.archives,
                 detail: error.localizedDescription
             ))
         }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let reported = String(decoding: data, as: UTF8.self)
+        guard result.termination == .exited(0) else {
+            let reported = String(decoding: result.output, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let detail = reported.isEmpty
-                ? L10n.format("the command exited with status %lld", Int64(process.terminationStatus))
-                : String(reported.prefix(ProviderArchiveDefaults.maximumErrorLength))
+            let detail: String
+            if !reported.isEmpty {
+                detail = String(reported.prefix(ProviderArchiveDefaults.maximumErrorLength))
+            } else {
+                switch result.termination {
+                case .timedOut:
+                    detail = L10n.string("the command took too long to answer")
+                case .exited(let status):
+                    detail = L10n.format("the command exited with status %lld", Int64(status))
+                }
+            }
             return .failure(.commandRejected(
                 provider: command.providerName,
                 archives: command.archives,
@@ -286,7 +309,7 @@ final class ProviderArchiveSync {
     ) {
         reconciliationGeneration += 1
         guard let session = store.session(withID: sessionID) else {
-            completion(.success(()))
+            completion(.failure(.sessionNotFound))
             return
         }
         guard pending.insert(sessionID).inserted else {
@@ -294,16 +317,32 @@ final class ProviderArchiveSync {
             return
         }
 
-        if archived {
-            AgentRuntime.shared.discard(sessionID: sessionID)
-        }
-
         guard session.kind.supports(.providerArchive),
               let transcriptID = session.resumeState.transcriptID else {
-            store.setArchived(archived, for: sessionID)
             pending.remove(sessionID)
-            announceIfLocalStateChanged(sessionID: sessionID, from: session.isArchived, to: archived)
-            completion(.success(()))
+            switch store.setArchived(archived, for: sessionID) {
+            case .applied:
+                if archived { AgentRuntime.shared.discard(sessionID: sessionID) }
+                announceIfLocalStateChanged(
+                    sessionID: sessionID,
+                    from: session.isArchived,
+                    to: archived
+                )
+                completion(.success(()))
+            case .unchanged:
+                completion(.success(()))
+            case .targetNotFound:
+                completion(.failure(.sessionNotFound))
+            case .persistenceRefused, .unsupportedValue:
+                completion(.failure(.persistenceUnavailable(processStopped: false)))
+            }
+            return
+        }
+        // Provider archive is a two-system transaction. Do not stop a live process or move its
+        // rollout when this store already knows it cannot record the matching local state.
+        guard store.acceptsDurableMutations else {
+            pending.remove(sessionID)
+            completion(.failure(.persistenceUnavailable(processStopped: false)))
             return
         }
         guard let account = AgentAccountDiscovery.account(
@@ -313,6 +352,13 @@ final class ProviderArchiveSync {
             pending.remove(sessionID)
             completion(.failure(.accountUnavailable(session.kind.displayName)))
             return
+        }
+
+        // Codex moves the rollout file, so its writer must be gone before the provider command.
+        // The preflight above prevents every known refusal; a later disk failure is still
+        // reported by `finishUserChange` rather than acknowledged as a successful archive.
+        if archived {
+            AgentRuntime.shared.discard(sessionID: sessionID)
         }
 
         DispatchQueue.global(qos: .utility).async {
@@ -352,6 +398,10 @@ final class ProviderArchiveSync {
     func reconcile() {
         reconciliationGeneration += 1
         let generation = reconciliationGeneration
+
+        // Reconciliation may launch provider commands. A read-only or poisoned store cannot
+        // durably record their result, so observing is safer than creating a new disagreement.
+        guard store.acceptsDurableMutations else { return }
 
         var batches: [String: Batch] = [:]
         for project in store.projects {
@@ -481,8 +531,14 @@ final class ProviderArchiveSync {
         completion: @escaping Completion
     ) {
         pending.remove(sessionID)
-        applySynchronized([sessionID: archived])
-        completion(.success(()))
+        switch applySynchronized([sessionID: archived]) {
+        case .applied, .unchanged:
+            completion(.success(()))
+        case .targetNotFound:
+            completion(.failure(.sessionNotFound))
+        case .persistenceRefused, .unsupportedValue:
+            completion(.failure(.persistenceUnavailable(processStopped: archived)))
+        }
     }
 
     private func runAutomaticCommand(
@@ -520,25 +576,33 @@ final class ProviderArchiveSync {
         }
     }
 
-    private func applySynchronized(_ states: [SessionID: Bool]) {
-        guard !states.isEmpty else { return }
+    @discardableResult
+    private func applySynchronized(_ states: [SessionID: Bool]) -> ProjectMutationResult {
+        guard !states.isEmpty else { return .unchanged }
         var localChanges: [(SessionID, Bool)] = []
         for (sessionID, archived) in states {
             guard let session = store.session(withID: sessionID),
                   session.isArchived != archived else { continue }
-            if archived {
-                AgentRuntime.shared.discard(sessionID: sessionID)
-            }
             localChanges.append((sessionID, archived))
         }
 
-        store.synchronizeArchiveStates(states)
+        let result = store.synchronizeArchiveStates(states)
+        guard result == .applied || result == .unchanged else {
+            ThreadingLogger.session.error(
+                "Could not persist provider archive reconciliation"
+            )
+            return result
+        }
         for (sessionID, archived) in localChanges {
+            if archived {
+                AgentRuntime.shared.discard(sessionID: sessionID)
+            }
             center.post(SessionArchivedStateDidChange(
                 sessionID: sessionID,
                 isArchived: archived
             ))
         }
+        return result
     }
 
     private func announceIfLocalStateChanged(
@@ -558,4 +622,6 @@ private enum ProviderArchiveDefaults {
     static let archivedDirectory = "archived_sessions"
     static let uuidLength = 36
     static let maximumErrorLength = 800
+    static let maximumCommandOutputBytes = 64 * 1024
+    static let commandTimeout: TimeInterval = 30
 }

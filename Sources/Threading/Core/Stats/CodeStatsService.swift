@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Code Stats Service
 
@@ -41,7 +42,6 @@ final class CodeStatsService {
 
     private var readings: [ProjectID: ProjectReading] = [:]
     private var inFlight: Set<ProjectID> = []
-    private var tool: Tool = .unresolved
 
     private let persistence: RecoverableFileStore<[ProjectID: ProjectReading]>
 
@@ -62,6 +62,7 @@ final class CodeStatsService {
             url: root.appendingPathComponent(CodeStatsDefaults.fileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
@@ -79,8 +80,7 @@ final class CodeStatsService {
     /// install hint rather than silence. False while unresolved: "not looked yet" must not
     /// read as "not installed".
     var toolIsMissing: Bool {
-        if case .missing = toolCache.value { return true }
-        return false
+        toolCache.withLock { if case .missing = $0 { return true }; return false }
     }
 
     /// When a project was last counted — the reading's age is part of the reading.
@@ -181,16 +181,19 @@ final class CodeStatsService {
     /// is kept for the app's run; a miss is re-probed once it ages past `missingReprobeAfter`,
     /// which is how installing scc heals the feature without a relaunch.
     private nonisolated func resolveTool(shell: String) -> String? {
-        switch toolCache.value {
+        let cached = toolCache.withLock { $0 }
+        switch cached {
         case .found(let path):
             return path
         case .missing(let lastChecked)
             where Date().timeIntervalSince(lastChecked) < CodeStatsDefaults.missingReprobeAfter:
             return nil
         case .missing, .unresolved:
-            let wasUnresolved = { if case .unresolved = toolCache.value { return true }; return false }()
+            let wasUnresolved = { if case .unresolved = cached { return true }; return false }()
             let path = CodeStatsRunner.locate(shell: shell)
-            toolCache.value = path.map { .found(path: $0) } ?? .missing(lastChecked: Date())
+            toolCache.withLock {
+                $0 = path.map { .found(path: $0) } ?? .missing(lastChecked: Date())
+            }
 
             // The first miss is worth a line; the periodic re-probes repeating it are not.
             if path == nil, wasUnresolved {
@@ -201,27 +204,12 @@ final class CodeStatsService {
     }
 
     /// The resolved location, readable off the main actor. Only the scan queue writes it.
-    private let toolCache = Locked<Tool>(.unresolved)
+    private let toolCache = OSAllocatedUnfairLock(initialState: Tool.unresolved)
 
     // MARK: - Persistence
 
     /// Written whole, on every change — one summary line per language per project.
     private func save() {
         _ = persistence.save(readings)
-    }
-}
-
-// MARK: - Locked
-
-/// A value guarded by a lock — the smallest thing that lets one field cross queues.
-private final class Locked<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: Value
-
-    init(_ value: Value) { self.stored = value }
-
-    var value: Value {
-        get { lock.lock(); defer { lock.unlock() }; return stored }
-        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }

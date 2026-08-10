@@ -255,10 +255,13 @@ enum ExtensionBundleInspector {
 
         let manifest: ExtensionManifest
         do {
-            let handle = try FileHandle(forReadingFrom: manifestURL)
-            defer { try? handle.close() }
-            let data = try handle.read(upToCount: maximumManifestBytes + 1) ?? Data()
-            guard data.count <= maximumManifestBytes else {
+            let data: Data
+            do {
+                data = try BoundedFileReader.read(
+                    manifestURL,
+                    maximumBytes: maximumManifestBytes
+                )
+            } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
                 throw ExtensionBundleError.manifestTooLarge(maximum: maximumManifestBytes)
             }
             // The format version is read on its own, before the manifest it describes.
@@ -389,7 +392,15 @@ enum ExtensionBundleInspector {
             )
             let document: AppTheme
             do {
-                document = try JSONDecoder().decode(AppTheme.self, from: Data(contentsOf: url))
+                let data = try boundedData(
+                    at: url,
+                    maximumBytes: maximumThemeBytes,
+                    failure: { ExtensionBundleError.themeResourceInvalid(
+                        path: declaration.resource,
+                        message: $0
+                    ) }
+                )
+                document = try JSONDecoder().decode(AppTheme.self, from: data)
             } catch {
                 throw ExtensionBundleError.themeResourceInvalid(
                     path: declaration.resource,
@@ -465,8 +476,12 @@ enum ExtensionBundleInspector {
                 maximumBytes: SidebarStyleLimits.maximumImageBytes,
                 failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
             )
-            guard let data = try? Data(contentsOf: url),
-                  let normalized = ProjectIconStore.normalizedPNGData(
+            let data = try boundedData(
+                at: url,
+                maximumBytes: SidebarStyleLimits.maximumImageBytes,
+                failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
+            )
+            guard let normalized = ProjectIconStore.normalizedPNGData(
                       from: data,
                       maxPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
                   ) else {
@@ -508,8 +523,12 @@ enum ExtensionBundleInspector {
             maximumBytes: maximumThemeIconBytes,
             failure: { ExtensionBundleError.themeResourceInvalid(path: path, message: $0) }
         )
-        guard let data = try? Data(contentsOf: url),
-              let normalized = ProjectIconStore.normalizedPNGData(
+        let data = try boundedData(
+            at: url,
+            maximumBytes: maximumThemeIconBytes,
+            failure: { ExtensionBundleError.themeResourceInvalid(path: path, message: $0) }
+        )
+        guard let normalized = ProjectIconStore.normalizedPNGData(
                   from: data,
                   maxPixelSize: maximumThemeIconPixels
               ),
@@ -579,10 +598,20 @@ enum ExtensionBundleInspector {
             )
             let strings: [String: String]
             do {
+                let data = try boundedData(
+                    at: url,
+                    maximumBytes: maximumLocalizationBytes,
+                    failure: { ExtensionBundleError.localizationResourceInvalid(
+                        path: declaration.resource,
+                        message: $0
+                    ) }
+                )
                 strings = try JSONDecoder().decode(
                     [String: String].self,
-                    from: Data(contentsOf: url)
+                    from: data
                 )
+            } catch let error as ExtensionBundleError {
+                throw error
             } catch {
                 throw ExtensionBundleError.localizationResourceInvalid(
                     path: declaration.resource,
@@ -656,6 +685,26 @@ enum ExtensionBundleInspector {
             throw failure("larger than \(maximumBytes) bytes")
         }
         return candidate
+    }
+
+    /// The metadata check in `resolveResource` makes ordinary oversize failures cheap, but it
+    /// cannot be the allocation boundary: an installed package is user-writable and a file can
+    /// grow between that check and a whole-file read. Recheck while reading and refuse the first
+    /// byte beyond the declared limit.
+    private static func boundedData(
+        at url: URL,
+        maximumBytes: Int,
+        failure: (String) -> ExtensionBundleError
+    ) throws -> Data {
+        do {
+            return try BoundedFileReader.read(url, maximumBytes: maximumBytes)
+        } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
+            throw failure("larger than \(maximumBytes) bytes")
+        } catch BoundedFileReadError.notRegularFile {
+            throw failure("missing or not a regular file")
+        } catch {
+            throw failure("could not be read (\(error.localizedDescription))")
+        }
     }
 
     /// Reads only `formatVersion`, tolerating everything else the document may contain.
