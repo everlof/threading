@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 
 typealias FileTreeActivityLookup = @MainActor (
     AgentWorkTarget,
@@ -6,10 +7,69 @@ typealias FileTreeActivityLookup = @MainActor (
     @escaping @MainActor @Sendable ([String: AgentWorkTreeItem]) -> Void
 ) -> Void
 
+struct FileDirectoryEntry: Sendable {
+    let url: URL
+    let name: String
+    let isDirectory: Bool
+}
+
+struct FileDirectorySnapshot: Sendable {
+    let entries: [FileDirectoryEntry]
+    let signature: Data
+
+    /// Directory enumeration, metadata reads and natural sorting are all filesystem/model work.
+    /// The controller invokes this value-only boundary from a detached task; AppKit and the
+    /// identity-bearing `FileNode` objects never cross that boundary.
+    static func read(_ url: URL) -> FileDirectorySnapshot {
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let entries = urls.map { entry in
+            FileDirectoryEntry(
+                url: entry,
+                name: entry.lastPathComponent,
+                isDirectory: (try? entry.resourceValues(
+                    forKeys: [.isDirectoryKey]
+                ))?.isDirectory ?? false
+            )
+        }.sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
+            let comparison = lhs.name.localizedStandardCompare(rhs.name)
+            if comparison != .orderedSame { return comparison == .orderedAscending }
+            return lhs.name < rhs.name
+        }
+        var signatureInput = Data()
+        signatureInput.reserveCapacity(entries.reduce(0) { $0 + $1.name.utf8.count + 2 })
+        for entry in entries {
+            signatureInput.append(entry.isDirectory ? 1 : 0)
+            signatureInput.append(contentsOf: entry.name.utf8)
+            signatureInput.append(0)
+        }
+        return FileDirectorySnapshot(
+            entries: entries,
+            signature: Data(SHA256.hash(data: signatureInput))
+        )
+    }
+}
+
+typealias FileTreeDirectoryReader = @Sendable (URL) -> FileDirectorySnapshot
+
 // MARK: - File Node
+
+private struct FileNodeApplyResult {
+    let accepted: Bool
+    let changed: Bool
+
+    static let stale = FileNodeApplyResult(accepted: false, changed: false)
+    static let unchanged = FileNodeApplyResult(accepted: true, changed: false)
+    static let changed = FileNodeApplyResult(accepted: true, changed: true)
+}
 
 /// One entry in the tree. A reference type because the outline view identifies rows by object,
 /// and because a directory's children are discovered later than the directory itself.
+@MainActor
 final class FileNode: NSObject {
 
     let url: URL
@@ -19,6 +79,8 @@ final class FileNode: NSObject {
     /// Nil until this directory has been read. The distinction matters: an unread directory is
     /// expandable on the strength of being a directory, while one that read as empty is not.
     private(set) var children: [FileNode]?
+    private var loadGeneration = 0
+    private var contentSignature: Data?
 
     init(url: URL, isDirectory: Bool) {
         self.url = url
@@ -32,49 +94,101 @@ final class FileNode: NSObject {
         isDirectory ? .folder(url) : .file(url, line: nil)
     }
 
-    /// Reads this directory's entries once. Cheap to call repeatedly; `reload` is what re-reads.
-    func loadChildrenIfNeeded() {
-        guard isDirectory, children == nil else { return }
-        children = Self.read(url)
+    var hasLoadedChildren: Bool { children != nil }
+
+    /// Begins one value-snapshot read. The token makes a late worker result harmless when a newer
+    /// refresh or disclosure for this same directory has already started.
+    func beginLoad() -> Int {
+        loadGeneration += 1
+        return loadGeneration
     }
 
-    func reload() {
-        guard isDirectory else { return }
-        children = Self.read(url, reusing: children ?? [])
-    }
-
-    /// Directories first, then case-insensitive by name — the order every file browser uses, and
-    /// the only one in which a deep tree can be scanned by eye.
+    /// Reconciles a worker-produced snapshot on the main actor. Directories first and natural name
+    /// order were already decided in the snapshot, so this phase is only identity matching and
+    /// allocation for genuinely new paths.
     /// Existing siblings are keyed by name, which is their stable path identity relative to this
     /// directory. Building canonical absolute paths here made a 20,000-row hot refresh pay for
     /// tens of thousands of URL standardizations it did not need.
-    ///
-    /// Dotfiles are skipped. A project root is full of them (`.git`, `.build`, every tool's
-    /// config) and none of it is what someone opening a file tree came to find.
-    private static func read(_ url: URL, reusing existing: [FileNode] = []) -> [FileNode] {
-        let existingByName = Dictionary(
-            existing.map { ($0.name, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let entries = (try? FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
+    @discardableResult
+    fileprivate func apply(
+        _ snapshot: FileDirectorySnapshot,
+        generation: Int
+    ) -> FileNodeApplyResult {
+        guard isDirectory, generation == loadGeneration else { return .stale }
+        guard let existing = children else {
+            children = snapshot.entries.map {
+                FileNode(url: $0.url, isDirectory: $0.isDirectory)
+            }
+            contentSignature = snapshot.signature
+            return .changed
+        }
 
-        return entries
-            .map { entry in
-                let isDirectory = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                if let existing = existingByName[entry.lastPathComponent],
-                   existing.isDirectory == isDirectory {
-                    return existing
+        guard contentSignature != snapshot.signature else { return .unchanged }
+
+        // The worker sorted both generations with the same deterministic comparator. Most hot
+        // refreshes are identical, and a changed directory usually differs by one or two names,
+        // so a two-pointer merge preserves identity without rebuilding a 20,000-entry dictionary.
+        var reconciled: [FileNode] = []
+        reconciled.reserveCapacity(snapshot.entries.count)
+        var oldIndex = 0
+        var newIndex = 0
+        var changed = existing.count != snapshot.entries.count
+
+        while newIndex < snapshot.entries.count {
+            let entry = snapshot.entries[newIndex]
+            guard oldIndex < existing.count else {
+                reconciled.append(FileNode(url: entry.url, isDirectory: entry.isDirectory))
+                newIndex += 1
+                changed = true
+                continue
+            }
+
+            let node = existing[oldIndex]
+            if node.name == entry.name {
+                if node.isDirectory == entry.isDirectory {
+                    reconciled.append(node)
+                } else {
+                    reconciled.append(FileNode(url: entry.url, isDirectory: entry.isDirectory))
+                    changed = true
                 }
-                return FileNode(url: entry, isDirectory: isDirectory)
+                oldIndex += 1
+                newIndex += 1
+            } else if Self.precedes(
+                lhsDirectory: node.isDirectory,
+                lhsName: node.name,
+                rhsDirectory: entry.isDirectory,
+                rhsName: entry.name
+            ) {
+                // An old path disappeared. The new entry will be compared with its successor.
+                oldIndex += 1
+                changed = true
+            } else {
+                // A new path was inserted before the current old child.
+                reconciled.append(FileNode(url: entry.url, isDirectory: entry.isDirectory))
+                newIndex += 1
+                changed = true
             }
-            .sorted { lhs, rhs in
-                if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
+        }
+        if oldIndex != existing.count { changed = true }
+        guard changed else {
+            contentSignature = snapshot.signature
+            return .unchanged
+        }
+        children = reconciled
+        contentSignature = snapshot.signature
+        return .changed
+    }
+
+    private static func precedes(
+        lhsDirectory: Bool,
+        lhsName: String,
+        rhsDirectory: Bool,
+        rhsName: String
+    ) -> Bool {
+        if lhsDirectory != rhsDirectory { return lhsDirectory }
+        let comparison = lhsName.localizedStandardCompare(rhsName)
+        if comparison != .orderedSame { return comparison == .orderedAscending }
+        return lhsName < rhsName
     }
 }
 
@@ -94,11 +208,27 @@ final class FileTreeViewController: NSViewController {
         static let activityRows = 256
     }
 
+    private struct DirectoryReadRequest: Sendable {
+        let index: Int
+        let url: URL
+    }
+
+    private struct DirectoryReadResult: Sendable {
+        let index: Int
+        let snapshot: FileDirectorySnapshot
+    }
+
+    private struct DirectoryReadBatch: Sendable {
+        let results: [DirectoryReadResult]
+        let elapsedNanoseconds: UInt64
+    }
+
     // MARK: - Properties
 
     let folderPath: String
     private let workTarget: AgentWorkTarget?
     private let activityLookup: FileTreeActivityLookup
+    private let directoryReader: FileTreeDirectoryReader
     private let appEvents = AppEventObservations()
 
     private lazy var root = FileNode(
@@ -140,6 +270,15 @@ final class FileTreeViewController: NSViewController {
     private var pendingActivityPaths: [String: AgentWorkTreePath] = [:]
     private var isActivityRequestScheduled = false
     private var activityGeneration = 0
+    private var refreshGeneration = 0
+    private var refreshTask: Task<Void, Never>?
+    private var refreshCompletions: [() -> Void] = []
+    private var directoryLoadTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    private var pendingExpansionIDs: Set<ObjectIdentifier> = []
+    private(set) var lastRefreshReadNanosecondsForTesting: UInt64 = 0
+    private(set) var lastRefreshApplyNanosecondsForTesting: UInt64 = 0
+    private(set) var maximumDisclosureApplyNanosecondsForTesting: UInt64 = 0
+    var pendingDirectoryLoadCountForTesting: Int { directoryLoadTasks.count }
     /// Holds the row context menu while it is up; released from its own dismissal.
     private var contextMenuSession: AnyObject?
 
@@ -148,10 +287,14 @@ final class FileTreeViewController: NSViewController {
     init(
         folderPath: String,
         workTarget: AgentWorkTarget? = nil,
-        activityLookup: FileTreeActivityLookup? = nil
+        activityLookup: FileTreeActivityLookup? = nil,
+        directoryReader: @escaping FileTreeDirectoryReader = {
+            FileDirectorySnapshot.read($0)
+        }
     ) {
         self.folderPath = folderPath
         self.workTarget = workTarget
+        self.directoryReader = directoryReader
         self.activityLookup = activityLookup ?? { target, paths, completion in
             AgentWorkTraceStore.shared.treeItems(
                 for: target, paths: paths, completion: completion
@@ -162,6 +305,11 @@ final class FileTreeViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        refreshTask?.cancel()
+        directoryLoadTasks.values.forEach { $0.cancel() }
     }
 
     // MARK: - Lifecycle
@@ -247,35 +395,115 @@ final class FileTreeViewController: NSViewController {
     ///
     /// Called by the pane when the tab is activated, the same deferred rule the browser's page
     /// and the review's git call follow.
-    func refresh() {
-        guard isViewLoaded else { return }
-
-        if !hasLoaded {
-            hasLoaded = true
-            root.loadChildrenIfNeeded()
-            outlineView.reloadData()
+    func refresh(completion: (() -> Void)? = nil) {
+        guard isViewLoaded else {
+            completion?()
             return
         }
+        if let completion { refreshCompletions.append(completion) }
 
-        // Re-read every directory currently open, so a file an agent just wrote appears without
-        // the user collapsing and reopening its folder. A closed directory is left alone: it
-        // will read itself when it is next opened.
-        reloadExpanded(from: root)
-        let expanded = expandedNodes()
-        outlineView.reloadData()
-        expanded.forEach { outlineView.expandItem($0) }
+        // Capture only the small set of open directory identities on the main actor. Their URLs
+        // become Sendable requests; enumeration, metadata reads and sorting happen off-main.
+        let expanded = hasLoaded ? expandedNodes() : []
+        let nodes = [root] + expanded
+        let targets = nodes.map { node in
+            (node: node, generation: node.beginLoad())
+        }
+        let requests = nodes.enumerated().map {
+            DirectoryReadRequest(index: $0.offset, url: $0.element.url)
+        }
+        let reader = directoryReader
+
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self, requests] in
+            let batch = await Task.detached(priority: .userInitiated) {
+                let started = DispatchTime.now().uptimeNanoseconds
+                let results = requests.map { request in
+                    DirectoryReadResult(
+                        index: request.index,
+                        snapshot: reader(request.url)
+                    )
+                }
+                return DirectoryReadBatch(
+                    results: results,
+                    elapsedNanoseconds: DispatchTime.now().uptimeNanoseconds - started
+                )
+            }.value
+            guard !Task.isCancelled, let self,
+                  generation == self.refreshGeneration else { return }
+
+            let applyStarted = DispatchTime.now().uptimeNanoseconds
+            var rootResult = FileNodeApplyResult.stale
+            var changedDirectories: [FileNode] = []
+            for result in batch.results where targets.indices.contains(result.index) {
+                let target = targets[result.index]
+                let applied = target.node.apply(
+                    result.snapshot,
+                    generation: target.generation
+                )
+                if result.index == 0 {
+                    rootResult = applied
+                } else if applied.changed {
+                    changedDirectories.append(target.node)
+                }
+            }
+            guard rootResult.accepted else { return }
+            self.hasLoaded = true
+            if rootResult.changed {
+                self.outlineView.reloadData()
+                expanded.forEach { self.outlineView.expandItem($0) }
+            } else {
+                for directory in changedDirectories
+                    where self.outlineView.row(forItem: directory) >= 0 {
+                    self.outlineView.reloadItem(directory, reloadChildren: true)
+                }
+            }
+            self.lastRefreshReadNanosecondsForTesting = batch.elapsedNanoseconds
+            self.lastRefreshApplyNanosecondsForTesting =
+                DispatchTime.now().uptimeNanoseconds - applyStarted
+            self.refreshTask = nil
+            let completions = self.refreshCompletions
+            self.refreshCompletions.removeAll(keepingCapacity: true)
+            completions.forEach { $0() }
+        }
     }
 
     // MARK: - Private Methods
 
-    private func reloadExpanded(from node: FileNode) {
-        guard node.isDirectory else { return }
-        let isRoot = node === root
-        guard isRoot || outlineView.isItemExpanded(node) else { return }
+    private func loadForDisclosure(_ node: FileNode) {
+        let identifier = ObjectIdentifier(node)
+        pendingExpansionIDs.insert(identifier)
+        guard directoryLoadTasks[identifier] == nil else { return }
 
-        node.reload()
-        for child in node.children ?? [] where child.isDirectory {
-            reloadExpanded(from: child)
+        let generation = node.beginLoad()
+        let url = node.url
+        let reader = directoryReader
+        directoryLoadTasks[identifier] = Task { [weak self, weak node] in
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                reader(url)
+            }.value
+            guard let self else { return }
+            self.directoryLoadTasks[identifier] = nil
+            guard !Task.isCancelled, let node else {
+                self.pendingExpansionIDs.remove(identifier)
+                return
+            }
+            let applyStarted = DispatchTime.now().uptimeNanoseconds
+            let result = node.apply(snapshot, generation: generation)
+            let shouldExpand = self.pendingExpansionIDs.remove(identifier) != nil
+            guard result.accepted else { return }
+            if result.changed {
+                self.outlineView.reloadItem(node, reloadChildren: true)
+            }
+            if shouldExpand, self.outlineView.row(forItem: node) >= 0 {
+                self.outlineView.expandItem(node)
+            }
+            self.maximumDisclosureApplyNanosecondsForTesting = max(
+                self.maximumDisclosureApplyNanosecondsForTesting,
+                DispatchTime.now().uptimeNanoseconds - applyStarted
+            )
         }
     }
 
@@ -471,7 +699,11 @@ extension FileTreeViewController: NSOutlineViewDataSource {
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
-        (item as? FileNode)?.loadChildrenIfNeeded()
+        guard let node = item as? FileNode else { return false }
+        guard node.hasLoadedChildren else {
+            loadForDisclosure(node)
+            return false
+        }
         return true
     }
 

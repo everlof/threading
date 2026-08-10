@@ -66,18 +66,26 @@ final class FileTreeViewTests: XCTestCase {
         let controller = FileTreeViewController(folderPath: fixture.path)
         _ = controller.view
         controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 300)
-        controller.refresh()
+        refreshAndWait(controller)
         controller.view.layoutSubtreeIfNeeded()
 
         let outline = try XCTUnwrap(Self.firstDescendant(NSOutlineView.self, in: controller.view))
         let sourcesBefore = try XCTUnwrap(Self.node(at: sources, in: outline))
         outline.expandItem(sourcesBefore)
+        XCTAssertTrue(waitUntil {
+            controller.pendingDirectoryLoadCountForTesting == 0
+                && outline.isItemExpanded(sourcesBefore)
+        })
         let featureBefore = try XCTUnwrap(Self.node(at: feature, in: outline))
         outline.expandItem(featureBefore)
+        XCTAssertTrue(waitUntil {
+            controller.pendingDirectoryLoadCountForTesting == 0
+                && outline.isItemExpanded(featureBefore)
+        })
         XCTAssertEqual(outline.numberOfRows, 3)
 
         try makeFile(named: "Two.swift", in: feature)
-        controller.refresh()
+        refreshAndWait(controller)
         controller.view.layoutSubtreeIfNeeded()
 
         let sourcesAfter = try XCTUnwrap(Self.node(at: sources, in: outline))
@@ -88,6 +96,46 @@ final class FileTreeViewTests: XCTestCase {
         XCTAssertTrue(outline.isItemExpanded(featureAfter))
         XCTAssertEqual(outline.numberOfRows, 4)
         XCTAssertNotNil(Self.node(at: feature.appendingPathComponent("Two.swift"), in: outline))
+    }
+
+    func testRefreshReturnsBeforeIOAndAStaleSnapshotCannotReplaceTheNewestTree() throws {
+        let fixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-file-stale-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        try makeFile(named: "One.swift", in: fixture)
+
+        let gate = FileTreeReaderGate()
+        defer { gate.releaseFirst.signal() }
+        let controller = FileTreeViewController(
+            folderPath: fixture.path,
+            directoryReader: { gate.read($0) }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 300)
+
+        var firstCompleted = false
+        let scheduledAt = DispatchTime.now().uptimeNanoseconds
+        controller.refresh { firstCompleted = true }
+        let returnedAt = DispatchTime.now().uptimeNanoseconds
+        XCTAssertLessThan(returnedAt - scheduledAt, 50_000_000)
+        XCTAssertTrue(waitUntil(timeout: 1) { gate.hasStarted })
+
+        try makeFile(named: "Two.swift", in: fixture)
+        var newestCompleted = false
+        controller.refresh { newestCompleted = true }
+        XCTAssertTrue(waitUntil { newestCompleted })
+        XCTAssertTrue(firstCompleted, "a coalesced caller was left waiting")
+
+        let outline = try XCTUnwrap(Self.firstDescendant(NSOutlineView.self, in: controller.view))
+        XCTAssertNotNil(Self.node(at: fixture.appendingPathComponent("Two.swift"), in: outline))
+
+        gate.releaseFirst.signal()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNotNil(
+            Self.node(at: fixture.appendingPathComponent("Two.swift"), in: outline),
+            "the canceled first snapshot overwrote the newer tree"
+        )
     }
 
     func testActivityTreeShowsFolderAndFileReadEditCounts() throws {
@@ -147,12 +195,15 @@ final class FileTreeViewTests: XCTestCase {
         window.contentView = host
         let summary = try XCTUnwrap(Self.firstDescendant(AgentWorkSummaryView.self, in: host))
         summary.setPresentation(activityPresentation(sessionID: sessionID))
-        controller.refresh()
+        refreshAndWait(controller)
         host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.03))
 
         let outline = try XCTUnwrap(Self.firstDescendant(NSOutlineView.self, in: host))
         outline.expandItem(try XCTUnwrap(Self.node(at: sources, in: outline)))
+        XCTAssertTrue(waitUntil {
+            controller.pendingDirectoryLoadCountForTesting == 0
+        })
         host.layoutSubtreeIfNeeded()
         for row in 0..<outline.numberOfRows {
             _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
@@ -227,6 +278,8 @@ final class FileTreeViewTests: XCTestCase {
         let shape = StressShape(
             rawValue: environment["THREADING_FILE_TREE_STRESS_SHAPE"] ?? "flat"
         ) ?? .flat
+        let mutatesBeforeHotRefresh =
+            environment["THREADING_FILE_TREE_STRESS_MUTATE"] == "1"
         let themeID = AppThemeID(environment["THREADING_FILE_TREE_STRESS_THEME"] ?? "system")
         let theme = try XCTUnwrap(
             AppThemeLibrary.theme(withID: themeID),
@@ -245,8 +298,14 @@ final class FileTreeViewTests: XCTestCase {
         controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
 
         let refreshStarted = DispatchTime.now().uptimeNanoseconds
-        controller.refresh()
-        let refreshEnded = DispatchTime.now().uptimeNanoseconds
+        var refreshFinished = false
+        controller.refresh { refreshFinished = true }
+        let refreshScheduled = DispatchTime.now().uptimeNanoseconds
+        XCTAssertLessThan(refreshScheduled - refreshStarted, 50_000_000)
+        XCTAssertTrue(waitUntil(timeout: 10) { refreshFinished })
+        let refreshReady = DispatchTime.now().uptimeNanoseconds
+        let refreshRead = controller.lastRefreshReadNanosecondsForTesting
+        let refreshApply = controller.lastRefreshApplyNanosecondsForTesting
         controller.view.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
 
@@ -256,9 +315,13 @@ final class FileTreeViewTests: XCTestCase {
         if shape == .expanded {
             let directories = (0..<rootRows).compactMap { outline.item(atRow: $0) }
             directories.forEach { outline.expandItem($0) }
-            controller.view.layoutSubtreeIfNeeded()
         }
-        let disclosureEnded = DispatchTime.now().uptimeNanoseconds
+        let disclosureScheduled = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(waitUntil(timeout: 10) {
+            controller.pendingDirectoryLoadCountForTesting == 0
+        })
+        controller.view.layoutSubtreeIfNeeded()
+        let disclosureReady = DispatchTime.now().uptimeNanoseconds
 
         let expandedRows = outline.numberOfRows
         let lastRow = expandedRows - 1
@@ -269,10 +332,19 @@ final class FileTreeViewTests: XCTestCase {
         let jumpEnded = DispatchTime.now().uptimeNanoseconds
         let lastNodeBeforeRefresh = try XCTUnwrap(outline.item(atRow: lastRow) as? FileNode)
 
+        if mutatesBeforeHotRefresh {
+            try makeFile(named: "file-999999-new.swift", in: fixture)
+        }
         let hotRefreshStarted = DispatchTime.now().uptimeNanoseconds
-        controller.refresh()
+        var hotRefreshFinished = false
+        controller.refresh { hotRefreshFinished = true }
+        let hotRefreshScheduled = DispatchTime.now().uptimeNanoseconds
+        XCTAssertLessThan(hotRefreshScheduled - hotRefreshStarted, 50_000_000)
+        XCTAssertTrue(waitUntil(timeout: 10) { hotRefreshFinished })
         controller.view.layoutSubtreeIfNeeded()
-        let hotRefreshEnded = DispatchTime.now().uptimeNanoseconds
+        let hotRefreshReady = DispatchTime.now().uptimeNanoseconds
+        let hotRefreshRead = controller.lastRefreshReadNanosecondsForTesting
+        let hotRefreshApply = controller.lastRefreshApplyNanosecondsForTesting
         let rowsAfterRefresh = outline.numberOfRows
         let lastNodeAfterRefresh = try XCTUnwrap(outline.item(atRow: lastRow) as? FileNode)
         XCTAssertTrue(
@@ -286,8 +358,13 @@ final class FileTreeViewTests: XCTestCase {
         if shape == .expanded {
             XCTAssertEqual(
                 rowsAfterRefresh,
-                expandedRows,
+                expandedRows + (mutatesBeforeHotRefresh ? 1 : 0),
                 "hot refresh lost disclosure state or an addressable row"
+            )
+        } else {
+            XCTAssertEqual(
+                rowsAfterRefresh,
+                expandedRows + (mutatesBeforeHotRefresh ? 1 : 0)
             )
         }
 
@@ -297,14 +374,22 @@ final class FileTreeViewTests: XCTestCase {
         print(
             "THREADING_PERF file-tree "
                 + "theme=\(theme.id.rawValue) shape=\(shape.rawValue) "
-                + "entries=\(entryCount) root_rows=\(rootRows) "
+                + "entries=\(entryCount) mutates=\(mutatesBeforeHotRefresh) root_rows=\(rootRows) "
                 + "expanded_rows=\(expandedRows) rows_after_refresh=\(rowsAfterRefresh) "
                 + "visible_cells=\(visibleCells) "
-                + "refresh_ms=\(Self.milliseconds(refreshEnded - refreshStarted)) "
-                + "layout_ms=\(Self.milliseconds(layoutEnded - refreshEnded)) "
-                + "disclosure_ms=\(Self.milliseconds(disclosureEnded - disclosureStarted)) "
+                + "refresh_schedule_ms=\(Self.milliseconds(refreshScheduled - refreshStarted)) "
+                + "refresh_ready_ms=\(Self.milliseconds(refreshReady - refreshStarted)) "
+                + "refresh_io_ms=\(Self.milliseconds(refreshRead)) "
+                + "refresh_apply_ms=\(Self.milliseconds(refreshApply)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - refreshReady)) "
+                + "disclosure_schedule_ms=\(Self.milliseconds(disclosureScheduled - disclosureStarted)) "
+                + "disclosure_ready_ms=\(Self.milliseconds(disclosureReady - disclosureStarted)) "
+                + "disclosure_max_apply_ms=\(Self.milliseconds(controller.maximumDisclosureApplyNanosecondsForTesting)) "
                 + "jump_ms=\(Self.milliseconds(jumpEnded - jumpStarted)) "
-                + "hot_refresh_ms=\(Self.milliseconds(hotRefreshEnded - hotRefreshStarted)) "
+                + "hot_refresh_schedule_ms=\(Self.milliseconds(hotRefreshScheduled - hotRefreshStarted)) "
+                + "hot_refresh_ready_ms=\(Self.milliseconds(hotRefreshReady - hotRefreshStarted)) "
+                + "hot_refresh_io_ms=\(Self.milliseconds(hotRefreshRead)) "
+                + "hot_refresh_apply_ms=\(Self.milliseconds(hotRefreshApply)) "
                 + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
         )
     }
@@ -388,11 +473,14 @@ final class FileTreeViewTests: XCTestCase {
         )
         window.appearance = theme.mode.appearance ?? NSAppearance(named: .aqua)
         window.contentView = host
-        controller.refresh()
+        refreshAndWait(controller)
         host.layoutSubtreeIfNeeded()
 
         let outline = try XCTUnwrap(Self.firstDescendant(NSOutlineView.self, in: host))
         outline.expandItem(outline.item(atRow: 0))
+        XCTAssertTrue(waitUntil {
+            controller.pendingDirectoryLoadCountForTesting == 0
+        })
         host.layoutSubtreeIfNeeded()
 
         let icons = Self.descendants(ThemedFileIconView.self, in: host)
@@ -491,6 +579,26 @@ final class FileTreeViewTests: XCTestCase {
             .first { $0.url.standardizedFileURL == url.standardizedFileURL }
     }
 
+    private func refreshAndWait(
+        _ controller: FileTreeViewController,
+        timeout: TimeInterval = 5
+    ) {
+        var finished = false
+        controller.refresh { finished = true }
+        XCTAssertTrue(waitUntil(timeout: timeout) { finished }, "file-tree refresh timed out")
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        _ condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        }
+        return condition()
+    }
+
     private static func physicalFootprintBytes() -> UInt64 {
         let pid = Int32(ProcessInfo.processInfo.processIdentifier)
         return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
@@ -508,5 +616,29 @@ final class FileTreeViewTests: XCTestCase {
 private extension UInt64 {
     func saturatingSubtract(_ other: UInt64) -> UInt64 {
         self >= other ? self - other : 0
+    }
+}
+
+private final class FileTreeReaderGate: @unchecked Sendable {
+    let releaseFirst = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var readCount = 0
+
+    var hasStarted: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return readCount > 0
+    }
+
+    func read(_ url: URL) -> FileDirectorySnapshot {
+        let snapshot = FileDirectorySnapshot.read(url)
+        lock.lock()
+        readCount += 1
+        let isFirst = readCount == 1
+        lock.unlock()
+        if isFirst {
+            releaseFirst.wait()
+        }
+        return snapshot
     }
 }

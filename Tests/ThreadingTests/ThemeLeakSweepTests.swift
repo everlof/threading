@@ -261,7 +261,7 @@ final class ThemeLeakSweepTests: XCTestCase {
                 _ = try self.pictures(count: 4)
                 let controller = FileTreeViewController(folderPath: self.root.path)
                 controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 360)
-                controller.refresh()
+                self.refreshAndWait(controller)
                 return controller.view
             },
             Screen(name: "themes settings", size: NSSize(width: 720, height: 560)) {
@@ -309,6 +309,16 @@ final class ThemeLeakSweepTests: XCTestCase {
     }
 
     // MARK: - Harness
+
+    private func refreshAndWait(_ controller: FileTreeViewController) {
+        var finished = false
+        controller.refresh { finished = true }
+        let deadline = Date().addingTimeInterval(5)
+        while !finished, Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        }
+        XCTAssertTrue(finished, "file-tree refresh timed out")
+    }
 
     /// Lays a screen out, makes every list in it produce rows, selects the first of each, and
     /// renders — the state the defect was reported in, and the only one in which a list has any

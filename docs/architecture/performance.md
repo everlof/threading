@@ -150,7 +150,7 @@ external data reaches eager AppKit work.
 | High | Extensions preferences | The page constructs every package's detail rows before `disclosureCard` discards the collapsed ones, then replaces the whole page on a toggle or disclosure. |
 | Resolved | Extension settings | Settings allow 128 fields per extension and built-in pages aggregate contributions from multiple extensions. Extension fields are now individual virtual rows in both the shared host and Tools page; the before/after measurements are below. |
 | Resolved | Browser baseline library | The 200-record value model is presented by reusable table rows. Only a viewport of cards exists; screenshot reads, SHA-256 and source inspection run off-main with reuse cancellation, while the main actor performs only a row-sized decode and assignment. The before/after measurements are below. |
-| High | File pane refresh | The outline virtualizes cells, but directory enumeration, resource-value reads, natural sorting, and reconciliation remain synchronous in `refresh()`. The existing 20,000-entry fixture measures about 200–230 ms for the correct refresh, already above a frame and near the stall threshold. |
+| Resolved | File pane refresh | Directory enumeration, resource-value reads, natural sorting and snapshot signatures now run off-main for initial load, hot refresh and disclosure. Main-actor reconciliation preserves node identity with a sorted merge; equal signatures skip both reconciliation and AppKit reload. The before/after measurements are below. |
 | Medium | Archived settings | `reload()` maps every archived session to an AppKit row and only then takes the recent prefix. The "Older" fold currently reduces visible rows but not cold construction. |
 | Medium | Tools dynamic sections | Tool rows and extension-contributed settings are virtualized at their repeating unit. Browser Sign-In and Website Access remain one coarse table row each, so a large credential or origin inventory can still defeat the outer table's bound. |
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
@@ -1390,6 +1390,40 @@ roughly 225 ms and 18–21 ms now, but the important refresh result is correctne
 all 20,100 rows remain addressable for about 220 ms. Remaining time is the intended work of reading
 and naturally sorting every open directory; changing that boundary means filesystem observation or
 incremental directory deltas, not another view-layer tweak.
+
+### File pane refresh leaves the event loop
+
+The remaining boundary was changed rather than micro-optimised. `FileDirectorySnapshot` is an
+immutable Sendable value: directory enumeration, `isDirectory` metadata, deterministic natural
+sorting and a SHA-256 content signature happen in a detached user-initiated task. The main actor
+keeps the identity-bearing `FileNode` objects and reconciles a changed sorted snapshot with a
+two-pointer merge. A late worker result carries the node's load generation and is refused if a
+newer refresh started. Completion callbacks from coalesced refreshes are retained until the newest
+accepted result, so moving work off-main does not leave a caller waiting forever.
+
+Disclosure uses the same boundary. The outline initially refuses an unread directory's expansion,
+loads its value snapshot off-main, then reloads and expands that one directory. A directory with
+tens of thousands of files can therefore take time to become ready without holding mouse, scroll,
+resize or terminal input for the duration.
+
+Fresh 20,000-entry runs before this change reproduced 204.2 ms initial refresh and 234.5 ms correct
+hot refresh. Afterward, under both System and Neo Brutalism:
+
+| 20,000-entry workload | Main actor before | Main actor after | Background readiness after |
+|---|---:|---:|---:|
+| Flat initial load | 201–207 ms synchronous refresh | **0.06–0.09 ms schedule + 18.5–20.6 ms snapshot install** | 259–272 ms including enumeration, sort and signature |
+| Flat unchanged hot refresh | 227–241 ms synchronous refresh | **1.8 ms schedule + 0.015–0.020 ms apply; no AppKit reload** | 257–265 ms |
+| Flat hot refresh after one insertion | same whole-tree synchronous path | **1.6–1.9 ms schedule + 16.3 ms merge/reload** | 297–299 ms under the two-process IO run |
+| 100-directory / 20,100-row disclosure | 220–230 ms synchronous disclosure | **0.33–0.36 ms schedule; 19.7–21.8 ms largest AppKit completion slice** | 330–401 ms for all 100 concurrent reads and expansions |
+| Expanded unchanged hot refresh | 219–225 ms synchronous refresh | **1.7 ms schedule + 0.057–0.068 ms apply** | 244–245 ms |
+
+The readiness column is deliberately not presented as a throughput win: SHA-256 adds bounded
+worker work and concurrent stress-process IO varies. The repaired invariant is event-loop
+ownership. Even the deliberately extreme fixture no longer performs a quarter-second filesystem
+walk or unchanged-tree rebuild on the main actor. The cold 20,000-node install, a top-level
+insertion and one late bulk outline expansion can still consume roughly one frame; materially
+lowering those costs would mean
+replacing the identity model or the outline, not moving the same scan between view callbacks.
 
 ## Tools settings stress target
 
